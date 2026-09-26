@@ -331,6 +331,62 @@ def search_memory(
     }
 
 
+
+@app.get("/experience/search", dependencies=[Depends(authenticated)])
+def search_experience(
+    domain: str | None = Query(default=None, max_length=200),
+    entity_name: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1000000),
+):
+    """Read past actions and observed results with explicit target linkage.
+
+    An older task without entity_id is returned as unlinked, NEVER silently
+    attributed to an entity merely because it has the same domain. The
+    records describe actual saved operations, which may be simulated.
+    """
+    domain = domain.strip() or None if domain is not None else None
+    entity_name = entity_name.strip() or None if entity_name is not None else None
+    if entity_name and not domain:
+        raise HTTPException(status_code=422, detail="entity_name requires domain")
+    where = """
+        FROM secretary.actions a
+        JOIN secretary.tasks t ON t.id = a.task_id
+        LEFT JOIN secretary.entities e ON e.id = t.entity_id
+        LEFT JOIN secretary.results r ON r.action_id = a.id
+        LEFT JOIN secretary.sources s ON s.id = r.source_id
+        WHERE (%s::text IS NULL OR t.domain = %s)
+          AND (%s::text IS NULL OR e.name = %s)
+    """
+    filters = (domain, domain, entity_name, entity_name)
+    with connect() as db:
+        with db.cursor() as cur:
+            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            cur.execute("SELECT count(*) AS total " + where, filters)
+            total = cur.fetchone()["total"]
+            cur.execute(
+                """SELECT a.id AS action_id, t.id AS task_id,
+                          t.domain, t.entity_id, e.name AS entity_name,
+                          t.request AS task_request, t.status AS task_status,
+                          a.tool, a.operation, a.status AS action_status,
+                          a.parameters, a.started_at, a.finished_at,
+                          r.id AS result_id, r.outcome, r.summary, r.evidence,
+                          r.recorded_at, s.citation AS source_citation
+                """ + where + """
+                ORDER BY a.started_at DESC NULLS LAST, a.id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*filters, limit, offset),
+            )
+            items = cur.fetchall()
+    return {
+        "total": total, "limit": limit, "offset": offset,
+        "scope": "linked entity only" if entity_name else
+                 "domain-wide including unlinked tasks",
+        "items": items,
+    }
+
+
 @app.post("/tasks", status_code=201)
 def create_task(body: CreateTask, actor: str = Depends(authenticated)):
     with connect() as db:
