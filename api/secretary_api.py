@@ -17,6 +17,7 @@ import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, StringConstraints
 
 
@@ -91,10 +92,17 @@ async def lifespan(_: FastAPI):
                 ("secretary.audit_events", "INSERT"),
             )
             for table, permission in checks:
-                cur.execute(
-                    "SELECT has_table_privilege(current_user, %s, %s) AS permitted",
-                    (table, permission),
-                )
+                if table == "secretary.pending_claims":
+                    # Candidate role has column-level INSERT only, not table INSERT.
+                    cur.execute(
+                        "SELECT has_column_privilege(current_user, %s, %s, 'INSERT') AS permitted",
+                        (table, "entity_id"),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT has_table_privilege(current_user, %s, %s) AS permitted",
+                        (table, permission),
+                    )
                 if not cur.fetchone()["permitted"]:
                     raise RuntimeError(
                         f"API DB login is missing {permission} on {table}."
@@ -283,7 +291,7 @@ def propose_claim(body: NewCandidate, actor: str = Depends(authenticated)):
                    RETURNING id, review_status, recorded_at""",
                 (
                     body.entity_id, body.source_id, body.claim_type,
-                    body.predicate, psycopg.types.json.Jsonb(body.proposed_value),
+                    body.predicate, Jsonb(body.proposed_value),
                     body.confidence, body.evidence, body.extraction_model,
                     body.prompt_version,
                 ),
