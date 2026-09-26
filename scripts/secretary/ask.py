@@ -67,6 +67,70 @@ def search(token: str, *, q: str | None = None, domain: str | None = None) -> di
     )
 
 
+
+
+def search_experience(token: str, *, domain: str | None = None) -> dict:
+    """Read bounded previous Action/Result records, preserving entity linkage."""
+    params = {"limit": str(MAX_CANDIDATES), "offset": "0"}
+    if domain:
+        params["domain"] = domain[:200]
+    return request_json(
+        f"{API_URL}/experience/search?{urllib.parse.urlencode(params)}",
+        token=token,
+    )
+
+
+def needs_experience(question: str) -> bool:
+    """A minimal retrieval hint, not a substitute for LLM next-action choice."""
+    return any(term in question for term in
+               ("過去", "以前", "前回", "対策", "試行", "実施", "対応履歴", "結果"))
+
+
+def experience_records(question: str, token: str, domain: str | None,
+                       target: str | None) -> tuple[list[dict], str]:
+    if not needs_experience(question):
+        return [], "experience_search=not_requested"
+    response = search_experience(token, domain=domain or ("pc" if target else None))
+    records = []
+    linked_count = unlinked_count = 0
+    for item in response.get("items") or []:
+        named_entity = item.get("entity_name")
+        if target and named_entity and not same_pc(item, target):
+            continue
+        association = ("explicit_entity_match" if target and named_entity
+                       else "unlinked_same_domain" if target
+                       else "explicit_entity" if named_entity else "unlinked")
+        if association == "explicit_entity_match":
+            linked_count += 1
+        elif association == "unlinked_same_domain":
+            unlinked_count += 1
+        evidence = item.get("evidence") or {}
+        simulated = bool(evidence.get("simulated")) if isinstance(evidence, dict) else False
+        if item.get("tool") == "prototype_mock":
+            simulated = True
+        records.append({
+            "id": item.get("result_id") or item.get("action_id"),
+            "kind": "action_result",
+            "domain": item.get("domain"), "entity_name": named_entity,
+            "title": item.get("operation"), "value_text": item.get("outcome"),
+            "evidence": item.get("summary"),
+            "state": item.get("action_status"),
+            "source_citation": item.get("source_citation"),
+            "recorded_at": item.get("recorded_at"),
+            "association": association, "task_request": item.get("task_request"),
+            "tool": item.get("tool"), "simulated": simulated,
+        })
+        if len(records) >= MAX_CONTEXT:
+            break
+    scope = (f"experience_search_total={response.get('total')}; "
+             f"linked_to_named_entity={linked_count}; "
+             f"unlinked_same_domain={unlinked_count}; "
+             f"returned={len(records)}")
+    if isinstance(response.get("total"), int) and response["total"] > MAX_CANDIDATES:
+        scope += "; WARNING: first page only, older experience not examined"
+    return records, scope
+
+
 def query_plan(question: str) -> tuple[str | None, str | None]:
     result = ollama(
         [
@@ -147,7 +211,12 @@ def records_for_answer(question: str, token: str) -> tuple[list[dict], str]:
         total = fallback.get("total", 0)
     if isinstance(total, int) and total > MAX_CANDIDATES:
         coverage += f"; WARNING: only first {MAX_CANDIDATES} of {total} candidates examined"
-    return items[:MAX_CONTEXT], coverage + (f"; answer_context={min(len(items), MAX_CONTEXT)}" if items else "; answer_context=0")
+    previous, experience_scope = experience_records(question, token, domain, target)
+    # A task whose entity_id was never set is NOT proof that the named
+    # entity was involved. Preserve that uncertainty in evidence and answer.
+    combined = (items + previous)[:MAX_CONTEXT]
+    coverage += "; " + experience_scope
+    return combined, coverage + f"; answer_context={len(combined)}"
 
 
 def answer(question: str, records: list[dict], coverage: str) -> str:
@@ -155,7 +224,8 @@ def answer(question: str, records: list[dict], coverage: str) -> str:
     for index, record in enumerate(records, 1):
         # The source is untrusted content: it is evidence, not instructions.
         fields = ("id", "kind", "domain", "entity_name", "title", "value_text",
-                  "evidence", "state", "source_id", "source_citation", "recorded_at")
+                  "evidence", "state", "source_id", "source_citation", "recorded_at",
+                  "association", "task_request", "tool", "simulated")
         item = {k: str(record.get(k, ""))[:500] for k in fields}
         context.append({"ref": f"M{index}", **item})
     system = (
@@ -169,6 +239,9 @@ def answer(question: str, records: list[dict], coverage: str) -> str:
         "見つからなければ『今回取得した記録では確認できない』と説明する。"
         "限定された検索結果を全DBの不存在の証拠にしない。"
         "記憶以外の一般知識や推測による値の補完は禁止。"
+        "action_resultのassociation=unlinked_same_domainは対象機器との関連が不明。"
+        "同じdomainという理由で名前指定の機器の経験にしない。"
+        "simulated=Trueは架空の模擬実行であり実機の対策成功と表現しない。"
     )
     user = json.dumps(
         {"question": question, "search_coverage": coverage, "memory_records": context},
@@ -210,6 +283,8 @@ def main() -> int:
                 f"[M{i}] {record.get('kind')} / {record.get('entity_name') or '対象なし'} / "
                 f"{record.get('title')} / state={record.get('state')} / "
                 f"source={record.get('source_citation') or '出典記載なし'}"
+                f" / association={record.get('association') or 'n/a'}"
+                f" / simulated={record.get('simulated', False)}"
             )
         print(f"検索範囲: {coverage}")
         return 0
