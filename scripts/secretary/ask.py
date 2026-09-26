@@ -19,7 +19,7 @@ import urllib.request
 
 API_URL = "http://127.0.0.1:8010"
 OLLAMA_URL = "http://127.0.0.1:11434"
-MODEL = "qwen3:8b"
+MODEL = os.getenv("LSA_OLLAMA_MODEL", "qwen3:8b")
 MAX_CANDIDATES = 100
 MAX_CONTEXT = 20
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,9 +41,9 @@ def request_json(url: str, *, token: str | None = None, body: dict | None = None
     return result
 
 
-def ollama(messages: list[dict], *, json_output: bool = False) -> str:
+def ollama(messages: list[dict], *, json_output: bool = False, model: str | None = None) -> str:
     payload = {
-        "model": MODEL,
+        "model": model or MODEL,
         "messages": messages,
         "stream": False,
         "think": False,
