@@ -151,7 +151,7 @@ def entities(
             cur.execute(
                 """SELECT id, name, entity_type, domain, created_at, retired_at
                    FROM secretary.entities
-                   WHERE (%s IS NULL OR domain = %s)
+                   WHERE (%s::text IS NULL OR domain = %s)
                    ORDER BY created_at DESC, id DESC LIMIT %s""",
                 (domain, domain, limit),
             )
@@ -191,7 +191,7 @@ def tasks(
                           status, due_at, next_run_at, checkpoint, revision,
                           created_at, updated_at, completed_at
                    FROM secretary.tasks
-                   WHERE (%s IS NULL OR status = %s)
+                   WHERE (%s::text IS NULL OR status = %s)
                    ORDER BY created_at DESC, id DESC LIMIT %s""",
                 (task_status, task_status, limit),
             )
