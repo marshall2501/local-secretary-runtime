@@ -1,0 +1,41 @@
+# Independent Compose project; use with --project-name local-secretary-runtime-api.
+# Attach only to the network created by the dedicated Secretary DB project.
+# Existing PostgreSQL scripts remain unchanged and do not manage this API.
+name: local-secretary-runtime-api
+services:
+  secretary-api:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env.api
+    environment:
+      LSA_API_CONTAINER_MODE: "1"
+      LSA_API_DB_PASSWORD_FILE: /run/secrets/secretary_api_db_password
+      LSA_API_TOKEN_FILE: /run/secrets/secretary_api_token
+    secrets:
+      - secretary_api_db_password
+      - secretary_api_token
+    ports:
+      - "127.0.0.1:${LSA_API_PORT:-8010}:8010"
+    networks: [secretary_db]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/healthz', timeout=4).read()"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+networks:
+  secretary_db:
+    external: true
+    name: local-secretary-runtime-db_secretary_db
+secrets:
+  secretary_api_db_password:
+    file: ../secrets/secretary-api-db-password.txt
+  secretary_api_token:
+    file: ../secrets/secretary-api-token.txt
