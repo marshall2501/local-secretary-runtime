@@ -56,7 +56,7 @@ class AdaptiveProbeTests(unittest.TestCase):
     def test_identical_action_does_not_loop_without_reassessment(self):
         scenario = fixture("adaptive_shopping.json")
         state = probe.load_state(Path("/no/existing/checkpoint/needed"), scenario)
-        chooser = lambda _: decision("research", query="desk light")
+        chooser = lambda _: decision("research", query="notebook")
         first = probe.step(scenario, state, chooser=chooser)
         second = probe.step(scenario, state, chooser=chooser)
         self.assertIn("sources", first["observation"])
