@@ -35,14 +35,21 @@ def checkpoint(path: Path, state: dict) -> None:
     os.replace(temporary, path)
 
 
-def load_state(path: Path, scenario: dict) -> dict:
+def load_state(path: Path, scenario: dict, model: str | None = None) -> dict:
+    model = model or ask.MODEL
     if path.exists():
         state = json.loads(path.read_text(encoding="utf-8"))
         if state["scenario_id"] != scenario["id"]:
             raise ValueError("Checkpoint belongs to a different scenario; choose another --state path.")
+        # Older checkpoints were written when qwen3:8b was the only option.
+        existing_model = state.get("model", "qwen3:8b")
+        if existing_model != model:
+            raise ValueError(f"Checkpoint uses {existing_model}, not {model}; use a separate --state path.")
+        state["model"] = existing_model
         return state
     return {
         "trial_id": str(uuid4()), "scenario_id": scenario["id"],
+        "model": model,
         "goal": scenario["goal"], "domain": scenario["domain"],
         "status": "active", "events": [], "user_replies": [], "attempts": {},
     }
@@ -51,6 +58,7 @@ def load_state(path: Path, scenario: dict) -> dict:
 def decision_context(scenario: dict, state: dict) -> dict:
     return {
         "goal": state["goal"],
+        "model": state.get("model", ask.MODEL),
         "completion_criteria": scenario["completion_criteria"],
         "domain": state["domain"],
         "current_context": scenario.get("current_context", {}),
@@ -75,7 +83,7 @@ def decision_context(scenario: dict, state: dict) -> dict:
     }
 
 
-def choose_next(context: dict) -> dict:
+def choose_next(context: dict, *, model: str | None = None) -> dict:
     system = (
         "You are testing the decision function of a general-purpose personal secretary. "
         "Respond ONLY as a JSON object. The goal is the user's stated objective, not "
@@ -101,7 +109,7 @@ def choose_next(context: dict) -> dict:
     result = ask.ollama([
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(context, ensure_ascii=False, default=str)},
-    ], json_output=True)
+    ], json_output=True, model=model)
     data = json.loads(result)
     if not isinstance(data, dict) or data.get("action") not in ACTIONS:
         raise ValueError("Model did not choose a valid action.")
@@ -231,6 +239,8 @@ def step(scenario: dict, state: dict, chooser=choose_next,
 def main() -> int:
     parser = argparse.ArgumentParser(description="Domain-neutral next-action experiment")
     parser.add_argument("--scenario", type=Path, required=True)
+    parser.add_argument("--model", default=ask.MODEL,
+                        help="Installed Ollama model tag; default is LSA_OLLAMA_MODEL or qwen3:8b")
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--steps", type=int, default=5)
     parser.add_argument("--reply", help="Reply to a pending user question")
@@ -238,7 +248,7 @@ def main() -> int:
     if args.steps < 1 or args.steps > 10:
         parser.error("--steps must be between 1 and 10")
     scenario = json.loads(args.scenario.read_text(encoding="utf-8"))
-    state = load_state(args.state, scenario)
+    state = load_state(args.state, scenario, model=args.model)
     if args.reply:
         if state["status"] != "waiting_user":
             parser.error("--reply requires a pending user question")
@@ -249,7 +259,8 @@ def main() -> int:
         return 0
     for _ in range(args.steps):
         try:
-            event = step(scenario, state)
+            event = step(scenario, state,
+                         chooser=lambda context: choose_next(context, model=state["model"]))
         except (ValueError, KeyError, OSError, TimeoutError, urllib.error.URLError) as exc:
             state["status"] = "waiting_replan"
             event = {"error_type": type(exc).__name__,
@@ -258,7 +269,7 @@ def main() -> int:
         print(json.dumps(event, ensure_ascii=False, indent=2, default=str))
         if state["status"] != "active":
             break
-    print(f"Trial {state['trial_id']} / {state['status']} / {len(state['events'])} decisions")
+    print(f"Trial {state['trial_id']} / model={state['model']} / {state['status']} / {len(state['events'])} decisions")
     print(f"Checkpoint: {args.state} (local experiment, not a PostgreSQL Task)")
     return 0
 
