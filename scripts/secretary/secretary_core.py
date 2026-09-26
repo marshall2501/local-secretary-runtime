@@ -106,7 +106,7 @@ class SecretaryCore:
     def manager(self, state: WorkState) -> WorkState:
         state["turns"] = state.get("turns", 0) + 1
         if state["turns"] > 9 or sum(
-                x.get("action") == "delegate" for x in state["events"]
+                x.get("type") == "dispatch" for x in state["events"]
                 ) >= MAX_DELEGATIONS:
             state["decision"] = {"action": "answer", "response": (
                 "現時点の情報だけでは原因を確定できません。取得済みの情報は"
@@ -123,7 +123,7 @@ class SecretaryCore:
                 "previous_actions": state["events"][-9:],
                 "validation_feedback": state.get("feedback", ""),
                 "remaining_delegations": MAX_DELEGATIONS - sum(
-                    x.get("action") == "delegate" for x in state["events"]),
+                    x.get("type") == "dispatch" for x in state["events"]),
             })
             if decision.get("action") not in ("delegate", "answer", "ask_user"):
                 state["feedback"] = "無効なaction。delegate, answer, ask_userから選択"
@@ -152,7 +152,8 @@ class SecretaryCore:
         previous = [x for x in state["events"] if x.get("type") == "dispatch"]
         signature = (specialist, query.casefold().strip())
         if previous and previous[-1].get("signature") == list(signature) and (
-                previous[-1].get("observation_count") == len(state["observations"])):
+                previous[-1].get("observation_count") == len(state["observations"]) - 1
+                and not state.get("user_update")):
             state["feedback"] = "新情報なしの同一再依頼。別の条件または回答を選んでください"
             state["events"].append({"type": "duplicate_blocked", "to": specialist})
             return self._persist(state)
@@ -326,9 +327,36 @@ class SecretaryCore:
                                 and not obs.get("error") for obs in state["observations"])
             asks_history = any(word in state["original_request"]
                                for word in ("以前", "過去", "前回", "これまで"))
+            validation_error = ""
             if cited - known or (asks_history and not prior_checked):
-                state["feedback"] = (
+                validation_error = (
                     "引用IDが不正か、以前の経験を未照会。確認せず不存在を宣言できない")
+            elif state.get("review_attempts", 0) < 2:
+                # Independent second LLM call to check content, not just schema.
+                # The reviewer sees actual observations rather than manager prose.
+                try:
+                    review = _json_llm(state["model"], (
+                        "あなたは独立した回答監査担当。与えられた観測の範囲だけで"
+                        "回答の主張が成立するか判定。模擬資料を実機事実としない。"
+                        "未紐付けのActionを対象PCの記録と断定しない。"
+                        "答えが不確実性を明示する場合は支持可能と扱う。"
+                        'JSONのみ: {"supported":true|false,"feedback":"理由"}'
+                    ), {
+                        "original_request": state["original_request"],
+                        "answer": answer,
+                        "observations": state["observations"],
+                        "used_ids": list(cited),
+                    })
+                    state["events"].append({"type": "answer_review",
+                                            "supported": review.get("supported"),
+                                            "feedback": review.get("feedback", "")})
+                    if review.get("supported") is not True:
+                        validation_error = ("独立監査で根拠不足: "
+                                            + str(review.get("feedback", "")))
+                except Exception as exc:
+                    validation_error = "回答の独立監査に失敗: " + str(exc)
+            if validation_error:
+                state["feedback"] = validation_error
                 state["review_attempts"] = state.get("review_attempts", 0) + 1
                 if state["review_attempts"] < 2:
                     state["decision"] = {"action": "retry_manager"}
