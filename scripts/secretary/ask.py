@@ -214,7 +214,7 @@ def records_for_answer(question: str, token: str) -> tuple[list[dict], str]:
     previous, experience_scope = experience_records(question, token, domain, target)
     # A task whose entity_id was never set is NOT proof that the named
     # entity was involved. Preserve that uncertainty in evidence and answer.
-    combined = (items + previous)[:MAX_CONTEXT]
+    combined = (items[:12] + previous[:8]) if previous else items[:MAX_CONTEXT]
     coverage += "; " + experience_scope
     return combined, coverage + f"; answer_context={len(combined)}"
 
