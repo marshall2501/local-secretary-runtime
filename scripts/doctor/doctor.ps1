@@ -7,36 +7,100 @@ $Root = "D:\AI"
 $RuntimeRoot = "D:\AI\projects\local-secretary-runtime"
 $DesignRoot = "D:\AI\projects\local-secretary-ai"
 
+$script:OkCount = 0
+$script:WarnCount = 0
+$script:NgCount = 0
+$script:TodoCount = 0
+
 function Write-Section {
     param([string]$Title)
     Write-Host ""
     Write-Host "==== $Title ====" -ForegroundColor Cyan
 }
 
-function Test-Command {
+function Add-OK {
+    param([string]$Message)
+    $script:OkCount++
+    Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Add-WARN {
+    param([string]$Message)
+    $script:WarnCount++
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+}
+
+function Add-NG {
+    param([string]$Message)
+    $script:NgCount++
+    Write-Host "[NG] $Message" -ForegroundColor Red
+}
+
+function Add-TODO {
+    param([string]$Message)
+    $script:TodoCount++
+    Write-Host "[TODO] $Message" -ForegroundColor Magenta
+}
+
+function Test-CommandStatus {
     param(
         [string]$Name,
-        [string]$Command
+        [string]$Command,
+        [switch]$Optional
     )
 
     $cmd = Get-Command $Command -ErrorAction SilentlyContinue
-    if ($cmd) {
-        Write-Host "[OK] $Name found: $($cmd.Source)" -ForegroundColor Green
-        return $true
-    } else {
-        Write-Host "[NG] $Name not found" -ForegroundColor Red
+
+    if (-not $cmd) {
+        if ($Optional) {
+            Add-TODO "$Name not found"
+        } else {
+            Add-NG "$Name not found"
+        }
         return $false
     }
+
+    Add-OK "$Name found: $($cmd.Source)"
+    return $true
 }
 
 function Test-PathStatus {
     param([string]$Path)
 
     if (Test-Path $Path) {
-        Write-Host "[OK] $Path" -ForegroundColor Green
+        Add-OK $Path
     } else {
-        Write-Host "[NG] $Path" -ForegroundColor Red
+        Add-NG $Path
     }
+}
+
+function Test-VersionCommand {
+    param(
+        [string]$Name,
+        [string]$Command,
+        [string[]]$Arguments,
+        [switch]$Optional
+    )
+
+    $cmd = Get-Command $Command -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        return $false
+    }
+
+    $output = & $Command @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    $text = ($output | Out-String).Trim()
+
+    if ($exitCode -ne 0 -or $text -match "was not found|Microsoft Store|install from the Microsoft Store") {
+        Add-WARN "$Name command exists but is not usable: $($cmd.Source)"
+        if ($text) {
+            Write-Host $text -ForegroundColor DarkYellow
+        }
+        return $false
+    }
+
+    Add-OK "$Name version: $text"
+    return $true
 }
 
 Write-Host "Local Secretary Runtime Doctor" -ForegroundColor Yellow
@@ -75,76 +139,138 @@ foreach ($p in $paths) {
 
 Write-Section "Commands"
 
-$hasGit = Test-Command "Git" "git"
-$hasDocker = Test-Command "Docker" "docker"
-$hasPython = Test-Command "Python" "python"
-$hasNode = Test-Command "Node.js" "node"
-$hasOllama = Test-Command "Ollama" "ollama"
+$hasGit = Test-CommandStatus "Git" "git"
+$hasDocker = Test-CommandStatus "Docker" "docker"
+$hasPython = Test-CommandStatus "Python" "python"
+$hasNode = Test-CommandStatus "Node.js" "node" -Optional
+$hasOllama = Test-CommandStatus "Ollama" "ollama" -Optional
 
 Write-Section "Versions"
 
 if ($hasGit) {
-    git --version
+    Test-VersionCommand "Git" "git" @("--version") | Out-Null
 }
 
 if ($hasDocker) {
-    docker --version
-    docker compose version
+    Test-VersionCommand "Docker" "docker" @("--version") | Out-Null
+    Test-VersionCommand "Docker Compose" "docker" @("compose", "version") | Out-Null
 }
 
 if ($hasPython) {
-    python --version
+    Test-VersionCommand "Python" "python" @("--version") | Out-Null
 }
 
 if ($hasNode) {
-    node --version
+    Test-VersionCommand "Node.js" "node" @("--version") -Optional | Out-Null
 }
 
 if ($hasOllama) {
-    ollama --version
+    Test-VersionCommand "Ollama" "ollama" @("--version") -Optional | Out-Null
 }
 
 Write-Section "Docker Status"
 
 if ($hasDocker) {
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    $containers = docker ps --format "{{.Names}}|{{.Status}}|{{.Ports}}" 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        Add-WARN "docker ps failed"
+        Write-Host ($containers | Out-String).Trim() -ForegroundColor DarkYellow
+    } else {
+        Write-Host "NAMES`tSTATUS`tPORTS"
+
+        foreach ($line in $containers) {
+            $parts = $line -split "\|", 3
+            $name = $parts[0]
+            $status = $parts[1]
+            $ports = if ($parts.Count -ge 3) { $parts[2] } else { "" }
+
+            Write-Host "$name`t$status`t$ports"
+
+            if ($status -match "Restarting|Exited|unhealthy") {
+                Add-WARN "Container attention needed: $name is $status"
+            }
+        }
+    }
 } else {
-    Write-Host "Docker not available. Skipped." -ForegroundColor Yellow
+    Add-NG "Docker not available. Skipped docker status."
 }
 
 Write-Section "Git Status: design repo"
 
 if (Test-Path "$DesignRoot\.git") {
     Push-Location $DesignRoot
-    git status --short
-    git branch --show-current
-    git remote -v
+
+    $status = git status --short
+    $branch = git branch --show-current
+    $remote = git remote -v
+
+    Add-OK "Design repo branch: $branch"
+
+    if ($status) {
+        Add-WARN "Design repo has uncommitted changes"
+        Write-Host $status -ForegroundColor DarkYellow
+    } else {
+        Add-OK "Design repo working tree clean"
+    }
+
+    Write-Host $remote
+
     Pop-Location
 } else {
-    Write-Host "No git repository found at $DesignRoot" -ForegroundColor Yellow
+    Add-WARN "No git repository found at $DesignRoot"
 }
 
 Write-Section "Git Status: runtime repo"
 
 if (Test-Path "$RuntimeRoot\.git") {
     Push-Location $RuntimeRoot
-    git status --short
-    git branch --show-current
-    git remote -v
+
+    $status = git status --short
+    $branch = git branch --show-current
+    $remote = git remote -v
+
+    Add-OK "Runtime repo branch: $branch"
+
+    if ($status) {
+        Add-WARN "Runtime repo has uncommitted changes"
+        Write-Host $status -ForegroundColor DarkYellow
+    } else {
+        Add-OK "Runtime repo working tree clean"
+    }
+
+    Write-Host $remote
+
     Pop-Location
 } else {
-    Write-Host "No git repository found at $RuntimeRoot" -ForegroundColor Yellow
+    Add-WARN "No git repository found at $RuntimeRoot"
 }
 
 Write-Section "Ollama Models"
 
 if ($hasOllama) {
-    ollama list
+    $models = ollama list 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host $models
+    } else {
+        Add-WARN "ollama list failed"
+        Write-Host ($models | Out-String).Trim() -ForegroundColor DarkYellow
+    }
 } else {
-    Write-Host "Ollama not available. Skipped." -ForegroundColor Yellow
+    Add-TODO "Ollama not installed yet. Needed later for local LLM."
 }
 
 Write-Section "Summary"
 
-Write-Host "Doctor check completed."
-Write-Host "Review [NG] items above before continuing."
+Write-Host "OK:   $script:OkCount" -ForegroundColor Green
+Write-Host "WARN: $script:WarnCount" -ForegroundColor Yellow
+Write-Host "NG:   $script:NgCount" -ForegroundColor Red
+Write-Host "TODO: $script:TodoCount" -ForegroundColor Magenta
+
+if ($script:NgCount -gt 0) {
+    Write-Host "Result: NG items must be fixed before continuing." -ForegroundColor Red
+} elseif ($script:WarnCount -gt 0) {
+    Write-Host "Result: Usable, but warnings should be reviewed." -ForegroundColor Yellow
+} else {
+    Write-Host "Result: Looks good." -ForegroundColor Green
+}
