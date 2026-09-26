@@ -92,7 +92,30 @@ def query_plan(question: str) -> tuple[str | None, str | None]:
         return None, None
 
 
+def explicit_pc_target(question: str) -> str | None:
+    """Conservative, explicit PC aliases for the first disambiguation test.
+
+    Do not substitute one PC's memory for another. Other domain/entity
+    normalization will be introduced only when its behavior is tested.
+    """
+    normalized = "".join(question.casefold().split())
+    for alias, canonical in (
+        ("架空テストpc", "架空テストpc"),
+        ("メインpc", "メインpc"),
+        ("サブpc", "サブpc"),
+    ):
+        if alias in normalized:
+            return canonical
+    return None
+
+
+def same_pc(record: dict, target: str) -> bool:
+    name = "".join(str(record.get("entity_name") or "").casefold().split())
+    return name == target
+
+
 def records_for_answer(question: str, token: str) -> tuple[list[dict], str]:
+    target = explicit_pc_target(question)
     q, domain = query_plan(question)
     first = search(token, q=q, domain=domain)
     items = first.get("items") or []
@@ -107,6 +130,17 @@ def records_for_answer(question: str, token: str) -> tuple[list[dict], str]:
             fallback = search(token)
             items = fallback.get("items") or []
             coverage += f"; fallback_all_total={fallback.get('total')}"
+    if target:
+        # Never hand unrelated PCs or generic source-only records to the LLM.
+        # If the attribute search missed the explicit PC, retry by its name.
+        relevant = [item for item in items if same_pc(item, target)]
+        if not relevant:
+            by_entity = search(token, q=target, domain="pc")
+            relevant = [item for item in (by_entity.get("items") or [])
+                        if same_pc(item, target)]
+            coverage += f"; entity_search_total={by_entity.get('total')}"
+        items = relevant
+        coverage += f"; entity_filter={target!r}, matched={len(items)}"
     total = first.get("total", 0)
     if "fallback" in coverage:
         # Coverage is explicitly bounded to avoid claiming exhaustive recall.
@@ -165,7 +199,11 @@ def main() -> int:
         return 2
     try:
         records, coverage = records_for_answer(question, token)
-        print("\n" + answer(question, records, coverage))
+        if records:
+            print("\n" + answer(question, records, coverage))
+        else:
+            print("\n今回取得した記録では、質問の対象について確認できません。"
+                  "検索は件数と範囲に制限があるため、DB全体に存在しないと断定はできません。")
         print("\n--- 取得した根拠（自動表示） ---")
         for i, record in enumerate(records, 1):
             print(
