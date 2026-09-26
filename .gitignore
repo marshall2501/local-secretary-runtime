@@ -1,0 +1,78 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Secrets / credentials
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+config/secrets/
+config/credentials/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / n8n
+node_modules/
+.npm/
+.n8n/
+n8n/.n8n/
+n8n/data/
+n8n/backups/
+
+# Docker / runtime data
+docker/volumes/
+docker/data/
+docker/postgres/
+docker/redis/
+docker/weaviate/
+docker/qdrant/
+docker/minio/
+
+# Logs
+logs/
+*.log
+
+# Database / backups
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.backup
+*.bak
+
+# Data exports/imports
+data/
+exports/
+imports/
+backup/
+backups/
+
+# Models
+models/
+*.gguf
+*.safetensors
+*.bin
+*.onnx
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
