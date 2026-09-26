@@ -80,6 +80,8 @@ def api_config() -> tuple[str, str]:
     if parsed.get("hostaddr"):
         raise RuntimeError("Host address override is not allowed.")
     if container_mode:
+        if parsed.get("user") != "secretary_api":
+            raise RuntimeError("Container API requires the candidate-only secretary_api login.")
         if parsed.get("host") != "secretary-postgres":
             raise RuntimeError("Container API must use its dedicated DB service hostname.")
         if not password_file or parsed.get("password"):
@@ -114,6 +116,12 @@ async def lifespan(_: FastAPI):
             row = cur.fetchone()
             if row is None or row["rolsuper"]:
                 raise RuntimeError("API DB login must be a non-superuser.")
+            cur.execute(
+                "SELECT pg_has_role(current_user, %s, 'member') AS too_privileged",
+                ("secretary_memory_writer",),
+            )
+            if cur.fetchone()["too_privileged"]:
+                raise RuntimeError("API must not inherit trusted memory-write privileges.")
             checks = (
                 ("secretary.entities", "SELECT"),
                 ("secretary.pending_claims", "INSERT"),
