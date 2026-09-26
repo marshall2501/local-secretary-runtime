@@ -183,10 +183,11 @@ def execute_decision(decision: dict, scenario: dict, state: dict,
                 "evidence": item.get("evidence"),
                 "source_citation": item.get("source_citation"),
                 "recorded_at": item.get("recorded_at"),
-                "simulated": item.get("tool") == "prototype_mock"
-                    or bool((item.get("evidence") or {}).get("simulated"))
-                    if isinstance(item.get("evidence") or {}, dict)
-                    else item.get("tool") == "prototype_mock",
+                "simulated": (
+                    item.get("tool") == "prototype_mock"
+                    or (isinstance(item.get("evidence"), dict)
+                        and bool(item["evidence"].get("simulated")))
+                ),
             })
             if len(history) >= 8:
                 break
