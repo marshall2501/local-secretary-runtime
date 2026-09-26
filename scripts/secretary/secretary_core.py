@@ -169,7 +169,7 @@ class SecretaryCore:
             if specialist == "memory":
                 result = self._memory(state)
             else:
-                result = self._research(query)
+                result = self._research(state, query)
             state["observations"].append(result)
             state["feedback"] = ""
         except Exception as exc:
@@ -266,8 +266,10 @@ class SecretaryCore:
         return {"specialist": "memory", "target": target, "domain": domain,
                 "records": records[:20], "coverage": coverage, "source_mode": state["mode"]}
 
-    def _research(self, query: str) -> dict:
-        # Real-web adapter does not exist yet. Explicit fictional provenance.
+    def _research(self, state: WorkState, query: str) -> dict:
+        if state["mode"] == "live":
+            raise RuntimeError("Real research adapter not connected; never substitute fictional sources")
+        # Fictional fixture only; preserve provenance.
         data = json.loads(self._evidence.research(query))
         return {
             "specialist": "research", "query": query,
@@ -282,6 +284,10 @@ class SecretaryCore:
         }
 
     def evaluate(self, state: WorkState) -> WorkState:
+        if state["events"][-1].get("type") in ("duplicate_blocked", "invalid_specialist"):
+            # Dispatch deliberately returned no new result; preserve its error.
+            state["events"].append({"type": "evaluation", "feedback": state["feedback"]})
+            return self._persist(state)
         result = state["observations"][-1] if state["observations"] else None
         if not result or result.get("error"):
             state["feedback"] = "専門担当がデータを取得できなかった。理由を踏まえて次の手を選ぶ"
@@ -413,6 +419,8 @@ class SecretaryCore:
               mode: str = "fixture", model: str = "qwen3:8b") -> WorkState:
         if not request.strip() or not target.strip() or not domain.strip():
             raise ValueError("Request, target and domain cannot be empty")
+        if mode == "fixture" and (target, domain) != ("架空テストPC", "pc"):
+            raise ValueError("Fixture supports only 架空テストPC / pc")
         state: WorkState = {
             "task_id": str(uuid.uuid4()), "original_request": request,
             "target": target, "domain": domain, "mode": mode, "model": model,
