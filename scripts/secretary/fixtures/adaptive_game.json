@@ -1,0 +1,47 @@
+{
+  "id": "fictional-game-crash-v1",
+  "goal": "架空ゲームの突然終了について、過去の経験と今回の情報を照合し、次に確認すべきことを提案する。必要なら続きの確認事項を残す。",
+  "completion_criteria": "確認済み情報・未確認事項・推奨する次の確認と根拠を示し、実機障害を解決したとは主張しない",
+  "domain": "pc",
+  "current_context": {
+    "entity": "架空テストPC",
+    "application": "架空ゲームA",
+    "symptom": "突然終了",
+    "driver_version": "2.0",
+    "scope": "完全に架空の検証シナリオ"
+  },
+  "documents": [
+    {
+      "id": "local-game-a-guide",
+      "title": "架空ゲームA 障害調査ガイド fictional game crash guide",
+      "text": "架空ゲームAで突然終了したときは、まずクラッシュログを取得して、終了直前のイベントとドライバ情報を照合する。ゲーム再インストールは過去の実施結果と現在の構成を比較してから検討する。This is a fictional test document, not a real product guide."
+    },
+    {
+      "id": "local-driver-history",
+      "title": "架空グラフィックドライバ 2.0 更新メモ fictional graphics driver notes",
+      "text": "架空ドライバ2.0では旧版と挙動が異なる場合がある。ログでタイムアウトの有無を確認する。This is not a real vendor release note."
+    }
+  ],
+  "simulated_tools": {
+    "read_crash_log": {
+      "description": "架空のクラッシュログを安全に読み取る模擬ツール。実PCには触れない。",
+      "outcomes": [
+        {
+          "log": "fictional application error 0xAA; cause not identified; driver timeout observed",
+          "driver_version": "2.0",
+          "source": "simulated-crash-log"
+        }
+      ]
+    },
+    "compare_versions": {
+      "description": "架空ゲームとドライバの版情報を比較する模擬ツール。",
+      "outcomes": [
+        {
+          "application": "A",
+          "driver": "2.0",
+          "past_context": "Previous attempt may have used driver 1.0; check actual memory evidence"
+        }
+      ]
+    }
+  }
+}
