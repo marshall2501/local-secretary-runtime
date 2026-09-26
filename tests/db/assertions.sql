@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 BEGIN;
 SET search_path = secretary, pg_catalog;
-DO $$
+DO $review_test$
 DECLARE e uuid; s uuid; p uuid; t uuid; other_task uuid; step uuid; c uuid;
 BEGIN
     INSERT INTO entities(name, entity_type, domain) VALUES ('Fictional PC','device','pc') RETURNING id INTO e;
@@ -57,7 +57,7 @@ BEGIN
               'secretary.approvals', 'UPDATE') THEN
         RAISE EXCEPTION 'Memory-only review role boundary failed';
     END IF;
-END $;
+END $review_test$;
 ROLLBACK;
 -- Persistent synthetic checkpoint checked after restart and restore.
 INSERT INTO secretary.tasks(id,request,requested_by,domain,completion_criteria,status,checkpoint,next_run_at)
