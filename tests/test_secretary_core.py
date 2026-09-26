@@ -135,5 +135,67 @@ class SecretaryCoreTest(unittest.TestCase):
                             domain="pc", mode="fixture")
 
 
+    def test_two_false_reviews_report_successful_memory_not_lookup_failure(self):
+        # Actual sub-PC regression: memory returned M1/M2, but qwen3's
+        # independent reviewer rejected even a properly qualified answer.
+        script = ScriptedModel([
+            delegate("memory", "以前の経験から原因を調べて"),
+            answer("模擬記録のみであり、原因は特定できません。", ["M1", "M2"]),
+            answer("対象の実機診断は未確認です。原因を特定できません。", ["M1"]),
+        ], reviews=[False, False])
+        result = self.start(script)
+        self.assertEqual(result["status"], "answered")
+        self.assertIn("記憶の照会は完了しました", result["answer"])
+        self.assertIn("M1", result["answer"])
+        self.assertIn("未検証", result["answer"])
+        self.assertIn("M2", result["answer"])
+        self.assertIn("模擬", result["answer"])
+        self.assertIn("今回の対象に紐付けなし", result["answer"])
+        self.assertNotIn("過去情報の確認が完了しなかった", result["answer"])
+        self.assertTrue(any(x["type"] == "evidence_fallback" and
+                            x["memory_retrieved"] for x in result["events"]))
+
+    def test_lookup_error_is_not_reported_as_no_records(self):
+        script = ScriptedModel([
+            delegate("memory", "以前の経験"),
+            answer("過去の記録はありません"),
+            answer("取得できていないので分かりません"),
+        ])
+        with patch.object(secretary_core, "_json_llm", side_effect=script):
+            with patch.object(self.core, "_memory",
+                              side_effect=RuntimeError("API unavailable")):
+                result = self.core.start(
+                    "以前の経験から原因わかる？",
+                    target="架空テストPC", domain="pc", mode="fixture")
+        self.assertIn("取得に失敗", result["answer"])
+        self.assertNotIn("記録が存在しない", result["answer"])
+        self.assertFalse(any(x["type"] == "answer_review" for x in result["events"]))
+        self.assertTrue(any(x["type"] == "evidence_fallback" and
+                            not x["memory_retrieved"] for x in result["events"]))
+
+    def test_exhausted_budget_uses_tool_evidence_without_llm(self):
+        state = {
+            "task_id": "11111111-1111-4111-8111-111111111111",
+            "original_request": "以前の経験から原因わかる？",
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "running", "turns": 9, "review_attempts": 0,
+            "feedback": "", "observations": [{
+                "specialist": "memory", "target": "架空テストPC",
+                "source_mode": "fixture", "records": [{
+                    "id": "M1", "text": "ram_gb=16",
+                    "verification": "unverified", "simulated": False,
+                    "linkage": "explicit_entity_match",
+                }],
+            }], "events": [],
+        }
+        with patch.object(secretary_core, "_json_llm",
+                          side_effect=AssertionError("Do not call the model")):
+            result = self.core.run(state)
+        self.assertEqual(result["status"], "answered")
+        self.assertIn("照会は完了", result["answer"])
+        self.assertIn("M1", result["answer"])
+
+
 if __name__ == "__main__":
     unittest.main()
