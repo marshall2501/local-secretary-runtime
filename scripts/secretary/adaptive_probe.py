@@ -146,7 +146,7 @@ def research_local(scenario: dict, query: str) -> dict:
 
 
 def execute_decision(decision: dict, scenario: dict, state: dict,
-                     memory_reader=None) -> dict:
+                     memory_reader=None, experience_reader=None) -> dict:
     action = decision["action"]
     if action == "memory_search":
         query = str(decision.get("query") or "").strip()
@@ -157,11 +157,47 @@ def execute_decision(decision: dict, scenario: dict, state: dict,
                 return {"error": "Memory API token file unavailable", "status": "needs_setup"}
             token = token_path.read_text(encoding="utf-8-sig").strip()
             memory_reader = lambda q, d: ask.search(token, q=q or None, domain=d or None)
+            if experience_reader is None:
+                experience_reader = lambda d: ask.search_experience(token, domain=d)
         result = memory_reader(query, domain)
+        previous = experience_reader(domain) if experience_reader is not None else {
+            "total": 0, "items": [],
+        }
+        target = str(scenario.get("current_context", {}).get("entity") or "").strip()
+        normalized_target = "".join(target.casefold().split())
+        history = []
+        for item in previous.get("items") or []:
+            entity = item.get("entity_name")
+            normalized_entity = "".join(str(entity or "").casefold().split())
+            if normalized_target and entity and normalized_entity != normalized_target:
+                continue
+            association = ("explicit_entity_match" if normalized_target and entity
+                           else "domain_only_unlinked" if normalized_target
+                           else "entity_named" if entity else "domain_only_unlinked")
+            history.append({
+                "task_id": item.get("task_id"),
+                "task_request": item.get("task_request"),
+                "entity_name": entity, "association": association,
+                "tool": item.get("tool"), "operation": item.get("operation"),
+                "outcome": item.get("outcome"), "summary": item.get("summary"),
+                "evidence": item.get("evidence"),
+                "source_citation": item.get("source_citation"),
+                "recorded_at": item.get("recorded_at"),
+                "simulated": item.get("tool") == "prototype_mock"
+                    or bool((item.get("evidence") or {}).get("simulated"))
+                    if isinstance(item.get("evidence") or {}, dict)
+                    else item.get("tool") == "prototype_mock",
+            })
+            if len(history) >= 8:
+                break
         return {
             "query": query, "domain": domain, "total": result.get("total"),
             "items": (result.get("items") or [])[:15],
-            "coverage": "first at most 100 matches in current SQL Memory API; not exhaustive",
+            "past_action_result_total": previous.get("total"),
+            "past_actions_and_results": history,
+            "coverage": ("first at most 100 matches in current SQL Memory API "
+                         "and at most 8 action/results from first 100 history "
+                         "matches; domain-only records are not proof of entity linkage"),
         }
     if action == "research":
         return research_local(scenario, str(decision.get("query") or ""))
@@ -190,7 +226,7 @@ def execute_decision(decision: dict, scenario: dict, state: dict,
 
 
 def step(scenario: dict, state: dict, chooser=choose_next,
-         memory_reader=None) -> dict:
+         memory_reader=None, experience_reader=None) -> dict:
     context = decision_context(scenario, state)
     decision = chooser(context)
     if decision.get("action") not in ACTIONS:
@@ -217,7 +253,8 @@ def step(scenario: dict, state: dict, chooser=choose_next,
         state["status"] = "waiting_replan"
     else:
         state["attempts"][signature] = seen + 1
-        observation = execute_decision(decision, scenario, state, memory_reader)
+        observation = execute_decision(decision, scenario, state,
+                                       memory_reader, experience_reader)
         if decision["action"] == "ask_user":
             state["status"] = "waiting_user"
         elif decision["action"] == "wait":
