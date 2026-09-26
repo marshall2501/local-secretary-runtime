@@ -22,6 +22,14 @@ When the LLM selects `memory_search`, the probe now retrieves the existing SQL m
 
 On the sub-PC, pull runtime main and run both the adaptive tests and the new `test_experience_recall.py` tests before rebuilding the existing secretary API container. **Until that container is rebuilt with the new endpoint, experience lookups cannot work**. If testing prints private memory or prior task requests, redact them before sharing traces; checkpoints remain only in git-ignored `secrets/`. This is not yet a DB-persisted adaptive Task or a real diagnostic.
 
+## 2026-09-27: Evidence-first recall for goals that require earlier experience
+
+The real sub-PC Gemma 4 12B trial chose crash-log inspection, two fictional local documents, then `propose_complete` **without ever choosing memory_search**. The recently tested read-only Action/Result API was therefore never called. The model also described a driver-version association more strongly than the observations justified; a driver timeout alone does not establish the cause.
+
+For goals explicitly requiring previous experience, the fictional game fixture now sets `initial_recall: true`. The probe obtains the existing SQL memories and bounded past Action/Result observations once **before the first LLM decision**, saves them in its private checkpoint, and makes them available in every subsequent decision context. The model still decides whether to investigate further, request additional memory, ask the user, or stop; this is an evidence preparation rule, not a forced diagnostic workflow. A shopping goal that does not require history does not automatically fetch it. Results for other named entities are filtered, and same-domain unlinked results remain labelled as unrelated-to-any-confirmed-entity; simulated results must not be treated as real-PC diagnoses. If the local Memory API is unavailable, the experiment stops rather than silently proceeding as though no history existed. On checkpoint resume, the initial read is not repeated; production DB Task resumption will separately need freshness checks.
+
+**Code and two new offline tests are on GitHub only; the updated probe and new LLM behavior are not yet sub-PC validated.** Use a new git-ignored `--state` file for another run; previous `awaiting_verification` trials are retained as historical evidence, not silently overwritten. The new initial recall is still a limited read-only experiment, not a persistent unified Task.
+
 ## Current limits
 
 - The research adapter searches **fictional local documents only**; it has no live web access. The observation tools return **fictional fixture data**, not live PC, stock or other state.
