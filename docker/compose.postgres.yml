@@ -1,0 +1,32 @@
+name: local-secretary-runtime-db
+services:
+  secretary-postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: secretary_admin
+      POSTGRES_DB: secretary
+      POSTGRES_PASSWORD_FILE: /run/secrets/secretary_db_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    ports:
+      - "127.0.0.1:${LSA_DB_PORT:-55432}:5432"
+    secrets:
+      - secretary_db_password
+    volumes:
+      - secretary_pgdata:/var/lib/postgresql/data
+      - ../db/migrations:/opt/secretary/migrations:ro
+      - ../scripts/db:/opt/secretary/scripts:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U secretary_admin -d secretary"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [secretary_db]
+volumes:
+  secretary_pgdata:
+networks:
+  secretary_db:
+secrets:
+  secretary_db_password:
+    file: ../secrets/postgres-password.txt

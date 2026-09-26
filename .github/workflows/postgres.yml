@@ -1,0 +1,27 @@
+name: PostgreSQL foundation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows-static:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse scripts and verify Git exclusions (Windows PowerShell 5.1)
+        shell: powershell
+        run: ./tests/db/test-static.ps1
+  postgres-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare ephemeral test credentials
+        shell: pwsh
+        run: ./scripts/db/postgres.ps1 -Action Setup
+      - name: Validate scripts
+        shell: pwsh
+        run: ./tests/db/test-static.ps1
+      - name: Test isolated PostgreSQL lifecycle
+        shell: pwsh
+        run: ./tests/db/test-integration.ps1
