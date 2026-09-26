@@ -592,7 +592,9 @@ def read_prototype_task(task_id: UUID, actor: str = Depends(authenticated)):
                 (task_id,),
             )
             steps = cur.fetchall()
-    return {**task, "steps": steps, "phase": "planned"}
+    checkpoint = task.get("checkpoint") or {}
+    phase = checkpoint.get("g1", {}).get("phase", "planned")
+    return {**task, "steps": steps, "phase": phase}
 
 
 
