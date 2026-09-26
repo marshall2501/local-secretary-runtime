@@ -1,0 +1,442 @@
+"""Runnable read-only Secretary Core: plan -> delegate -> verify -> replan -> answer.
+
+This is the FIRST integrated manager, not a general autonomous PC operator.
+It reuses the existing Ollama and Secretary API; checkpoint files stay local.
+Entry point: python scripts/secretary/secretary_core.py "question" --mode fixture
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import uuid
+from typing import TypedDict
+
+from langgraph.graph import END, StateGraph
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE / "framework_compare"))
+import ask
+from shared import Evidence, FICTIONAL_NOTES
+
+MAX_DELEGATIONS = 4
+DEFAULT_STATE_DIR = ask.ROOT / "secrets" / "secretary-core-states"
+
+
+class WorkState(TypedDict, total=False):
+    task_id: str
+    original_request: str
+    target: str
+    domain: str
+    mode: str
+    model: str
+    user_update: str
+    status: str
+    turns: int
+    review_attempts: int
+    decision: dict
+    feedback: str
+    observations: list[dict]
+    events: list[dict]
+    answer: str
+    awaiting: str
+
+
+def save_state(state: WorkState, folder: Path) -> None:
+    """Atomic local checkpoint, intentionally not presented as DB Action/Result."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / (state["task_id"] + ".json")
+    temp = folder / (state["task_id"] + ".tmp")
+    temp.write_text(json.dumps(state, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8")
+    os.replace(temp, path)
+
+
+def load_state(task_id: str, folder: Path) -> WorkState:
+    valid_id = str(uuid.UUID(task_id))
+    data = json.loads((folder / (valid_id + ".json")).read_text(encoding="utf-8"))
+    if data.get("task_id") != valid_id:
+        raise ValueError("Checkpoint task_id mismatch")
+    return data
+
+
+def _json_llm(model: str, instruction: str, context: dict) -> dict:
+    response = ask.ollama([
+        {"role": "system", "content": instruction},
+        {"role": "user", "content": json.dumps(context, ensure_ascii=False,
+                                              default=str)},
+    ], model=model, json_output=True)
+    try:
+        parsed = json.loads(response)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("LLM did not return valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("LLM JSON result must be an object")
+    return parsed
+
+
+MANAGER_RULES = (
+    "あなたは個人秘書の統括役。ユーザーの元の依頼範囲を絶対に拡大しない。"
+    "必要なら記憶担当(memory)・資料担当(research)に委任し、返った観測の品質を見て、"
+    "再依頼・別担当・質問・回答を選び直す。以前の観測があるときは再利用する。"
+    "模擬情報は実観測ではない。entityが未紐付けのActionを指定PCの実績と断定しない。"
+    "調査で解決しない場合は不明点を明示して回答してよい。"
+    "明示的な実行依頼と承認がないので変更・購入・メール送信等を提案実行しない。"
+    "JSONのみ返す。"
+    '{"action":"delegate|answer|ask_user","specialist":"memory|research",'
+    '"query":"担当への質問または検索語","reason":"理由",'
+    '"response":"回答または本人への質問","used_ids":["M1","R1"]}。'
+    "action=delegateの時のみspecialistとqueryが必要。回答は出典IDがある時だけ挙げる。"
+)
+
+
+class SecretaryCore:
+    def __init__(self, folder: Path = DEFAULT_STATE_DIR):
+        self.folder = Path(folder)
+        self._evidence = None
+        self.graph = self._build_graph()
+
+    def _persist(self, state: WorkState) -> WorkState:
+        save_state(state, self.folder)
+        return state
+
+    def manager(self, state: WorkState) -> WorkState:
+        state["turns"] = state.get("turns", 0) + 1
+        if state["turns"] > 9 or sum(
+                x.get("action") == "delegate" for x in state["events"]
+                ) >= MAX_DELEGATIONS:
+            state["decision"] = {"action": "answer", "response": (
+                "現時点の情報だけでは原因を確定できません。取得済みの情報は"
+                "確認済み・模擬・対象未紐付けを区別する必要があります。"
+                "追加で現在の症状と実際のログが必要です。"), "used_ids": [],
+                "reason": "安全な調査上限"}
+        else:
+            observations = state["observations"]
+            decision = _json_llm(state["model"], MANAGER_RULES, {
+                "request": state["original_request"],
+                "new_user_information": state.get("user_update", ""),
+                "target": state["target"], "domain": state["domain"],
+                "previous_observations": observations[-6:],
+                "previous_actions": state["events"][-9:],
+                "validation_feedback": state.get("feedback", ""),
+                "remaining_delegations": MAX_DELEGATIONS - sum(
+                    x.get("action") == "delegate" for x in state["events"]),
+            })
+            if decision.get("action") not in ("delegate", "answer", "ask_user"):
+                state["feedback"] = "無効なaction。delegate, answer, ask_userから選択"
+                decision = {"action": "answer", "response": (
+                    "現在の情報では結論を出せません。必要な確認事項を整理してから回答します。"),
+                    "used_ids": [], "reason": "不正な判断形式"}
+            state["decision"] = decision
+        state["events"].append({
+            "type": "decision", "action": state["decision"].get("action"),
+            "specialist": state["decision"].get("specialist"),
+            "reason": state["decision"].get("reason", ""),
+        })
+        return self._persist(state)
+
+    def dispatch(self, state: WorkState) -> WorkState:
+        decision = state["decision"]
+        specialist = decision.get("specialist")
+        query = str(decision.get("query") or state["original_request"])[:240]
+        if specialist not in ("memory", "research"):
+            state["feedback"] = "存在しない専門担当が指定された。memoryかresearchのみ利用可"
+            state["events"].append({"type": "invalid_specialist", "name": specialist})
+            return self._persist(state)
+
+        # Repetition without changed evidence is not progress. Changed user
+        # input or an intervening observation permits a fresh request.
+        previous = [x for x in state["events"] if x.get("type") == "dispatch"]
+        signature = (specialist, query.casefold().strip())
+        if previous and previous[-1].get("signature") == list(signature) and (
+                previous[-1].get("observation_count") == len(state["observations"])):
+            state["feedback"] = "新情報なしの同一再依頼。別の条件または回答を選んでください"
+            state["events"].append({"type": "duplicate_blocked", "to": specialist})
+            return self._persist(state)
+
+        state["events"].append({
+            "type": "dispatch", "action": "delegate",
+            "to": specialist, "query": query,
+            "signature": list(signature),
+            "observation_count": len(state["observations"]),
+        })
+        self._persist(state)
+        try:
+            if specialist == "memory":
+                result = self._memory(state)
+            else:
+                result = self._research(query)
+            state["observations"].append(result)
+            state["feedback"] = ""
+        except Exception as exc:
+            # Never pretend an unavailable API means the user has no history.
+            state["observations"].append({
+                "specialist": specialist, "records": [],
+                "coverage": "unavailable",
+                "error": str(exc), "query": query,
+            })
+            state["feedback"] = ("取得処理が失敗。記憶なしとは断定しない。"
+                                 "再依頼・別担当・状況報告を選ぶ")
+        return self._persist(state)
+
+    def _memory(self, state: WorkState) -> dict:
+        target, domain = state["target"], state["domain"]
+        if state["mode"] == "fixture":
+            raw = json.loads(self._evidence.recall())
+            # The shared fixture intentionally names one fictional PC.
+            if target != "架空テストPC" or domain != "pc":
+                raise ValueError("Fixture only covers 架空テストPC / pc")
+            records = []
+            for record in raw["claims"]:
+                records.append({
+                    "id": "M" + str(len(records) + 1),
+                    "entity_name": record.get("entity_name"),
+                    "kind": record.get("kind"),
+                    "text": record.get("title", "") + "="
+                            + str(record.get("value_text")),
+                    "verification": record.get("state"),
+                    "source": record.get("source_citation"),
+                    "simulated": False, "linkage": "explicit_entity_match",
+                })
+            for record in raw["previous_actions"]:
+                records.append({
+                    "id": "M" + str(len(records) + 1),
+                    "entity_name": record.get("entity_name"),
+                    "kind": "action_result",
+                    "text": str(record.get("summary") or record.get("outcome")),
+                    "verification": "simulated" if record.get("simulated")
+                                    else "unverified",
+                    "source": record.get("source_citation"),
+                    "simulated": bool(record.get("simulated")),
+                    "linkage": record.get("association"),
+                })
+            coverage = raw["coverage"]
+        else:
+            token_file = ask.ROOT / "secrets" / "secretary-api-token.txt"
+            if not token_file.is_file():
+                raise RuntimeError("Secret API token not found; no fallback to fixture")
+            token = token_file.read_text(encoding="utf-8-sig").strip()
+            if not token:
+                raise RuntimeError("Secret API token empty")
+            claims = ask.search(token, domain=domain)
+            actions = ask.search_experience(token, domain=domain)
+            def same_target(row):
+                return "".join(str(row.get("entity_name") or "").casefold().split()
+                               ) == "".join(target.casefold().split())
+            records = []
+            for row in claims.get("items") or []:
+                if not same_target(row):
+                    continue
+                records.append({
+                    "id": "M" + str(len(records) + 1),
+                    "entity_name": row.get("entity_name"),
+                    "kind": row.get("kind"),
+                    "text": str(row.get("title")) + " " + str(row.get("value_text")),
+                    "verification": row.get("state"),
+                    "source": row.get("source_citation"),
+                    "source_id": str(row.get("source_id")),
+                    "simulated": False, "linkage": "explicit_entity_match",
+                })
+            for row in actions.get("items") or []:
+                if row.get("entity_name") and not same_target(row):
+                    continue
+                simulated = (
+                    row.get("tool") == "prototype_mock"
+                    or (isinstance(row.get("evidence"), dict) and
+                        bool(row["evidence"].get("simulated")))
+                )
+                records.append({
+                    "id": "M" + str(len(records) + 1),
+                    "entity_name": row.get("entity_name"),
+                    "kind": "action_result",
+                    "text": str(row.get("summary") or row.get("outcome")),
+                    "verification": "simulated" if simulated else "unverified",
+                    "source": row.get("source_citation"),
+                    "simulated": simulated,
+                    "linkage": ("explicit_entity_match" if row.get("entity_name")
+                                else "unlinked_same_domain_not_proof_of_target"),
+                })
+            coverage = ("first-page domain records only; memory total="
+                        + str(claims.get("total")) + ", experience total="
+                        + str(actions.get("total")))
+        return {"specialist": "memory", "target": target, "domain": domain,
+                "records": records[:20], "coverage": coverage, "source_mode": state["mode"]}
+
+    def _research(self, query: str) -> dict:
+        # Real-web adapter does not exist yet. Explicit fictional provenance.
+        data = json.loads(self._evidence.research(query))
+        return {
+            "specialist": "research", "query": query,
+            "records": [{
+                "id": "R" + str(n + 1),
+                "text": str(record.get("title")) + ": " + str(record.get("text")),
+                "source": record.get("provenance"),
+                "verification": "fictional_not_real_reference",
+                "simulated": True,
+            } for n, record in enumerate(data["sources"])],
+            "coverage": data["coverage"], "source_mode": "fictional_fixture",
+        }
+
+    def evaluate(self, state: WorkState) -> WorkState:
+        result = state["observations"][-1] if state["observations"] else None
+        if not result or result.get("error"):
+            state["feedback"] = "専門担当がデータを取得できなかった。理由を踏まえて次の手を選ぶ"
+        else:
+            records = result.get("records") or []
+            if result["specialist"] == "memory":
+                wrong = [r for r in records if
+                         r.get("entity_name") and
+                         "".join(r["entity_name"].casefold().split()) !=
+                         "".join(state["target"].casefold().split())]
+                if wrong:
+                    result["records"] = [r for r in records if r not in wrong]
+                    state["feedback"] = "対象外の記憶を除外した。現在の対象と照合する"
+                elif not records:
+                    state["feedback"] = ("この検索範囲で該当記憶なし。"
+                                         "DB全体に不存在と断定しない")
+                else:
+                    state["feedback"] = (
+                        "対象未紐付け・模擬・未検証記録は診断の証明にならない。"
+                        "必要なら別担当へ依頼するか、現時点の結論を回答する")
+            else:
+                state["feedback"] = (
+                    "取得した資料は架空の参考資料であり実機の根拠ではない。"
+                    "新しい証拠がなければ原因を確定せず回答する")
+        state["events"].append({"type": "evaluation",
+                                "specialist": result.get("specialist") if result else None,
+                                "feedback": state["feedback"]})
+        return self._persist(state)
+
+    def final(self, state: WorkState) -> WorkState:
+        decision = state["decision"]
+        if decision["action"] == "ask_user":
+            state["awaiting"] = str(decision.get("response") or
+                                    "もう少し状況を教えてください")
+            state["answer"] = state["awaiting"]
+            state["status"] = "waiting_user"
+        else:
+            answer = str(decision.get("response") or "").strip()
+            known = {r.get("id") for obs in state["observations"]
+                     for r in obs.get("records") or []}
+            cited = set(str(x) for x in decision.get("used_ids", []))
+            prior_checked = any(obs.get("specialist") == "memory"
+                                and not obs.get("error") for obs in state["observations"])
+            asks_history = any(word in state["original_request"]
+                               for word in ("以前", "過去", "前回", "これまで"))
+            if cited - known or (asks_history and not prior_checked):
+                state["feedback"] = (
+                    "引用IDが不正か、以前の経験を未照会。確認せず不存在を宣言できない")
+                state["review_attempts"] = state.get("review_attempts", 0) + 1
+                if state["review_attempts"] < 2:
+                    state["decision"] = {"action": "retry_manager"}
+                    return self._persist(state)
+                answer = ("過去情報の確認が完了しなかったため、"
+                          "現時点では原因を特定できません。"
+                          "記憶取得を再試行するか現在のログを確認する必要があります。")
+            if not answer:
+                answer = "現時点では回答を生成できませんでした。"
+            state["answer"] = answer
+            state["status"] = "answered"
+        state["events"].append({"type": "finish", "status": state["status"]})
+        return self._persist(state)
+
+    @staticmethod
+    def route_manager(state: WorkState) -> str:
+        return "dispatch" if state["decision"]["action"] == "delegate" else "final"
+
+    @staticmethod
+    def route_final(state: WorkState) -> str:
+        return "manager" if state["decision"]["action"] == "retry_manager" else "end"
+
+    def _build_graph(self):
+        g = StateGraph(WorkState)
+        g.add_node("manager", self.manager)
+        g.add_node("dispatch", self.dispatch)
+        g.add_node("evaluate", self.evaluate)
+        g.add_node("final", self.final)
+        g.set_entry_point("manager")
+        g.add_conditional_edges("manager", self.route_manager,
+                                {"dispatch": "dispatch", "final": "final"})
+        g.add_edge("dispatch", "evaluate")
+        g.add_edge("evaluate", "manager")
+        g.add_conditional_edges("final", self.route_final,
+                                {"manager": "manager", "end": END})
+        return g.compile()
+
+    def run(self, state: WorkState) -> WorkState:
+        if state["status"] in ("answered", "waiting_user"):
+            return state
+        if state["mode"] not in ("fixture", "live"):
+            raise ValueError("Unknown mode")
+        self._evidence = Evidence("fixture")
+        try:
+            result = self.graph.invoke(state, config={"recursion_limit": 45})
+        except Exception:
+            # Node checkpoints survive recoverable errors; surface errors
+            # instead of silently treating unavailable evidence as none.
+            save_state(state, self.folder)
+            raise
+        return result
+
+    def start(self, request: str, *, target: str, domain: str,
+              mode: str = "fixture", model: str = "qwen3:8b") -> WorkState:
+        if not request.strip() or not target.strip() or not domain.strip():
+            raise ValueError("Request, target and domain cannot be empty")
+        state: WorkState = {
+            "task_id": str(uuid.uuid4()), "original_request": request,
+            "target": target, "domain": domain, "mode": mode, "model": model,
+            "status": "running", "turns": 0, "review_attempts": 0,
+            "feedback": "", "observations": [], "events": [],
+        }
+        save_state(state, self.folder)
+        return self.run(state)
+
+    def resume(self, task_id: str, user_update: str = "") -> WorkState:
+        state = load_state(task_id, self.folder)
+        if state["status"] == "answered":
+            return state
+        if state["status"] == "waiting_user" and not user_update.strip():
+            return state
+        if user_update.strip():
+            state["user_update"] = user_update.strip()
+            state["events"].append({"type": "user_update",
+                                    "text": user_update.strip()})
+        state["status"] = "running"
+        return self.run(state)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Read-only Secretary Core")
+    parser.add_argument("question", nargs="?")
+    parser.add_argument("--target", default="架空テストPC")
+    parser.add_argument("--domain", default="pc")
+    parser.add_argument("--mode", choices=("fixture", "live"), default="fixture")
+    parser.add_argument("--model", default="qwen3:8b")
+    parser.add_argument("--resume", metavar="TASK_ID")
+    parser.add_argument("--reply", default="", help="New information for paused work")
+    parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
+    args = parser.parse_args()
+    core = SecretaryCore(args.state_dir)
+    if args.resume:
+        result = core.resume(args.resume, args.reply)
+    else:
+        if not args.question:
+            parser.error("Specify a question or --resume TASK_ID")
+        result = core.start(args.question, target=args.target,
+                            domain=args.domain, mode=args.mode,
+                            model=args.model)
+    print(json.dumps({
+        "task_id": result["task_id"], "status": result["status"],
+        "answer": result.get("answer"), "events": result["events"],
+        "observations": result["observations"],
+        "checkpoint": str(args.state_dir / (result["task_id"] + ".json")),
+        "notice": ("Local checkpoint only; DB Task/Action/Result linking and "
+                   "real-web tools are not yet implemented."),
+    }, ensure_ascii=False, indent=2, default=str))
+
+
+if __name__ == "__main__":
+    main()
