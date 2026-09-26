@@ -1,5 +1,10 @@
 # Agent instructions — Secretary Runtime
 
+## Gate 0 — check the overall goal first (takes precedence over every implementation gate)
+
+**最上位ゲート（すべての作業に適用）**：個別機能や判断ループの完成そのものを目的にしない。提案・設計・実装・テスト・マイグレーション・実機コマンドを行う前に、(1) それが「ユーザーの全領域にわたり、依頼理解・記憶・調査・計画・安全な実行・検証・記録・継続対応を担う個人秘書AI」という**大目標にどう貢献するか**、(2) **今その作業を優先する理由**と他の優先課題・最小代替案を確認する。どちらか説明できなければ着手せず、計画を大目標から組み直す。この判定を通った作業にのみ、適応的判断ループ上の新能力・新観測による判断の変化・失敗条件・実機検証方法という4項目を適用する。判断ループも実現手段であり大目標ではない。
+
+
 ## Mandatory adaptive-core gate — takes precedence over older P0/G1 checklists (2026-09-26)
 
 The target is **a domain-general personal secretary that chooses its next action using experience and new observations**, not a scripted pipeline connecting `ask.py` with a fixed-step API. Read the current design [START_HERE](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/00_Project/START_HERE.md), [Vision](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/00_Project/Vision.md), [target architecture](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/SecretaryCore-vNext.md), and [adaptive vertical-slice gates](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/03_Workflows/PrototypeVerticalSlice.md) **before proposing any coding/migration/local user operation**. Older fixed-G1-first directions are superseded.
