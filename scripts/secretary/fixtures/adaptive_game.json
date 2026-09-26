@@ -3,6 +3,7 @@
   "goal": "架空ゲームの突然終了について、過去の経験と今回の情報を照合し、次に確認すべきことを提案する。必要なら続きの確認事項を残す。",
   "completion_criteria": "確認済み情報・未確認事項・推奨する次の確認と根拠を示し、実機障害を解決したとは主張しない",
   "domain": "pc",
+  "initial_recall": true,
   "current_context": {
     "entity": "架空テストPC",
     "application": "架空ゲームA",
