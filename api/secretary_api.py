@@ -198,6 +198,92 @@ def tasks(
             return cur.fetchall()
 
 
+# Structured SQL enumeration is the default; this endpoint does not use RAG,
+# vector similarity, LLM summarization or a top-k approximation.
+MEMORY_KINDS = ("claim", "issue", "hypothesis", "source")
+
+
+def memory_search_sql(include_history: bool) -> str:
+    # Only our own constant relation names may be substituted into SQL.
+    claim_relation = "secretary.claims" if include_history else "secretary.current_claims"
+    return f"""
+        WITH memory_records AS (
+          SELECT c.id, 'claim'::text AS kind, e.domain, e.name AS entity_name,
+                 c.predicate AS title, c.value::text AS value_text,
+                 c.evidence AS evidence, c.verification_status AS state,
+                 s.id AS source_id, s.citation AS source_citation, s.uri AS source_uri,
+                 c.recorded_at AS recorded_at
+          FROM {claim_relation} c
+          JOIN secretary.entities e ON e.id=c.entity_id
+          JOIN secretary.sources s ON s.id=c.source_id
+          UNION ALL
+          SELECT i.id, 'issue', e.domain, e.name,
+                 i.description, NULL::text, NULL::text, i.status,
+                 s.id, s.citation, s.uri, i.recorded_at
+          FROM secretary.issues i
+          LEFT JOIN secretary.entities e ON e.id=i.entity_id
+          JOIN secretary.sources s ON s.id=i.source_id
+          UNION ALL
+          SELECT h.id, 'hypothesis', e.domain, e.name,
+                 h.statement, NULL::text, h.evidence, h.status,
+                 s.id, s.citation, s.uri, h.recorded_at
+          FROM secretary.hypotheses h
+          JOIN secretary.issues i ON i.id=h.issue_id
+          LEFT JOIN secretary.entities e ON e.id=i.entity_id
+          JOIN secretary.sources s ON s.id=h.source_id
+          UNION ALL
+          SELECT s.id, 'source', NULL::text, NULL::text,
+                 s.citation, NULL::text, NULL::text, s.source_type,
+                 s.id, s.citation, s.uri, s.recorded_at
+          FROM secretary.sources s
+        )
+        SELECT * FROM memory_records
+        WHERE (%s::text IS NULL OR domain=%s)
+          AND (%s::text IS NULL OR kind=%s)
+          AND (%s::text IS NULL OR
+               strpos(lower(concat_ws(' ', entity_name, title, value_text,
+                                      evidence, source_citation, source_uri)),
+                      lower(%s)) > 0)
+    """
+
+
+@app.get("/memory/search", dependencies=[Depends(authenticated)])
+def search_memory(
+    q: str | None = Query(default=None, max_length=200),
+    domain: str | None = Query(default=None, max_length=200),
+    kind: Literal["claim", "issue", "hypothesis", "source"] | None = None,
+    include_history: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=1000000),
+):
+    # q omitted => unfiltered enumeration. q supplied => exact substring
+    # matching over stored data, NOT semantic similarity. Each response
+    # includes a total and a stable (within one DB snapshot) result page.
+    q = q.strip() or None if q is not None else None
+    domain = domain.strip() or None if domain is not None else None
+    filters = (domain, domain, kind, kind, q, q)
+    matching_sql = memory_search_sql(include_history)
+    with connect() as db:
+        with db.cursor() as cur:
+            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            cur.execute(
+                f"SELECT count(*) AS total FROM ({matching_sql}) AS matching",
+                filters,
+            )
+            total = cur.fetchone()["total"]
+            cur.execute(
+                f"""SELECT * FROM ({matching_sql}) AS matching
+                    ORDER BY recorded_at DESC, kind ASC, id DESC
+                    LIMIT %s OFFSET %s""",
+                (*filters, limit, offset),
+            )
+            items = cur.fetchall()
+    return {
+        "total": total, "limit": limit, "offset": offset,
+        "include_history": include_history, "items": items,
+    }
+
+
 @app.post("/tasks", status_code=201)
 def create_task(body: CreateTask, actor: str = Depends(authenticated)):
     with connect() as db:
