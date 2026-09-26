@@ -87,6 +87,15 @@ RAGの類似上位件数に依存しません。外部Web調査や出典原本�
 
 手順と制約は [`docs/memory-search.md`](docs/memory-search.md) を参照。
 
+## サブPC通常運用／メインPC代替のポータブルAPI
+
+`api/Dockerfile` と `docker/compose.api.yml` でPython APIをコンテナ化できます。
+DBは既存の別Composeプロジェクトを使い、APIはその専用Dockerネットワークに参加します。
+同じソースから両PCで再ビルドし、秘密情報とDBデータは別途移す手動切替方式です。
+APIのホスト側ポートはlocalhostに限定。元のWindows仮想環境方式も維持します。
+導入手順と制限は [`docs/portable-api.md`](docs/portable-api.md) を参照してください。
+この構成をまだ両PCで実際に稼働・移行検証したわけではありません。
+
 ## 次の実装
 
 Source Archive、Memory Write Service / API、実行時の承認検証、永続Task ManagerとSecretary Core最小APIを追加し、記憶→調査→計画→承認→安全な実行→検証→記録→フォローアップを通したテストを行います。今回の DB 基盤だけで自律実行や承認ポリシーの完成とはしません。
