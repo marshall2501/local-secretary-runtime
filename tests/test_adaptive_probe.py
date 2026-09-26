@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "secretary"
 sys.path.insert(0, str(SCRIPT))
@@ -23,6 +24,35 @@ def decision(action, **kwargs):
 
 
 class AdaptiveProbeTests(unittest.TestCase):
+    def test_selected_model_is_passed_to_ollama(self):
+        proposal = decision("wait")
+        with patch.object(probe.ask, "ollama",
+                          return_value=json.dumps(proposal)) as mock:
+            result = probe.choose_next({"goal": "fictional task"},
+                                       model="local-other:latest")
+        self.assertEqual(result["action"], "wait")
+        self.assertEqual(mock.call_args.kwargs["model"], "local-other:latest")
+        self.assertTrue(mock.call_args.kwargs["json_output"])
+
+    def test_checkpoints_are_isolated_by_model(self):
+        scenario = fixture("adaptive_game.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trial.json"
+            initial = probe.load_state(path, scenario, model="qwen3:8b")
+            probe.checkpoint(path, initial)
+            continued = probe.load_state(path, scenario, model="qwen3:8b")
+            self.assertEqual(continued["trial_id"], initial["trial_id"])
+            with self.assertRaisesRegex(ValueError, "Checkpoint uses"):
+                probe.load_state(path, scenario, model="another-model:9b")
+
+    def test_per_request_ollama_model_override(self):
+        with patch.object(probe.ask, "request_json",
+                          return_value={"message": {"content": "{}"}}) as req:
+            probe.ask.ollama([{"role": "user", "content": "test"}],
+                             model="another-model:9b")
+        self.assertEqual(req.call_args.kwargs["body"]["model"],
+                         "another-model:9b")
+
     def test_new_evidence_changes_next_action(self):
         scenario = fixture("adaptive_game.json")
         with tempfile.TemporaryDirectory() as tmp:
