@@ -1,46 +1,56 @@
-# PostgreSQL foundation (M0 / M1 / persistent-task schema)
+# PostgreSQL 基盤（M0 / M1 / 永続タスク用スキーマ）
 
-## Design reviewed
+## 参照した設計
 
-Implementation baseline: design repo commit `f9fe00f4fda56864f73e16f62b3d272658afffe8`:
+設計リポジトリのコミット `f9fe00f4fda56864f73e16f62b3d272658afffe8` を基準に実装しています。
 
 - [SecretaryCore-vNext](https://github.com/marshall2501/local-secretary-ai/blob/f9fe00f4fda56864f73e16f62b3d272658afffe8/docs/01_Architecture/SecretaryCore-vNext.md)
 - [Memory-vNext](https://github.com/marshall2501/local-secretary-ai/blob/f9fe00f4fda56864f73e16f62b3d272658afffe8/docs/02_Database/Memory-vNext.md)
 - [PrototypeVerticalSlice](https://github.com/marshall2501/local-secretary-ai/blob/f9fe00f4fda56864f73e16f62b3d272658afffe8/docs/03_Workflows/PrototypeVerticalSlice.md)
 
-This is storage/provisioning, not a completed autonomous secretary or Memory API.
-The design leaves concrete types and state machines open; the migrations make initial,
-domain-neutral choices rather than importing the old PC-specific schema.
+今回の実装範囲は、データの保存基盤とその構築・運用手順です。自律型秘書や Memory API はまだ完成していません。
+設計で未確定だった具体的な型や状態については、ドメインに依存しない初期定義を採用しました。
 
-| Design requirement | Initial implementation |
+| 設計上の要件 | 初期実装 |
 | --- | --- |
-| Structured source of truth + original archive | `entities`, `sources`; URI, hash, citation, retrieval time, confidentiality; original files stay outside DB/Git |
-| Facts/observations/attributes separate from guesses | typed `claims`, separate `pending_claims` and `hypotheses`; evidence and source required |
-| Effective time versus record time | `valid_from/to`, `recorded_at`, `supersedes_id`, retraction; `current_claims` excludes expired and superseded revisions |
-| AI candidates require review | restricted candidate INSERT columns; accepted-candidate provenance trigger; no direct AI claim-write grant |
-| Issues, hypotheses, decisions | separate tables, source references and decision history |
-| Persistent task core | UUID tasks/steps, dependencies, checkpoint, due/next-run/retry time, revision, approval-wait state |
-| Memory and external approval separation | `approval_kind`, distinct subject constraints, scope, decider, expiry; no application approval-write grants yet |
-| Operation and verification history | actions/results with evidence, errors, actor, parameters, idempotency key, reversibility |
-| Audit | linked `audit_events`; audit role INSERT-only; read/proposal/execution events must be emitted by future services |
+| 構造化データの正本と原本アーカイブ | `entities`、`sources` に URI・ハッシュ・出典・取得時刻・機密区分を保持。原本ファイルは DB と Git の外に保存 |
+| 事実・観測・属性と推測の区別 | 種別付きの `claims` と、独立した `pending_claims`、`hypotheses`。根拠と出典を必須化 |
+| 有効時点と記録時点の区別 | `valid_from/to`、`recorded_at`、`supersedes_id`、撤回情報。`current_claims` から期限切れ・置換済みの版を除外 |
+| AI 抽出候補のレビュー | 候補を追加できる列を制限し、承認済み候補との一致をトリガーで確認。AI に正本の直接書き込み権限を与えない |
+| 問題・仮説・判断 | 個別テーブル、出典への参照、判断の変更履歴 |
+| 永続タスク管理の基盤 | UUID のタスク・手順、依存関係、チェックポイント、期限・次回実行・再試行時刻、版番号、承認待ち状態 |
+| 記憶更新と外部操作の承認の分離 | `approval_kind`、対象の制約、承認範囲、判断者、有効期限。アプリからの承認書き込み権限は未付与 |
+| 操作と検証の履歴 | 操作・結果に根拠、エラー、実施者、引数、再実行キー、取り消し可否を保持 |
+| 監査 | 関連情報を結び付ける `audit_events`。監査ロールは追加のみ可能。参照・提案・実行のイベント記録処理は今後サービス側に実装 |
 
-`current_claims` means currently effective records, **not all verified facts**: callers must filter
-`verification_status` and preserve uncertainty. A superseding revision stops its predecessor from
-being current from the successor's `valid_from` onward, even if the successor later expires.
-Multiple values are allowed (attributes may be multi-valued); ambiguity resolution is not invented
-by this schema. Point-in-time queries must constrain both effective time and `recorded_at`, and
-only consider successors recorded by that time. These columns preserve revisions but are not a
-complete automatic bitemporal history system: trusted writers must append corrections and close
-effective periods transactionally instead of replacing old values.
+`current_claims` は現在有効な記録を返します。すべてが検証済みの事実とは限らないため、呼び出し側で
+`verification_status` を絞り込み、不確実性を保持してください。後継の版の `valid_from` 以降は旧版を現在値から除外します。
+後継の版がその後期限切れになっても、旧版は自動的に現在値へ戻りません。
+属性には複数の値を許容します。値の曖昧さを解消する判断は、このスキーマには含めていません。
+過去の時点を検索する場合は、有効期間と `recorded_at` の両方を指定し、その時点までに記録された後継版だけを考慮してください。
+これらの列は版の保持に使えますが、有効時点と記録時点の履歴を自動管理する仕組みは未実装です。
+信頼された書き込みサービスが、旧値を上書きせず、訂正版の追加と有効期間の終了を同一トランザクションで処理する必要があります。
 
-`simple` full-text GIN supports basic token search, not Japanese morphological segmentation.
-SQL exact filters/enumeration work independently; no vector database or cloud LLM required.
+`simple` 辞書を使った全文検索用 GIN 索引は、基本的なトークン検索に対応します。日本語の形態素解析には対応していません。
+SQL による厳密な条件検索や全件列挙は独立して利用でき、ベクトル DB やクラウド LLM は不要です。
 
-## Windows setup and start
+## ローカルリポジトリへの反映と起動（Windows）
 
-Requirements: PowerShell 5.1+; Git; Docker Desktop running **Linux containers**; Compose with `up --wait`.
-Run from the runtime checkout you intend to operate. The DB commands locate their own checkout;
-the pre-existing general doctor still uses its original `D:\AI` paths.
+実装の取得先は **`D:\AI\projects\local-secretary-runtime`** です。
+`D:\AI` はプロジェクト・データ・モデルなどを置く親フォルダーであり、Git リポジトリそのものではありません。
+GitHub の `main` にマージされた変更は、実装リポジトリ内で取得します。
+
+```powershell
+cd D:\AI\projects\local-secretary-runtime
+git pull --ff-only origin main
+```
+
+上記はローカルリポジトリが `main` ブランチの場合の手順です。別ブランチで作業している場合は、
+作業内容を確認してから `main` に切り替えてください。変更の取得だけでは、コンテナの起動や DB の更新は行われません。
+
+必要環境は PowerShell 5.1 以降、Git、**Linux コンテナ**を実行する Docker Desktop、`up --wait` 対応の Docker Compose です。
+運用する実装リポジトリ内で次を実行してください。DB スクリプトは自身の配置からリポジトリを特定します。
+従来の環境全体用 `doctor.ps1` は、引き続き固定の `D:\AI` 配下を確認します。
 
 ```powershell
 cd D:\AI\projects\local-secretary-runtime
@@ -48,130 +58,129 @@ cd D:\AI\projects\local-secretary-runtime
 .\scripts\db\postgres.ps1 -Action Start
 .\scripts\db\postgres.ps1 -Action Migrate
 .\scripts\db\postgres.ps1 -Action Doctor
-# Optional combined environment + database checks:
+# 環境全体と DB をまとめて確認する場合：
 .\scripts\doctor\doctor.ps1 -Postgres
 ```
 
-Setup creates only ignored `.env.postgres` (port) and `secrets/postgres-password.txt`
-(cryptographically random password). Existing `.env`, config and secrets are preserved.
-The password is mounted as a Compose secret, not in compose YAML or command arguments.
-Protect the secrets directory with local user-only NTFS permissions; Compose secrets are local
-file mounts, not encryption at rest. Back up the password separately in secure storage.
-Never paste expanded environment files, secret contents or raw private DB output into an issue.
+Setup は、Git 除外対象の `.env.postgres`（ポート設定）と `secrets/postgres-password.txt`
+（暗号学的乱数で生成したパスワード）を、存在しない場合に作成します。既存の `.env`、設定、秘密情報は保持します。
+パスワードは Compose secret としてマウントし、Compose の YAML やコマンド引数には含めません。
+秘密情報のフォルダーは、利用者本人だけがアクセスできる NTFS 権限で保護してください。
+Compose secret はローカルファイルのマウントであり、保存時の暗号化を提供するものではありません。
+パスワードは安全な場所に別途バックアップしてください。環境ファイルの展開結果、秘密情報、個人データを含む DB 出力を Issue に貼り付けないでください。
 
-Defaults:
+既定値は次のとおりです。
 
-| Item | Value |
+| 項目 | 値 |
 | --- | --- |
-| Compose project | `local-secretary-runtime-db` |
-| Service | `secretary-postgres` |
-| Volume | `local-secretary-runtime-db_secretary_pgdata` |
-| Network | `local-secretary-runtime-db_secretary_db` |
-| Host binding | `127.0.0.1:55432` only |
-| DB / provisioning user | `secretary` / `secretary_admin` |
-| PostgreSQL image | `postgres:17-bookworm` (major fixed, minor/security updates available) |
+| Compose プロジェクト | `local-secretary-runtime-db` |
+| サービス | `secretary-postgres` |
+| ボリューム | `local-secretary-runtime-db_secretary_pgdata` |
+| ネットワーク | `local-secretary-runtime-db_secretary_db` |
+| ホスト側の接続先 | `127.0.0.1:55432` のみ |
+| DB / 構築用ユーザー | `secretary` / `secretary_admin` |
+| PostgreSQL イメージ | `postgres:17-bookworm`（メジャーバージョン固定。マイナー更新・セキュリティ更新を取得可能） |
 
-No `container_name`, external/shared volume or network, existing-project dependency, or Docker prune.
-Scripts always pass the project, compose file and dedicated env file explicitly. Existing container
-project/checkout/service labels and named volume/network labels are checked before DB operations.
-Orphaned volumes/networks cause a refusal, not silent adoption: inspect them manually and recover
-from a trusted backup to a fresh instance if ownership is uncertain. Direct Compose commands bypass
-script guards; prefer the script.
+`container_name`、外部・共有ボリュームやネットワーク、既存プロジェクトへの依存、Docker 全体の一括削除は使用しません。
+スクリプトはプロジェクト名、Compose ファイル、専用の環境ファイルを毎回明示します。
+DB 操作前に、既存コンテナのプロジェクト・配置先・サービスのラベルと、ボリューム・ネットワークのラベルを確認します。
+対応するコンテナがないボリュームやネットワークがある場合は、処理を停止します。
+所有関係を手動で確認し、不明な場合は信頼できるバックアップから新しい環境へ復旧してください。
+Compose の直接実行ではこれらの確認を通らないため、通常はスクリプトを利用してください。
 
-Start reserves/tests the loopback port before starting; if unavailable, it stops without choosing
-another port or stopping the owner. On first setup, use `-Action Setup -Port 55433` if needed.
-For existing setup, edit only `LSA_DB_PORT=55433` in ignored `.env.postgres` before initial start.
-Start does not silently recreate an already running service with a changed port: plan that restart
-explicitly. A port can still be taken between preflight and Docker binding; Docker then fails safely.
+Start は起動前にループバックのポートを一時確保して利用可能か確認します。
+使用できない場合は停止し、別のポートへの自動変更や、ポートを使用中のプロセスの停止は行いません。
+初回設定では、必要に応じて `-Action Setup -Port 55433` を指定できます。
+設定済みの場合は、初回起動前に Git 除外対象の `.env.postgres` の `LSA_DB_PORT=55433` を変更してください。
+起動済みサービスのポート変更と再作成は自動では行わないため、別途再起動を計画してください。
+事前確認と Docker の起動の間にポートが使用された場合も、Docker 側で起動が失敗します。
 
-Readiness uses `pg_isready`; Doctor additionally checks the actual localhost binding, TCP password
-authentication, and migration history. It fails before migration, intentionally. Use Start then Migrate.
-Changing the secret file after initialization does **not** change an existing DB password. A mismatch
-is caught by Doctor; plan password rotation through PostgreSQL before updating the local secret.
-Do not delete the volume to fix credentials. Keep admin credentials away from LLMs and future apps.
+起動確認には `pg_isready` を使用します。Doctor はさらに localhost の実際の接続設定、TCP パスワード認証、
+マイグレーション履歴を確認します。マイグレーション前の Doctor は失敗する仕様です。Start、Migrate の順に実行してください。
+初期化後に秘密情報のファイルを書き換えても、既存 DB のパスワードは変わりません。
+不一致は Doctor で検出します。PostgreSQL 側のパスワード変更とローカルの秘密情報の更新を計画して実施してください。
+認証を直す目的でボリュームを削除しないでください。管理者資格情報は LLM や将来のアプリに渡さないでください。
 
-## Migrations, permissions, remaining service work
+## マイグレーション・権限・今後のサービス実装
 
-Migrate explicitly applies ordered `db/migrations/NNN_*.sql`, with an advisory transaction lock,
-one transaction, `ON_ERROR_STOP`, and SHA-256 history. Reapplying is a no-op. Editing an applied
-migration fails; add a new migration instead. Failure rolls back all pending migrations and their
-history. Migration SQL is not tied to first-time image initialization, so it works on an existing volume.
-No down migrations or auto-rollback that drops user data. Back up before schema changes.
+Migrate は `db/migrations/NNN_*.sql` を順番に適用します。
+アドバイザリートランザクションロック、単一トランザクション、`ON_ERROR_STOP`、SHA-256 の履歴を使用します。
+適用済みの SQL は再実行しません。適用済みファイルが変更されていれば失敗するため、変更は新しいマイグレーションとして追加してください。
+失敗時は今回の未適用マイグレーションと適用履歴をまとめてロールバックします。
+SQL の適用はコンテナの初回初期化から独立しており、既存ボリュームにも適用できます。
+ユーザーデータを削除する逆方向のマイグレーションや、自動的な巻き戻しは用意していません。スキーマ変更前にバックアップしてください。
 
-Five NOLOGIN group roles are created: reader, candidate writer, memory writer, task writer and audit
-writer. There are no application passwords/logins yet. Candidate writers can only insert unreviewed
-candidates; memory writers are trusted service roles; task writers cannot decide approvals; audit
-writers cannot edit/delete history. The provisioning account is a superuser and is not a safe runtime
-identity. There is no multi-user row-level isolation yet. Do not connect untrusted code with admin.
+読み取り、候補追加、記憶更新、タスク更新、監査追加の 5 種類の NOLOGIN グループロールを作成します。
+アプリ用のログインユーザーやパスワードはまだ作成しません。
+候補追加ロールは未レビューの候補の追加だけが可能です。記憶更新ロールは信頼されたサービス用です。
+タスク更新ロールは承認を決定できず、監査追加ロールは履歴を編集・削除できません。
+構築用アカウントはスーパーユーザーであり、通常のアプリ実行用には使えません。
+複数利用者のデータを行単位で分離する仕組みも未実装です。信頼できないコードを管理者権限で接続しないでください。
 
-Before enabling autonomous actions, implement and test:
+自律的な操作を有効にする前に、次を実装・検証する必要があります。
 
-- Memory Write Service: transactionally validate schema, evidence, duplicate/correction rules,
-  reviewer authority, approval scope/expiry, and append audit events. An accepted review is not
-  automatically an authorized write; explicit user corrections have a separate policy path.
-- Policy/Executor: bind approval to exact operation/parameters, identity, risk, expiry and revocation;
-  recheck immediately before external execution. An approval FK/high-risk presence check is **not**
-  authorization. No external operation is executed by this stage.
-- Task Manager: legal transitions, dependency-cycle detection, atomic claims/leases, optimistic
-  revision checks, retry policy and completion verification. Unique idempotency keys prevent duplicate
-  ledger entries; they cannot guarantee exactly-once external effects after a crash.
-- Audit read access, redact sensitive parameters, implement archive ingestion/hash verification,
-  privacy deletion with explicit FK-aware handling, and immutable correction history at service level.
+- **Memory Write Service**：スキーマ、根拠、重複・訂正ルール、レビュー者の権限、承認範囲・期限を検証し、監査記録とともにトランザクションで反映します。レビューの受理だけで書き込み権限が成立するわけではありません。本人の明示的な訂正には別のポリシーを適用します。
+- **Policy / Executor**：承認を具体的な操作・引数・実施者・危険度・期限・取り消し状態に結び付け、外部操作の直前に再確認します。承認の外部キーや高リスク操作の承認参照が存在するだけでは、実行許可にはなりません。今回の段階では外部操作を実行しません。
+- **Task Manager**：状態遷移の検証、依存関係の循環検出、実行担当の排他的な取得と期限管理、版番号による競合検出、再試行方針、完了確認を実装します。一意な再実行キーは操作記録の重複を防ぎますが、障害後も外部操作が必ず一度だけ実行されることまでは保証しません。
+- **監査・原本・削除**：読み取りアクセスの監査、機密引数の秘匿、原本の取り込みとハッシュ検証、外部キーの関係を考慮した個人情報の削除、上書きしない訂正履歴をサービス側で実装します。
 
-## Backup and restore drill
+## バックアップと復元訓練
 
 ```powershell
 .\scripts\db\postgres.ps1 -Action Backup
-# Use the exact dump path printed above; choose a NEW restore database name each time:
+# Backup が表示した実際のパスに置き換え、復元先 DB 名は毎回新しい名前にしてください：
 .\scripts\db\postgres.ps1 -Action Restore -BackupPath 'D:\AI\data\backup\example.dump' -RestoreDatabase secretary_restore_drill1
 ```
 
-Default backups go to ignored `backups/` in this checkout. To write directly to the external data
-directory, pass `-BackupPath 'D:\AI\data\backup\secretary-YYYYMMDD.dump'` to Backup. Existing files
-are never overwritten. `pg_dump --format=custom` makes a consistent DB snapshot. Binary data moves
-with `docker cp`, avoiding Windows PowerShell 5.1 redirection corruption. Dumps contain private data:
-keep them out of Git, encrypt/protect storage, and set a retention/off-device backup policy.
+既定では、このリポジトリ内の Git 除外対象 `backups/` に保存します。
+外部のデータフォルダーへ保存する場合は、Backup に `-BackupPath 'D:\AI\data\backup\secretary-YYYYMMDD.dump'` を指定してください。
+既存ファイルは上書きしません。`pg_dump --format=custom` で整合性のある DB スナップショットを作成します。
+バイナリは `docker cp` で転送し、Windows PowerShell 5.1 の出力リダイレクトによる破損を避けます。
+ダンプには個人データが含まれ得るため、Git に登録せず、保存先の暗号化・アクセス保護、保存期間、別機器への退避方針を決めてください。
 
-Restore accepts only a new `secretary_restore_*` DB in the dedicated service. It uses a single
-transaction, no `--clean`, no overwrite, and no production DB target. A failed restore may leave an
-empty diagnostic DB; it is not automatically dropped. Restore only trusted dumps because database
-archives can contain executable SQL. Existing production `secretary` remains unchanged.
+Restore は、専用サービス内の新規 `secretary_restore_*` DB だけを対象にします。
+単一トランザクションで復元し、`--clean`、既存 DB の上書き、運用 DB への直接復元は行いません。
+失敗時に空の検証用 DB が残る場合がありますが、自動削除はしません。
+DB アーカイブには実行可能な SQL が含まれるため、信頼できるダンプだけを復元してください。運用中の `secretary` は変更しません。
 
-After restoring, compare migration versions, entity/source/claim/task counts, source hash/archive
-availability, and selected task IDs/status/checkpoints/approvals with the source. Run a recovery drill
-before relying on backups. Production cutover is intentionally a separate operator procedure.
-Dumps omit owners/ACLs and cluster-global roles; restored drill DBs are admin-only. For recovery to a
-new cluster, initialize this version in an empty `secretary` DB to create group roles, then restore to
-a new drill DB and deliberately reapply reviewed grants before a planned cutover. Secrets, original
-source archive files and local config require separate coordinated backup; pg_dump includes tasks
-but not those files or Docker configuration. Pause application writes if archive/DB cross-consistency
-is needed. Never copy a live PostgreSQL data directory as a logical backup.
+復元後は、マイグレーションの版、entity・source・claim・task の件数、原本のハッシュと存在、
+代表的な Task ID・状態・チェックポイント・承認情報を復元元と比較してください。
+バックアップを運用に頼る前に復元訓練を行ってください。運用 DB の切り替えは別の手順として実施します。
+ダンプには所有者・アクセス権限とクラスタ共通のロールを含めないため、復元した検証用 DB は管理者専用です。
+新しいクラスタへ復旧する場合は、空の `secretary` DB にこの版を初期構築してグループロールを作成した後、
+新規の検証用 DB へ復元します。運用先を切り替える前に、確認済みの権限を明示的に設定してください。
+秘密情報、原本アーカイブ、ローカル設定は DB と対応が取れるよう別途バックアップします。
+`pg_dump` にはタスク状態は含まれますが、それらのファイルや Docker 設定は含まれません。
+原本と DB の厳密な整合性が必要な場合は、アプリの書き込みを停止してください。
+稼働中の PostgreSQL データディレクトリをコピーして論理バックアップの代わりにしないでください。
 
-## Validation
+## 検証方法と実施結果
 
 ```powershell
 .\tests\db\test-static.ps1
-# Uses the configured port, which must be free. No production service should occupy it.
+# 設定済みのポートを使用するため、運用サービスなどが使用していない状態で実行してください：
 .\tests\db\test-integration.ps1
 ```
 
-Integration tests use a random `local-secretary-test-*` project, synthetic data and dedicated resources.
-They reject occupied ports and applied-migration checksum drift; apply/reapply SQL; reject unreviewed promotion, invalid periods, cross-task steps and missing
-high-risk approval references; inspect role boundaries; verify waiting-task state across restart and
-binary backup/restore; reject existing restore targets. Finally they remove only that random project's
-containers/volume/network and compare all other container IDs, status, start times and restart counts.
-Synthetic dump files are ignored and retained locally; the shared downloaded PostgreSQL image remains.
-Do not run tests concurrently with manual lifecycle changes to other containers.
+統合テストは、ランダムな名前の `local-secretary-test-*` プロジェクト、架空データ、専用リソースを使用します。
+使用中ポートと適用済みマイグレーションのチェックサム不一致の拒否、SQL の適用・再適用、
+未レビュー候補の正本への反映拒否、不正な有効期間、別タスクの手順参照、高リスク操作の承認参照不足、ロール権限を確認します。
+再起動とバイナリバックアップ・復元を通じた承認待ちタスク状態の保持、既存復元先の拒否も確認します。
+終了時には、そのテスト専用プロジェクトのコンテナ・ボリューム・ネットワークだけを削除し、
+その他のコンテナの ID・状態・起動時刻・再起動回数を実行前と比較します。
+架空データのダンプは Git 除外対象としてローカルに残し、ダウンロードした PostgreSQL イメージも残します。
+テスト中に、別コンテナの起動・停止などを並行して行わないでください。
 
-Local validation on 2026-09-26: static checks passed under Windows PowerShell 5.1 and PowerShell
-7.6.5. Docker Desktop Linux-container integration passed on Windows; the final expanded suite
-(including port collision and checksum drift) passed under Windows PowerShell 5.1. These runs used
-an isolated Codex working checkout, not `D:\AI\projects\local-secretary-runtime`. Test containers,
-volumes and networks were removed; existing `yt-topic-search` container IDs, running state, start
-times and restart counts were unchanged. The downloaded image and ignored synthetic test dumps
-remain in local test storage. No production secretary database was provisioned in `D:\AI`.
-GitHub Actions defines a separate Linux integration job and Windows static job; local Windows
-results do not imply those CI jobs have passed.
+2026-09-26 のローカル検証では、Windows PowerShell 5.1 と PowerShell 7.6.5 で静的検証に成功しました。
+Windows 上の Docker Desktop（Linux コンテナ）で統合テストに成功し、
+ポート競合とチェックサム不一致の確認を追加した最終版も Windows PowerShell 5.1 で成功しました。
+検証場所は独立した Codex 作業コピーであり、`D:\AI\projects\local-secretary-runtime` ではありません。
+テスト用コンテナ・ボリューム・ネットワークは削除済みで、既存 `yt-topic-search` のコンテナ ID・稼働状態・起動時刻・再起動回数は変わっていません。
+ダウンロードしたイメージと Git 除外対象の架空データダンプは、ローカルのテスト用保存先に残っています。
+運用用リポジトリへの変更の取得や、運用用秘書 DB の構築は、この検証では実施していません。
 
-References: [Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/),
-[PostgreSQL pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html).
+[PR #2 の GitHub Actions](https://github.com/marshall2501/local-secretary-runtime/actions/runs/36217034600) でも、
+Linux の PostgreSQL 統合テストと Windows の静的検証の両方が成功しています。
+
+参考資料：[Docker Compose の秘密情報管理](https://docs.docker.com/compose/how-tos/use-secrets/)、
+[PostgreSQL の pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)。
