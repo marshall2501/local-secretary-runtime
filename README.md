@@ -64,6 +64,18 @@ DB 基盤は Windows / Docker Desktop の隔離テスト環境で検証済みで
 [Python APIの日本語セットアップと機能・制限](docs/python-api.md)に、専用ロール作成・venv・起動・架空データでの動作確認を記載しています。
 Python APIの依存ライブラリとオフラインテストは追加済みですが、利用者のメインPCでの統合検証は未実施です。
 
+## Memory Review（人間専用のローカルCLI・試作段階）
+
+未確定なPending Claimから正本Claimへ反映する、人間専用のレビューCLIを追加しました。
+独立した `secretary_reviewer` のDBログインを使用し、通常のPython APIには承認権限を与えません。
+Entityとユーザー発言のSourceメタデータ作成、候補一覧、承認・却下・要修正、承認時の
+`unverified` Claim追加、memory_writeの承認記録、監査記録を扱います。
+**元のファイル・全文のアーカイブ、真偽の検証、重複や訂正の解決は未実装**です。
+
+マイグレーション`003_memory_review.sql`を適用し、手動でレビュー専用ログインを作成してから利用します。
+実行コマンドと機能制限は [`docs/memory-review.md`](docs/memory-review.md) に記載しています。
+レビューログインをAIやAPIサーバーに設定しないでください。
+
 ## 次の実装
 
 Source Archive、Memory Write Service / API、実行時の承認検証、永続Task ManagerとSecretary Core最小APIを追加し、記憶→調査→計画→承認→安全な実行→検証→記録→フォローアップを通したテストを行います。今回の DB 基盤だけで自律実行や承認ポリシーの完成とはしません。
