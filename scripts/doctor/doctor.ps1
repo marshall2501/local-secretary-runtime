@@ -1,3 +1,4 @@
+param([switch]$Postgres)
 # doctor.ps1
 # Environment diagnostic script for Local Secretary Runtime.
 
@@ -289,6 +290,16 @@ if ($hasOllama) {
     }
 } else {
     Add-TODO "Ollama not installed yet. Needed later for local LLM."
+}
+
+if ($Postgres) {
+    Write-Section "Dedicated Secretary PostgreSQL"
+    try {
+        & (Join-Path $PSScriptRoot '../db/postgres.ps1') -Action Doctor
+        Add-OK "Dedicated PostgreSQL checks passed"
+    } catch {
+        Add-NG "Dedicated PostgreSQL: $($_.Exception.Message)"
+    }
 }
 
 Write-Section "Summary"

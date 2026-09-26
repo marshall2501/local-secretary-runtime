@@ -6,7 +6,7 @@ Personal Local Secretary AI の実装リポジトリ。目標は **記憶・調�
 
 ## 現状（実装済みと目標を区別）
 
-現在：`doctor.ps1`、環境テンプレート、PC別プロファイル。今回の変更で非破壊の `setup-runtime.ps1` を追加。PostgreSQL、Secretary Core、MCP Gateway、Ollama/n8n連携は今後の実装です。
+現在：非破壊の `setup-runtime.ps1`、`doctor.ps1`、環境テンプレート、PC別プロファイル、独立 PostgreSQL Compose、Memory / 永続 Task の初期 SQL、バックアップ・新規 DB への復元スクリプト。Secretary Core、Memory Write Service、承認の実行時検証、MCP Gateway、Ollama/n8n 連携は今後の実装です。
 
 目標構成：
 - **Python Secretary Core**：対話、Planner、永続Task Manager、Memory Engine、Research Engine、Tool Executor、Policy & Approval、Model Router。
@@ -30,10 +30,27 @@ cd D:\AI\projects\local-secretary-runtime
 
 `doctor.ps1` は現在固定の `D:\AI` パスを使用しています。サブPCなど別パスでセットアップする場合は、doctorの可変パス対応が必要です。
 
+## PostgreSQL を開始する
+
+Docker Desktop の Linux containers を使用します。既存セットアップ後、runtime repo 内で：
+
+```powershell
+.\scripts\db\postgres.ps1 -Action Setup
+.\scripts\db\postgres.ps1 -Action Start
+.\scripts\db\postgres.ps1 -Action Migrate
+.\scripts\db\postgres.ps1 -Action Doctor
+```
+
+専用 project `local-secretary-runtime-db`、専用 volume/network、`127.0.0.1:55432` を使用。起動前に競合を検査します。既存 `.env` は変更せず、DB 用 `.env.postgres` と `secrets/` は Git 対象外です。
+
+[設計との対応、ポート変更、権限の境界、バックアップ・復元、テスト手順](docs/postgres.md) を参照してください。`doctor.ps1 -Postgres` で DB 診断も追加できます。
+
+DB 基盤は Windows / Docker Desktop の隔離テスト環境で検証済みです（PowerShell 5.1 で再起動・バックアップ復元・ポート競合拒否・マイグレーション改変検知を確認）。`D:\AI` の通常運用環境への導入は別途必要です。
+
 ## セキュリティと別プロジェクト保護
 
 `.env`、APIキー、実データ、DB本体、Docker volume、モデル、ログ、バックアップをGitへ入れないでください。`yt-topic-search` は同じPC上で稼働する**独立した別プロジェクト**です。構築時に他のCompose project、コンテナ、volume、portを変更しません。
 
 ## 次の実装
 
-専用Docker Compose・PostgreSQLとschema migration・Source Archive、永続Task ManagerとSecretary Core最小APIを追加し、記憶→調査→計画→承認→安全な実行→検証→記録→フォローアップを通したテストを行います。
+Source Archive、Memory Write Service / API、実行時の承認検証、永続Task ManagerとSecretary Core最小APIを追加し、記憶→調査→計画→承認→安全な実行→検証→記録→フォローアップを通したテストを行います。今回の DB 基盤だけで自律実行や承認ポリシーの完成とはしません。
