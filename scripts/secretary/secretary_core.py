@@ -64,6 +64,66 @@ def load_state(task_id: str, folder: Path) -> WorkState:
     return data
 
 
+
+def evidence_based_fallback(state: WorkState) -> str:
+    """Produce a bounded, provenance-aware report without trusting a failed LLM review.
+
+    A rejected answer does not mean the underlying memory retrieval failed.
+    Use tool observations to distinguish successful lookup, lookup failure,
+    unverified claims and unlinked simulated actions. Domain-neutral by design.
+    """
+    observations = state.get("observations") or []
+    memory = [x for x in observations if x.get("specialist") == "memory"]
+    successful = [x for x in memory if not x.get("error")]
+    parts = []
+
+    if successful:
+        latest = successful[-1]
+        parts.append("記憶の照会は完了しました。")
+        records = latest.get("records") or []
+        if records:
+            parts.append("取得できた記録（確定事実とは限りません）:")
+            for record in records[:5]:
+                qualifiers = []
+                if record.get("simulated"):
+                    qualifiers.append("模擬")
+                if record.get("linkage") == "unlinked_same_domain_not_proof_of_target":
+                    qualifiers.append("今回の対象に紐付けなし")
+                if record.get("verification") in ("unverified", "unknown"):
+                    qualifiers.append("未検証")
+                if record.get("verification") == "fictional_not_real_reference":
+                    qualifiers.append("架空資料")
+                if not qualifiers:
+                    qualifiers.append("記録上の情報・最新の実観測ではない")
+                title = str(record.get("id") or "記録")
+                detail = str(record.get("text") or "内容不明")[:180]
+                parts.append(f"{title}: {detail}（{'・'.join(qualifiers)}）")
+        else:
+            parts.append("今回取得できた検索範囲に対象の記録はありません。"
+                         "DB全体に存在しないことは確認できていません。")
+        if latest.get("source_mode") == "fixture":
+            parts.append("これらは試験用の架空データであり、実機の診断結果ではありません。")
+    elif memory:
+        parts.append("記憶への照会を試みましたが取得に失敗しました。"
+                     "過去の記録が存在しないという意味ではありません。")
+    else:
+        parts.append("過去の記憶はまだ取得できていません。"
+                     "記録が存在しないとは断定できません。")
+
+    research = [x for x in observations
+                if x.get("specialist") == "research" and not x.get("error")]
+    if research:
+        parts.append("取得した参考資料の出典・適用条件も実際の対象との照合が必要です。"
+                     "架空資料だけでは実際の原因を証明できません。")
+    parts.append("現在の情報だけでは依頼の結論を確定できません。")
+    if state.get("domain") == "pc":
+        parts.append("次に必要なのは、現在の症状・発生時刻・実際のエラーログと"
+                     "構成や更新履歴の確認です。実機の設定変更は行っていません。")
+    else:
+        parts.append("次に必要なのは、現在の状況と不足している根拠の確認です。")
+    return "\n".join(parts)
+
+
 def _json_llm(model: str, instruction: str, context: dict) -> dict:
     response = ask.ollama([
         {"role": "system", "content": instruction},
@@ -109,11 +169,11 @@ class SecretaryCore:
         if state["turns"] > 9 or sum(
                 x.get("type") == "dispatch" for x in state["events"]
                 ) >= MAX_DELEGATIONS:
-            state["decision"] = {"action": "answer", "response": (
-                "現時点の情報だけでは原因を確定できません。取得済みの情報は"
-                "確認済み・模擬・対象未紐付けを区別する必要があります。"
-                "追加で現在の症状と実際のログが必要です。"), "used_ids": [],
-                "reason": "安全な調査上限"}
+            state["decision"] = {
+                "action": "answer", "response": evidence_based_fallback(state),
+                "used_ids": [], "skip_review": True,
+                "reason": "安全な調査上限のため取得済み証拠を限定報告",
+            }
         else:
             observations = state["observations"]
             decision = _json_llm(state["model"], MANAGER_RULES, {
@@ -339,10 +399,13 @@ class SecretaryCore:
             asks_history = any(word in state["original_request"]
                                for word in ("以前", "過去", "前回", "これまで"))
             validation_error = ""
-            if cited - known or (asks_history and not prior_checked):
+            if not decision.get("skip_review") and not answer:
+                validation_error = "回答が空です。取得済みの証拠を使い、限定的に回答する"
+            elif not decision.get("skip_review") and (
+                    cited - known or (asks_history and not prior_checked)):
                 validation_error = (
                     "引用IDが不正か、以前の経験を未照会。確認せず不存在を宣言できない")
-            elif state.get("review_attempts", 0) < 2:
+            elif not decision.get("skip_review") and state.get("review_attempts", 0) < 2:
                 # Independent second LLM call to check content, not just schema.
                 # The reviewer sees actual observations rather than manager prose.
                 try:
@@ -350,7 +413,12 @@ class SecretaryCore:
                         "あなたは独立した回答監査担当。与えられた観測の範囲だけで"
                         "回答の主張が成立するか判定。模擬資料を実機事実としない。"
                         "未紐付けのActionを対象PCの記録と断定しない。"
-                        "答えが不確実性を明示する場合は支持可能と扱う。"
+                        "回答に根本原因の特定を要求しない。「原因は未特定」や"
+                        "「現時点の証拠では断定できない」は、事実に矛盾しなければ"
+                        "適切な限定的回答としてsupported=true。"
+                        "supported=falseは、観測と矛盾する具体的な断定や、"
+                        "架空・未紐付け記録を実機の確定結果と偽る主張がある場合だけ。"
+                        "その場合、具体的な問題箇所と対応する根拠をfeedbackで示す。"
                         'JSONのみ: {"supported":true|false,"feedback":"理由"}'
                     ), {
                         "original_request": state["original_request"],
@@ -372,9 +440,15 @@ class SecretaryCore:
                 if state["review_attempts"] < 2:
                     state["decision"] = {"action": "retry_manager"}
                     return self._persist(state)
-                answer = ("過去情報の確認が完了しなかったため、"
-                          "現時点では原因を特定できません。"
-                          "記憶取得を再試行するか現在のログを確認する必要があります。")
+                # The reviewer may itself be mistaken. Never claim the
+                # successful memory lookup failed just because it rejected
+                # two candidate answers. Return a verifiable evidence report.
+                answer = evidence_based_fallback(state)
+                state["events"].append({
+                    "type": "evidence_fallback",
+                    "reason": "回答監査が2回不合格。確認済みの取得結果のみで限定報告",
+                    "memory_retrieved": prior_checked,
+                })
             if not answer:
                 answer = "現時点では回答を生成できませんでした。"
             state["answer"] = answer
