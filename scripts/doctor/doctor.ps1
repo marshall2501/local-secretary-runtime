@@ -137,6 +137,37 @@ foreach ($p in $paths) {
     Test-PathStatus $p
 }
 
+Write-Section "Environment Files"
+
+$envExamplePath = Join-Path $RuntimeRoot ".env.example"
+$envPath = Join-Path $RuntimeRoot ".env"
+$mainProfilePath = Join-Path $RuntimeRoot "config\profiles\main-pc.example.env"
+$subProfilePath = Join-Path $RuntimeRoot "config\profiles\sub-pc.example.env"
+
+if (Test-Path $envExamplePath) {
+    Add-OK ".env.example exists"
+} else {
+    Add-NG ".env.example is missing"
+}
+
+if (Test-Path $mainProfilePath) {
+    Add-OK "main-pc example profile exists"
+} else {
+    Add-NG "main-pc example profile is missing"
+}
+
+if (Test-Path $subProfilePath) {
+    Add-OK "sub-pc example profile exists"
+} else {
+    Add-NG "sub-pc example profile is missing"
+}
+
+if (Test-Path $envPath) {
+    Add-OK ".env exists"
+} else {
+    Add-TODO ".env not created yet. Copy .env.example to .env and edit local values."
+}
+
 Write-Section "Commands"
 
 $hasGit = Test-CommandStatus "Git" "git"
