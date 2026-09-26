@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import uuid
@@ -331,7 +332,8 @@ class SecretaryCore:
             answer = str(decision.get("response") or "").strip()
             known = {r.get("id") for obs in state["observations"]
                      for r in obs.get("records") or []}
-            cited = set(str(x) for x in decision.get("used_ids", []))
+            cited = (set(str(x) for x in decision.get("used_ids", []))
+                     | set(re.findall(r"\b[MR][0-9]+\b", answer)))
             prior_checked = any(obs.get("specialist") == "memory"
                                 and not obs.get("error") for obs in state["observations"])
             asks_history = any(word in state["original_request"]
@@ -412,9 +414,8 @@ class SecretaryCore:
         try:
             result = self.graph.invoke(state, config={"recursion_limit": 45})
         except Exception:
-            # Node checkpoints survive recoverable errors; surface errors
-            # instead of silently treating unavailable evidence as none.
-            save_state(state, self.folder)
+            # Each completed node has already checkpointed. Never replace its
+            # newer state with the stale invocation input on failure.
             raise
         return result
 
