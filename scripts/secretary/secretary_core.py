@@ -216,9 +216,12 @@ class SecretaryCore:
                 })
             coverage = raw["coverage"]
         else:
-            token_file = ask.ROOT / "secrets" / "secretary-api-token.txt"
+            token_file = Path(os.getenv(
+                "LSA_SECRETARY_API_TOKEN_FILE",
+                str(ask.ROOT / "secrets" / "secretary-api-token.txt"),
+            )).expanduser()
             if not token_file.is_file():
-                raise RuntimeError("Secret API token not found; no fallback to fixture")
+                raise RuntimeError("Secret API token not found: set LSA_SECRETARY_API_TOKEN_FILE; no fallback to fixture")
             token = token_file.read_text(encoding="utf-8-sig").strip()
             if not token:
                 raise RuntimeError("Secret API token empty")
