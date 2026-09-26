@@ -79,6 +79,55 @@ class AdaptiveProbeTests(unittest.TestCase):
         self.assertEqual(recalled[1]["association"], "domain_only_unlinked")
         self.assertTrue(recalled[0]["simulated"])
 
+    def test_initial_recall_is_available_before_first_decision_and_reused(self):
+        scenario = fixture("adaptive_game.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "initial-recall.json"
+            state = probe.load_state(path, scenario)
+            calls = []
+            def memory_reader(q, domain):
+                calls.append(("memory", q, domain))
+                return {"total": 2, "items": [
+                    {"entity_name": "架空テストPC", "title": "ram_gb",
+                     "state": "unverified"},
+                    {"entity_name": "別PC", "title": "irrelevant"},
+                ]}
+            def experience_reader(domain):
+                calls.append(("experience", domain))
+                return {"total": 1, "items": [
+                    {"task_id": "old-mock", "entity_name": None,
+                     "tool": "prototype_mock",
+                     "summary": "Fictional result",
+                     "evidence": {"simulated": True}},
+                ]}
+            self.assertTrue(probe.initial_recall(
+                scenario, state, memory_reader, experience_reader))
+            self.assertEqual(len(state["initial_recall"]["items"]), 1)
+            self.assertEqual(
+                state["initial_recall"]["past_actions_and_results"][0]["association"],
+                "domain_only_unlinked")
+            self.assertEqual(len(calls), 2)
+            captured = []
+            probe.step(scenario, state, chooser=lambda context:
+                       (captured.append(context) or decision("research", query="driver")))
+            self.assertEqual(
+                captured[0]["initial_recall"]["past_actions_and_results"][0]["task_id"],
+                "old-mock")
+            probe.checkpoint(path, state)
+            loaded = probe.load_state(path, scenario)
+            self.assertFalse(probe.initial_recall(
+                scenario, loaded, memory_reader, experience_reader))
+            self.assertEqual(len(calls), 2)
+
+    def test_initial_recall_only_when_past_experience_is_requested(self):
+        scenario = fixture("adaptive_shopping.json")
+        state = probe.load_state(Path("/no/existing/checkpoint/needed"), scenario)
+        def unexpectedly_called(*args):
+            self.fail("No automatic memory retrieval expected")
+        self.assertFalse(probe.initial_recall(
+            scenario, state, unexpectedly_called, unexpectedly_called))
+        self.assertNotIn("initial_recall", state)
+
     def test_new_evidence_changes_next_action(self):
         scenario = fixture("adaptive_game.json")
         with tempfile.TemporaryDirectory() as tmp:
