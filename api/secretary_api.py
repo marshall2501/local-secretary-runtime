@@ -448,7 +448,9 @@ def run_prototype_task(task_id: UUID, actor: str = Depends(authenticated)):
                    ORDER BY c.recorded_at DESC, c.id DESC LIMIT 20""",
                 (task["domain"], task["entity_id"], task["entity_id"]),
             )
-            recalled = cur.fetchall()
+            recalled = [
+                {**row, "id": str(row["id"])} for row in cur.fetchall()
+            ]
             cur.execute(
                 """SELECT r.id, r.outcome, r.summary, a.tool, a.operation
                    FROM secretary.results r
@@ -458,7 +460,9 @@ def run_prototype_task(task_id: UUID, actor: str = Depends(authenticated)):
                    ORDER BY r.recorded_at DESC, r.id DESC LIMIT 10""",
                 (task["domain"], task_id),
             )
-            previous_results = cur.fetchall()
+            previous_results = [
+                {**row, "id": str(row["id"])} for row in cur.fetchall()
+            ]
             cur.execute(
                 """UPDATE secretary.task_steps
                    SET status = 'completed', checkpoint = %s
