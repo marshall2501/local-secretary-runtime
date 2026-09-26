@@ -54,6 +54,16 @@ DB 基盤は Windows / Docker Desktop の隔離テスト環境で検証済みで
 
 `.env`、APIキー、実データ、DB本体、Docker volume、モデル、ログ、バックアップをGitへ入れないでください。`yt-topic-search` は同じPC上で稼働する**独立した別プロジェクト**です。構築時に他のCompose project、コンテナ、volume、portを変更しません。
 
+## Python Secretary API（試作段階）
+
+専用PostgreSQL上の記憶・タスクを扱う、localhost限定・Bearer認証付きPython APIのMVPを追加しました。
+現時点の機能は現在のClaimとEntityの検索、未レビュー候補の提案、タスク作成・一覧・中断・再開です。
+未確定候補の承認・正本への反映、Source取り込み、外部操作、タスク自動実行はまだできません。
+
+**管理者DBユーザーをAPIへ渡さず**、読み取り・候補提案・タスク更新・監査追加に限定した専用ログインを作ってください。
+[Python APIの日本語セットアップと機能・制限](docs/python-api.md)に、専用ロール作成・venv・起動・架空データでの動作確認を記載しています。
+Python APIの依存ライブラリとオフラインテストは追加済みですが、利用者のメインPCでの統合検証は未実施です。
+
 ## 次の実装
 
 Source Archive、Memory Write Service / API、実行時の承認検証、永続Task ManagerとSecretary Core最小APIを追加し、記憶→調査→計画→承認→安全な実行→検証→記録→フォローアップを通したテストを行います。今回の DB 基盤だけで自律実行や承認ポリシーの完成とはしません。
