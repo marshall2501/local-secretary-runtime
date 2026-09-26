@@ -7,7 +7,7 @@ make purchases, or claim user-level task completion.
 
 Run on the sub-PC after pulling this script:
  python scripts/secretary/adaptive_probe.py --scenario scripts/secretary/fixtures/adaptive_game.json
- python scripts/secretary/adaptive_probe.py --scenario scripts/secretary/fixtures/adaptive_shopping.json
+ python scripts/secretary/adaptive_probe.py --scenario scripts/secretary/fixtures/adaptive_shopping.json --state secrets/adaptive-shopping.json
 Repeating the same command resumes its checkpoint.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import urllib.error
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -53,6 +54,7 @@ def decision_context(scenario: dict, state: dict) -> dict:
         "completion_criteria": scenario["completion_criteria"],
         "domain": state["domain"],
         "current_context": scenario.get("current_context", {}),
+        "trial_status": state["status"],
         "latest_user_replies": state["user_replies"][-3:],
         "previous_decisions_and_observations": state["events"][-8:],
         "available_research": [
@@ -227,7 +229,7 @@ def main() -> int:
     for _ in range(args.steps):
         try:
             event = step(scenario, state)
-        except (ValueError, KeyError, OSError, TimeoutError) as exc:
+        except (ValueError, KeyError, OSError, TimeoutError, urllib.error.URLError) as exc:
             state["status"] = "waiting_replan"
             event = {"error_type": type(exc).__name__,
                      "note": "Decision/tool error; checkpoint retained for examination"}
