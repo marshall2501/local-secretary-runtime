@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from api.secretary_api import (
-    PROTOTYPE_STEPS, CreateTask, create_prototype_task, read_prototype_task,
+    PROTOTYPE_STEPS, CreateTask, create_prototype_task, read_prototype_task,\n    run_prototype_task,
 )
 
 
