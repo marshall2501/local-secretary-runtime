@@ -1,45 +1,45 @@
 {
-  "id": "fictional-shopping-v1",
-  "goal": "架空の卓上ライトを予算1万2千円以内で比較し、以前見送った候補も現在の条件で再検討して、次に取るべき行動を提案する。",
-  "completion_criteria": "予算・仕様・在庫の出所を区別して候補を比較し、実際の購入は本人が選んで承認する",
+  "id": "fictional-paper-notebook-v1",
+  "goal": "架空の紙の旅行用ノートを予算2000円以内で比較し、以前見送った候補も現在の条件で再検討して、次に取るべき行動を提案する。",
+  "completion_criteria": "予算・紙質・サイズ・在庫の出所を区別して候補を比較し、実際の購入は本人が選んで承認する",
   "domain": "shopping",
   "current_context": {
-    "item": "卓上ライト",
-    "budget_yen": 12000,
+    "item": "紙の旅行用ノート",
+    "budget_yen": 2000,
     "requirements": [
-      "調光対応",
-      "USB給電"
+      "B6程度",
+      "書き心地重視"
     ],
-    "scope": "架空の比較試験。実在商品の価格・在庫ではない"
+    "scope": "架空の非機械・日用品比較試験。実在商品の価格・在庫ではない"
   },
   "documents": [
     {
-      "id": "catalog-light-x",
-      "title": "架空商品X fictional desk light catalog",
-      "text": "架空商品Xは9800円、調光対応、USB給電。価格と仕様はテスト用の架空情報。"
+      "id": "catalog-notebook-x",
+      "title": "架空の紙ノートX fictional paper notebook catalog",
+      "text": "架空の紙ノートXは1200円、B6、やや厚めの紙。価格と仕様はテスト用の架空情報。"
     },
     {
-      "id": "catalog-light-y",
-      "title": "架空商品Y fictional desk light catalog",
-      "text": "架空商品Yは12800円、調光対応、USB給電。価格と仕様はテスト用の架空情報。"
+      "id": "catalog-notebook-y",
+      "title": "架空の紙ノートY fictional paper notebook catalog",
+      "text": "架空の紙ノートYは1800円、B6、薄い軽量紙。価格と仕様はテスト用の架空情報。"
     }
   ],
   "simulated_tools": {
     "check_stock_x": {
-      "description": "架空商品Xの在庫確認を模擬する。実際の店舗照会はしない。",
+      "description": "架空の紙ノートXの在庫確認を模擬する。実際の店舗照会はしない。",
       "outcomes": [
         {
-          "product": "架空商品X",
+          "product": "架空の紙ノートX",
           "in_stock": false,
           "source": "fictional-stock-fixture"
         }
       ]
     },
     "check_stock_y": {
-      "description": "架空商品Yの在庫確認を模擬する。実際の店舗照会はしない。",
+      "description": "架空の紙ノートYの在庫確認を模擬する。実際の店舗照会はしない。",
       "outcomes": [
         {
-          "product": "架空商品Y",
+          "product": "架空の紙ノートY",
           "in_stock": true,
           "source": "fictional-stock-fixture"
         }
