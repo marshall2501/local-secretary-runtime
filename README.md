@@ -76,6 +76,17 @@ Entityとユーザー発言のSourceメタデータ作成、候補一覧、承�
 実行コマンドと機能制限は [`docs/memory-review.md`](docs/memory-review.md) に記載しています。
 レビューログインをAIやAPIサーバーに設定しないでください。
 
+## ③ 記憶参照：SQL-first 検索（試作段階）
+
+`GET /memory/search` は既存のEntity/Claim/Issue/Hypothesis/Sourceメタデータを
+PostgreSQLから直接取得する**読み取り専用**エンドポイントです。
+未検証のClaimとHypothesisを区別し、通常は有効期間内のClaimを表示。
+`include_history=true` で過去のClaimも検索可能です。
+`q` を省略すれば対象の全件を `total` と `limit/offset` で列挙でき、
+RAGの類似上位件数に依存しません。外部Web調査や出典原本の検索は未実装です。
+
+手順と制約は [`docs/memory-search.md`](docs/memory-search.md) を参照。
+
 ## 次の実装
 
 Source Archive、Memory Write Service / API、実行時の承認検証、永続Task ManagerとSecretary Core最小APIを追加し、記憶→調査→計画→承認→安全な実行→検証→記録→フォローアップを通したテストを行います。今回の DB 基盤だけで自律実行や承認ポリシーの完成とはしません。
