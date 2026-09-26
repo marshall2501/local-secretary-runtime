@@ -173,6 +173,7 @@ def step(scenario: dict, state: dict, chooser=choose_next,
     signature = json.dumps({
         "action": decision["action"], "query": decision.get("query"),
         "domain": decision.get("domain"), "tool": decision.get("tool"),
+        "question": decision.get("question") if decision["action"] == "ask_user" else None,
     }, sort_keys=True, ensure_ascii=False)
     seen = state["attempts"].get(signature, 0)
     if seen >= 1 and not decision.get("retry_reason"):
