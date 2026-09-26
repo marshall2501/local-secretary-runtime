@@ -38,6 +38,16 @@ class ApiContainerConfigTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 api_config()
 
+    def test_container_refuses_reviewer_login(self):
+        with patch.dict(os.environ, {
+            "LSA_API_DSN": "host=secretary-postgres user=secretary_reviewer "
+                           "dbname=secretary",
+            "LSA_API_TOKEN": "x" * 48,
+            "LSA_API_CONTAINER_MODE": "1",
+        }, clear=True):
+            with self.assertRaises(RuntimeError):
+                api_config()
+
     def test_container_requires_secret_not_inline_password(self):
         with patch.dict(os.environ, {
             "LSA_API_DSN": "host=secretary-postgres user=secretary_api "
