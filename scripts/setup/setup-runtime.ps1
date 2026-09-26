@@ -41,7 +41,7 @@ function Get-TemplateValue([string]$key) {
     if (-not (Test-Path -LiteralPath $ExamplePath -PathType Leaf)) { return $null }
     $pattern = '^\s*' + [regex]::Escape($key) + '\s*=\s*(.*?)\s*$'
     foreach ($line in [IO.File]::ReadAllLines($ExamplePath)) {
-        if ($line -match $pattern) { return $Matches[1].Trim('"', "'") }
+        if ($line -match $pattern) { return $Matches[1].Trim('"').Trim("'") }
     }
     return $null
 }
@@ -49,7 +49,7 @@ function Get-LocalValue([string]$key) {
     if (-not (Test-Path -LiteralPath $EnvPath -PathType Leaf)) { return $null }
     $pattern = '^\s*' + [regex]::Escape($key) + '\s*=\s*(.*?)\s*$'
     foreach ($line in [IO.File]::ReadAllLines($EnvPath)) {
-        if ($line -match $pattern) { return $Matches[1].Trim('"', "'") }
+        if ($line -match $pattern) { return $Matches[1].Trim('"').Trim("'") }
     }
     return $null
 }
