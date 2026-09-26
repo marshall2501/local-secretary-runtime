@@ -56,10 +56,24 @@ class Evidence:
             raise ValueError("mode must be fixture or live")
         self.mode = mode
         self.calls = []
+        self.invalid_queries = []
+        self._recall_cache = None
+        self._research_cache = {}
 
     def recall(self, target: str = TARGET, domain: str = DOMAIN) -> str:
+        # This trial's user explicitly named one PC. Agent-generated free text
+        # must not silently become a DB entity or a broad, unrelated domain.
+        # Report corrected requests so a successful lookup cannot hide an LLM error.
+        if target != TARGET or domain != DOMAIN:
+            self.invalid_queries.append({
+                "target_requested": target, "domain_requested": domain,
+                "target_applied": TARGET, "domain_applied": DOMAIN,
+            })
+        target, domain = TARGET, DOMAIN
         self.calls.append({"specialist": "memory", "target": target,
                            "domain": domain, "mode": self.mode})
+        if self._recall_cache is not None:
+            return self._recall_cache
         if self.mode == "fixture":
             claims, actions, count = FIXTURE_CLAIMS, FIXTURE_HISTORY, 1
         else:
@@ -92,21 +106,27 @@ class Evidence:
                               if isinstance(item.get("evidence"), dict)
                               else item.get("tool") == "prototype_mock")
             result.append(x)
-        return json.dumps({
+        self._recall_cache = json.dumps({
             "mode": self.mode, "target": target, "domain": domain,
             "claims": named[:12], "previous_actions": result,
             "history_domain_total": count,
             "coverage": "bounded first 100 domain records; no proof of DB-wide absence",
         }, ensure_ascii=False, default=str)
+        return self._recall_cache
 
     def research(self, query: str) -> str:
+        key = " ".join(query.casefold().split())
         self.calls.append({"specialist": "research", "query": query,
                            "mode": "fictional_fixture"})
+        if key in self._research_cache:
+            return self._research_cache[key]
         words = [w for w in query.casefold().split() if len(w) > 2]
         matches = [n for n in FICTIONAL_NOTES if not words or any(
             w in (n["title"] + " " + n["text"]).casefold() for w in words)]
-        return json.dumps({
+        response = json.dumps({
             "query": query,
             "sources": (matches or FICTIONAL_NOTES)[:2],
             "coverage": "fictional local catalog; no current web or real diagnostics",
         }, ensure_ascii=False)
+        self._research_cache[key] = response
+        return response
