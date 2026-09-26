@@ -53,6 +53,32 @@ class AdaptiveProbeTests(unittest.TestCase):
         self.assertEqual(req.call_args.kwargs["body"]["model"],
                          "another-model:9b")
 
+    def test_recall_separates_named_entity_from_unlinked_history(self):
+        scenario = fixture("adaptive_game.json")
+        state = probe.load_state(Path("/no/existing/checkpoint/needed"), scenario)
+        history = {"total": 3, "items": [
+            {"task_id": "linked", "entity_name": "架空テストPC",
+             "tool": "prototype_mock", "summary": "Linked simulated trial",
+             "evidence": {"simulated": True}},
+            {"task_id": "different", "entity_name": "別PC",
+             "tool": "prototype_mock", "summary": "Other device"},
+            {"task_id": "unlinked", "entity_name": None,
+             "tool": "prototype_mock", "summary": "Unknown exact PC"},
+        ]}
+        event = probe.step(
+            scenario, state, chooser=lambda _: decision(
+                "memory_search", query="架空テストPC", domain="pc"
+            ),
+            memory_reader=lambda q, d: {"total": 0, "items": []},
+            experience_reader=lambda d: history,
+        )
+        recalled = event["observation"]["past_actions_and_results"]
+        self.assertEqual([r["task_id"] for r in recalled],
+                         ["linked", "unlinked"])
+        self.assertEqual(recalled[0]["association"], "explicit_entity_match")
+        self.assertEqual(recalled[1]["association"], "domain_only_unlinked")
+        self.assertTrue(recalled[0]["simulated"])
+
     def test_new_evidence_changes_next_action(self):
         scenario = fixture("adaptive_game.json")
         with tempfile.TemporaryDirectory() as tmp:
