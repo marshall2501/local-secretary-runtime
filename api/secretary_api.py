@@ -10,12 +10,13 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
 import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, StringConstraints
@@ -55,17 +56,47 @@ class NewCandidate(BaseModel):
 
 
 def api_config() -> tuple[str, str]:
+    # Desktop dev mode keeps the existing localhost DSN + token workflow.
+    # Container mode loads both secrets from files mounted by Compose.
     dsn = os.getenv("LSA_API_DSN", "").strip()
     token = os.getenv("LSA_API_TOKEN", "")
+    container_mode = os.getenv("LSA_API_CONTAINER_MODE", "") == "1"
+    token_file = os.getenv("LSA_API_TOKEN_FILE", "")
+    password_file = os.getenv("LSA_API_DB_PASSWORD_FILE", "")
     if not dsn:
         raise RuntimeError("Set LSA_API_DSN for a dedicated restricted DB login.")
+    if token_file:
+        if not container_mode or token:
+            raise RuntimeError("Token file requires container mode without inline token.")
+        try:
+            token = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError("Unable to read API token secret file.") from exc
     if len(token) < 32:
         raise RuntimeError("Set a unique LSA_API_TOKEN of at least 32 characters.")
     parsed = conninfo_to_dict(dsn)
-    if parsed.get("user") in ("secretary_admin", "postgres"):
+    if parsed.get("user") in ("secretary_admin", "postgres", None, ""):
         raise RuntimeError("Refusing PostgreSQL provisioning/superuser account.")
-    if parsed.get("host") not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError("MVP API requires a local PostgreSQL connection.")
+    if parsed.get("hostaddr"):
+        raise RuntimeError("Host address override is not allowed.")
+    if container_mode:
+        if parsed.get("user") != "secretary_api":
+            raise RuntimeError("Container API requires the candidate-only secretary_api login.")
+        if parsed.get("host") != "secretary-postgres":
+            raise RuntimeError("Container API must use its dedicated DB service hostname.")
+        if not password_file or parsed.get("password"):
+            raise RuntimeError("Container mode requires a separate DB password file.")
+        try:
+            password = Path(password_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError("Unable to read database password secret file.") from exc
+        if not password:
+            raise RuntimeError("Database password file is empty.")
+        dsn = make_conninfo(dsn, password=password)
+    elif parsed.get("host") not in ("localhost", "127.0.0.1", "::1"):
+        raise RuntimeError("Desktop MVP API requires a localhost DB connection.")
+    elif password_file:
+        raise RuntimeError("Password file mode requires container mode.")
     return dsn, token
 
 
@@ -85,6 +116,12 @@ async def lifespan(_: FastAPI):
             row = cur.fetchone()
             if row is None or row["rolsuper"]:
                 raise RuntimeError("API DB login must be a non-superuser.")
+            cur.execute(
+                "SELECT pg_has_role(current_user, %s, 'member') AS too_privileged",
+                ("secretary_memory_writer",),
+            )
+            if cur.fetchone()["too_privileged"]:
+                raise RuntimeError("API must not inherit trusted memory-write privileges.")
             checks = (
                 ("secretary.entities", "SELECT"),
                 ("secretary.pending_claims", "INSERT"),

@@ -7,6 +7,11 @@ on:
       - "tests/test_api_static.py"
       - "tests/test_memory_review.py"
       - "tests/test_memory_search.py"
+      - "tests/test_api_container_config.py"
+      - "docker/compose.api.yml"
+      - "api/Dockerfile"
+      - ".env.api.example"
+      - ".dockerignore"
       - ".github/workflows/python-api.yml"
   push:
     branches: [main]
@@ -16,6 +21,11 @@ on:
       - "tests/test_api_static.py"
       - "tests/test_memory_review.py"
       - "tests/test_memory_search.py"
+      - "tests/test_api_container_config.py"
+      - "docker/compose.api.yml"
+      - "api/Dockerfile"
+      - ".env.api.example"
+      - ".dockerignore"
       - ".github/workflows/python-api.yml"
 jobs:
   test:
@@ -26,7 +36,15 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -r api/requirements.txt
-      - run: python -m compileall -q api scripts/memory tests/test_api_static.py tests/test_memory_review.py tests/test_memory_search.py
+      - run: python -m compileall -q api scripts/memory tests/test_api_static.py tests/test_memory_review.py tests/test_memory_search.py tests/test_api_container_config.py
       - run: python -m unittest discover -s tests -p test_api_static.py -v
       - run: python -m unittest discover -s tests -p test_memory_review.py -v
       - run: python -m unittest discover -s tests -p test_memory_search.py -v
+      - run: python -m unittest discover -s tests -p test_api_container_config.py -v
+      - name: Validate API Docker Compose and image
+        run: |
+          cp .env.api.example .env.api
+          mkdir -p secrets
+          touch secrets/secretary-api-db-password.txt secrets/secretary-api-token.txt
+          docker compose --project-name local-secretary-runtime-api --env-file .env.api -f docker/compose.api.yml config --quiet
+          docker build -f api/Dockerfile -t secretary-api-ci .

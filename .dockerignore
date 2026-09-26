@@ -1,0 +1,22 @@
+# Keep personal data, credentials, backups and unrelated files OUT of image build.
+.git
+.env
+.env.*
+secrets/
+backups/
+backup/
+data/
+models/
+logs/
+.venv/
+__pycache__/
+*.pyc
+*.dump
+*.backup
+*.bak
+*.key
+*.pem
+*.p12
+*.pfx
+docker/volumes/
+docker/data/
