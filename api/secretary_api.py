@@ -39,6 +39,16 @@ class CreateTask(BaseModel):
     due_at: datetime | None = None
 
 
+# G1: deterministic, LLM-free first slice. Later stages attach memory,
+# simulated tools, and verification to these persisted task steps.
+PROTOTYPE_STEPS = (
+    "Recall: inspect existing memory and previous actions",
+    "Plan: choose a safe read-only diagnostic",
+    "Execute: run a simulated read-only diagnostic",
+    "Verify and record the result",
+)
+
+
 class TaskTransition(BaseModel):
     expected_revision: int = Field(ge=0)
 
@@ -344,6 +354,73 @@ def create_task(body: CreateTask, actor: str = Depends(authenticated)):
                 (actor, created["id"]),
             )
             return created
+
+
+
+@app.post("/prototype/tasks", status_code=201)
+def create_prototype_task(body: CreateTask, actor: str = Depends(authenticated)):
+    """Create one real Task ID and the fixed G1 steps in one DB transaction.
+
+    This is planning/persistence only: NO tool execution or LLM is implied.
+    An ordinary user need not manually insert Task Steps or copy UUIDs.
+    """
+    with connect() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """INSERT INTO secretary.tasks
+                   (request, requested_by, domain, completion_criteria,
+                    entity_id, due_at, status)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                   RETURNING id, status, revision, created_at""",
+                (body.request, actor, body.domain, body.completion_criteria,
+                 body.entity_id, body.due_at),
+            )
+            created = cur.fetchone()
+            steps = []
+            for step_order, description in enumerate(PROTOTYPE_STEPS):
+                cur.execute(
+                    """INSERT INTO secretary.task_steps
+                       (task_id, step_order, description)
+                       VALUES (%s, %s, %s)
+                       RETURNING id, step_order, description, status""",
+                    (created["id"], step_order, description),
+                )
+                steps.append(cur.fetchone())
+            cur.execute(
+                """INSERT INTO secretary.audit_events
+                   (actor, event_type, task_id, object_type, object_id)
+                   VALUES (%s, 'prototype.task_created', %s, 'task', %s)""",
+                (actor, created["id"], created["id"]),
+            )
+    return {**created, "steps": steps, "phase": "planned"}
+
+
+@app.get("/prototype/tasks/{task_id}")
+def read_prototype_task(task_id: UUID, actor: str = Depends(authenticated)):
+    """Retrieve the same Task ID plus persisted step statuses after restart."""
+    with connect() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """SELECT id, request, domain, completion_criteria, status,
+                          revision, checkpoint, created_at, updated_at
+                   FROM secretary.tasks
+                   WHERE id = %s""",
+                (task_id,),
+            )
+            task = cur.fetchone()
+            if task is None:
+                raise HTTPException(status_code=404, detail="Task not found.")
+            cur.execute(
+                """SELECT id, step_order, description, status, checkpoint,
+                          attempt_count, last_error, updated_at
+                   FROM secretary.task_steps
+                   WHERE task_id = %s
+                   ORDER BY step_order""",
+                (task_id,),
+            )
+            steps = cur.fetchall()
+    return {**task, "steps": steps, "phase": "planned"}
+
 
 
 def transition_task(
