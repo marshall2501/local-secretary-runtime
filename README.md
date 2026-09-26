@@ -32,6 +32,9 @@ cd D:\AI\projects\local-secretary-runtime
 
 ## PostgreSQL を開始する
 
+GitHub でマージされた変更は、ローカルの `D:\AI\projects\local-secretary-runtime` で取得します。`D:\AI` はその親フォルダーです。
+`main` ブランチで `git pull --ff-only origin main` を実行してください。変更の取得と、以下のコンテナ起動・DB 初期化は別の操作です。
+
 Docker Desktop の Linux containers を使用します。既存セットアップ後、runtime repo 内で：
 
 ```powershell
