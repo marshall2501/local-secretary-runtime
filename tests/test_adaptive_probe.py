@@ -63,6 +63,18 @@ class AdaptiveProbeTests(unittest.TestCase):
         self.assertEqual(second["observation"]["status"], "review_needed")
         self.assertEqual(state["status"], "waiting_replan")
 
+    def test_japanese_free_form_query_browses_existing_local_sources(self):
+        scenario = fixture("adaptive_game.json")
+        result = probe.research_local(
+            scenario, "ドライババージョン2.0の更新内容と、ゲームAのクラッシュ原因に関する情報"
+        )
+        self.assertEqual(result["total_matches"], 0)
+        self.assertEqual(result["browse_total"], 2)
+        self.assertEqual(len(result["sources"]), 2)
+        self.assertIn("catalog browse", result["coverage"])
+        self.assertTrue(all(s["origin"] == "fictional local research fixture"
+                            for s in result["sources"]))
+
     def test_non_machine_scenario_uses_same_core(self):
         scenario = fixture("adaptive_shopping.json")
         state = probe.load_state(Path("/no/existing/checkpoint/needed"), scenario)
