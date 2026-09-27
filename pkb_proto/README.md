@@ -30,3 +30,9 @@ cd D:\AI\projects\local-secretary-runtime
 設計正本：[PersonalKnowledgeBase](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/02_Database/PersonalKnowledgeBase.md)／[Memory-vNext](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/02_Database/Memory-vNext.md)。
 
 **安全条件：** 本番`secretary` DBはこの段階では読み書きしない。テストは架空データのみ。既存`yt-topic-search`、Cognee、Graphiti環境へ干渉しない。実データ・本番DB更新に進む時はD-08に従って直近バックアップ、復元可能性、権限、戻し方を確認する。
+
+## 追記：DB書込みスライス（GitHubのみ・未実機）
+
+`write_service.py` と `sql/005_pkb_proto_receipts.sql` を追加。対象は `secretary_pkb_proto_*` という名前の**専用隔離DB**と `fixture://` の架空入力だけ。既存 `secretary` DBや実データは拒否する。入力IDごとの一意な領収記録・Source・単一Claimを1トランザクションで保存する。現在は対象の既知Entityに対する明示的な初回更新・交換のみを候補とし、既存Claimとの競合、訂正、曖昧な入力、外部情報はレビューへ回す。DB競合確認・引用の字面照合だけで意味的な正しさが保証されるわけではない。
+
+まず `python -m unittest discover -s tests -p "test_pkb*.py" -v` によりオフライン試験を実施し、次段階で専用DB上の挿入・冪等再送・ロールバック・権限を実証する。既存の001〜004を更新せず、この実験専用005は運用DBに適用しない。
