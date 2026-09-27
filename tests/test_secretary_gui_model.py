@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "secretary"))
 from secretary_core import SecretaryCore, load_state, save_state
 from secretary_gui_model import (
     can_reply, can_retry, event_rows, evidence_rows, task_summaries,
-    task_text_report,
+    task_text_report, STATUS_LABELS,
 )
 
 
@@ -208,6 +208,36 @@ class GuiModelTest(unittest.TestCase):
         self.assertIn("事実報告は妥当だが目的未達", report)
         self.assertIn("新しいログはありますか？", report)
         self.assertIn("未解決の依頼を再開", report)
+
+
+
+    def test_capability_blocked_status_and_rejected_question_are_copyable(self):
+        state = self.make_task(status="blocked_capability")
+        state["blocker"] = (
+            "架空資料は取得済み。新しい読み取り専用情報源が未接続です。"
+        )
+        state["awaiting"] = ""
+        state["latest_report"] = "原因は未特定です。"
+        state["events"].extend([
+            {"type": "question_rejected", "reason": "本人回答を反復",
+             "candidate": "既に入力した回答"},
+            {"type": "capability_blocked",
+             "reason": state["blocker"]},
+        ])
+        self.assertEqual(STATUS_LABELS["blocked_capability"],
+                         "情報源の接続待ち")
+        self.assertFalse(can_reply(state))
+        self.assertFalse(can_retry(state, set()))
+        events = event_rows(state)
+        self.assertEqual(events[-2]["title"], "無効な質問を却下")
+        self.assertIn("却下した質問案: 既に入力した回答",
+                      events[-2]["details"])
+        self.assertEqual(events[-1]["title"], "新しい情報源が必要")
+        report = task_text_report(state)
+        self.assertIn("blocked_capability", report)
+        self.assertIn("本人回答を反復", report)
+        self.assertIn("必要な次の能力: " + state["blocker"], report)
+        self.assertIn("依頼未完了", report)
 
 
 if __name__ == "__main__":
