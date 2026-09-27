@@ -61,3 +61,7 @@ The deterministic tests and experimental GitHub Actions workflow check
 wiring and these transitions with a scripted manager. Only the sub-PC Ollama
 trial can establish whether qwen3:8b actually demonstrates those judgments.
 Do not merge the branch into main based on syntax tests alone.
+
+## 操作可能なGUI（2026-09-27追加）
+
+最初のローカルNiceGUI画面を実験ブランチへ追加。依頼入力、checkpointからの依頼履歴、判断・委任・Python評価・独立監査の経過、証拠と出典フラグ、結論、ask_user質問への回答・同一Task再開を扱う。実ブラウザとQwen3によるGUI一気通貫試験は未検証。詳細とサブPC手順は docs/secretary-gui.md 。
