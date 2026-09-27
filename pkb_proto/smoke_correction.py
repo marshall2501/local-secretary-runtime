@@ -96,11 +96,6 @@ def main():
         rc_a, "RCカーA", "servo_updated", "SERVO-X1",
     )
     # The correction must coexist with subsequent, distinct historical updates.
-    rc_later = fixture(
-        "pkb-proto-rc-04", "RCカーBのサーボを架空型式SERVO-X2に交換した。走行試験はまだしていない。",
-        "2026-09-23T10:00:00+09:00", "2026-09-23T08:00:00+09:00",
-        rc_b, "RCカーB", "servo_updated", "SERVO-X2",
-    )
     # The initial write slice flags uncertainty as review. Use an independent
     # unambiguous assertion of the same fictional later replacement here.
     rc_later = fixture(
