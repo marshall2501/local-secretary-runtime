@@ -79,6 +79,10 @@ def event_rows(state: dict) -> list[dict]:
                 details.append("担当: " + SPECIALIST_LABELS.get(str(to), str(to)))
             if event.get("reason"):
                 details.append("理由: " + str(event["reason"]))
+            if action == "ask_user" and event.get("question"):
+                details.append("質問: " + str(event["question"]))
+            if action == "answer" and event.get("draft_answer"):
+                details.append("回答案: " + str(event["draft_answer"]))
         elif kind == "dispatch":
             details.append("依頼先: " + SPECIALIST_LABELS.get(
                 str(event.get("to") or ""), str(event.get("to") or "不明")))
@@ -171,8 +175,10 @@ def task_text_report(state: dict) -> str:
     if state.get("user_update"):
         lines.extend(["", "=== 最後に受け取った追加情報 ===",
                       str(state["user_update"])])
-    if state.get("awaiting") and status == "waiting_user":
-        lines.extend(["", "=== 現在の質問 ===", str(state["awaiting"])])
+    if state.get("awaiting"):
+        heading = ("=== 現在の質問 ===" if status == "waiting_user" else
+                   "=== 記録に残る最後の質問（現在は回答待ちではありません） ===")
+        lines.extend(["", heading, str(state["awaiting"])])
     lines.extend([
         "",
         "=== 判断・作業の全履歴（" + str(len(events)) + "件） ===",
