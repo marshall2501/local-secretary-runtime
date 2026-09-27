@@ -265,7 +265,8 @@ class Workbench:
                 extraction = (inspect_model_output(episode, raw)
                               if mode == "抽出：現行"
                               else Extraction(episode["id"], (), ()))
-                report = analyze_reply(episode, response, extraction)
+                report = analyze_reply(episode, response, extraction,
+                                       expect_json=mode.startswith("抽出："))
                 report["mode"] = mode
                 report["check"] = judge_response(mode, episode, raw)
                 report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
