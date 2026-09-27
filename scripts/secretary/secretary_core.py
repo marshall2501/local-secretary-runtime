@@ -192,6 +192,12 @@ MANAGER_RULES = (
     "判明した内容と限界を示してanswerする。既に取得した証拠は捨てない。"
     "ただし元の依頼が未解決のまま継続を明示している場合、"
     "仮の報告だけで業務完了と宣言しない。取得済みのユーザー回答を再質問せず、"
+    "all_user_updatesは本人がこの依頼で既に答えた全情報。previous_questionsは"
+    "過去の質問。両方を確認し、判断理由も含め既回答を不足として扱わない。"
+    "記憶に当該問題の経験がない場合、検索範囲内で未発見と全履歴不存在を区別する。"
+    "本人へ未登録の経験を尋ねる場合は検索済みの資料と区別して理由を説明する。"
+    "架空fixtureしか使えない場合、実Web・実PCログを取得したふりをせず、"
+    "新情報を得られる方法と未接続の能力を区別する。"
     "次の調査を変える具体的な未取得情報をask_userで尋ねるか、"
     "answerにnext_questionを付けて暫定報告する。"
     "本体の利用可能な調査手段はmemoryとresearchのみ。"
@@ -248,7 +254,30 @@ class SecretaryCore:
                 decision = _json_llm(state["model"], MANAGER_RULES, {
                     "request": state["original_request"],
                     "new_user_information": state.get("user_update", ""),
+                    # User replies may predate previous_actions[-9:] after
+                    # repeated tool calls or explicit reopening. Present all
+                    # replies separately so prior facts are not forgotten.
+                    "all_user_updates": [
+                        {"event_index": index, "text": str(event.get("text") or "")}
+                        for index, event in enumerate(state["events"], 1)
+                        if event.get("type") == "user_update"
+                    ],
+                    "previous_questions": [
+                        {"event_index": index,
+                         "question": str(event.get("question") or "")}
+                        for index, event in enumerate(state["events"], 1)
+                        if event.get("type") == "decision"
+                        and event.get("action") == "ask_user"
+                        and event.get("question")
+                    ],
                     "target": state["target"], "domain": state["domain"],
+                    "mode": state["mode"],
+                    "available_sources": (
+                        "記憶・資料とも架空fixture。実Web・実PC診断は不可"
+                        if state["mode"] == "fixture" else
+                        "既存の読み取り専用記憶API。実Web調査は未接続"
+                    ),
+                    "latest_provisional_report": state.get("latest_report", ""),
                     "previous_observations": observations[-6:],
                     "previous_actions": state["events"][-9:],
                     "validation_feedback": state.get("feedback", ""),
