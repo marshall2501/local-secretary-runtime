@@ -401,5 +401,58 @@ class SecretaryCoreTest(unittest.TestCase):
 
 
 
+
+    def test_reopened_task_manager_sees_all_previous_user_answers(self):
+        # Actual GUI failure: an old, previously answered task had two user
+        # replies separated by many tool events. previous_actions[-9:] lost
+        # the first reply and its reason incorrectly requested facts already
+        # provided. All replies must reach the manager after reopening.
+        task_id = "ce9d595b-b943-4942-b864-3e1cb5eea895"
+        state = {
+            "task_id": task_id,
+            "original_request": "過去の経験を調べて原因の切り分けを続けて",
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "waiting_user", "turns": 7,
+            "review_attempts": 0,
+            "latest_report": "原因は未特定、調査継続中です",
+            "feedback": "",
+            "events": [
+                {"type": "user_update", "text": "エラー表示なし、10分後に終了"},
+                *({"type": "evaluation", "feedback": "資料の評価"} for _ in range(13)),
+                {"type": "user_update", "text": "CPU30%、GPU60%、再起動後も再発"},
+                {"type": "decision", "action": "ask_user",
+                 "question": "過去に類似症状はありましたか？"},
+                {"type": "finish", "status": "waiting_user"},
+            ],
+            "observations": [{
+                "specialist": "memory", "source_mode": "fixture",
+                "records": [{"id": "M1", "text": "ram_gb=16",
+                             "verification": "unverified"}],
+            }],
+        }
+        secretary_core.save_state(state, self.folder)
+        script = ScriptedModel([{
+            "action": "ask_user",
+            "response": "新しいログがあれば教えてください",
+            "reason": "過去の回答を使い、未取得のログだけ尋ねる",
+        }])
+        with patch.object(secretary_core, "_json_llm", side_effect=script):
+            result = self.core.resume(task_id, "過去に類似症状はありません")
+        self.assertEqual(result["status"], "waiting_user")
+        context = script.manager_contexts[0]
+        self.assertNotIn("エラー表示なし",
+                         str(context["previous_actions"]))
+        self.assertEqual([item["text"] for item in context["all_user_updates"]],
+                         ["エラー表示なし、10分後に終了",
+                          "CPU30%、GPU60%、再起動後も再発",
+                          "過去に類似症状はありません"])
+        self.assertEqual(context["previous_questions"][-1]["question"],
+                         "過去に類似症状はありましたか？")
+        self.assertEqual(context["latest_provisional_report"],
+                         "原因は未特定、調査継続中です")
+        self.assertIn("実Web・実PC診断は不可", context["available_sources"])
+
+
 if __name__ == "__main__":
     unittest.main()
