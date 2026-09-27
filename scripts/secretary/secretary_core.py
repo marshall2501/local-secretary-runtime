@@ -105,7 +105,7 @@ def evidence_based_fallback(state: WorkState) -> str:
             parts.append("これらは試験用の架空データであり、実機の診断結果ではありません。")
     elif memory:
         parts.append("記憶への照会を試みましたが取得に失敗しました。"
-                     "過去の記録が存在しないという意味ではありません。")
+                     "過去の記録の有無は確認できていません。")
     else:
         parts.append("過去の記憶はまだ取得できていません。"
                      "記録が存在しないとは断定できません。")
