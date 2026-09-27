@@ -2,7 +2,8 @@
 import json
 import unittest
 
-from pkb_proto.diagnostic_cases import MODES, request_for, judge_response
+from pkb_proto.diagnostic_cases import (MODES, EPISODE_UNUSED, build_ollama_payload,
+                                        request_for, judge_response)
 from pkb_proto.extraction_service import Extraction
 from pkb_proto.gui_helpers import analyze_reply
 
@@ -46,6 +47,26 @@ class DiagnosticCasesTests(unittest.TestCase):
         )
         self.assertEqual(result["json_parse"], "not_requested")
         self.assertEqual(result["content_preview"], "ABC123")
+
+    def test_basic_modes_ignore_episode_and_send_plain_text_request(self):
+        other = {**EP, "text": "変更しても送信されない架空文章"}
+        for mode in EPISODE_UNUSED:
+            first = build_ollama_payload(EP, "qwen3.5:9b", 1100, "自動", mode)
+            second = build_ollama_payload(other, "qwen3.5:9b", 1100, "自動", mode)
+            self.assertEqual(first, second)
+            self.assertNotIn("format", first)
+            self.assertNotIn("think", first)
+            self.assertNotIn(EP["text"], json.dumps(first, ensure_ascii=False))
+
+    def test_actual_payload_preview_and_disabled_reasoning(self):
+        payload = build_ollama_payload(
+            EP, "qwen3.5:9b", 1100, "無効", "抽出：現行"
+        )
+        self.assertEqual(payload["format"], "json")
+        self.assertIs(payload["think"], False)
+        self.assertEqual(payload["options"]["num_predict"], 1100)
+        self.assertIn(EP["text"], payload["messages"][1]["content"])
+        self.assertNotIn("expected", json.dumps(payload))
 
     def test_invalid_mode_rejected(self):
         with self.assertRaises(ValueError):
