@@ -24,6 +24,13 @@ import ask
 from shared import Evidence, FICTIONAL_NOTES
 
 MAX_DELEGATIONS = 4
+
+RECALL_REQUEST_TERMS = ("以前", "過去", "前回", "これまで", "履歴", "実施済み", "経験")
+
+
+def requires_recall(request: str) -> bool:
+    """The user explicitly requested their history, regardless of LLM choice."""
+    return any(term in request for term in RECALL_REQUEST_TERMS)
 DEFAULT_STATE_DIR = ask.ROOT / "secrets" / "secretary-core-states"
 
 
@@ -179,16 +186,33 @@ class SecretaryCore:
             }
         else:
             observations = state["observations"]
-            decision = _json_llm(state["model"], MANAGER_RULES, {
+            # Preserve the user's instruction to consult past experience. If a
+            # prior turn asked the user or consulted research first, the same
+            # task still retrieves memory before deciding what to do next.
+            recall_needed = (
+                requires_recall(state["original_request"])
+                and not any(o.get("specialist") == "memory" for o in observations)
+                and not any(e.get("type") == "dispatch" and e.get("to") == "memory"
+                            for e in state["events"])
+            )
+            if recall_needed:
+                decision = {
+                    "action": "delegate", "specialist": "memory",
+                    "query": state["target"] + "の過去の経験・対策・結果",
+                    "reason": "元の依頼が過去の経験の確認を要求しているため先に照会",
+                    "used_ids": [],
+                }
+            else:
+                decision = _json_llm(state["model"], MANAGER_RULES, {
                 "request": state["original_request"],
                 "new_user_information": state.get("user_update", ""),
                 "target": state["target"], "domain": state["domain"],
                 "previous_observations": observations[-6:],
                 "previous_actions": state["events"][-9:],
                 "validation_feedback": state.get("feedback", ""),
-                "remaining_delegations": MAX_DELEGATIONS - sum(
-                    x.get("type") == "dispatch" for x in state["events"]),
-            })
+                    "remaining_delegations": MAX_DELEGATIONS - sum(
+                        x.get("type") == "dispatch" for x in state["events"]),
+                })
             if decision.get("action") not in ("delegate", "answer", "ask_user"):
                 state["feedback"] = "無効なaction。delegate, answer, ask_userから選択"
                 decision = {"action": "answer", "response": (
@@ -213,14 +237,32 @@ class SecretaryCore:
 
         # Repetition without changed evidence is not progress. Changed user
         # input or an intervening observation permits a fresh request.
-        previous = [x for x in state["events"] if x.get("type") == "dispatch"]
         signature = (specialist, query.casefold().strip())
-        if previous and previous[-1].get("signature") == list(signature) and (
-                previous[-1].get("observation_count") == len(state["observations"]) - 1
-                and not state.get("user_update")):
-            state["feedback"] = "新情報なしの同一再依頼。別の条件または回答を選んでください"
-            state["events"].append({"type": "duplicate_blocked", "to": specialist})
-            return self._persist(state)
+        # 'user_update' remains in the state for the manager's context, so
+        # testing its non-emptiness here wrongly allowed every duplicate call
+        # after a single user reply. Check event ordering instead.
+        previous_same = [
+            i for i, event in enumerate(state["events"])
+            if event.get("type") == "dispatch"
+            and event.get("signature") == list(signature)
+        ]
+        if previous_same:
+            intervening = state["events"][previous_same[-1] + 1:]
+            has_new_input = any(e.get("type") == "user_update" for e in intervening)
+            has_other_delegation = any(
+                e.get("type") == "dispatch" and e.get("to") != specialist
+                for e in intervening
+            )
+            if not has_new_input and not has_other_delegation:
+                state["feedback"] = (
+                    "新情報のない同一依頼を停止。取得済みの資料を再利用し、"
+                    "別の担当・質問・現状報告から次の手を選ぶ"
+                )
+                state["events"].append({
+                    "type": "duplicate_blocked", "to": specialist,
+                    "query": query,
+                })
+                return self._persist(state)
 
         state["events"].append({
             "type": "dispatch", "action": "delegate",
@@ -234,6 +276,20 @@ class SecretaryCore:
                 result = self._memory(state)
             else:
                 result = self._research(state, query)
+            if specialist == "research" and any(
+                    o.get("specialist") == "research"
+                    and not o.get("error")
+                    and o.get("records") == result.get("records")
+                    for o in state["observations"]):
+                state["feedback"] = (
+                    "検索条件を変更したが、新しい資料は得られなかった。"
+                    "取得済み資料を再利用し、別の情報源かユーザーへの質問を検討"
+                )
+                state["events"].append({
+                    "type": "evidence_unchanged", "to": specialist,
+                    "query": query, "feedback": state["feedback"],
+                })
+                return self._persist(state)
             state["observations"].append(result)
             state["feedback"] = ""
         except Exception as exc:
@@ -351,7 +407,8 @@ class SecretaryCore:
         }
 
     def evaluate(self, state: WorkState) -> WorkState:
-        if state["events"][-1].get("type") in ("duplicate_blocked", "invalid_specialist"):
+        if state["events"][-1].get("type") in (
+                "duplicate_blocked", "invalid_specialist", "evidence_unchanged"):
             # Dispatch deliberately returned no new result; preserve its error.
             state["events"].append({"type": "evaluation", "feedback": state["feedback"]})
             return self._persist(state)
