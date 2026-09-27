@@ -105,6 +105,8 @@ class SecretaryCoreTest(unittest.TestCase):
                             x["supported"] is False for x in result["events"]))
         self.assertEqual([x["to"] for x in result["events"]
                           if x["type"] == "dispatch"], ["memory", "research"])
+        self.assertTrue(any(e.get("draft_answer") == "ドライバーが確実に原因です"
+                            for e in result["events"]))
 
     def test_question_pause_restarts_with_same_task(self):
         script = ScriptedModel([{
@@ -113,6 +115,7 @@ class SecretaryCoreTest(unittest.TestCase):
         }])
         first = self.start(script, "ゲームが突然終了します。原因わかる？")
         self.assertEqual(first["status"], "waiting_user")
+        self.assertEqual(first["events"][0]["question"], "終了時のエラーは出ましたか？")
         self.assertIsNone(first["events"][0]["specialist"])
         self.assertEqual(self.core.resume(first["task_id"])["status"], "waiting_user")
         restarted = secretary_core.SecretaryCore(self.folder)
