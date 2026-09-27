@@ -5,7 +5,8 @@ import json
 from typing import Any
 
 
-def analyze_reply(episode: dict, response: dict[str, Any], extraction) -> dict[str, Any]:
+def analyze_reply(episode: dict, response: dict[str, Any], extraction,
+                  *, expect_json: bool = True) -> dict[str, Any]:
     """Keep metadata and harmless fictional snippets; never export model thinking."""
     message = response.get("message") or {}
     raw = message.get("content")
@@ -17,6 +18,8 @@ def analyze_reply(episode: dict, response: dict[str, Any], extraction) -> dict[s
     except (ValueError, TypeError) as exc:
         json_state = "invalid_json: " + str(exc)[:160]
         json_type = None
+    if not expect_json:
+        json_state, json_type = "not_requested", None
     embedded_thought = raw.lstrip().startswith("<think>")
     return {
         "episode": episode["id"],
