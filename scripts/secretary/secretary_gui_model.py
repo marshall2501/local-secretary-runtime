@@ -6,6 +6,7 @@ Only loads locally persisted experimental checkpoints, never GitHub or DB dumps.
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 import uuid
 
@@ -141,3 +142,110 @@ def can_reply(state: dict) -> bool:
 def can_retry(state: dict, running_tasks: set[str]) -> bool:
     return (state.get("status") in ("error", "running")
             and state.get("task_id") not in running_tasks)
+
+
+def task_text_report(state: dict) -> str:
+    """Lossless-enough plain-text trace for copying a single task into a report.
+
+    Includes ALL persisted events and observations, never screenshots or hidden
+    browser state. Original structured checkpoint is independently available
+    through the optional JSON pane in the GUI. Does not claim timestamps absent
+    from the original event schema.
+    """
+    events = state.get("events") or []
+    observations = state.get("observations") or []
+    status = str(state.get("status") or "unknown")
+    lines = [
+        "Local Secretary AI — 検証用テキストログ",
+        "Task ID: " + str(state.get("task_id") or "不明"),
+        "状態: " + STATUS_LABELS.get(status, "不明") + " (" + status + ")",
+        "対象: " + str(state.get("target") or "不明"),
+        "領域: " + str(state.get("domain") or "不明"),
+        "モード: " + str(state.get("mode") or "不明"),
+        "モデル: " + str(state.get("model") or "不明"),
+        "※ ローカルcheckpointの内容。各イベントの日時は現行形式では未記録です。",
+        "",
+        "=== 元の依頼 ===",
+        str(state.get("original_request") or "（記録なし）"),
+    ]
+    if state.get("user_update"):
+        lines.extend(["", "=== 最後に受け取った追加情報 ===",
+                      str(state["user_update"])])
+    if state.get("awaiting") and status == "waiting_user":
+        lines.extend(["", "=== 現在の質問 ===", str(state["awaiting"])])
+    lines.extend([
+        "",
+        "=== 判断・作業の全履歴（" + str(len(events)) + "件） ===",
+    ])
+    for row, event in zip(event_rows(state), events):
+        lines.append("[" + str(row["index"]) + "] " + row["title"]
+                     + " / " + row["kind"])
+        for detail in row["details"]:
+            lines.append("  " + detail)
+        # Raw event makes diagnostic fields (query, status, simulated flags,
+        # old manager decision data) copyable, including fields not yet in UI.
+        lines.append("  EVENT: " + json.dumps(
+            event, ensure_ascii=False, sort_keys=True, default=str))
+        lines.append("")
+    if not events:
+        lines.append("（履歴なし）")
+    lines.extend([
+        "=== 取得した証拠の全履歴（" + str(len(observations)) + "回） ===",
+    ])
+    for index, observation in enumerate(observations, 1):
+        specialist = str(observation.get("specialist") or "unknown")
+        lines.append("[" + str(index) + "] "
+                     + SPECIALIST_LABELS.get(specialist, specialist))
+        for key, label in (
+            ("query", "検索・依頼内容"),
+            ("coverage", "取得範囲"),
+            ("source_mode", "情報源モード"),
+            ("target", "対象"),
+            ("error", "取得エラー"),
+        ):
+            if observation.get(key) is not None:
+                lines.append("  " + label + ": " + str(observation[key]))
+        records = observation.get("records") or []
+        if not records:
+            lines.append("  記録: なし（取得失敗や検索範囲の制約と区別）")
+        for record in records:
+            qualifiers = []
+            if record.get("simulated"):
+                qualifiers.append("模擬")
+            if record.get("verification") in ("unverified", "unknown"):
+                qualifiers.append("未検証")
+            if record.get("verification") == "fictional_not_real_reference":
+                qualifiers.append("架空資料")
+            if record.get("linkage") == "unlinked_same_domain_not_proof_of_target":
+                qualifiers.append("対象との紐付けなし")
+            lines.append(
+                "  " + str(record.get("id") or "記録") + ": "
+                + str(record.get("text") or "")
+                + (" [" + ", ".join(qualifiers) + "]" if qualifiers else "")
+            )
+            if record.get("source") is not None:
+                lines.append("    出典: " + str(record["source"]))
+            lines.append("    RECORD: " + json.dumps(
+                record, ensure_ascii=False, sort_keys=True, default=str))
+        # Retain the complete retrieval metadata as well as displayed records.
+        lines.append("  OBSERVATION: " + json.dumps(
+            observation, ensure_ascii=False, sort_keys=True, default=str))
+        lines.append("")
+    if not observations:
+        lines.append("（取得結果なし）")
+    lines.extend(["", "=== 現在の結論・保留事項 ==="])
+    if state.get("answer"):
+        lines.append(str(state["answer"]))
+    elif status == "running":
+        lines.append("処理中（まだ回答なし）")
+    else:
+        lines.append("回答なし")
+    if state.get("feedback"):
+        lines.append("最新の評価: " + str(state["feedback"]))
+    if state.get("error"):
+        lines.append("エラー: " + str(state["error"]))
+    if status == "waiting_user":
+        lines.append("依頼は未完了です。上記の質問に対する回答待ちです。")
+    elif status == "answered":
+        lines.append("今回の回答を生成済み（元の問題の解決を保証しません）。")
+    return "\n".join(lines).rstrip() + "\n"
