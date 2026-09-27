@@ -80,6 +80,8 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
         "localhost", "127.0.0.1", "::1",
     ):
         raise ValueError("Refusing non-prototype or non-local PostgreSQL connection")
+    if (info.user or "") != "secretary_pkb_proto_writer_20260927":
+        raise ValueError("Refusing a DB login other than the dedicated PKB prototype writer")
     if not record.source_ref.startswith("fixture://"):
         return WriteResult("rejected", "fictional_fixture_only")
 
