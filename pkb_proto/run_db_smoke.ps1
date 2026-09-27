@@ -20,7 +20,7 @@ if ($envLines.Count -ne 1) { throw 'Unable to locate the existing PostgreSQL por
 $port = [int]($envLines[0] -replace '^LSA_DB_PORT=', '')
 $python = 'py'
 $pythonArgs = @('-3.12')
-& $python @pythonArgs -c 'import psycopg'
+& $python @pythonArgs -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("psycopg") else 1)'
 if ($LASTEXITCODE -ne 0) {
     $venvPython = Join-Path $main '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
