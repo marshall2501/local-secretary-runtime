@@ -11,5 +11,6 @@ CREATE TABLE pkb_correction_receipts (
     CHECK (old_claim_id <> new_claim_id)
 );
 GRANT SELECT, INSERT ON pkb_correction_receipts TO secretary_pkb_proto_writer_20260927;
+GRANT SELECT ON current_claims TO secretary_pkb_proto_writer_20260927;
 GRANT UPDATE (verification_status, retracted_at) ON claims
     TO secretary_pkb_proto_writer_20260927;
