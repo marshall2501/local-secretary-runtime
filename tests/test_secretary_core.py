@@ -326,6 +326,7 @@ class SecretaryCoreTest(unittest.TestCase):
         result = self.start(script, question=request)
         self.assertEqual(result["status"], "waiting_user")
         self.assertIn("原因はまだ分かりません", result["latest_report"])
+        self.assertEqual(secretary_core.load_state(result["task_id"], self.folder)["latest_report"], result["latest_report"])
         self.assertIn("まだ共有していない", result["awaiting"])
         self.assertTrue(any(e["type"] == "answer_review" and e["supported"]
                             for e in result["events"]))
@@ -376,6 +377,10 @@ class SecretaryCoreTest(unittest.TestCase):
                          "元の調査を完了せず途中で回答済みにした")
         self.assertEqual(result["awaiting"], "まだ未共有のログはありますか？")
         self.assertEqual(result["turns"], 1)
+        self.assertEqual(result["session_event_start"], len(previous_events))
+        saved = secretary_core.load_state(task_id, self.folder)
+        self.assertEqual(saved["session_event_start"], len(previous_events))
+        self.assertEqual(saved["latest_report"], result["latest_report"])
         self.assertEqual(result["review_attempts"], 0)
         self.assertEqual(sum(e.get("type") == "dispatch"
                              for e in result["events"]),
