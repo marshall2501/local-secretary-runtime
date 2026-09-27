@@ -94,9 +94,12 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                 "SELECT pg_advisory_xact_lock(hashtext(%s))",
                 (record.input_id,),
             )
+            # The advisory transaction lock already serializes this input ID.
+            # FOR UPDATE would unnecessarily require UPDATE privilege on the
+            # restricted prototype writer; SELECT is sufficient here.
             cur.execute(
                 """SELECT payload_sha256, source_id, claim_id
-                   FROM secretary.pkb_input_receipts WHERE input_id=%s FOR UPDATE""",
+                   FROM secretary.pkb_input_receipts WHERE input_id=%s""",
                 (record.input_id,),
             )
             existing = cur.fetchone()
