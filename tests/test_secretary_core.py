@@ -312,5 +312,89 @@ class SecretaryCoreTest(unittest.TestCase):
 
 
 
+    def test_explicit_ongoing_goal_stays_open_after_factual_report(self):
+        # Based on the first full clipboard log: the reviewer approved a
+        # factually cautious answer, yet the user explicitly required
+        # investigation to continue if the cause remains unknown.
+        request = (
+            "過去の経験を確認し、原因の切り分けを進めてください。"
+            "原因が不明という報告だけで調査を終了しないでください。"
+        )
+        script = ScriptedModel([
+            answer("RAM容量の記録は未検証で、原因はまだ分かりません。", ["M1"]),
+        ])
+        result = self.start(script, question=request)
+        self.assertEqual(result["status"], "waiting_user")
+        self.assertIn("原因はまだ分かりません", result["latest_report"])
+        self.assertIn("まだ共有していない", result["awaiting"])
+        self.assertTrue(any(e["type"] == "answer_review" and e["supported"]
+                            for e in result["events"]))
+        self.assertTrue(any(e["type"] == "goal_gate" and
+                            e["status"] == "waiting_user"
+                            for e in result["events"]))
+        self.assertEqual(secretary_core.load_state(
+            result["task_id"], self.folder)["status"], "waiting_user")
+
+    def test_reopen_older_answered_continuation_keeps_same_id_and_budget(self):
+        # Previously answered tasks were locked even though their explicit
+        # original objective remained incomplete. The new GUI reopen is
+        # an intentional user interaction; past events must remain visible.
+        task_id = "6b5fe50f-b9d3-4689-a1c7-2c1f1a43bc04"
+        request = (
+            "過去の経験を調べて、必要な情報を質問し、調査を続けてください。"
+        )
+        previous_events = [
+            {"type": "dispatch", "to": "research",
+             "signature": ["research", "old query"]}
+            for _ in range(secretary_core.MAX_DELEGATIONS)
+        ]
+        state = {
+            "task_id": task_id, "original_request": request,
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "answered", "turns": 9, "review_attempts": 2,
+            "answer": "元の調査を完了せず途中で回答済みにした",
+            "awaiting": "もう少し状況を教えてください",
+            "feedback": "", "events": previous_events,
+            "observations": [{
+                "specialist": "memory", "source_mode": "fixture",
+                "target": "架空テストPC",
+                "records": [{"id": "M1", "text": "ram_gb=16",
+                             "verification": "unverified"}],
+            }],
+        }
+        secretary_core.save_state(state, self.folder)
+        script = ScriptedModel([{
+            "action": "ask_user", "response": "まだ未共有のログはありますか？",
+            "reason": "未解決の原因分析を継続",
+        }])
+        with patch.object(secretary_core, "_json_llm", side_effect=script):
+            result = self.core.reopen(task_id, "今回は新しいログがありません")
+        self.assertEqual(result["status"], "waiting_user")
+        self.assertEqual(result["task_id"], task_id)
+        self.assertEqual(result["latest_report"],
+                         "元の調査を完了せず途中で回答済みにした")
+        self.assertEqual(result["awaiting"], "まだ未共有のログはありますか？")
+        self.assertEqual(result["turns"], 1)
+        self.assertEqual(result["review_attempts"], 0)
+        self.assertEqual(sum(e.get("type") == "dispatch"
+                             for e in result["events"]),
+                         secretary_core.MAX_DELEGATIONS)
+        self.assertTrue(any(e["type"] == "task_reopened"
+                            for e in result["events"]))
+        self.assertEqual(script.manager_contexts[0]["new_user_information"],
+                         "今回は新しいログがありません")
+
+    def test_one_off_question_still_finishes_and_cannot_reopen(self):
+        result = self.start(
+            ScriptedModel([answer("現時点の証拠では未特定です。")]),
+            question="現状だけで何が分かるか教えてください",
+        )
+        self.assertEqual(result["status"], "answered")
+        with self.assertRaisesRegex(ValueError, "ongoing intent"):
+            self.core.reopen(result["task_id"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
