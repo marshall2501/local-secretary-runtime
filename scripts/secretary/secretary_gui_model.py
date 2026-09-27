@@ -26,6 +26,7 @@ EVENT_LABELS = {
     "answer_review": "回答案を独立監査",
     "evidence_fallback": "取得済み根拠による限定報告",
     "duplicate_blocked": "重複した依頼を停止",
+    "evidence_unchanged": "再調査したが新しい資料なし",
     "invalid_specialist": "不正な担当指定を停止",
     "user_update": "ユーザーから追加情報",
     "finish": "今回の処理を終了",
