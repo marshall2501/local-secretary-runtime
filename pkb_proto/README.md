@@ -36,3 +36,7 @@ cd D:\AI\projects\local-secretary-runtime
 `write_service.py` と `sql/005_pkb_proto_receipts.sql` を追加。対象は `secretary_pkb_proto_*` という名前の**専用隔離DB**と `fixture://` の架空入力だけ。既存 `secretary` DBや実データは拒否する。入力IDごとの一意な領収記録・Source・単一Claimを1トランザクションで保存する。現在は対象の既知Entityに対する明示的な初回更新・交換のみを候補とし、既存Claimとの競合、訂正、曖昧な入力、外部情報はレビューへ回す。DB競合確認・引用の字面照合だけで意味的な正しさが保証されるわけではない。
 
 まず `python -m unittest discover -s tests -p "test_pkb*.py" -v` によりオフライン試験を実施し、次段階で専用DB上の挿入・冪等再送・ロールバック・権限を実証する。既存の001〜004を更新せず、この実験専用005は運用DBに適用しない。
+
+## 隔離DB実機スモーク試験（準備済み、未実施）
+
+既に`secretary_pkb_proto_20260927`に001〜005を適用したサブPCで、`./pkb_proto/run_db_smoke.ps1`を実行。まず専用の`secretary_pkb_proto_writer_20260927`ログインとローカル除外対象の秘密ファイルを作り、**隔離DBに対してのみ**SELECT/INSERTを付与。既存`secretary_*`の広いグループロールは付与しない。実験用の架空メインPC Entityを作成し、`smoke_isolated.py`が初回Claim登録・再送・同一ID別内容拒否・Source/状態確認・意図的失敗のロールバック・運用DBのClaims読取拒否を確認する。通常の`secretary`DBに001〜005を適用しない。実測結果はサブPC出力を受領するまで未確認。
