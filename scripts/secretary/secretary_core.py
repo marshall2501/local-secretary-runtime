@@ -219,12 +219,20 @@ class SecretaryCore:
                     "現在の情報では結論を出せません。必要な確認事項を整理してから回答します。"),
                     "used_ids": [], "reason": "不正な判断形式"}
             state["decision"] = decision
-        state["events"].append({
+        decision_event = {
             "type": "decision", "action": state["decision"].get("action"),
             "specialist": (state["decision"].get("specialist")
                            if state["decision"].get("action") == "delegate" else None),
             "reason": state["decision"].get("reason", ""),
-        })
+        }
+        # Future diagnostic exports must contain the exact question and
+        # proposed answers, including drafts later rejected by the reviewer.
+        # Existing checkpoints remain readable (these fields may be absent).
+        if state["decision"].get("action") == "ask_user":
+            decision_event["question"] = str(state["decision"].get("response") or "")
+        elif state["decision"].get("action") == "answer":
+            decision_event["draft_answer"] = str(state["decision"].get("response") or "")
+        state["events"].append(decision_event)
         return self._persist(state)
 
     def dispatch(self, state: WorkState) -> WorkState:
