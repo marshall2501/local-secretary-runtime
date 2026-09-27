@@ -16,7 +16,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .episode_intake import load_fixture
-from .extraction_service import extraction_messages, inspect_model_output
+from .extraction_service import Extraction, inspect_model_output
+from .diagnostic_cases import MODES, request_for, judge_response
 from .gui_helpers import analyze_reply, export_report
 
 OLLAMA = "http://127.0.0.1:11434"
@@ -32,12 +33,16 @@ def installed_models() -> list[str]:
     })
 
 
-def call_local_model(episode: dict, model: str, predict: int, think: str) -> dict:
+def call_local_model(episode: dict, model: str, predict: int, think: str,
+                     mode: str = '抽出：現行') -> dict:
+    messages, json_format = request_for(episode, mode)
     payload = {
-        "model": model, "stream": False, "format": "json",
-        "messages": extraction_messages(episode),
+        "model": model, "stream": False,
+        "messages": messages,
         "options": {"temperature": 0, "num_predict": predict},
     }
+    if json_format:
+        payload["format"] = "json"
     if think == "無効":
         payload["think"] = False
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -70,9 +75,11 @@ class Workbench:
         self.episode_var = tk.StringVar(value=self.episodes[0]["id"])
         self.predict_var = tk.StringVar(value="1100")
         self.think_var = tk.StringVar(value="自動")
+        self.mode_var = tk.StringVar(value="抽出：現行")
         self.status_var = tk.StringVar(value="初期状態：DBには接続しません")
         self._build()
         self.choose_episode()
+        self.mode_changed()
         self.root.after(100, self.process_events)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -107,6 +114,13 @@ class Workbench:
 
         actions = ttk.Frame(top)
         actions.pack(fill="x")
+        ttk.Label(actions, text="検証").pack(side="left")
+        self.mode_box = ttk.Combobox(
+            actions, textvariable=self.mode_var, values=MODES,
+            state="readonly", width=18
+        )
+        self.mode_box.pack(side="left", padx=(5, 10))
+        self.mode_box.bind("<<ComboboxSelected>>", self.mode_changed)
         ttk.Label(actions, text="Episode").pack(side="left")
         self.episode_box = ttk.Combobox(
             actions, textvariable=self.episode_var,
@@ -145,12 +159,13 @@ class Workbench:
         lower = ttk.Frame(divider)
         divider.add(lower, weight=4)
         ttk.Label(lower, text="実行結果：項目をクリックして詳細表示").pack(anchor="w")
-        columns = ("episode", "elapsed", "done", "tokens", "content", "json", "candidates", "errors")
+        columns = ("episode", "mode", "elapsed", "done", "tokens", "content", "json", "candidates", "errors")
         self.table = ttk.Treeview(
             lower, columns=columns, show="headings", height=9, selectmode="browse"
         )
         for col, title, width in (
-            ("episode", "Episode", 85), ("elapsed", "実行秒", 75),
+            ("episode", "Episode", 75), ("mode", "検証項目", 115),
+            ("elapsed", "実行秒", 65),
             ("done", "終了理由", 100),
             ("tokens", "生成tokens", 90), ("content", "本文文字数", 90),
             ("json", "JSON解析", 220), ("candidates", "候補", 60),
@@ -187,6 +202,12 @@ class Workbench:
             + episode["text"],
         )
 
+    def mode_changed(self, _event=None):
+        if not self.running:
+            self.all_button.configure(
+                state="normal" if self.mode_var.get() == "抽出：現行" else "disabled"
+            )
+
     def refresh_models(self):
         if self.running:
             return
@@ -215,6 +236,10 @@ class Workbench:
         except (OSError, ValueError) as exc:
             messagebox.showerror("ローカルモデル確認失敗", str(exc))
             return
+        mode = self.mode_var.get()
+        if all_episodes and mode != "抽出：現行":
+            messagebox.showinfo("1件ずつ検証", "切り分けモードは1件だけ実行してください。")
+            return
         ids = list(self.by_id) if all_episodes else [self.episode_var.get()]
         self.running = True
         self.batch_started = time.perf_counter()
@@ -223,23 +248,26 @@ class Workbench:
         self.all_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status_var.set(f"開始：{len(ids)}件、モデル {model}。DBへの書込みなし")
-        settings = (model, int(self.predict_var.get()), self.think_var.get())
+        settings = (model, int(self.predict_var.get()), self.think_var.get(), mode)
         thread = threading.Thread(target=self.worker, args=(ids, settings), daemon=True)
         thread.start()
 
     def worker(self, ids, settings):
-        model, predict, think = settings
+        model, predict, think, mode = settings
         for episode_id in ids:
             if self.stop_requested.is_set():
                 break
             episode = self.by_id[episode_id]
             started = time.perf_counter()
             try:
-                response = call_local_model(episode, model, predict, think)
-                extraction = inspect_model_output(
-                    episode, response["message"].get("content", "")
-                )
+                response = call_local_model(episode, model, predict, think, mode)
+                raw = response["message"].get("content", "")
+                extraction = (inspect_model_output(episode, raw)
+                              if mode == "抽出：現行"
+                              else Extraction(episode["id"], (), ()))
                 report = analyze_reply(episode, response, extraction)
+                report["mode"] = mode
+                report["check"] = judge_response(mode, episode, raw)
                 report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
                 report["settings"] = {"num_predict": predict, "think": think}
                 self.events.put(("result", report))
@@ -260,7 +288,8 @@ class Workbench:
                     self.results.append(report)
                     idx = len(self.results) - 1
                     self.table.insert("", "end", iid=str(idx), values=(
-                        report["episode"], f"{report['elapsed_seconds']:.2f}",
+                        report["episode"], report["mode"],
+                        f"{report['elapsed_seconds']:.2f}",
                         report["done_reason"],
                         report["eval_count"], report["content_length"],
                         report["json_parse"], report["candidate_count"],
@@ -271,7 +300,7 @@ class Workbench:
                     self.show_details()
                     self.status_var.set(
                         f"取得 {len(self.results)}件／最新 {report['episode']}："
-                        f"{report['json_parse']}／{report['elapsed_seconds']:.2f}秒"
+                        f"{report['check']}／{report['elapsed_seconds']:.2f}秒"
                         "（候補はすべて確認待ち）"
                     )
                 elif kind == "error":
@@ -284,7 +313,7 @@ class Workbench:
                 elif kind == "finished":
                     self.running = False
                     self.one_button.configure(state="normal")
-                    self.all_button.configure(state="normal")
+                    self.mode_changed()
                     self.stop_button.configure(state="disabled")
                     elapsed = (
                         time.perf_counter() - self.batch_started
