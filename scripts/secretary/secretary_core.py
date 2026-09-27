@@ -661,6 +661,11 @@ class SecretaryCore:
         if state.get("status") != "answered" or not requires_continuation(
                 state.get("original_request", "")):
             raise ValueError("Only answered tasks with explicit ongoing intent can be reopened")
+        # Older answered checkpoints have no latest_report. Retain the
+        # original interim conclusion when the next action is a question.
+        if state.get("answer") and not state.get("latest_report"):
+            state["latest_report"] = state["answer"]
+        state.pop("awaiting", None)
         state["status"] = "running"
         state["turns"] = 0
         state["review_attempts"] = 0
