@@ -51,6 +51,10 @@ class WorkState(TypedDict, total=False):
     events: list[dict]
     answer: str
     awaiting: str
+    # LangGraph only carries fields declared in this TypedDict across nodes.
+    # Both values were formerly written to checkpoints but dropped on invoke.
+    latest_report: str
+    session_event_start: int
 
 
 def save_state(state: WorkState, folder: Path) -> None:
