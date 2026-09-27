@@ -454,5 +454,119 @@ class SecretaryCoreTest(unittest.TestCase):
         self.assertIn("実Web・実PC診断は不可", context["available_sources"])
 
 
+
+    def test_question_validator_rejects_echo_and_answered_duplicate(self):
+        reply = ("過去に同様の症状はありません。特別な対策も"
+                 "実施していません。新しいログはまだ取得していません。")
+        state = {
+            "user_update": reply,
+            "events": [
+                {"type": "decision", "action": "ask_user",
+                 "question": "以前にも同じ症状はありましたか？"},
+                {"type": "user_update", "text": reply},
+            ],
+        }
+        self.assertIn("本人", secretary_core.invalid_question_reason(state, reply))
+        self.assertIn(
+            "同じ質問",
+            secretary_core.invalid_question_reason(
+                state, "以前にも同じ症状はありましたか？"),
+        )
+        self.assertEqual(
+            secretary_core.invalid_question_reason(
+                state, "新しく判明した情報があれば教えてください。"),
+            "",
+        )
+
+    def test_manager_blocks_echo_instead_of_another_fixture_question(self):
+        # Regression from real Qwen3 log event 23: the model returned the
+        # latest user answer verbatim as a supposed ask_user question.
+        latest = ("過去に同様の症状はありません。これまで特別な対策も"
+                  "実施していません。新しいログはまだ取得していません。")
+        state = {
+            "task_id": "9d5219de-3d49-43fc-9414-ab638f7822e5",
+            "original_request": (
+                "過去の経験を確認し原因の切り分けを続けてください。"),
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "running", "turns": 2, "review_attempts": 0,
+            "latest_report": "原因はまだ特定できず、架空資料のみです。",
+            "user_update": latest, "feedback": "",
+            "events": [
+                {"type": "user_update", "text": "CPU30%、GPU60%"},
+                {"type": "user_update", "text": latest},
+            ],
+            "observations": [
+                {"specialist": "research", "records": [{
+                    "id": "R1", "text": "fictional research",
+                    "simulated": True}]},
+                {"specialist": "memory", "records": [{
+                    "id": "M1", "text": "unverified memory",
+                    "verification": "unverified"}]},
+            ],
+        }
+        script = ScriptedModel([{
+            "action": "ask_user", "response": latest,
+            "reason": "既に回答済みのPC負荷と再起動後の情報が必要",
+        }])
+        with patch.object(secretary_core, "_json_llm", side_effect=script):
+            result = self.core.run(state)
+        self.assertEqual(result["status"], "blocked_capability")
+        self.assertNotIn("awaiting", result)
+        self.assertEqual(result["answer"], state["latest_report"])
+        self.assertTrue(any(e.get("type") == "question_rejected" and
+                            e.get("candidate") == latest
+                            for e in result["events"]))
+        self.assertTrue(any(e.get("type") == "capability_blocked"
+                            for e in result["events"]))
+        self.assertEqual(result["events"][-1]["status"],
+                         "blocked_capability")
+        saved = secretary_core.load_state(result["task_id"], self.folder)
+        self.assertEqual(saved["status"], "blocked_capability")
+
+    def test_old_waiting_echo_can_be_deferred_without_fake_user_reply(self):
+        task_id = "4bf94cc3-662d-4cc7-b6bf-21af9ec05093"
+        reply = "過去の対策はありません。新しいログはありません。"
+        state = {
+            "task_id": task_id,
+            "original_request": "過去の経験を調べて調査を続けて",
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "waiting_user", "turns": 4,
+            "user_update": reply,
+            "latest_report": "原因はまだ未特定。",
+            "awaiting": reply, "answer": "原因はまだ未特定。",
+            "events": [
+                {"type": "decision", "action": "ask_user",
+                 "question": "過去の対策はありますか？"},
+                {"type": "user_update", "text": reply},
+                {"type": "decision", "action": "ask_user",
+                 "question": reply},
+                {"type": "finish", "status": "waiting_user"},
+            ],
+            "observations": [
+                {"specialist": "research",
+                 "records": [{"id": "R1", "simulated": True}]},
+                {"specialist": "memory",
+                 "records": [{"id": "M1", "verification": "unverified"}]},
+            ],
+        }
+        secretary_core.save_state(state, self.folder)
+        with patch.object(secretary_core, "_json_llm",
+                          side_effect=AssertionError("No LLM needed for correction")):
+            result = self.core.defer_invalid_question(task_id)
+        self.assertEqual(result["task_id"], task_id)
+        self.assertEqual(result["status"], "blocked_capability")
+        self.assertNotIn("awaiting", result)
+        self.assertEqual(result["answer"], state["latest_report"])
+        self.assertEqual(result["observations"], state["observations"])
+        self.assertEqual(result["events"][:4], state["events"])
+        self.assertEqual(result["events"][-3]["type"], "question_rejected")
+        self.assertEqual(result["events"][-2]["type"], "capability_blocked")
+        self.assertEqual(result["events"][-1]["status"], "blocked_capability")
+        with self.assertRaisesRegex(ValueError, "waiting task"):
+            self.core.defer_invalid_question(task_id)
+
+
 if __name__ == "__main__":
     unittest.main()
