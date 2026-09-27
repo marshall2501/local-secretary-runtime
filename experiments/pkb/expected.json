@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "dataset_id": "pkb-p0-fictional-20260927",
+  "entity_aliases": {
+    "メインPC": "pc-main",
+    "サブPC": "pc-sub",
+    "RCカーA": "rc-car-a",
+    "RCカーB": "rc-car-b"
+  },
+  "corrections": [
+    {
+      "event": "pc-03",
+      "target_episode": "pc-01",
+      "from": "pc-sub",
+      "to": "pc-main",
+      "effective_at": "2026-09-19T16:00:00+09:00"
+    },
+    {
+      "event": "rc-03",
+      "target_episode": "rc-01",
+      "from": "rc-car-a",
+      "to": "rc-car-b",
+      "effective_at": "2026-09-19T14:00:00+09:00"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q01",
+      "ask": "2026年9月24日時点で、本人の申告によるメインPCの最新ドライバーは？",
+      "must_cite": [
+        "pc-04"
+      ],
+      "must_not_promote": [
+        "pc-05"
+      ],
+      "expected": "DRV-A2; stability not verified"
+    },
+    {
+      "id": "q02",
+      "ask": "9月22日の訂正後、9月20日のDRV-A1更新はどのPCの履歴か？",
+      "must_cite": [
+        "pc-01",
+        "pc-03"
+      ],
+      "expected": "pc-main only; must not remain a current pc-sub driver fact"
+    },
+    {
+      "id": "q03",
+      "ask": "2026年9月21日の時点でシステムが知っていた9月20日のDRV-A1更新対象は？ その後の訂正も区別して説明。",
+      "must_cite": [
+        "pc-01",
+        "pc-03"
+      ],
+      "expected": "as-known-at Sep21 pc-sub; corrected Sep22 to pc-main; valid-at and recorded-at distinct"
+    },
+    {
+      "id": "q04",
+      "ask": "9月24日までの本人申告によるメインPCのドライバー更新の時系列を全件列挙して。",
+      "must_cite": [
+        "pc-01",
+        "pc-03",
+        "pc-04"
+      ],
+      "must_not_promote": [
+        "pc-05"
+      ],
+      "expected": "DRV-A1 then DRV-A2; no verified DRV-A3"
+    },
+    {
+      "id": "q05",
+      "ask": "RCカーAとRCカーBのサーボ交換履歴をそれぞれ全件示して。",
+      "must_cite": [
+        "rc-01",
+        "rc-03",
+        "rc-04"
+      ],
+      "expected": "A no swap in supplied evidence; B X1 then X2"
+    },
+    {
+      "id": "q06",
+      "ask": "RCカーAの右旋回が遅い原因は判明している？",
+      "must_cite": [
+        "rc-02"
+      ],
+      "must_not_promote": [
+        "rc-01",
+        "rc-05"
+      ],
+      "expected": "unknown; do not infer servo caused it"
+    },
+    {
+      "id": "q07",
+      "ask": "メインPCのDRV-A3とRCカーBのSERVO-X2故障は確認済み？",
+      "must_cite": [
+        "pc-05",
+        "rc-05"
+      ],
+      "expected": "both only external unverified material, actual confirmation absent"
+    },
+    {
+      "id": "q08",
+      "ask": "このデータにはメインPC・サブPC・RCカーA・RCカーBの記録が何件ずつある？",
+      "must_cite": [
+        "pc-01",
+        "pc-02",
+        "pc-03",
+        "pc-04",
+        "pc-05",
+        "rc-01",
+        "rc-02",
+        "rc-03",
+        "rc-04",
+        "rc-05"
+      ],
+      "expected": "strict enumeration with original episodes, no top-k substitution"
+    }
+  ]
+}
