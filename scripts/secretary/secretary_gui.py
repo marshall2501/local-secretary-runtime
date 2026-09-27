@@ -9,6 +9,7 @@ no automatic machine changes, and no modifications to yt-topic-search.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import uuid
@@ -29,6 +30,7 @@ from secretary_gui_model import (
     event_rows,
     evidence_rows,
     task_summaries,
+    task_text_report,
 )
 
 STATE_DIR = Path(os.getenv(
@@ -365,6 +367,51 @@ def home():
                                 if record["source"]:
                                     ui.label("出典: " + record["source"]) \
                                         .classes("secretary-muted secretary-wrap")
+                    # Keep a complete selectable trace at the VERY BOTTOM of
+                    # the task. The source is the same persisted checkpoint as
+                    # the human-friendly cards above, never a screenshot.
+                    with ui.card().classes("w-full secretary-surface p-5 gap-3"):
+                        ui.label("検証用ログ（全文コピー）").classes(
+                            "text-xl font-bold")
+                        ui.label(
+                            "このTaskの元依頼・追加回答・全判断・全証拠・結論を"
+                            "まとめています。上の画面に収まらない内容も、"
+                            "下の欄からまとめてコピーできます。"
+                        ).classes("secretary-muted secretary-wrap")
+
+                        report = task_text_report(state)
+                        ui.textarea("コピー用テキスト", value=report).props(
+                            "outlined readonly rows=16"
+                        ).classes("w-full font-mono secretary-wrap")
+                        ui.button(
+                            "ログ全文をコピー",
+                            on_click=lambda value=report: ui.clipboard.write(value),
+                            icon="content_copy",
+                        ).classes("self-start")
+
+                        with ui.expansion(
+                                "詳細JSON（内部状態をそのままコピー）",
+                                icon="data_object").classes("w-full"):
+                            raw_json = json.dumps(
+                                state, ensure_ascii=False, indent=2,
+                                sort_keys=True, default=str,
+                            )
+                            ui.textarea(
+                                "checkpoint JSON", value=raw_json,
+                            ).props("outlined readonly rows=12").classes(
+                                "w-full font-mono secretary-wrap"
+                            )
+                            ui.button(
+                                "JSON全文をコピー",
+                                on_click=lambda value=raw_json: ui.clipboard.write(value),
+                                icon="content_copy",
+                            )
+                        if state.get("mode") == "live":
+                            ui.label(
+                                "注意：実記憶モードのログには個人情報が"
+                                "含まれ得ます。外部への共有前に内容を確認してください。"
+                            ).classes("text-amber-800 secretary-wrap")
+
                 show_detail()
 
         def refresh_if_changed():
