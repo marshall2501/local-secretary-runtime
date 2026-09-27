@@ -204,12 +204,12 @@ class SecretaryCore:
                 }
             else:
                 decision = _json_llm(state["model"], MANAGER_RULES, {
-                "request": state["original_request"],
-                "new_user_information": state.get("user_update", ""),
-                "target": state["target"], "domain": state["domain"],
-                "previous_observations": observations[-6:],
-                "previous_actions": state["events"][-9:],
-                "validation_feedback": state.get("feedback", ""),
+                    "request": state["original_request"],
+                    "new_user_information": state.get("user_update", ""),
+                    "target": state["target"], "domain": state["domain"],
+                    "previous_observations": observations[-6:],
+                    "previous_actions": state["events"][-9:],
+                    "validation_feedback": state.get("feedback", ""),
                     "remaining_delegations": MAX_DELEGATIONS - sum(
                         x.get("type") == "dispatch" for x in state["events"]),
                 })
@@ -221,7 +221,8 @@ class SecretaryCore:
             state["decision"] = decision
         state["events"].append({
             "type": "decision", "action": state["decision"].get("action"),
-            "specialist": state["decision"].get("specialist"),
+            "specialist": (state["decision"].get("specialist")
+                           if state["decision"].get("action") == "delegate" else None),
             "reason": state["decision"].get("reason", ""),
         })
         return self._persist(state)
