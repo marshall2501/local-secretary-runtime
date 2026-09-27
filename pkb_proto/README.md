@@ -40,3 +40,11 @@ cd D:\AI\projects\local-secretary-runtime
 ## 隔離DB実機スモーク試験（準備済み、未実施）
 
 既に`secretary_pkb_proto_20260927`に001〜005を適用したサブPCで、`./pkb_proto/run_db_smoke.ps1`を実行。まず専用の`secretary_pkb_proto_writer_20260927`ログインとローカル除外対象の秘密ファイルを作り、**隔離DBに対してのみ**SELECT/INSERTを付与。既存`secretary_*`の広いグループロールは付与しない。実験用の架空メインPC Entityを作成し、`smoke_isolated.py`が初回Claim登録・再送・同一ID別内容拒否・Source/状態確認・意図的失敗のロールバック・運用DBのClaims読取拒否を確認する。通常の`secretary`DBに001〜005を適用しない。実測結果はサブPC出力を受領するまで未確認。
+
+## 訂正スライス：PC／RC対象の明示的な訂正（実装済み、DB実機未検証）
+
+- `correction_service.py`: 元の本人申告ClaimのIDを明示し、「旧Entityではなく新Entity」という原文がある場合だけ、**元Claimの撤回・新Claimの追加・訂正Source・訂正領収記録を同一トランザクション**で処理。元Claimと元Sourceを削除せず、訂正は`supersedes_id`で連結する。別日時の更新イベントは同じpredicateでも共存を許す。曖昧さ、別値変更、未検証の訂正先、同日時の衝突はレビューへ。
+- `sql/006_pkb_proto_corrections.sql`: 既存隔離DBだけに適用する追加テーブルと、専用実験用ロールに限定したClaimの撤回列更新権限。**運用DBには適用しない**。
+- `run_correction_smoke.ps1`: 既存サブPCの実験DBに006を安全確認後適用し、既存18件＋訂正用単体テストと、PC／RC両方の訂正、再送、訂正前後の「当時知っていた記録」、別の更新の保持を確認。実際の結果は本人のサブPC出力が出るまで未実証。
+
+この段階の訂正は既知Claim IDと既知Entity IDを指定する**サービス内部の限定機能**であり、利用者が自然言語だけで訂正対象を特定できる完成したPKBではない。また`driver_updated`・`servo_updated`は履歴イベントであり、現在のドライバー・サーボの確定属性を推定するものではない。
