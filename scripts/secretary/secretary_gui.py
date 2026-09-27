@@ -23,6 +23,8 @@ from secretary_core import (
     save_state,
     requires_continuation,
     verified_objective,
+    invalid_question_reason,
+    missing_external_evidence,
 )
 from secretary_gui_model import (
     SPECIALIST_LABELS,
@@ -75,6 +77,10 @@ def _execute_resume(task_id: str, answer: str) -> None:
 
 def _execute_reopen(task_id: str, update: str) -> None:
     SecretaryCore(STATE_DIR).reopen(task_id, update)
+
+
+def _execute_defer_bad_question(task_id: str) -> None:
+    SecretaryCore(STATE_DIR).defer_invalid_question(task_id)
 
 
 async def _run_background(task_id: str, function, *args) -> None:
@@ -249,7 +255,7 @@ def home():
                             ui.space()
                             ui.badge(STATUS_LABELS.get(status, status), color=(
                                 "green" if status == "answered" else
-                                "amber" if status == "waiting_user" else
+                                "amber" if status in ("waiting_user", "blocked_capability") else
                                 "red" if status == "error" else "blue"))
                         ui.label(str(state.get("original_request") or "")) \
                             .classes("text-lg secretary-wrap")
@@ -275,36 +281,73 @@ def home():
                                     "text-lg font-bold text-amber-800")
                                 ui.label(str(state["latest_report"])).classes(
                                     "secretary-wrap")
-                        with ui.card().classes(
-                                "w-full secretary-surface p-5 border-l-4 border-amber-400"):
-                            ui.label("追加情報を教えてください").classes(
-                                "text-lg font-bold text-amber-800")
-                            ui.label(str(state.get("awaiting") or state.get("answer")
-                                         or "詳しい状況を教えてください。")) \
-                                .classes("secretary-wrap")
-                            reply = ui.textarea(
-                                "回答", placeholder="例: 終了時にエラー表示はありません"
-                            ).props("outlined autogrow").classes("w-full")
+                        question_invalid = invalid_question_reason(
+                            state, str(state.get("awaiting") or ""))
+                        if question_invalid and missing_external_evidence(state):
+                            # The old checkpoint may already contain a model
+                            # error: the last user reply is displayed as the
+                            # next question. Do not ask them to answer it again.
+                            with ui.card().classes(
+                                    "w-full secretary-surface p-5 border-l-4 border-amber-400"):
+                                ui.label("AIの追加質問に問題があります").classes(
+                                    "text-lg font-bold text-amber-800")
+                                ui.label("検出した問題: " + question_invalid).classes(
+                                    "secretary-wrap")
+                                ui.label(
+                                    "記憶と架空資料は取得済みです。"
+                                    "本人の回答を繰り返しても新しい証拠は増えません。"
+                                    "この質問を取り消し、依頼と履歴を保持して"
+                                    "必要な情報源を明示できます。"
+                                ).classes("secretary-muted secretary-wrap")
 
-                            def send_reply():
-                                value = str(reply.value or "").strip()
-                                if not value:
-                                    ui.notify("回答を入力してください。", type="warning")
-                                    return
-                                if not can_reply(load_state(task_id, STATE_DIR)):
-                                    ui.notify("この依頼は現在回答待ちではありません。",
-                                              type="warning")
-                                    return
-                                if not launch(task_id, _execute_resume, task_id, value):
-                                    ui.notify("別の処理が実行中です。", type="warning")
-                                    return
-                                # The question and its answer are preserved by
-                                # Core.resume under this task_id.
-                                ui.notify("回答を受け付け、同じ依頼を再開します。",
-                                          type="positive")
+                                def defer_bad_question():
+                                    if not launch(
+                                            task_id, _execute_defer_bad_question,
+                                            task_id):
+                                        ui.notify(
+                                            "別の処理が実行中です。",
+                                            type="warning",
+                                        )
+                                        return
+                                    ui.notify(
+                                        "無効な質問を取り消し、情報源の不足を記録します。",
+                                        type="positive",
+                                    )
 
-                            ui.button("回答して再開", on_click=send_reply,
-                                      icon="send").classes("self-start")
+                                ui.button(
+                                    "無効な質問を取り消し、情報源不足として保留",
+                                    on_click=defer_bad_question, icon="report_problem",
+                                ).classes("self-start")
+                        else:
+                            with ui.card().classes(
+                                    "w-full secretary-surface p-5 border-l-4 border-amber-400"):
+                                ui.label("追加情報を教えてください").classes(
+                                    "text-lg font-bold text-amber-800")
+                                ui.label(str(state.get("awaiting") or state.get("answer")
+                                             or "詳しい状況を教えてください。")) \
+                                    .classes("secretary-wrap")
+                                reply = ui.textarea(
+                                    "回答", placeholder="例: 終了時にエラー表示はありません"
+                                ).props("outlined autogrow").classes("w-full")
+
+                                def send_reply():
+                                    value = str(reply.value or "").strip()
+                                    if not value:
+                                        ui.notify("回答を入力してください。", type="warning")
+                                        return
+                                    if not can_reply(load_state(task_id, STATE_DIR)):
+                                        ui.notify("この依頼は現在回答待ちではありません。",
+                                                  type="warning")
+                                        return
+                                    if not launch(task_id, _execute_resume, task_id, value):
+                                        ui.notify("別の処理が実行中です。", type="warning")
+                                        return
+                                    # Core.resume preserves the original Task.
+                                    ui.notify("回答を受け付け、同じ依頼を再開します。",
+                                              type="positive")
+
+                                ui.button("回答して再開", on_click=send_reply,
+                                          icon="send").classes("self-start")
 
                     elif can_retry(state, ACTIVE_TASKS):
                         with ui.card().classes("w-full secretary-surface p-4"):
@@ -322,6 +365,23 @@ def home():
 
                             ui.button("保存状態から再開", on_click=retry,
                                       icon="restart_alt")
+
+                    if status == "blocked_capability":
+                        with ui.card().classes(
+                                "w-full secretary-surface p-5 border-l-4 border-amber-400"):
+                            ui.label("新しい情報源の接続が必要（依頼は未完了）").classes(
+                                "text-lg font-bold text-amber-800")
+                            ui.label(str(state.get("blocker") or
+                                         "利用可能な資料だけでは先に進めません。")
+                                     ).classes("secretary-wrap")
+                            if state.get("latest_report"):
+                                ui.label("現時点の報告").classes("font-semibold")
+                                ui.label(str(state["latest_report"])).classes(
+                                    "secretary-wrap")
+                            ui.label(
+                                "この実験版では情報源の追加や自動再開はまだ未実装です。"
+                                "元のTaskと取得済み証拠は保存されています。"
+                            ).classes("secretary-muted")
 
                     if status == "answered":
                         with ui.card().classes("w-full secretary-surface p-5"):
