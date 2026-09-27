@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "secretary"))
 from secretary_core import SecretaryCore, load_state, save_state
 from secretary_gui_model import (
     can_reply, can_retry, event_rows, evidence_rows, task_summaries,
+    task_text_report,
 )
 
 
@@ -127,6 +128,65 @@ class GuiModelTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already exists"):
             fresh.start("誤って同じIDで新規依頼", target="架空テストPC",
                         domain="pc", mode="fixture", task_id=task_id)
+
+
+    def test_clipboard_report_contains_full_history_and_evidence(self):
+        state = self.make_task(
+            status="answered",
+            request="過去の経験を調べて、追加情報を尋ねてから原因を分析",
+        )
+        state["events"].extend([
+            {"type": "user_update", "text": "再起動後も再現します"},
+            {"type": "decision", "action": "answer",
+             "reason": "暫定判断", "draft_answer": "原因は未特定"},
+            {"type": "answer_review", "supported": True,
+             "feedback": "観測の範囲内"},
+        ])
+        state["answer"] = "未検証情報だけでは原因を確定できません。"
+        state["user_update"] = "再起動後も再現します"
+        # Keep historical duplicate observations; reports must not silently
+        # drop them just because Core now blocks future duplicates.
+        state["observations"].append({
+            "specialist": "research", "query": "過去の症状",
+            "source_mode": "fictional_fixture",
+            "records": [{
+                "id": "R1", "text": "架空の参考資料",
+                "source": "fictional_local_fixture",
+                "simulated": True,
+                "verification": "fictional_not_real_reference",
+            }],
+        })
+        report = task_text_report(state)
+        self.assertIn("=== 元の依頼 ===", report)
+        self.assertIn(state["original_request"], report)
+        self.assertIn("=== 判断・作業の全履歴（5件） ===", report)
+        self.assertIn("再起動後も再現します", report)
+        self.assertIn("原因は未特定", report)
+        self.assertIn("EVENT: ", report)
+        self.assertIn("=== 取得した証拠の全履歴（2回） ===", report)
+        self.assertIn("ram_gb=16", report)
+        self.assertIn("fictional user statement", report)
+        self.assertIn("Simulated diagnostic only", report)
+        self.assertIn("対象との紐付けなし", report)
+        self.assertIn("fictional_local_fixture", report)
+        self.assertIn(state["answer"], report)
+        self.assertIn("記録に残る最後の質問", report)
+        self.assertNotIn("現在の質問 ===", report)
+
+    def test_long_report_is_not_truncated_and_pending_question_is_visible(self):
+        state = self.make_task()
+        state["events"] = [
+            {"type": "decision", "action": "ask_user",
+             "reason": "情報不足", "question": f"質問 {n}"}
+            for n in range(105)
+        ]
+        report = task_text_report(state)
+        self.assertIn("全履歴（105件）", report)
+        self.assertIn("質問 0", report)
+        self.assertIn("質問 104", report)
+        self.assertIn("現在の質問", report)
+        self.assertIn("終了時のエラーは出ましたか？", report)
+        self.assertLess(report.index("質問 0"), report.index("質問 104"))
 
 
 if __name__ == "__main__":
