@@ -48,3 +48,9 @@ cd D:\AI\projects\local-secretary-runtime
 - `run_correction_smoke.ps1`: 既存サブPCの実験DBに006を安全確認後適用し、既存18件＋訂正用単体テストと、PC／RC両方の訂正、再送、訂正前後の「当時知っていた記録」、別の更新の保持を確認。実際の結果は本人のサブPC出力が出るまで未実証。
 
 この段階の訂正は既知Claim IDと既知Entity IDを指定する**サービス内部の限定機能**であり、利用者が自然言語だけで訂正対象を特定できる完成したPKBではない。また`driver_updated`・`servo_updated`は履歴イベントであり、現在のドライバー・サーボの確定属性を推定するものではない。
+
+## SQL-first検索スライス（GitHub実装、サブPC未試験）
+
+`query_service.py`はUUID指定の対象・domain・predicate・発生時点の範囲・知識時点（`known_at`）・履歴の有無で**正本Claimを限定SQL検索**する。過去の撤回について当時の記録状態と現在保存されている状態を混同しないよう`status_at_cutoff`を別に返す。出典URI／citation・Source ID、総件数／ページを同じ読み取りトランザクションで取得する。0件なら`status=ok,total=0`で、DB障害は例外として区別。複数のページ取得要求を通じた固定スナップショットは未実装。
+
+`tests/test_pkb_query.py`と`smoke_query.py`を追加し、サブPCで001〜006とPC／RC訂正試験を成功した既存隔離DBを使用する`run_query_smoke.ps1`を用意した。この新しいコードの実機結果は**未受領**。まだ原本10 Episode全件の投入・正解8問・自然言語質問・UIは未対応。
