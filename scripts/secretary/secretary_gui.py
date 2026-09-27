@@ -21,6 +21,8 @@ from secretary_core import (
     SecretaryCore,
     load_state,
     save_state,
+    requires_continuation,
+    verified_objective,
 )
 from secretary_gui_model import (
     SPECIALIST_LABELS,
@@ -69,6 +71,10 @@ def _execute_start(task_id: str, request: str, target: str,
 
 def _execute_resume(task_id: str, answer: str) -> None:
     SecretaryCore(STATE_DIR).resume(task_id, answer)
+
+
+def _execute_reopen(task_id: str, update: str) -> None:
+    SecretaryCore(STATE_DIR).reopen(task_id, update)
 
 
 async def _run_background(task_id: str, function, *args) -> None:
@@ -263,6 +269,12 @@ def home():
                                 "text-red-700 secretary-wrap")
 
                     if status == "waiting_user":
+                        if state.get("latest_report"):
+                            with ui.card().classes("w-full secretary-surface p-5"):
+                                ui.label("現時点の報告（依頼は未完了）").classes(
+                                    "text-lg font-bold text-amber-800")
+                                ui.label(str(state["latest_report"])).classes(
+                                    "secretary-wrap")
                         with ui.card().classes(
                                 "w-full secretary-surface p-5 border-l-4 border-amber-400"):
                             ui.label("追加情報を教えてください").classes(
@@ -319,6 +331,33 @@ def home():
                                 .classes("secretary-wrap text-base")
                             ui.label("注: この実験の回答は実機の診断結果ではありません。") \
                                 .classes("secretary-muted")
+                            if (requires_continuation(state.get("original_request", ""))
+                                    and not verified_objective(state)):
+                                ui.label(
+                                    "この依頼は元々、未解決の場合も調査を続ける"
+                                    "よう求めています。旧版が回答済みにしたTaskも"
+                                    "履歴を残して同じIDから再開できます。"
+                                ).classes("secretary-muted")
+                                continuation = ui.textarea(
+                                    "追加情報（任意）",
+                                    placeholder="新しいログ・確認結果があれば入力",
+                                ).props("outlined autogrow").classes("w-full")
+
+                                def reopen_task():
+                                    if not launch(
+                                            task_id, _execute_reopen, task_id,
+                                            str(continuation.value or "").strip()):
+                                        ui.notify("別の処理が実行中です。", type="warning")
+                                        return
+                                    ui.notify(
+                                        "同じTaskを再開しました。過去の経過は保持します。",
+                                        type="positive",
+                                    )
+
+                                ui.button(
+                                    "未解決の依頼として調査を続ける",
+                                    on_click=reopen_task, icon="restart_alt",
+                                ).classes("self-start")
                     elif status == "running":
                         with ui.card().classes("w-full secretary-surface p-5"):
                             ui.label("処理を進めています。").classes(
