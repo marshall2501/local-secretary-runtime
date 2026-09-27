@@ -142,9 +142,10 @@ def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionR
         cur.execute(
             """SELECT id FROM secretary.claims
                WHERE entity_id=%s AND predicate=%s
+                 AND valid_from=%s
                  AND verification_status != 'retracted'
                  AND retracted_at IS NULL LIMIT 1""",
-            (new_entity_id, predicate),
+            (new_entity_id, predicate, valid_from),
         )
         if cur.fetchone():
             return CorrectionResult("review", "target_entity_has_existing_claim")
