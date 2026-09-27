@@ -189,5 +189,26 @@ class GuiModelTest(unittest.TestCase):
         self.assertLess(report.index("質問 0"), report.index("質問 104"))
 
 
+    def test_goal_gate_and_reopen_are_visible_in_copied_timeline(self):
+        state = self.make_task()
+        state["events"].extend([
+            {"type": "decision", "action": "answer",
+             "draft_answer": "過去の記録は不十分です。"},
+            {"type": "goal_gate", "status": "waiting_user",
+             "reason": "事実報告は妥当だが目的未達",
+             "question": "新しいログはありますか？"},
+            {"type": "task_reopened", "reason": "未解決の依頼を再開"},
+        ])
+        timeline = event_rows(state)
+        self.assertEqual(timeline[-2]["title"], "元の依頼の完了条件を確認")
+        self.assertIn("次に必要な情報: 新しいログはありますか？",
+                      timeline[-2]["details"])
+        self.assertEqual(timeline[-1]["title"], "継続依頼を再開")
+        report = task_text_report(state)
+        self.assertIn("事実報告は妥当だが目的未達", report)
+        self.assertIn("新しいログはありますか？", report)
+        self.assertIn("未解決の依頼を再開", report)
+
+
 if __name__ == "__main__":
     unittest.main()
