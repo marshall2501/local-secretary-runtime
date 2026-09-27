@@ -16,6 +16,7 @@ from secretary_core import load_state
 STATUS_LABELS = {
     "running": "処理中",
     "waiting_user": "回答待ち",
+    "blocked_capability": "情報源の接続待ち",
     "answered": "回答済み",
     "error": "実行エラー",
 }
@@ -33,6 +34,8 @@ EVENT_LABELS = {
     "finish": "今回の処理を終了",
     "goal_gate": "元の依頼の完了条件を確認",
     "task_reopened": "継続依頼を再開",
+    "question_rejected": "無効な質問を却下",
+    "capability_blocked": "新しい情報源が必要",
     "error": "処理中にエラー",
 }
 
@@ -101,9 +104,10 @@ def event_rows(state: dict) -> list[dict]:
         elif kind == "user_update":
             details.append(str(event.get("text") or ""))
         else:
-            for key in ("reason", "feedback", "message", "question"):
+            for key in ("reason", "feedback", "message", "question", "candidate"):
                 if event.get(key):
-                    details.append(("次に必要な情報: " if key == "question" else "")
+                    details.append(("次に必要な情報: " if key == "question" else
+                                    "却下した質問案: " if key == "candidate" else "")
                                    + str(event[key]))
         rows.append({"index": index, "kind": kind, "title": heading,
                      "details": details})
@@ -255,6 +259,9 @@ def task_text_report(state: dict) -> str:
         lines.append("エラー: " + str(state["error"]))
     if status == "waiting_user":
         lines.append("依頼は未完了です。上記の質問に対する回答待ちです。")
+    elif status == "blocked_capability":
+        lines.append("利用可能な情報源の不足でTaskを中断しています（依頼未完了）。")
+        lines.append("必要な次の能力: " + str(state.get("blocker") or "新しい情報源の接続"))
     elif status == "answered":
         lines.append("今回の回答を生成済み（元の問題の解決を保証しません）。")
     return "\n".join(lines).rstrip() + "\n"
