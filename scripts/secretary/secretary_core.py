@@ -145,6 +145,9 @@ MANAGER_RULES = (
     "再依頼・別担当・質問・回答を選び直す。以前の観測があるときは再利用する。"
     "模擬情報は実観測ではない。entityが未紐付けのActionを指定PCの実績と断定しない。"
     "調査で解決しない場合は不明点を明示して回答してよい。"
+    "ユーザーから今聞くことで次の判断が変わる具体的な情報が不足しているなら、"
+    "ask_userで最も重要な質問を1つ返し、回答を待つ。質問が不要なら"
+    "判明した内容と限界を示してanswerする。既に取得した証拠は捨てない。"
     "明示的な実行依頼と承認がないので変更・購入・メール送信等を提案実行しない。"
     "JSONのみ返す。"
     '{"action":"delegate|answer|ask_user","specialist":"memory|research",'
@@ -494,13 +497,17 @@ class SecretaryCore:
         return result
 
     def start(self, request: str, *, target: str, domain: str,
-              mode: str = "fixture", model: str = "qwen3:8b") -> WorkState:
+              mode: str = "fixture", model: str = "qwen3:8b",
+              task_id: str | None = None) -> WorkState:
         if not request.strip() or not target.strip() or not domain.strip():
             raise ValueError("Request, target and domain cannot be empty")
         if mode == "fixture" and (target, domain) != ("架空テストPC", "pc"):
             raise ValueError("Fixture supports only 架空テストPC / pc")
+        new_id = str(uuid.UUID(task_id)) if task_id else str(uuid.uuid4())
+        if (self.folder / (new_id + ".json")).exists():
+            raise ValueError("Task ID already exists; use resume instead of overwriting")
         state: WorkState = {
-            "task_id": str(uuid.uuid4()), "original_request": request,
+            "task_id": new_id, "original_request": request,
             "target": target, "domain": domain, "mode": mode, "model": model,
             "status": "running", "turns": 0, "review_attempts": 0,
             "feedback": "", "observations": [], "events": [],
