@@ -68,6 +68,11 @@ class GuiModelTest(unittest.TestCase):
         self.assertEqual(events[0]["title"], "統括役の判断")
         self.assertTrue(any("ユーザーに質問" in d for d in events[0]["details"]))
         self.assertEqual(events[1]["title"], "今回の処理を終了")
+        state["events"].append({"type": "evidence_unchanged",
+                                "feedback": "新しい資料はありません"})
+        repeated = event_rows(state)[-1]
+        self.assertEqual(repeated["title"], "再調査したが新しい資料なし")
+        self.assertIn("新しい資料はありません", repeated["details"])
 
     def test_evidence_marks_unverified_and_unlinked_simulation(self):
         state = self.make_task()
