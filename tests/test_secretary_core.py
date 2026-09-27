@@ -60,7 +60,6 @@ class SecretaryCoreTest(unittest.TestCase):
 
     def test_manager_delegates_reviews_then_answers(self):
         script = ScriptedModel([
-            delegate("memory", "以前の症状と対策"),
             delegate("research", "ゲーム突然終了の確認事項"),
             answer("模擬資料しかなく原因は特定できません。実際のログを確認してください。",
                    ["M1", "R1"]),
@@ -78,21 +77,24 @@ class SecretaryCoreTest(unittest.TestCase):
                          "unlinked_same_domain_not_proof_of_target")
 
     def test_unchecked_history_cannot_be_declared_missing(self):
+        # Explicitly requested history is now obtained before the first
+        # model decision. The reviewer rejects a subsequent false statement.
         script = ScriptedModel([
             answer("過去の記録はありません"),
-            delegate("memory", "対象PCの記録を検索"),
             answer("未検証のRAM情報はあるが、模擬診断はPCに未紐付けです。", ["M1"]),
-        ])
+        ], reviews=[False, True])
         result = self.start(script)
         self.assertEqual(result["status"], "answered")
-        self.assertEqual(len([x for x in result["events"]
-                              if x["type"] == "dispatch"]), 1)
+        self.assertEqual([e["to"] for e in result["events"]
+                          if e["type"] == "dispatch"], ["memory"])
+        self.assertEqual(result["events"][0]["action"], "delegate")
+        self.assertEqual(script.manager_contexts[0]["previous_observations"][0]
+                         ["specialist"], "memory")
         self.assertGreaterEqual(result["review_attempts"], 1)
-        self.assertIn("未照会", script.manager_contexts[1]["validation_feedback"])
+        self.assertIn("独立監査", script.manager_contexts[1]["validation_feedback"])
 
     def test_reviewer_rejects_overclaim_and_manager_reassigns(self):
         script = ScriptedModel([
-            delegate("memory", "過去の確認"),
             answer("ドライバーが確実に原因です", ["M2"]),
             delegate("research", "架空ゲームの突然終了ガイド"),
             answer("原因は未特定で、実際のログが必要です。", ["R1"]),
@@ -111,6 +113,7 @@ class SecretaryCoreTest(unittest.TestCase):
         }])
         first = self.start(script, "ゲームが突然終了します。原因わかる？")
         self.assertEqual(first["status"], "waiting_user")
+        self.assertIsNone(first["events"][0]["specialist"])
         self.assertEqual(self.core.resume(first["task_id"])["status"], "waiting_user")
         restarted = secretary_core.SecretaryCore(self.folder)
         script2 = ScriptedModel([
@@ -139,7 +142,6 @@ class SecretaryCoreTest(unittest.TestCase):
         # Actual sub-PC regression: memory returned M1/M2, but qwen3's
         # independent reviewer rejected even a properly qualified answer.
         script = ScriptedModel([
-            delegate("memory", "以前の経験から原因を調べて"),
             answer("模擬記録のみであり、原因は特定できません。", ["M1", "M2"]),
             answer("対象の実機診断は未確認です。原因を特定できません。", ["M1"]),
         ], reviews=[False, False])
@@ -157,7 +159,6 @@ class SecretaryCoreTest(unittest.TestCase):
 
     def test_lookup_error_is_not_reported_as_no_records(self):
         script = ScriptedModel([
-            delegate("memory", "以前の経験"),
             answer("過去の記録はありません"),
             answer("取得できていないので分かりません"),
         ])
@@ -195,6 +196,117 @@ class SecretaryCoreTest(unittest.TestCase):
         self.assertEqual(result["status"], "answered")
         self.assertIn("照会は完了", result["answer"])
         self.assertIn("M1", result["answer"])
+
+
+    def test_history_question_always_recalled_before_asking_user(self):
+        script = ScriptedModel([{
+            "action": "ask_user", "response": "現在のエラー表示は？",
+            "reason": "対象の履歴を参照後に必要となる追加情報",
+        }])
+        result = self.start(script)
+        self.assertEqual(result["status"], "waiting_user")
+        actions = [(e.get("type"), e.get("action"), e.get("to"))
+                   for e in result["events"]]
+        self.assertEqual(actions[0][1], "delegate")
+        self.assertEqual(actions[1][2], "memory")
+        self.assertEqual(actions[3][1], "ask_user")
+        self.assertEqual(script.manager_contexts[0]["previous_observations"]
+                         [0]["specialist"], "memory")
+
+    def test_waiting_legacy_task_recalls_history_on_next_reply(self):
+        # Reproduce the on-device GUI screenshot: after user reply, the
+        # older task has two research records but NO memory attempt.
+        task_id = "81ad1824-4787-4dbe-8318-6bcc0faf5350"
+        state = {
+            "task_id": task_id,
+            "original_request": (
+                "過去の経験を確認して原因の切り分けを進め、"
+                "情報が不足していれば質問し、調査を続けて"),
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "waiting_user", "turns": 4,
+            "review_attempts": 0, "user_update": "10分で終了",
+            "feedback": "", "events": [
+                {"type": "decision", "action": "ask_user", "reason": "追加情報"},
+                {"type": "finish", "status": "waiting_user"},
+            ],
+            "observations": [{
+                "specialist": "research", "records": [{
+                    "id": "R1", "simulated": True,
+                    "text": "fictional fixture reference",
+                }],
+            }],
+        }
+        secretary_core.save_state(state, self.folder)
+        script = ScriptedModel([{
+            "action": "ask_user",
+            "reason": "履歴は対象に未紐付け。追加の実症状が必要",
+            "response": "再起動後も起きますか？",
+        }])
+        with patch.object(secretary_core, "_json_llm", side_effect=script):
+            result = self.core.resume(task_id, "再起動後も発生します")
+        self.assertEqual(result["task_id"], task_id)
+        self.assertEqual(result["status"], "waiting_user")
+        self.assertEqual([e["to"] for e in result["events"]
+                          if e.get("type") == "dispatch"], ["memory"])
+        self.assertEqual(script.manager_contexts[0]["new_user_information"],
+                         "再起動後も発生します")
+        self.assertEqual(script.manager_contexts[0]["previous_observations"]
+                         [-1]["specialist"], "memory")
+
+    def test_same_research_rejected_after_user_reply_without_new_input(self):
+        query = "架空ゲームの10分後終了"
+        state = {
+            "task_id": "1f0ea887-ab28-48e6-a9a8-dca69de2fd4b",
+            "original_request": "症状を調べて",
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "running", "turns": 3,
+            "user_update": "エラー表示なし",
+            "feedback": "",
+            "decision": delegate("research", query),
+            "events": [
+                {"type": "user_update", "text": "エラー表示なし"},
+                {"type": "dispatch", "to": "research", "query": query,
+                 "signature": ["research", query.casefold()]},
+                {"type": "evaluation", "feedback": "架空資料"},
+            ],
+            "observations": [{
+                "specialist": "research",
+                "records": [{"id": "R1", "text": "fictional notes"}],
+            }],
+        }
+        result = self.core.dispatch(state)
+        self.assertEqual(len(result["observations"]), 1)
+        self.assertEqual(result["events"][-1]["type"], "duplicate_blocked")
+        self.assertIn("同一依頼", result["feedback"])
+
+    def test_different_query_same_research_material_not_duplicated(self):
+        record = {"id": "R1", "text": "fictional document", "simulated": True}
+        state = {
+            "task_id": "d59908db-353a-480e-bc41-1c337439a237",
+            "original_request": "調べて",
+            "target": "架空テストPC", "domain": "pc",
+            "mode": "fixture", "model": "qwen3:8b",
+            "status": "running", "turns": 2,
+            "feedback": "",
+            "decision": delegate("research", "別の検索語"),
+            "events": [{
+                "type": "dispatch", "to": "research", "query": "以前の検索",
+                "signature": ["research", "以前の検索"],
+            }],
+            "observations": [{
+                "specialist": "research", "records": [record],
+            }],
+        }
+        with patch.object(self.core, "_research", return_value={
+            "specialist": "research", "records": [record],
+        }):
+            result = self.core.dispatch(state)
+        self.assertEqual(len(result["observations"]), 1)
+        self.assertEqual(result["events"][-1]["type"], "evidence_unchanged")
+        self.assertIn("新しい資料は得られなかった", result["feedback"])
+
 
 
 if __name__ == "__main__":
