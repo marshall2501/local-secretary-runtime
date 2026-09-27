@@ -60,3 +60,9 @@ cd D:\AI\projects\local-secretary-runtime
 旧P0の`episodes.json`だけをそのまま`fixtures/episodes.json`に取り込み、正解`expected.json`は実装／入力へ混ぜない。`episode_intake.py`は10件の領域、Source種別、本文、記録・発生時点、`fixture://`出典を事前検査し、原文を`sources.metadata`に保全する。新しい実験専用`007_pkb_proto_episodes.sql`でEpisode IDとSourceを一対一で関連付け、同一内容の再送は冪等とする。未知の原文の解釈はすべて`uninterpreted`として保留し、**この取り込みだけではClaimを作成しない**。
 
 既存の隔離DBで006と訂正スモークが成功済みなら、`pkb_proto/run_episode_smoke.ps1`が007のSHAと専用DB名を検査して適用し、単体試験と元の10件・再送・外部推測資料の非昇格を確認する。8つの正解質問への回答試験は**この次**であり、本取込成功だけで「8問正解」や汎用自然言語抽出の完成とはしない。
+
+## ローカルLLM抽出の読取専用スライス（GitHub登録、サブPC未試験）
+
+`extraction_service.py` は `fixtures/episodes.json` の原文だけを対象に、候補の引用・値・Entity文字列が原文中に存在するか検証する。LLMによる意味理解の正しさは別に評価するため、**候補は一律review、DBへの書込みはゼロ**。外部資料、明示訂正、未確認を別の理由で保留する。`run_local_extraction.py` は `127.0.0.1:11434` のローカルOllamaだけを呼び、元10件から候補数・拒否理由を観測。**正解 `expected.json` は抽出プロンプトに入れない**。
+
+サブPCでは `pkb_proto/run_extraction_smoke.ps1` が先にPKB単体テストとローカルモデルの存在を確認し、その後に架空データだけの観測試験を実行する。モデルがなければ停止し、勝手にダウンロードや外部APIへの送信をしない。結果を受領するまでは抽出性能未実証。
