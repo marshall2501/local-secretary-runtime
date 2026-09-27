@@ -48,6 +48,26 @@ def request_for(episode: dict, mode: str) -> tuple[list[dict[str, str]], bool]:
     raise ValueError("Unknown diagnostic mode")
 
 
+EPISODE_UNUSED = frozenset(("疎通：固定文字列", "推論：簡単な計算"))
+
+
+def build_ollama_payload(episode: dict, model: str, predict: int,
+                         think: str, mode: str) -> dict:
+    """Return the actual request body shared by GUI preview and HTTP sender."""
+    messages, json_format = request_for(episode, mode)
+    result = {
+        "model": model,
+        "stream": False,
+        "messages": messages,
+        "options": {"temperature": 0, "num_predict": predict},
+    }
+    if json_format:
+        result["format"] = "json"
+    if think == "無効":
+        result["think"] = False
+    return result
+
+
 def judge_response(mode: str, episode: dict, content: str) -> str:
     """Narrow observable checks, NOT general semantic correctness."""
     if not content.strip():
