@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -62,6 +63,7 @@ class Workbench:
         self.results: list[dict] = []
         self.events: queue.Queue = queue.Queue()
         self.running = False
+        self.batch_started: float | None = None
         self.stop_requested = threading.Event()
 
         self.model_var = tk.StringVar(value="qwen3.5:9b")
@@ -124,6 +126,9 @@ class Workbench:
         ttk.Button(actions, text="結果をJSON保存", command=self.save_report).pack(
             side="right", padx=5
         )
+        ttk.Button(actions, text="結果JSONをコピー", command=self.copy_report).pack(
+            side="right", padx=5
+        )
         ttk.Button(actions, text="結果をクリア", command=self.clear_results).pack(
             side="right", padx=5
         )
@@ -140,12 +145,13 @@ class Workbench:
         lower = ttk.Frame(divider)
         divider.add(lower, weight=4)
         ttk.Label(lower, text="実行結果：項目をクリックして詳細表示").pack(anchor="w")
-        columns = ("episode", "done", "tokens", "content", "json", "candidates", "errors")
+        columns = ("episode", "elapsed", "done", "tokens", "content", "json", "candidates", "errors")
         self.table = ttk.Treeview(
             lower, columns=columns, show="headings", height=9, selectmode="browse"
         )
         for col, title, width in (
-            ("episode", "Episode", 85), ("done", "終了理由", 100),
+            ("episode", "Episode", 85), ("elapsed", "実行秒", 75),
+            ("done", "終了理由", 100),
             ("tokens", "生成tokens", 90), ("content", "本文文字数", 90),
             ("json", "JSON解析", 220), ("candidates", "候補", 60),
             ("errors", "拒否", 60),
@@ -211,6 +217,7 @@ class Workbench:
             return
         ids = list(self.by_id) if all_episodes else [self.episode_var.get()]
         self.running = True
+        self.batch_started = time.perf_counter()
         self.stop_requested.clear()
         self.one_button.configure(state="disabled")
         self.all_button.configure(state="disabled")
@@ -226,16 +233,20 @@ class Workbench:
             if self.stop_requested.is_set():
                 break
             episode = self.by_id[episode_id]
+            started = time.perf_counter()
             try:
                 response = call_local_model(episode, model, predict, think)
                 extraction = inspect_model_output(
                     episode, response["message"].get("content", "")
                 )
                 report = analyze_reply(episode, response, extraction)
+                report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
                 report["settings"] = {"num_predict": predict, "think": think}
                 self.events.put(("result", report))
             except Exception as exc:
-                self.events.put(("error", episode_id, f"{type(exc).__name__}: {exc}"))
+                elapsed = round(time.perf_counter() - started, 3)
+                self.events.put(("error", episode_id,
+                                 f"{type(exc).__name__}: {exc}", elapsed))
         self.events.put(("finished",))
 
     def process_events(self):
@@ -249,7 +260,8 @@ class Workbench:
                     self.results.append(report)
                     idx = len(self.results) - 1
                     self.table.insert("", "end", iid=str(idx), values=(
-                        report["episode"], report["done_reason"],
+                        report["episode"], f"{report['elapsed_seconds']:.2f}",
+                        report["done_reason"],
                         report["eval_count"], report["content_length"],
                         report["json_parse"], report["candidate_count"],
                         len(report["errors"]),
@@ -259,19 +271,29 @@ class Workbench:
                     self.show_details()
                     self.status_var.set(
                         f"取得 {len(self.results)}件／最新 {report['episode']}："
-                        f"{report['json_parse']}（候補はすべて確認待ち）"
+                        f"{report['json_parse']}／{report['elapsed_seconds']:.2f}秒"
+                        "（候補はすべて確認待ち）"
                     )
                 elif kind == "error":
-                    _, episode_id, message = event
-                    self.status_var.set(f"{episode_id}: {message}")
-                    messagebox.showerror("ローカル抽出エラー", f"{episode_id}\n{message}")
+                    _, episode_id, message, elapsed = event
+                    self.status_var.set(f"{episode_id}: {elapsed:.2f}秒で失敗：{message}")
+                    messagebox.showerror(
+                        "ローカル抽出エラー",
+                        f"{episode_id}／{elapsed:.2f}秒\n{message}"
+                    )
                 elif kind == "finished":
                     self.running = False
                     self.one_button.configure(state="normal")
                     self.all_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
+                    elapsed = (
+                        time.perf_counter() - self.batch_started
+                        if self.batch_started is not None else 0.0
+                    )
+                    self.batch_started = None
                     self.status_var.set(
-                        f"終了：累計{len(self.results)}件。正解判定ではありません。DB書込なし。"
+                        f"終了：今回の実行時間 {elapsed:.2f}秒／累計{len(self.results)}件。"
+                        "正解判定ではありません。DB書込なし。"
                     )
         except queue.Empty:
             pass
@@ -307,6 +329,25 @@ class Workbench:
         self.replace_text(self.raw_preview, "")
         self.status_var.set("結果をクリアしました。DBには接続していません。")
 
+    def report_json(self) -> str:
+        return export_report(
+            self.results, model=self.model_var.get(),
+            settings={"note": "Per-item model settings stored with each result"},
+        )
+
+    def copy_report(self):
+        if not self.results:
+            messagebox.showinfo("コピーする結果なし", "先に架空Episodeを診断してください。")
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.report_json())
+            self.root.update_idletasks()
+        except tk.TclError as exc:
+            messagebox.showerror("コピー失敗", str(exc))
+            return
+        self.status_var.set(f"結果JSONをクリップボードにコピーしました（{len(self.results)}件）。")
+
     def save_report(self):
         if not self.results:
             messagebox.showinfo("保存する結果なし", "先に架空Episodeを診断してください。")
@@ -320,8 +361,7 @@ class Workbench:
             return
         try:
             Path(target).write_text(
-                export_report(self.results, model=self.model_var.get(),
-                              settings={"note": "Per-item model settings stored with each result"}),
+                self.report_json(),
                 encoding="utf-8",
             )
         except OSError as exc:
