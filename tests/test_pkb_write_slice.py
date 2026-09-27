@@ -42,7 +42,7 @@ class WriteSliceTests(unittest.TestCase):
     def test_uncertain_language_needs_review(self):
         text = "メインPCをDRV-A2へ更新したかもしれない。"
         self.assertEqual(_literal_gate(record(text), proposal(text)),
-                         "value_or_action_not_explicit_in_quote")
+                         "uncertain_or_correction_language")
 
     def test_prototype_dbname_guard_before_any_sql(self):
         class ForbiddenDB:
