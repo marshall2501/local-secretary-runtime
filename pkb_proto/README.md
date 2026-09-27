@@ -54,3 +54,9 @@ cd D:\AI\projects\local-secretary-runtime
 `query_service.py`はUUID指定の対象・domain・predicate・発生時点の範囲・知識時点（`known_at`）・履歴の有無で**正本Claimを限定SQL検索**する。過去の撤回について当時の記録状態と現在保存されている状態を混同しないよう`status_at_cutoff`を別に返す。出典URI／citation・Source ID、総件数／ページを同じ読み取りトランザクションで取得する。0件なら`status=ok,total=0`で、DB障害は例外として区別。複数のページ取得要求を通じた固定スナップショットは未実装。
 
 `tests/test_pkb_query.py`と`smoke_query.py`を追加し、サブPCで001〜006とPC／RC訂正試験を成功した既存隔離DBを使用する`run_query_smoke.ps1`を用意した。この新しいコードの実機結果は**未受領**。まだ原本10 Episode全件の投入・正解8問・自然言語質問・UIは未対応。
+
+## 元のEpisode10件の無損失取込（GitHub実装・サブPC未試験）
+
+旧P0の`episodes.json`だけをそのまま`fixtures/episodes.json`に取り込み、正解`expected.json`は実装／入力へ混ぜない。`episode_intake.py`は10件の領域、Source種別、本文、記録・発生時点、`fixture://`出典を事前検査し、原文を`sources.metadata`に保全する。新しい実験専用`007_pkb_proto_episodes.sql`でEpisode IDとSourceを一対一で関連付け、同一内容の再送は冪等とする。未知の原文の解釈はすべて`uninterpreted`として保留し、**この取り込みだけではClaimを作成しない**。
+
+既存の隔離DBで006と訂正スモークが成功済みなら、`pkb_proto/run_episode_smoke.ps1`が007のSHAと専用DB名を検査して適用し、単体試験と元の10件・再送・外部推測資料の非昇格を確認する。8つの正解質問への回答試験は**この次**であり、本取込成功だけで「8問正解」や汎用自然言語抽出の完成とはしない。
