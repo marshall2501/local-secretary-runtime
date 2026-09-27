@@ -155,6 +155,15 @@ def main():
                        WHERE input_id=%s""", (correction[0].input_id,),
                 )
                 assert cur.fetchone()[0] == 1
+                cur.execute(
+                    """SELECT id, entity_id FROM secretary.current_claims
+                       WHERE id IN (%s,%s)""",
+                    (original.claim_id, first.new_claim_id),
+                )
+                current = cur.fetchall()
+                assert current == [
+                    (UUID(first.new_claim_id), UUID(correction[1].entity_key))
+                ], current
             ids = (original.claim_id, first.new_claim_id)
             assert as_known_at(db, ids, at(early)) == [original.claim_id]
             assert as_known_at(db, ids, at(late)) == [first.new_claim_id]
