@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 
 from .episode_intake import load_fixture
 from .extraction_service import Extraction, inspect_model_output
-from .diagnostic_cases import MODES, request_for, judge_response
+from .diagnostic_cases import MODES, EPISODE_UNUSED, build_ollama_payload, judge_response
 from .gui_helpers import analyze_reply, export_report
 
 OLLAMA = "http://127.0.0.1:11434"
@@ -35,16 +35,7 @@ def installed_models() -> list[str]:
 
 def call_local_model(episode: dict, model: str, predict: int, think: str,
                      mode: str = '抽出：現行') -> dict:
-    messages, json_format = request_for(episode, mode)
-    payload = {
-        "model": model, "stream": False,
-        "messages": messages,
-        "options": {"temperature": 0, "num_predict": predict},
-    }
-    if json_format:
-        payload["format"] = "json"
-    if think == "無効":
-        payload["think"] = False
+    payload = build_ollama_payload(episode, model, predict, think, mode)
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(
         OLLAMA + "/api/chat", data=data,
@@ -78,6 +69,8 @@ class Workbench:
         self.mode_var = tk.StringVar(value="抽出：現行")
         self.status_var = tk.StringVar(value="初期状態：DBには接続しません")
         self._build()
+        for variable in (self.model_var, self.predict_var, self.think_var):
+            variable.trace_add("write", lambda *_: self.refresh_request_preview())
         self.choose_episode()
         self.mode_changed()
         self.root.after(100, self.process_events)
@@ -152,7 +145,8 @@ class Workbench:
 
         upper = ttk.Frame(divider)
         divider.add(upper, weight=1)
-        ttk.Label(upper, text="選択中の架空Episode原文").pack(anchor="w")
+        self.original_label = ttk.Label(upper, text="選択中の架空Episode原文")
+        self.original_label.pack(anchor="w")
         self.original = tk.Text(upper, height=5, wrap="word", state="disabled")
         self.original.pack(fill="both", expand=True, pady=(3, 7))
 
@@ -182,6 +176,8 @@ class Workbench:
         notebook.add(self.detail, text="応答・抽出候補")
         self.raw_preview = tk.Text(notebook, wrap="word", state="disabled")
         notebook.add(self.raw_preview, text="モデル本文の先頭（推論テキストは除外）")
+        self.request_preview = tk.Text(notebook, wrap="word", state="disabled")
+        notebook.add(self.request_preview, text="Ollamaへ送る依頼JSON")
         ttk.Label(
             self.root, textvariable=self.status_var, anchor="w", padding=8
         ).pack(fill="x")
@@ -195,18 +191,53 @@ class Workbench:
 
     def choose_episode(self, _event=None):
         episode = self.by_id[self.episode_var.get()]
-        self.replace_text(
-            self.original,
-            f"{episode['id']}　{episode['source_kind']}　"
-            f"記録 {episode['recorded_at']}　発生 {episode['occurred_at']}\n"
-            + episode["text"],
-        )
+        if self.mode_var.get() in EPISODE_UNUSED:
+            self.original_label.configure(text="この検証ではEpisode原文を送信しません")
+            self.replace_text(
+                self.original,
+                "選択中のEpisodeは識別ラベルとしてだけ使用します。"
+                "実際の送信内容は「Ollamaへ送る依頼JSON」を参照してください。",
+            )
+        else:
+            self.original_label.configure(text="選択中の架空Episode原文")
+            self.replace_text(
+                self.original,
+                f"{episode['id']}　{episode['source_kind']}　"
+                f"記録 {episode['recorded_at']}　発生 {episode['occurred_at']}\n"
+                + episode["text"],
+            )
+        self.refresh_request_preview()
+
+    def refresh_request_preview(self):
+        if self.running:
+            return
+        if not hasattr(self, "request_preview"):
+            return
+        try:
+            payload = build_ollama_payload(
+                self.by_id[self.episode_var.get()],
+                self.model_var.get().strip(),
+                int(self.predict_var.get()),
+                self.think_var.get(),
+                self.mode_var.get(),
+            )
+            self.replace_text(
+                self.request_preview,
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+        except (KeyError, ValueError):
+            self.replace_text(self.request_preview, "依頼JSONを構築できません。")
 
     def mode_changed(self, _event=None):
         if not self.running:
             self.all_button.configure(
                 state="normal" if self.mode_var.get() == "抽出：現行" else "disabled"
             )
+            self.episode_box.configure(
+                state="disabled" if self.mode_var.get() in EPISODE_UNUSED
+                else "readonly"
+            )
+            self.choose_episode()
 
     def refresh_models(self):
         if self.running:
@@ -268,6 +299,9 @@ class Workbench:
                 report = analyze_reply(episode, response, extraction,
                                        expect_json=mode.startswith("抽出："))
                 report["mode"] = mode
+                report["request_payload"] = build_ollama_payload(
+                    episode, model, predict, think, mode
+                )
                 report["check"] = judge_response(mode, episode, raw)
                 report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
                 report["settings"] = {"num_predict": predict, "think": think}
@@ -339,6 +373,10 @@ class Workbench:
                    if k not in ("content_preview", "content_truncated")}
         self.replace_text(self.detail, json.dumps(summary, ensure_ascii=False,
                                                  indent=2, default=str))
+        self.replace_text(
+            self.request_preview,
+            json.dumps(report["request_payload"], ensure_ascii=False, indent=2),
+        )
         self.replace_text(
             self.raw_preview,
             report["content_preview"] +
