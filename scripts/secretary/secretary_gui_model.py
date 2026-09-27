@@ -31,6 +31,8 @@ EVENT_LABELS = {
     "invalid_specialist": "不正な担当指定を停止",
     "user_update": "ユーザーから追加情報",
     "finish": "今回の処理を終了",
+    "goal_gate": "元の依頼の完了条件を確認",
+    "task_reopened": "継続依頼を再開",
     "error": "処理中にエラー",
 }
 
@@ -99,9 +101,10 @@ def event_rows(state: dict) -> list[dict]:
         elif kind == "user_update":
             details.append(str(event.get("text") or ""))
         else:
-            for key in ("reason", "feedback", "message"):
+            for key in ("reason", "feedback", "message", "question"):
                 if event.get(key):
-                    details.append(str(event[key]))
+                    details.append(("次に必要な情報: " if key == "question" else "")
+                                   + str(event[key]))
         rows.append({"index": index, "kind": kind, "title": heading,
                      "details": details})
     return rows
