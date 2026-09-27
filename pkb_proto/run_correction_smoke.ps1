@@ -50,7 +50,8 @@ BEGIN
     RAISE EXCEPTION 'Refusing an unexpected DB or migration state';
   END IF;
 END $guard$;
-'@ + [Environment]::NewLine +
+'@
+    $sql += [Environment]::NewLine +
         [IO.File]::ReadAllText($migration) + [Environment]::NewLine +
         "INSERT INTO secretary.schema_migrations(version,sha256) VALUES ('006_pkb_proto_corrections.sql','$sha');" +
         [Environment]::NewLine + 'COMMIT;'
