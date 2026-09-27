@@ -62,9 +62,17 @@ class WriteSliceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-local"):
             write_one(ForbiddenDB(), record(), proposal())
 
+    def test_non_dedicated_login_guard_before_any_sql(self):
+        class ForbiddenDB:
+            info = SimpleNamespace(dbname="secretary_pkb_proto_test", host="localhost", user="secretary_admin")
+            def transaction(self):
+                raise AssertionError("must not open a transaction")
+        with self.assertRaisesRegex(ValueError, "dedicated PKB prototype writer"):
+            write_one(ForbiddenDB(), record(), proposal())
+
     def test_only_fixture_sources_in_first_slice(self):
         class IsolatedDB:
-            info = SimpleNamespace(dbname="secretary_pkb_proto_test", host="localhost")
+            info = SimpleNamespace(dbname="secretary_pkb_proto_test", host="localhost", user="secretary_pkb_proto_writer_20260927")
             def transaction(self):
                 raise AssertionError("must reject before opening a transaction")
 
