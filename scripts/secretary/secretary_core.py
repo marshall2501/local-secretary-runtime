@@ -55,6 +55,7 @@ class WorkState(TypedDict, total=False):
     # Both values were formerly written to checkpoints but dropped on invoke.
     latest_report: str
     session_event_start: int
+    blocker: str
 
 
 def save_state(state: WorkState, folder: Path) -> None:
@@ -106,6 +107,65 @@ def verified_objective(state: WorkState) -> bool:
             return True
     return False
 
+
+
+def invalid_question_reason(state: WorkState, question: str) -> str:
+    """Reject observable question errors without trying to judge all semantics.
+
+    A reply echoed verbatim as a question caused a real GUI task to loop,
+    even though the model received every earlier user answer. Heuristic
+    validation is deliberately conservative for other kinds of questions.
+    """
+    q = str(question or "").strip()
+    normalized = lambda value: re.sub(
+        r"[\s?？!！。．、，,.]+", "", str(value or "").casefold())
+    compact = normalized(q)
+    if len(compact) < 5:
+        return "質問内容が空か短すぎる"
+    for event in state.get("events") or []:
+        if event.get("type") == "user_update" and compact == normalized(
+                event.get("text")):
+            return "本人がすでに回答した文章を質問として反復した"
+    if compact == normalized(state.get("user_update")) and state.get("user_update"):
+        return "最後の本人回答を質問として反復した"
+    for index, event in enumerate(state.get("events") or []):
+        if (event.get("type") == "decision"
+                and event.get("action") == "ask_user"
+                and compact == normalized(event.get("question"))
+                and any(x.get("type") == "user_update"
+                        for x in state["events"][index + 1:])):
+            return "回答後に同じ質問を再提示した"
+    question_markers = (
+        "?", "？", "教えて", "共有して", "入力して", "お知らせ",
+        "示して", "提示して", "選んで", "確認して", "答えて",
+    )
+    if not any(marker in q for marker in question_markers):
+        return "本人に尋ねる質問や具体的な情報依頼になっていない"
+    return ""
+
+
+def missing_external_evidence(state: WorkState) -> bool:
+    """The isolated fixture offers no new observations beyond its two sources."""
+    return state.get("mode") == "fixture" and {
+        observation.get("specialist")
+        for observation in state.get("observations") or []
+        if not observation.get("error")
+    } >= {"memory", "research"}
+
+
+def capability_blocker(state: WorkState) -> str:
+    if state.get("mode") == "fixture":
+        return (
+            "既存の架空記憶と架空資料は確認済みですが、"
+            "新しい実測情報を取得する手段はこの実験版に接続されていません。"
+            "既に回答された内容を再質問せず、このTaskと暫定報告を保持します。"
+            "次は必要な読み取り専用の実情報源・診断ツールを接続し、"
+            "新しい証拠に基づく判断を検証する必要があります。"
+        )
+    return (
+        "現在利用できる情報源から必要な新しい証拠を取得できません。"
+        "不足する読み取り専用の情報源・調査手段の接続が必要です。"
+    )
 
 def evidence_based_fallback(state: WorkState) -> str:
     """Produce a bounded, provenance-aware report without trusting a failed LLM review.
@@ -284,7 +344,38 @@ class SecretaryCore:
                     "remaining_delegations": MAX_DELEGATIONS - sum(
                         x.get("type") == "dispatch" for x in session_events),
                 })
-            if decision.get("action") not in ("delegate", "answer", "ask_user"):
+            if decision.get("action") == "ask_user":
+                invalid = invalid_question_reason(
+                    state, str(decision.get("response") or ""))
+                if invalid:
+                    state["events"].append({
+                        "type": "question_rejected",
+                        "reason": invalid,
+                        "candidate": str(decision.get("response") or ""),
+                    })
+                    state["feedback"] = invalid
+                    if missing_external_evidence(state):
+                        # This is not a question to the user. The available
+                        # fixtures have already been read and cannot yield
+                        # further independent evidence.
+                        decision = {
+                            "action": "wait_capability",
+                            "response": capability_blocker(state),
+                            "reason": "不正な質問を拒否。既存の架空情報源だけでは調査を進められない",
+                        }
+                    else:
+                        # For early-stage tasks, allow an independent new
+                        # fact request rather than echoing the user's reply.
+                        decision = {
+                            "action": "ask_user",
+                            "response": (
+                                "今回の依頼について、まだ共有していない"
+                                "判断に必要な情報があれば教えてください。"
+                            ),
+                            "reason": "統括案が質問形式を満たさず、未提示の情報を尋ね直す",
+                        }
+            if decision.get("action") not in (
+                    "delegate", "answer", "ask_user", "wait_capability"):
                 state["feedback"] = "無効なaction。delegate, answer, ask_userから選択"
                 decision = {"action": "answer", "response": (
                     "現在の情報では結論を出せません。必要な確認事項を整理してから回答します。"),
@@ -523,7 +614,16 @@ class SecretaryCore:
 
     def final(self, state: WorkState) -> WorkState:
         decision = state["decision"]
-        if decision["action"] == "ask_user":
+        if decision["action"] == "wait_capability":
+            state["status"] = "blocked_capability"
+            state["blocker"] = str(decision.get("response") or capability_blocker(state))
+            state.pop("awaiting", None)
+            if state.get("latest_report"):
+                state["answer"] = state["latest_report"]
+            state["events"].append({
+                "type": "capability_blocked", "reason": state["blocker"],
+            })
+        elif decision["action"] == "ask_user":
             state["awaiting"] = str(decision.get("response") or
                                     "次の判断に必要な追加情報を教えてください")
             # Preserve earlier provisional findings across follow-up questions.
@@ -652,7 +752,8 @@ class SecretaryCore:
         return g.compile()
 
     def run(self, state: WorkState) -> WorkState:
-        if state["status"] in ("answered", "waiting_user"):
+        if state["status"] in ("answered", "waiting_user",
+                               "blocked_capability"):
             return state
         if state["mode"] not in ("fixture", "live"):
             raise ValueError("Unknown mode")
@@ -683,6 +784,37 @@ class SecretaryCore:
         }
         save_state(state, self.folder)
         return self.run(state)
+
+    def defer_invalid_question(self, task_id: str) -> WorkState:
+        """Correct a saved nonsensical question without fabricating a reply.
+
+        Old checkpoints may already be waiting on an echoed user answer. An
+        explicit GUI action converts the task into an honest tool blocker.
+        """
+        state = load_state(task_id, self.folder)
+        if state.get("status") != "waiting_user":
+            raise ValueError("Only a waiting task can have its question corrected")
+        invalid = invalid_question_reason(state, state.get("awaiting") or "")
+        if not invalid:
+            raise ValueError("Current question is not observably invalid")
+        if not missing_external_evidence(state):
+            raise ValueError("Available sources must be reviewed before deferring")
+        state["events"].append({
+            "type": "question_rejected",
+            "reason": invalid, "candidate": str(state.get("awaiting") or ""),
+        })
+        state["blocker"] = capability_blocker(state)
+        state["status"] = "blocked_capability"
+        state.pop("awaiting", None)
+        if state.get("latest_report"):
+            state["answer"] = state["latest_report"]
+        state["events"].append({
+            "type": "capability_blocked", "reason": state["blocker"],
+        })
+        state["events"].append({
+            "type": "finish", "status": "blocked_capability",
+        })
+        return self._persist(state)
 
     def reopen(self, task_id: str, user_update: str = "") -> WorkState:
         """Explicitly reopen an older, prematurely answered ongoing task.
