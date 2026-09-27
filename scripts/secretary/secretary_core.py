@@ -72,6 +72,37 @@ def load_state(task_id: str, folder: Path) -> WorkState:
 
 
 
+# A narrow, explicit-intent gate: do not conflate an interim report with
+# completing an investigation that the user explicitly asked to continue.
+# This is not an unrestricted background-work promise or goal verifier.
+CONTINUE_TERMS = (
+    "終了しない", "終了しないで", "終わらせない", "終えない",
+    "調査を続け", "調査を継続", "確認を続け", "調べ続け",
+    "継続して調べ", "原因が不明という報告だけで",
+)
+
+
+def requires_continuation(request: str) -> bool:
+    return any(term in request for term in CONTINUE_TERMS)
+
+
+def verified_objective(state: WorkState) -> bool:
+    """Only externally verified observations can close explicit ongoing goals.
+
+    No current fixture adapter emits this record. Never treat model prose,
+    prior unlinked actions or simulated materials as proof of completion.
+    """
+    target = state.get("target")
+    for observation in state.get("observations") or []:
+        if (observation.get("objective_verified") is True
+                and observation.get("verification") == "external_observation"
+                and observation.get("simulated") is False
+                and observation.get("target") == target
+                and observation.get("source_mode") != "fixture"):
+            return True
+    return False
+
+
 def evidence_based_fallback(state: WorkState) -> str:
     """Produce a bounded, provenance-aware report without trusting a failed LLM review.
 
@@ -155,6 +186,12 @@ MANAGER_RULES = (
     "ユーザーから今聞くことで次の判断が変わる具体的な情報が不足しているなら、"
     "ask_userで最も重要な質問を1つ返し、回答を待つ。質問が不要なら"
     "判明した内容と限界を示してanswerする。既に取得した証拠は捨てない。"
+    "ただし元の依頼が未解決のまま継続を明示している場合、"
+    "仮の報告だけで業務完了と宣言しない。取得済みのユーザー回答を再質問せず、"
+    "次の調査を変える具体的な未取得情報をask_userで尋ねるか、"
+    "answerにnext_questionを付けて暫定報告する。"
+    "本体の利用可能な調査手段はmemoryとresearchのみ。"
+
     "明示的な実行依頼と承認がないので変更・購入・メール送信等を提案実行しない。"
     "JSONのみ返す。"
     '{"action":"delegate|answer|ask_user","specialist":"memory|research",'
@@ -176,8 +213,9 @@ class SecretaryCore:
 
     def manager(self, state: WorkState) -> WorkState:
         state["turns"] = state.get("turns", 0) + 1
+        session_events = state["events"][state.get("session_event_start", 0):]
         if state["turns"] > 9 or sum(
-                x.get("type") == "dispatch" for x in state["events"]
+                x.get("type") == "dispatch" for x in session_events
                 ) >= MAX_DELEGATIONS:
             state["decision"] = {
                 "action": "answer", "response": evidence_based_fallback(state),
@@ -211,7 +249,7 @@ class SecretaryCore:
                     "previous_actions": state["events"][-9:],
                     "validation_feedback": state.get("feedback", ""),
                     "remaining_delegations": MAX_DELEGATIONS - sum(
-                        x.get("type") == "dispatch" for x in state["events"]),
+                        x.get("type") == "dispatch" for x in session_events),
                 })
             if decision.get("action") not in ("delegate", "answer", "ask_user"):
                 state["feedback"] = "無効なaction。delegate, answer, ask_userから選択"
@@ -454,8 +492,12 @@ class SecretaryCore:
         decision = state["decision"]
         if decision["action"] == "ask_user":
             state["awaiting"] = str(decision.get("response") or
-                                    "もう少し状況を教えてください")
-            state["answer"] = state["awaiting"]
+                                    "次の判断に必要な追加情報を教えてください")
+            # Preserve earlier provisional findings across follow-up questions.
+            if state.get("latest_report"):
+                state["answer"] = state["latest_report"]
+            else:
+                state["answer"] = state["awaiting"]
             state["status"] = "waiting_user"
         else:
             answer = str(decision.get("response") or "").strip()
@@ -521,7 +563,35 @@ class SecretaryCore:
             if not answer:
                 answer = "現時点では回答を生成できませんでした。"
             state["answer"] = answer
-            state["status"] = "answered"
+            state["latest_report"] = answer
+            state.pop("awaiting", None)
+            if (requires_continuation(state["original_request"])
+                    and not verified_objective(state)):
+                # Factually sound prose is NOT verified completion of the
+                # user's original ongoing goal. Persist a partial report
+                # and wait for genuinely new evidence instead of answering
+                # away an explicit commitment to continue.
+                question = str(decision.get("next_question") or "").strip()
+                prior_inputs = [
+                    str(e.get("text") or "") for e in state["events"]
+                    if e.get("type") == "user_update"
+                ]
+                if not question or question in prior_inputs:
+                    question = (
+                        "調査を続けるため、まだ共有していない実際のログ、"
+                        "関連する変更履歴、または新しい確認結果があれば"
+                        "教えてください。新情報が得られない場合は、"
+                        "次に利用する情報源・調査手段について相談します。"
+                    )
+                state["awaiting"] = question
+                state["status"] = "waiting_user"
+                state["events"].append({
+                    "type": "goal_gate", "status": "waiting_user",
+                    "reason": "暫定報告は妥当だが継続依頼の目的達成は未検証",
+                    "question": question,
+                })
+            else:
+                state["status"] = "answered"
         state["events"].append({"type": "finish", "status": state["status"]})
         return self._persist(state)
 
@@ -581,6 +651,29 @@ class SecretaryCore:
         save_state(state, self.folder)
         return self.run(state)
 
+    def reopen(self, task_id: str, user_update: str = "") -> WorkState:
+        """Explicitly reopen an older, prematurely answered ongoing task.
+
+        Preserve its immutable original objective, observations and prior
+        events. Normal one-off answered tasks cannot be reopened this way.
+        """
+        state = load_state(task_id, self.folder)
+        if state.get("status") != "answered" or not requires_continuation(
+                state.get("original_request", "")):
+            raise ValueError("Only answered tasks with explicit ongoing intent can be reopened")
+        state["status"] = "running"
+        state["turns"] = 0
+        state["review_attempts"] = 0
+        state["session_event_start"] = len(state.get("events") or [])
+        state["events"].append({
+            "type": "task_reopened",
+            "reason": "ユーザーが未解決の継続依頼を再開",
+        })
+        if user_update.strip():
+            state["user_update"] = user_update.strip()
+            state["events"].append({"type": "user_update", "text": user_update.strip()})
+        return self.run(state)
+
     def resume(self, task_id: str, user_update: str = "") -> WorkState:
         state = load_state(task_id, self.folder)
         if state["status"] == "answered":
@@ -592,6 +685,9 @@ class SecretaryCore:
             state["events"].append({"type": "user_update",
                                     "text": user_update.strip()})
         state["status"] = "running"
+        state["turns"] = 0
+        state["review_attempts"] = 0
+        state["session_event_start"] = len(state["events"])
         return self.run(state)
 
 
