@@ -1,6 +1,10 @@
 # PKB自前プロトタイプ：最初の実装単位
 
-**状態：GitHub実装のみ、サブPC未検証。** 現在のブランチは運用DB・既存APIを変更しない。
+**現行状態（2026-09-28）**: PKBプロトタイプをGitHubの`main`へfast-forward統合済み（`3eb8d3cdd7802d0d05f298319f1308f9ff7736d7`）。既存の限定登録・訂正・SQL-first検索・Episode取込は隔離DBのサブPC実機試験に成功し、Tkinter診断GUIも起動・LLM比較の本人実測あり。**新Web Workbenchと日常用PKB GUIは未実装**。この下の「GitHubのみ・未実機」は各実装を追加した**当時の履歴記述**であり、最新版の実機到達点や次の操作として使わない。詳細は[設計repo STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md)。
+
+## main統合後の安全な扱い
+
+`pkb_proto/sql/005〜007`と隔離DB用スクリプトは**運用`secretary`DBへ適用しない**。通常の運用migrationは`db/migrations`配下のみを対象とし、本プロトの追加SQLは別ディレクトリで管理する。既存サブPCの実験用writer／秘密ファイルを運用DBのRoleや正本に転用しない。GitHub mainへの統合は、サブPCのローカルブランチ切替・DB変更・ソフト導入・GUI実装ではない。
 
 ## 目的
 
