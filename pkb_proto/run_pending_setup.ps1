@@ -12,7 +12,8 @@ $file010 = Join-Path $root 'pkb_proto\sql\010_pkb_proto_pending_review_audit.sql
 $file011 = Join-Path $root 'pkb_proto\sql\011_pkb_proto_pending_acceptance.sql'
 $file012 = Join-Path $root 'pkb_proto\sql\012_pkb_proto_pending_interpreter.sql'
 $file013 = Join-Path $root 'pkb_proto\sql\013_pkb_proto_entity_model.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013)) {
+$file014 = Join-Path $root 'pkb_proto\sql\014_pkb_proto_component_state.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -163,7 +164,34 @@ $verify013 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($verify013 | Out-String).Trim() -ne '1') {
     throw 'Compositional Entity model verification failed.'
 }
-Write-Host 'PASS: PKB prototype migrations verified through 013 (Pending + interpreter + compositional Entity model).'
+$has014 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='014_pkb_proto_component_state.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 014 schema version.' }
+if (($has014 | Out-String).Trim() -eq '0') {
+    $hash014 = (Get-FileHash -LiteralPath $file014 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql014 = [IO.File]::ReadAllText($file014).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash014)
+    $tmpName014 = 'pkb-component-state-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp014 = Join-Path ([IO.Path]::GetTempPath()) $tmpName014
+    $remoteTmp014 = '/tmp/' + $tmpName014
+    try {
+        [IO.File]::WriteAllText($localTmp014, $sql014, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp014 ($id + ':' + $remoteTmp014) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 014 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp014
+        if ($LASTEXITCODE -ne 0) { throw '014 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp014) { Remove-Item -LiteralPath $localTmp014 }
+        & docker exec $id rm -f $remoteTmp014 | Out-Null
+    }
+} elseif (($has014 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 014 migration records.'
+}
+
+$verify014 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='014_pkb_proto_component_state.sql';"
+if ($LASTEXITCODE -ne 0 -or ($verify014 | Out-String).Trim() -ne '1') {
+    throw 'Component relation/current-state verification failed.'
+}
+Write-Host 'PASS: PKB prototype migrations verified through 014 (Pending + interpreter + Entity/Relation/Event/State component model).'
+
 
 
 
