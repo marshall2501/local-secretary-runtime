@@ -10,6 +10,7 @@ from pkb_proto.daily_pkb import (
     FINANCE_PAGE_SIZE_DEFAULT,
     FINANCE_UI_DEFAULT_OPEN,
     PKB_UI_DEFAULT_OPEN,
+    UI_VISIBILITY_DEFAULT,
     _PKB_UI_OPEN,
     _default_ui_preferences,
     _set_pkb_ui_open,
@@ -69,6 +70,10 @@ class DailyPKBParserTests(unittest.TestCase):
             "pkb": {"write": False, "search": "invalid"},
             "entity": {"history": True, "events": "invalid"},
             "finance": {"details": True, "recent_limit": 100, "stored": 1},
+            "visibility": {
+                "pkb": {"limits": False, "write": "invalid"},
+                "core": {"trace": False},
+            },
         })
         self.assertFalse(prefs["pkb"]["write"])
         self.assertEqual(prefs["pkb"]["search"], PKB_UI_DEFAULT_OPEN["search"])
@@ -80,6 +85,12 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertTrue(prefs["finance"]["details"])
         self.assertEqual(prefs["finance"]["stored"], FINANCE_UI_DEFAULT_OPEN["stored"])
         self.assertEqual(prefs["finance"]["recent_limit"], 100)
+        self.assertFalse(prefs["visibility"]["pkb"]["limits"])
+        self.assertEqual(
+            prefs["visibility"]["pkb"]["write"],
+            UI_VISIBILITY_DEFAULT["pkb"]["write"],
+        )
+        self.assertFalse(prefs["visibility"]["core"]["trace"])
 
     def test_ui_preferences_round_trip_json_outside_pkb(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -89,6 +100,8 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["entity"]["history"] = True
             prefs["finance"]["details"] = True
             prefs["finance"]["recent_limit"] = 50
+            prefs["visibility"]["pkb"]["limits"] = False
+            prefs["visibility"]["core"]["trace"] = False
             saved = save_ui_preferences(prefs, path)
             loaded = load_ui_preferences(path)
             self.assertEqual(loaded, saved)
@@ -96,11 +109,14 @@ class DailyPKBParserTests(unittest.TestCase):
             self.assertTrue(loaded["entity"]["history"])
             self.assertTrue(loaded["finance"]["details"])
             self.assertEqual(loaded["finance"]["recent_limit"], 50)
+            self.assertFalse(loaded["visibility"]["pkb"]["limits"])
+            self.assertFalse(loaded["visibility"]["core"]["trace"])
 
     def test_ui_preferences_missing_file_uses_builtin_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             loaded = load_ui_preferences(Path(directory) / "missing.json")
         self.assertEqual(loaded["pkb"], PKB_UI_DEFAULT_OPEN)
+        self.assertEqual(loaded["visibility"], UI_VISIBILITY_DEFAULT)
         self.assertEqual(
             loaded["finance"]["recent_limit"],
             FINANCE_PAGE_SIZE_DEFAULT,
