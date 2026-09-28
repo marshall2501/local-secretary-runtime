@@ -72,6 +72,16 @@ FINANCE_UI_DEFAULT_OPEN = {
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
 
+UI_VISIBILITY_DEFAULT = {
+    "pkb": {key: True for key in PKB_UI_DEFAULT_OPEN},
+    "entity": {key: True for key in ENTITY_UI_DEFAULT_OPEN},
+    "finance": {key: True for key in FINANCE_UI_DEFAULT_OPEN},
+    "core": {
+        "trace": True,
+        "limits": True,
+    },
+}
+
 
 def _default_ui_preferences() -> dict:
     return {
@@ -80,6 +90,10 @@ def _default_ui_preferences() -> dict:
         "finance": {
             **FINANCE_UI_DEFAULT_OPEN,
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
+        },
+        "visibility": {
+            section: dict(values)
+            for section, values in UI_VISIBILITY_DEFAULT.items()
         },
     }
 
@@ -121,6 +135,17 @@ def _validate_ui_preferences(raw: object) -> dict:
         page_size = finance.get("recent_limit")
         if type(page_size) is int and page_size in FINANCE_PAGE_SIZE_OPTIONS:
             result["finance"]["recent_limit"] = page_size
+
+    visibility = raw.get("visibility")
+    if isinstance(visibility, dict):
+        for section, defaults in UI_VISIBILITY_DEFAULT.items():
+            section_values = visibility.get(section)
+            if not isinstance(section_values, dict):
+                continue
+            for key in defaults:
+                value = section_values.get(key)
+                if isinstance(value, bool):
+                    result["visibility"][section][key] = value
     return result
 
 
@@ -189,6 +214,11 @@ def _set_finance_ui_open(key: str, value: bool) -> None:
     if key not in FINANCE_UI_DEFAULT_OPEN:
         raise KeyError("unknown finance accordion key")
     _FINANCE_UI_OPEN[key] = bool(value)
+
+
+def _block_visibility_class(section: str, key: str) -> str:
+    visible = _UI_PREFERENCES["visibility"][section][key]
+    return "" if visible else " hidden"
 
 
 COMPONENT_WRITE_PATTERN = re.compile(
@@ -1503,6 +1533,7 @@ def core_page():
                 except Exception as exc:
                     with ui.expansion("検証・稼働ログ", value=False).classes(
                         "w-full border border-red-200 bg-red-50"
+                        + _block_visibility_class("core", "trace")
                     ):
                         ui.label("Traceを取得できません: " + str(exc)).classes(
                             "text-red-700"
@@ -1512,6 +1543,7 @@ def core_page():
                 task = trace["task"]
                 with ui.expansion("検証・稼働ログ", value=False).classes(
                     "w-full border-2 border-slate-300 bg-slate-50"
+                    + _block_visibility_class("core", "trace")
                 ):
                     ui.label(
                         "DBに記録されたTask / Action / Resultを表示します。"
@@ -1646,7 +1678,9 @@ def core_page():
             resume_panel()
             trace_panel()
 
-        with ui.card().classes("w-full"):
+        with ui.card().classes(
+            "w-full" + _block_visibility_class("core", "limits")
+        ):
             ui.label("この縦断でまだ行わないこと").classes("font-bold")
             ui.label(
                 "Web調査、外部Tool実行、承認、結果検証による再計画は"
@@ -1665,6 +1699,12 @@ def settings_page():
         "reviewed": "処理済みの確認待ち",
         "limits": "この最小実装の制限",
     }
+    entity_labels = {
+        "current": "現在のState / Attribute",
+        "relations": "Relations",
+        "events": "Event履歴",
+        "history": "過去のState / Attribute",
+    }
     finance_labels = {
         "filter": "家計フィルタ・検索",
         "stored": "保存済み家計",
@@ -1674,96 +1714,159 @@ def settings_page():
         "imports": "Import履歴 / Source",
         "csv": "MoneyForward CSV 取込",
     }
+    core_labels = {
+        "trace": "検証・稼働ログ",
+        "limits": "この縦断でまだ行わないこと",
+    }
 
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
         _portal_header(
             "表示設定",
-            "日常用GUIの初期表示を変更。サーバー再起動なしで保存・反映します。",
+            "日常用GUIの表示・初期展開を変更。サーバー再起動は不要です。",
         )
+        ui.label(
+            "「表示」はブロック自体の表示/非表示、「初期展開」は表示する"
+            "アコーディオンを最初から開くかを設定します。"
+        ).classes("text-sm text-grey-7")
         ui.label(
             "保存先はローカルの data/ui_preferences.json（Git管理外）。"
             "PKBの本人データとは分離しています。"
         ).classes("text-sm text-grey-7")
 
-        pkb_controls = {}
+        pkb_open_controls = {}
+        pkb_visible_controls = {}
         with ui.card().classes("w-full border-2 border-green-200 bg-green-50"):
             ui.label("PKB").classes("text-lg font-bold text-green-900")
-            ui.label("各ブロックを最初に開いて表示するか設定します。").classes(
-                "text-sm text-green-900"
-            )
             for key, label in pkb_labels.items():
-                pkb_controls[key] = ui.switch(
-                    label,
-                    value=_UI_PREFERENCES["pkb"][key],
-                )
+                with ui.row().classes("w-full items-center gap-4"):
+                    ui.label(label).classes("grow")
+                    pkb_visible_controls[key] = ui.switch(
+                        "表示",
+                        value=_UI_PREFERENCES["visibility"]["pkb"][key],
+                    )
+                    pkb_open_controls[key] = ui.switch(
+                        "初期展開",
+                        value=_UI_PREFERENCES["pkb"][key],
+                    )
 
-        entity_labels = {
-            "current": "現在のState / Attribute",
-            "relations": "Relations",
-            "events": "Event履歴",
-            "history": "過去のState / Attribute",
-        }
-        entity_controls = {}
+        entity_open_controls = {}
+        entity_visible_controls = {}
         with ui.card().classes("w-full border-2 border-purple-200 bg-purple-50"):
             ui.label("Entity詳細").classes("text-lg font-bold text-purple-900")
-            ui.label("Entity詳細画面の各ブロックの初期状態を設定します。").classes(
-                "text-sm text-purple-900"
-            )
             for key, label in entity_labels.items():
-                entity_controls[key] = ui.switch(
-                    label,
-                    value=_UI_PREFERENCES["entity"][key],
-                )
+                with ui.row().classes("w-full items-center gap-4"):
+                    ui.label(label).classes("grow")
+                    entity_visible_controls[key] = ui.switch(
+                        "表示",
+                        value=_UI_PREFERENCES["visibility"]["entity"][key],
+                    )
+                    entity_open_controls[key] = ui.switch(
+                        "初期展開",
+                        value=_UI_PREFERENCES["entity"][key],
+                    )
 
-        finance_controls = {}
+        finance_open_controls = {}
+        finance_visible_controls = {}
         with ui.card().classes("w-full border-2 border-blue-200 bg-blue-50"):
             ui.label("家計・資産").classes("text-lg font-bold text-blue-900")
-            ui.label("各ブロックの初期状態と明細の既定件数を設定します。").classes(
-                "text-sm text-blue-900"
-            )
             for key, label in finance_labels.items():
-                finance_controls[key] = ui.switch(
-                    label,
-                    value=_UI_PREFERENCES["finance"][key],
-                )
+                with ui.row().classes("w-full items-center gap-4"):
+                    ui.label(label).classes("grow")
+                    finance_visible_controls[key] = ui.switch(
+                        "表示",
+                        value=_UI_PREFERENCES["visibility"]["finance"][key],
+                    )
+                    finance_open_controls[key] = ui.switch(
+                        "初期展開",
+                        value=_UI_PREFERENCES["finance"][key],
+                    )
             page_size_select = ui.select(
                 options=list(FINANCE_PAGE_SIZE_OPTIONS),
                 label="保存済み明細の既定1ページ件数",
                 value=_UI_PREFERENCES["finance"]["recent_limit"],
             ).classes("min-w-64")
 
+        core_visible_controls = {}
+        with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
+            ui.label("Secretary Core").classes("text-lg font-bold")
+            ui.label(
+                "主操作の依頼ブロックは常時表示。検証・補足ブロックだけ非表示にできます。"
+            ).classes("text-sm text-grey-7")
+            for key, label in core_labels.items():
+                with ui.row().classes("w-full items-center gap-4"):
+                    ui.label(label).classes("grow")
+                    core_visible_controls[key] = ui.switch(
+                        "表示",
+                        value=_UI_PREFERENCES["visibility"]["core"][key],
+                    )
+
         ui.label(
-            "「保存して反映」は保存済みの初期値を更新し、現在のPKB/家計の"
-            "アコーディオン状態もその値へそろえます。"
+            "保存後、別画面へ移動するかページを再読み込みすると表示/非表示が反映されます。"
+            "現在のアコーディオン開閉状態と保存済み初期値は別管理です。"
         ).classes("text-sm text-grey-7")
 
         def collect_preferences() -> dict:
             return {
                 "pkb": {
                     key: bool(control.value)
-                    for key, control in pkb_controls.items()
+                    for key, control in pkb_open_controls.items()
                 },
                 "entity": {
                     key: bool(control.value)
-                    for key, control in entity_controls.items()
+                    for key, control in entity_open_controls.items()
                 },
                 "finance": {
                     **{
                         key: bool(control.value)
-                        for key, control in finance_controls.items()
+                        for key, control in finance_open_controls.items()
                     },
                     "recent_limit": int(
                         page_size_select.value or FINANCE_PAGE_SIZE_DEFAULT
                     ),
                 },
+                "visibility": {
+                    "pkb": {
+                        key: bool(control.value)
+                        for key, control in pkb_visible_controls.items()
+                    },
+                    "entity": {
+                        key: bool(control.value)
+                        for key, control in entity_visible_controls.items()
+                    },
+                    "finance": {
+                        key: bool(control.value)
+                        for key, control in finance_visible_controls.items()
+                    },
+                    "core": {
+                        key: bool(control.value)
+                        for key, control in core_visible_controls.items()
+                    },
+                },
             }
+
+        def sync_controls(preferences: dict) -> None:
+            for key, control in pkb_open_controls.items():
+                control.value = preferences["pkb"][key]
+            for key, control in pkb_visible_controls.items():
+                control.value = preferences["visibility"]["pkb"][key]
+            for key, control in entity_open_controls.items():
+                control.value = preferences["entity"][key]
+            for key, control in entity_visible_controls.items():
+                control.value = preferences["visibility"]["entity"][key]
+            for key, control in finance_open_controls.items():
+                control.value = preferences["finance"][key]
+            for key, control in finance_visible_controls.items():
+                control.value = preferences["visibility"]["finance"][key]
+            for key, control in core_visible_controls.items():
+                control.value = preferences["visibility"]["core"][key]
+            page_size_select.value = preferences["finance"]["recent_limit"]
 
         def save_and_apply():
             try:
                 saved = save_ui_preferences(collect_preferences())
                 _apply_ui_preferences(saved)
                 ui.notify(
-                    "表示設定を保存し、現在のセッションにも反映しました",
+                    "表示設定を保存しました。各画面を開き直すと反映されます",
                     type="positive",
                 )
             except Exception as exc:
@@ -1771,17 +1874,11 @@ def settings_page():
 
         def restore_builtin():
             defaults = _default_ui_preferences()
-            for key, control in pkb_controls.items():
-                control.value = defaults["pkb"][key]
-            for key, control in entity_controls.items():
-                control.value = defaults["entity"][key]
-            for key, control in finance_controls.items():
-                control.value = defaults["finance"][key]
-            page_size_select.value = defaults["finance"]["recent_limit"]
+            sync_controls(defaults)
             try:
                 saved = save_ui_preferences(defaults)
                 _apply_ui_preferences(saved)
-                ui.notify("初期値へ戻して保存・反映しました", type="positive")
+                ui.notify("初期値へ戻して保存しました", type="positive")
             except Exception as exc:
                 ui.notify("初期値を保存できません: " + str(exc)[:220], type="negative")
 
@@ -1855,6 +1952,7 @@ def finance_page():
             on_value_change=remember_expansion("filter"),
         ).classes(
             "w-full border-2 border-teal-200 bg-teal-50 text-teal-900"
+            + _block_visibility_class("finance", "filter")
         ):
             with ui.row().classes("w-full gap-3 flex-wrap items-end"):
                 start_input = ui.input("開始日").props("type=date").classes("min-w-40")
@@ -2209,7 +2307,7 @@ def finance_page():
             value=state["ui_open"]["csv"],
             on_value_change=remember_expansion("csv"),
         ).classes(
-            "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
+            "w-full border-2 border-blue-300 bg-blue-50 text-blue-900" + _block_visibility_class("pkb", "search")
         ):
             ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
             ui.label(
@@ -2504,7 +2602,7 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["current"],
             on_value_change=remember_expansion("current"),
         ).classes(
-            "w-full border-2 border-green-300 bg-green-50 text-green-900"
+            "w-full border-2 border-green-300 bg-green-50 text-green-900" + _block_visibility_class("pkb", "write")
         ):
             rows = detail["current"]
             if not rows:
@@ -2535,8 +2633,7 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["relations"],
             on_value_change=remember_expansion("relations"),
         ).classes(
-            "w-full border-2 border-purple-300 bg-purple-50 text-purple-900"
-        ):
+            "w-full border-2 border-purple-300 bg-purple-50 text-purple-900" + _block_visibility_class("entity", "current")\n        )):
             relations = detail["relations"]
             if not relations:
                 ui.label("現在または履歴Relationはありません。")
@@ -2545,8 +2642,7 @@ def entity_page(entity_id: str):
                     arrow = "→" if rel["direction"] == "outgoing" else "←"
                     role = f" / role={rel['relation_role']}" if rel["relation_role"] else ""
                     with ui.row().classes(
-                        "w-full items-center gap-3 border-b border-purple-200 py-2"
-                    ):
+                        "w-full items-center gap-3 border-b border-purple-200 py-2" + _block_visibility_class("entity", "relations")\n                    )):
                         ui.label(arrow).classes("text-lg font-bold")
                         with ui.column().classes("grow gap-0"):
                             ui.label(
@@ -2564,8 +2660,7 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["events"],
             on_value_change=remember_expansion("events"),
         ).classes(
-            "w-full border-2 border-orange-300 bg-orange-50 text-orange-900"
-        ):
+            "w-full border-2 border-orange-300 bg-orange-50 text-orange-900" + _block_visibility_class("entity", "events")\n        )):
             rows = detail["events"]
             if not rows:
                 ui.label("Event履歴はありません。")
@@ -2594,8 +2689,7 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["history"],
             on_value_change=remember_expansion("history"),
         ).classes(
-            "w-full border-2 border-grey-300 bg-grey-1"
-        ):
+            "w-full border-2 border-grey-300 bg-grey-1" + _block_visibility_class("entity", "history")\n        )):
             rows = detail["history"]
             if not rows:
                 ui.label("終了済みのState / Attributeはありません。")
@@ -2683,7 +2777,7 @@ def pkb_page():
             value=_PKB_UI_OPEN["correction"],
             on_value_change=remember_expansion("correction"),
         ).classes(
-            "w-full border-2 border-amber-300 bg-amber-50 text-amber-900"
+            "w-full border-2 border-amber-300 bg-amber-50 text-amber-900" + _block_visibility_class("pkb", "correction")
         ):
             ui.label("例: 訂正：サブPCではなくメインPCをDRV-A1へ更新した。").classes("text-sm")
             correction_input = ui.textarea(label="明示的に訂正").classes("w-full")
@@ -2767,7 +2861,7 @@ def pkb_page():
             value=_PKB_UI_OPEN["entities"],
             on_value_change=remember_expansion("entities"),
         ).classes(
-            "w-full border-2 border-indigo-300 bg-indigo-50 text-indigo-900"
+            "w-full border-2 border-indigo-300 bg-indigo-50 text-indigo-900" + _block_visibility_class("pkb", "entities")
         ):
             try:
                 with connection() as db:
@@ -2802,7 +2896,7 @@ def pkb_page():
                     value=_PKB_UI_OPEN["pending"],
                     on_value_change=remember_expansion("pending"),
                 ).classes(
-                    "w-full border-2 border-purple-500 bg-purple-50 text-purple-900"
+                    "w-full border-2 border-purple-500 bg-purple-50 text-purple-900" + _block_visibility_class("pkb", "pending")
                 ):
                     ui.label("確認待ち一覧を取得できません: " + str(exc)).classes("text-red-600")
                 return
@@ -2813,7 +2907,7 @@ def pkb_page():
                 value=_PKB_UI_OPEN["pending"],
                 on_value_change=remember_expansion("pending"),
             ).classes(
-                "w-full border-2 border-purple-500 bg-purple-50 text-purple-900"
+                "w-full border-2 border-purple-500 bg-purple-50 text-purple-900" + _block_visibility_class("pkb", "pending")
             ):
                 if not rows:
                     ui.label("確認待ちはありません。")
@@ -2906,7 +3000,7 @@ def pkb_page():
             "この最小実装の制限",
             value=_PKB_UI_OPEN["limits"],
             on_value_change=remember_expansion("limits"),
-        ):
+        ).classes(_block_visibility_class("pkb", "limits")):
             ui.label("限定文型は決定的に処理し、それ以外はローカルLLMで単一の構造化候補化を試みます。")
             ui.label("LLM由来候補・曖昧入力・未知Entity・複数候補はPendingへ回し、勝手に正式Claimへ登録しません。")
             ui.label("LLM解釈は現在driver_updated / servo_updatedの単一候補だけ。実データ、金融・給与・税務・Googleカレンダー連携は未実装です。")
