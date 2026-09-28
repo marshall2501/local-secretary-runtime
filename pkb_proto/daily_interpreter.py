@@ -136,7 +136,14 @@ def inspect_output(text: str, entity_names: set[str], raw: object) -> Interpreta
     # Keep the first LLM slice intentionally single-entity. It prevents a model
     # from silently choosing one target from a multi-target sentence.
     mentioned = [name for name in entity_names if name in text]
-    if len(mentioned) != 1 or mentioned[0] != entity:
+    # Nested names are common in the compositional model (e.g. "メインPC" and
+    # "メインPCのGPU"). Prefer the most specific mention rather than treating
+    # the parent substring as a second independent target.
+    most_specific = [
+        name for name in mentioned
+        if not any(name != other and name in other for other in mentioned)
+    ]
+    if len(most_specific) != 1 or most_specific[0] != entity:
         return Interpretation("invalid", "ambiguous_entity_mentions")
     # The model's quote/value are advisory. Ground the candidate back to the
     # original text deterministically so minor punctuation/quoting mistakes do
