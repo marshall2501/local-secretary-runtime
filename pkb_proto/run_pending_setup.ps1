@@ -8,7 +8,8 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $db = 'secretary_pkb_proto_20260927'
 $file008 = Join-Path $root 'pkb_proto\sql\008_pkb_proto_pending_intake.sql'
 $file009 = Join-Path $root 'pkb_proto\sql\009_pkb_proto_pending_privileges.sql'
-foreach ($file in @($file008, $file009)) {
+$file010 = Join-Path $root 'pkb_proto\sql\010_pkb_proto_pending_review_audit.sql'
+foreach ($file in @($file008, $file009, $file010)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -54,4 +55,32 @@ $verify009 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($grants | Out-String).Trim() -ne 't' -or ($verify009 | Out-String).Trim() -ne '1') {
     throw 'Pending Claims privilege verification failed.'
 }
-Write-Host 'PASS: Pending Claims storage and writer privileges verified (008 + 009).'
+
+$has010 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='010_pkb_proto_pending_review_audit.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 010 schema version.' }
+if (($has010 | Out-String).Trim() -eq '0') {
+    $hash010 = (Get-FileHash -LiteralPath $file010 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql010 = [IO.File]::ReadAllText($file010).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash010)
+    $tmpName010 = 'pkb-pending-review-audit-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp010 = Join-Path ([IO.Path]::GetTempPath()) $tmpName010
+    $remoteTmp010 = '/tmp/' + $tmpName010
+    try {
+        [IO.File]::WriteAllText($localTmp010, $sql010, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp010 ($id + ':' + $remoteTmp010) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 010 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp010
+        if ($LASTEXITCODE -ne 0) { throw '010 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp010) { Remove-Item -LiteralPath $localTmp010 }
+        & docker exec $id rm -f $remoteTmp010 | Out-Null
+    }
+} elseif (($has010 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 010 migration records.'
+}
+
+$verify010 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='010_pkb_proto_pending_review_audit.sql';"
+if ($LASTEXITCODE -ne 0 -or ($verify010 | Out-String).Trim() -ne '1') {
+    throw 'Pending Claims review audit verification failed.'
+}
+Write-Host 'PASS: Pending Claims storage, privileges and review audit verified (008 + 009 + 010).'
+
