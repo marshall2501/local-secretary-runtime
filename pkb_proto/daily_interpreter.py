@@ -16,8 +16,8 @@ from urllib.request import Request, urlopen
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED_MODELS = ("llama3.1:8b", "qwen3.5:9b")
 ALLOWED_PREDICATES = {
-    "driver_updated": "更新した",
-    "servo_updated": "交換した",
+    "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
+    "servo_updated": ("交換した", "取り替えた"),
 }
 BLOCKED_MARKERS = (
     "かもしれない", "気がする", "たぶん", "多分", "未確認", "不明",
@@ -83,8 +83,9 @@ def messages(text: str, entity_names: list[str]) -> list[dict[str, str]]:
         "曖昧表現、訂正、対象不明なら candidate は null にしてください。"
         f"対象は次の既知Entityだけです: {entities}。"
         "predicate は driver_updated または servo_updated のみ。"
-        "driver_updated は『更新した』が明示された場合、servo_updated は『交換した』が"
-        "明示された場合だけ使います。"
+        "driver_updated は『更新した』『更新しておいた』『アップデートした』の"
+        "いずれかが明示された場合だけ使います。servo_updated は『交換した』"
+        "または『取り替えた』が明示された場合だけ使います。"
         "candidateを返す場合は entity_mention, predicate, value, quote の4項目だけ。"
         "entity_mention と value は原文に実際にある文字列、quote は根拠となる原文の"
         "連続した完全一致部分文字列にしてください。創作・補完は禁止です。"
@@ -130,7 +131,7 @@ def inspect_output(text: str, entity_names: set[str], raw: object) -> Interpreta
         return Interpretation("invalid", "ambiguous_entity_mentions")
     if text.count(quote) != 1 or entity not in quote or value not in quote:
         return Interpretation("invalid", "ungrounded_quote_or_value")
-    if ALLOWED_PREDICATES[predicate] not in quote:
+    if not any(phrase in quote for phrase in ALLOWED_PREDICATES[predicate]):
         return Interpretation("invalid", "action_not_explicit_in_quote")
     return Interpretation(
         "candidate", "deterministically_grounded_model_candidate",
