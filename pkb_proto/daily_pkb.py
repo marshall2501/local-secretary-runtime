@@ -9,6 +9,7 @@ Run with: python -m pkb_proto.daily_pkb
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import re
 from dataclasses import asdict
@@ -52,16 +53,118 @@ PKB_UI_DEFAULT_OPEN = {
     "reviewed": False,
     "limits": False,
 }
-# The daily app is localhost/single-user today. Keep navigation state in one
-# process-session dictionary so /pkb -> /entity/... -> /pkb restores the
-# accordion layout. Server restart resets it; no hidden fields or DB writes.
-_PKB_UI_OPEN = dict(PKB_UI_DEFAULT_OPEN)
+FINANCE_UI_DEFAULT_OPEN = {
+    "filter": True,
+    "stored": True,
+    "monthly": True,
+    "categories": False,
+    "details": False,
+    "imports": False,
+    "csv": False,
+}
+FINANCE_PAGE_SIZE_DEFAULT = 25
+FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
+
+
+def _default_ui_preferences() -> dict:
+    return {
+        "pkb": dict(PKB_UI_DEFAULT_OPEN),
+        "finance": {
+            **FINANCE_UI_DEFAULT_OPEN,
+            "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
+        },
+    }
+
+
+def _preferences_path() -> Path:
+    override = os.environ.get("LSA_UI_PREFERENCES_PATH", "").strip()
+    if override:
+        return Path(override)
+    # Runtime-only preferences live under gitignored data/, not in PKB data
+    # and not in source control. This also survives server restarts.
+    return Path(__file__).resolve().parents[1] / "data" / "ui_preferences.json"
+
+
+def _validate_ui_preferences(raw: object) -> dict:
+    result = _default_ui_preferences()
+    if not isinstance(raw, dict):
+        return result
+
+    pkb = raw.get("pkb")
+    if isinstance(pkb, dict):
+        for key in PKB_UI_DEFAULT_OPEN:
+            value = pkb.get(key)
+            if isinstance(value, bool):
+                result["pkb"][key] = value
+
+    finance = raw.get("finance")
+    if isinstance(finance, dict):
+        for key in FINANCE_UI_DEFAULT_OPEN:
+            value = finance.get(key)
+            if isinstance(value, bool):
+                result["finance"][key] = value
+        page_size = finance.get("recent_limit")
+        if type(page_size) is int and page_size in FINANCE_PAGE_SIZE_OPTIONS:
+            result["finance"]["recent_limit"] = page_size
+    return result
+
+
+def load_ui_preferences(path: Path | None = None) -> dict:
+    target = path or _preferences_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return _default_ui_preferences()
+    return _validate_ui_preferences(raw)
+
+
+def save_ui_preferences(preferences: dict, path: Path | None = None) -> dict:
+    target = path or _preferences_path()
+    validated = _validate_ui_preferences(preferences)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(validated, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(target)
+    return validated
+
+
+_UI_PREFERENCES = load_ui_preferences()
+
+# Current navigation state is separate from saved defaults. It preserves the
+# user's current accordion layout while moving between pages, while settings
+# can deliberately reset the live state to newly saved defaults.
+_PKB_UI_OPEN = dict(_UI_PREFERENCES["pkb"])
+_FINANCE_UI_OPEN = {
+    key: _UI_PREFERENCES["finance"][key]
+    for key in FINANCE_UI_DEFAULT_OPEN
+}
+
+
+def _apply_ui_preferences(preferences: dict) -> None:
+    global _UI_PREFERENCES
+    validated = _validate_ui_preferences(preferences)
+    _UI_PREFERENCES = validated
+    _PKB_UI_OPEN.clear()
+    _PKB_UI_OPEN.update(validated["pkb"])
+    _FINANCE_UI_OPEN.clear()
+    _FINANCE_UI_OPEN.update(
+        {key: validated["finance"][key] for key in FINANCE_UI_DEFAULT_OPEN}
+    )
 
 
 def _set_pkb_ui_open(key: str, value: bool) -> None:
     if key not in PKB_UI_DEFAULT_OPEN:
         raise KeyError("unknown PKB accordion key")
     _PKB_UI_OPEN[key] = bool(value)
+
+
+def _set_finance_ui_open(key: str, value: bool) -> None:
+    if key not in FINANCE_UI_DEFAULT_OPEN:
+        raise KeyError("unknown finance accordion key")
+    _FINANCE_UI_OPEN[key] = bool(value)
 
 
 COMPONENT_WRITE_PATTERN = re.compile(
@@ -586,6 +689,7 @@ def _nav():
         ui.button("機能一覧", icon="apps").props("flat href=/features tag=a")
         ui.button("PKB", icon="account_tree").props("flat href=/pkb tag=a")
         ui.button("家計・資産", icon="account_balance_wallet").props("flat href=/finance tag=a")
+        ui.button("設定", icon="settings").props("flat href=/settings tag=a")
 
 
 def _portal_header(title: str, subtitle: str):
@@ -687,8 +791,130 @@ def features_page():
                         )
 
 
+@ui.page("/settings")
+def settings_page():
+    pkb_labels = {
+        "write": "記録",
+        "correction": "訂正",
+        "search": "検索・履歴",
+        "entities": "Entity一覧",
+        "pending": "確認待ち（Pending Claims）",
+        "reviewed": "処理済みの確認待ち",
+        "limits": "この最小実装の制限",
+    }
+    finance_labels = {
+        "filter": "家計フィルタ・検索",
+        "stored": "保存済み家計",
+        "monthly": "保存済み月別集計",
+        "categories": "保存済みカテゴリ別支出",
+        "details": "保存済み明細",
+        "imports": "Import履歴 / Source",
+        "csv": "MoneyForward CSV 取込",
+    }
+
+    with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
+        _portal_header(
+            "表示設定",
+            "日常用GUIの初期表示を変更。サーバー再起動なしで保存・反映します。",
+        )
+        ui.label(
+            "保存先はローカルの data/ui_preferences.json（Git管理外）。"
+            "PKBの本人データとは分離しています。"
+        ).classes("text-sm text-grey-7")
+
+        pkb_controls = {}
+        with ui.card().classes("w-full border-2 border-green-200 bg-green-50"):
+            ui.label("PKB").classes("text-lg font-bold text-green-900")
+            ui.label("各ブロックを最初に開いて表示するか設定します。").classes(
+                "text-sm text-green-900"
+            )
+            for key, label in pkb_labels.items():
+                pkb_controls[key] = ui.switch(
+                    label,
+                    value=_UI_PREFERENCES["pkb"][key],
+                )
+
+        finance_controls = {}
+        with ui.card().classes("w-full border-2 border-blue-200 bg-blue-50"):
+            ui.label("家計・資産").classes("text-lg font-bold text-blue-900")
+            ui.label("各ブロックの初期状態と明細の既定件数を設定します。").classes(
+                "text-sm text-blue-900"
+            )
+            for key, label in finance_labels.items():
+                finance_controls[key] = ui.switch(
+                    label,
+                    value=_UI_PREFERENCES["finance"][key],
+                )
+            page_size_select = ui.select(
+                options=list(FINANCE_PAGE_SIZE_OPTIONS),
+                label="保存済み明細の既定1ページ件数",
+                value=_UI_PREFERENCES["finance"]["recent_limit"],
+            ).classes("min-w-64")
+
+        ui.label(
+            "「保存して反映」は保存済みの初期値を更新し、現在のPKB/家計の"
+            "アコーディオン状態もその値へそろえます。"
+        ).classes("text-sm text-grey-7")
+
+        def collect_preferences() -> dict:
+            return {
+                "pkb": {
+                    key: bool(control.value)
+                    for key, control in pkb_controls.items()
+                },
+                "finance": {
+                    **{
+                        key: bool(control.value)
+                        for key, control in finance_controls.items()
+                    },
+                    "recent_limit": int(
+                        page_size_select.value or FINANCE_PAGE_SIZE_DEFAULT
+                    ),
+                },
+            }
+
+        def save_and_apply():
+            try:
+                saved = save_ui_preferences(collect_preferences())
+                _apply_ui_preferences(saved)
+                ui.notify(
+                    "表示設定を保存し、現在のセッションにも反映しました",
+                    type="positive",
+                )
+            except Exception as exc:
+                ui.notify("表示設定を保存できません: " + str(exc)[:220], type="negative")
+
+        def restore_builtin():
+            defaults = _default_ui_preferences()
+            for key, control in pkb_controls.items():
+                control.value = defaults["pkb"][key]
+            for key, control in finance_controls.items():
+                control.value = defaults["finance"][key]
+            page_size_select.value = defaults["finance"]["recent_limit"]
+            try:
+                saved = save_ui_preferences(defaults)
+                _apply_ui_preferences(saved)
+                ui.notify("初期値へ戻して保存・反映しました", type="positive")
+            except Exception as exc:
+                ui.notify("初期値を保存できません: " + str(exc)[:220], type="negative")
+
+        with ui.row().classes("gap-2"):
+            ui.button(
+                "保存して反映",
+                icon="save",
+                color="blue",
+                on_click=save_and_apply,
+            )
+            ui.button(
+                "初期値に戻す",
+                icon="restart_alt",
+                on_click=restore_builtin,
+            ).props("outline")
+
+
 @ui.page("/finance")
 def finance_page():
+    finance_preferences = _UI_PREFERENCES["finance"]
     state = {
         "preview": None,
         "error": None,
@@ -710,20 +936,11 @@ def finance_page():
             "page": 1,
             "sort_by": "date",
             "sort_dir": "desc",
-            "recent_limit": 25,
+            "recent_limit": finance_preferences["recent_limit"],
         },
-        # UI-only state is kept in one named structure so refreshes do not
-        # scatter hidden flags through the page code. It is intentionally
-        # page-instance state: operations preserve it, full reloads reset it.
-        "ui_open": {
-            "filter": True,
-            "stored": True,
-            "monthly": True,
-            "categories": False,
-            "details": False,
-            "imports": False,
-            "csv": False,
-        },
+        # Current navigation state is kept separately from saved defaults,
+        # matching PKB behavior across normal page navigation.
+        "ui_open": dict(_FINANCE_UI_OPEN),
     }
 
     try:
@@ -736,6 +953,7 @@ def finance_page():
     def remember_expansion(key: str):
         def _remember(event):
             state["ui_open"][key] = bool(event.value)
+            _set_finance_ui_open(key, event.value)
         return _remember
 
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
@@ -790,7 +1008,9 @@ def finance_page():
                         "page": 1,
                         "sort_by": state["filters"].get("sort_by", "date"),
                         "sort_dir": state["filters"].get("sort_dir", "desc"),
-                        "recent_limit": state["filters"].get("recent_limit", 25),
+                        "recent_limit": state["filters"].get(
+                            "recent_limit", finance_preferences["recent_limit"]
+                        ),
                     }
                     if filters["start_date"] and filters["end_date"] and filters["start_date"] > filters["end_date"]:
                         ui.notify("開始日は終了日以前にしてください", type="warning")
@@ -812,7 +1032,7 @@ def finance_page():
                 search_input_finance.value = ""
                 state["filters"]["sort_by"] = "date"
                 state["filters"]["sort_dir"] = "desc"
-                state["filters"]["recent_limit"] = 25
+                state["filters"]["recent_limit"] = finance_preferences["recent_limit"]
                 reload_stored()
 
             with ui.row().classes("gap-2"):
@@ -953,7 +1173,10 @@ def finance_page():
                                 if apply_sort:
                                     filters["sort_by"] = sort_by_select.value or "date"
                                     filters["sort_dir"] = sort_dir_select.value or "desc"
-                                    filters["recent_limit"] = int(page_size_select.value or 50)
+                                    filters["recent_limit"] = int(
+                                        page_size_select.value
+                                        or finance_preferences["recent_limit"]
+                                    )
                                     filters["page"] = 1
                                 elif target_page is not None:
                                     filters["page"] = target_page
