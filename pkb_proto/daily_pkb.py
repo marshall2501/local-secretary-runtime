@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
+from .entity_model_service import list_components
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -33,6 +34,13 @@ WRITER = "secretary_pkb_proto_writer_20260927"
 HOST = "127.0.0.1"
 
 # UI color semantics: green=create/confirm, blue=read/search, orange=edit/review, red=reject/destructive.
+
+COMPONENT_ACTION_PATTERNS = (
+    ("driver_updated", re.compile(
+        r"^(?P<entity>.+?)(?:ドライバー)を(?P<value>[A-Za-z0-9._-]+)へ"
+        r"(?:更新した|更新しておいた|アップデートした)[。.]?$"
+    )),
+)
 
 ACTION_PATTERNS = (
     ("driver_updated", re.compile(r"^(?P<entity>.+?)(?:を)?(?P<value>[A-Za-z0-9._-]+)へ更新した[。.]?$")),
@@ -109,6 +117,20 @@ def _entity_map(db) -> dict[str, dict]:
 
 def parse_write(text: str, entity_names: set[str]) -> dict | None:
     text = text.strip()
+    for predicate, pattern in COMPONENT_ACTION_PATTERNS:
+        match = pattern.fullmatch(text)
+        if not match:
+            continue
+        entity = match.group("entity").strip()
+        if entity not in entity_names:
+            return {"status": "review", "reason": "unknown_or_ambiguous_entity", "entity": entity}
+        return {
+            "status": "parsed",
+            "intent": "assertion",
+            "entity": entity,
+            "predicate": predicate,
+            "value": match.group("value"),
+        }
     for predicate, pattern in ACTION_PATTERNS:
         match = pattern.fullmatch(text)
         if not match:
@@ -163,7 +185,11 @@ def parse_query(text: str, entities: dict[str, dict]) -> ClaimQuery:
             break
     predicate = None
     if "ドライバ" in q or "DRV-" in q:
-        predicate = "driver_updated"
+        predicate = (
+            "current_driver"
+            if any(word in q for word in ("現在", "今の", "現行", "現在値"))
+            else "driver_updated"
+        )
     elif "サーボ" in q or "SERVO-" in q:
         predicate = "servo_updated"
     include_history = any(word in q for word in ("履歴", "過去", "全部", "すべて", "訂正前"))
@@ -344,8 +370,38 @@ def correct_text(text: str) -> dict:
 def search_text(text: str) -> dict:
     with connection() as db:
         entities = _entity_map(db)
+        q = text.strip()
+        if "構成" in q:
+            parent = next(
+                (
+                    row for name, row in sorted(
+                        entities.items(), key=lambda item: len(item[0]), reverse=True
+                    )
+                    if name in q and row["entity_type"] == "computer"
+                ),
+                None,
+            )
+            if parent is not None:
+                rows = list_components(db, UUID(parent["id"]))
+                items = []
+                for row in rows:
+                    item = {}
+                    for key, value in row.items():
+                        if isinstance(value, (datetime, UUID)):
+                            item[key] = str(value)
+                        else:
+                            item[key] = value
+                    items.append(item)
+                return {
+                    "status": "ok",
+                    "result_kind": "components",
+                    "total": len(items),
+                    "items": items,
+                }
         page = query_claims(db, parse_query(text, entities))
-        return _serialize_page(page)
+        result = _serialize_page(page)
+        result["result_kind"] = "claims"
+        return result
 
 
 class TextInput(BaseModel):
@@ -472,7 +528,7 @@ def index():
         with ui.expansion("記録", value=True).classes(
             "w-full border-2 border-green-300 bg-green-50 text-green-900"
         ):
-            ui.label("例: メインPCをDRV-A3へ更新した。 / RCカーBのサーボをSERVO-X3へ交換した。").classes("text-sm")
+            ui.label("例: メインPCをDRV-A3へ更新した。 / メインPCのGPUドライバーをDRV-G1へ更新した。 / RCカーBのサーボをSERVO-X3へ交換した。").classes("text-sm")
             write_input = ui.textarea(label="自然言語で記録").classes("w-full")
             @ui.refreshable
             def write_result():
@@ -530,7 +586,7 @@ def index():
         with ui.expansion("検索・履歴", value=True).classes(
             "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
         ):
-            ui.label("例: サブPCのドライバー更新履歴 / RCカーBのサーボ更新").classes("text-sm")
+            ui.label("例: メインPCの構成 / メインPCのGPUの現在のドライバー / サブPCのドライバー更新履歴").classes("text-sm")
             search_input = ui.input(label="自然言語で検索").classes("w-full")
             @ui.refreshable
             def search_result():
@@ -540,15 +596,27 @@ def index():
                     return
                 ui.label(f'件数: {result.get("total", 0)}')
                 rows = result.get("items", [])
+                if not rows:
+                    ui.label("該当する記録はありません。")
+                    return
+                if result.get("result_kind") == "components":
+                    columns = [
+                        {"name": "parent", "label": "親Entity", "field": "parent_name"},
+                        {"name": "relation", "label": "関係", "field": "relation_predicate"},
+                        {"name": "component", "label": "構成要素", "field": "component_name"},
+                        {"name": "type", "label": "型", "field": "component_type"},
+                        {"name": "driver", "label": "現在ドライバー", "field": "current_driver"},
+                        {"name": "since", "label": "状態開始", "field": "state_valid_from"},
+                        {"name": "source", "label": "状態の出典", "field": "state_source_uri"},
+                    ]
+                    ui.table(columns=columns, rows=rows, row_key="relation_id").classes("w-full")
+                    return
                 for row in rows:
                     raw_status = row.get("status_at_cutoff")
                     if raw_status == "active":
                         row["status_at_cutoff"] = "現行記録"
                     elif raw_status == "superseded":
                         row["status_at_cutoff"] = "旧版・訂正済み"
-                if not rows:
-                    ui.label("該当する記録はありません。")
-                    return
                 columns = [
                     {"name": "entity", "label": "対象", "field": "entity_name"},
                     {"name": "predicate", "label": "種類", "field": "predicate"},
