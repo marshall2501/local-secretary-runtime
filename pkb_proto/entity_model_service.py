@@ -49,6 +49,7 @@ COMPONENT_ROLE_TOKENS = {
     "GPU": "primary_gpu",
     "NIC": "wired_nic",
 }
+ROLE_TO_HUMAN_TOKEN = {value: key for key, value in COMPONENT_ROLE_TOKENS.items()}
 
 
 @dataclass(frozen=True)
@@ -282,3 +283,36 @@ def resolve_component_reference(db, parent_name: str, role_token: str) -> dict |
         "parent_name": parent_name,
         "role_token": role_token,
     }
+
+
+def authoritative_entity_aliases(cur) -> dict[str, set[str]]:
+    """Build aliases only from authoritative Entity names and active Relations.
+
+    Human phrases like "メインPCのGPU" resolve to the normalized child Entity
+    (e.g. GPU1) without making the parent-specific phrase the Entity identity.
+    """
+    cur.execute(
+        """SELECT id, name
+           FROM secretary.entities
+           WHERE retired_at IS NULL"""
+    )
+    aliases = {str(entity_id): {name} for entity_id, name in cur.fetchall()}
+
+    cur.execute(
+        """SELECT p.name, c.id, r.relation_role
+           FROM secretary.entity_relations r
+           JOIN secretary.entities p ON p.id=r.subject_entity_id
+           JOIN secretary.entities c ON c.id=r.object_entity_id
+           WHERE r.predicate='has_component'
+             AND r.relation_role IS NOT NULL
+             AND r.valid_to IS NULL
+             AND r.retracted_at IS NULL
+             AND p.retired_at IS NULL
+             AND c.retired_at IS NULL"""
+    )
+    for parent_name, child_id, relation_role in cur.fetchall():
+        token = ROLE_TO_HUMAN_TOKEN.get(relation_role)
+        if token is None:
+            continue
+        aliases.setdefault(str(child_id), set()).add(f"{parent_name}の{token}")
+    return aliases
