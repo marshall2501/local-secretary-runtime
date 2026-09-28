@@ -43,6 +43,159 @@ class ImportResult:
     reason: str | None = None
 
 
+@dataclass(frozen=True)
+class FinanceDashboard:
+    transaction_count: int
+    start_date: str | None
+    end_date: str | None
+    income_total: int
+    expense_total: int
+    net_total: int
+    monthly: list[dict]
+    categories: list[dict]
+    recent_rows: list[dict]
+    import_batches: list[dict]
+
+
+def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
+    """Read the normalized current finance view from the isolated prototype DB."""
+    _guard_db(db)
+    if recent_limit < 1 or recent_limit > 500:
+        raise ValueError("recent_limit must be between 1 and 500")
+
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT
+                   count(*),
+                   min(transaction_date),
+                   max(transaction_date),
+                   COALESCE(sum(amount_jpy) FILTER (
+                     WHERE calculation_target AND amount_jpy > 0
+                   ), 0),
+                   COALESCE(sum(-amount_jpy) FILTER (
+                     WHERE calculation_target AND amount_jpy < 0
+                   ), 0)
+               FROM secretary.finance_transactions
+               WHERE source_system=%s""",
+            (SOURCE_SYSTEM,),
+        )
+        count, start_date, end_date, income_total, expense_total = cur.fetchone()
+
+        cur.execute(
+            """SELECT
+                   to_char(transaction_date, 'YYYY-MM') AS month,
+                   COALESCE(sum(amount_jpy) FILTER (WHERE amount_jpy > 0), 0) AS income,
+                   COALESCE(sum(-amount_jpy) FILTER (WHERE amount_jpy < 0), 0) AS expense,
+                   COALESCE(sum(amount_jpy), 0) AS net,
+                   count(*) AS row_count
+               FROM secretary.finance_transactions
+               WHERE source_system=%s AND calculation_target
+               GROUP BY 1
+               ORDER BY 1 DESC""",
+            (SOURCE_SYSTEM,),
+        )
+        monthly = [
+            {
+                "month": row[0],
+                "income": int(row[1]),
+                "expense": int(row[2]),
+                "net": int(row[3]),
+                "count": int(row[4]),
+            }
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """SELECT
+                   COALESCE(c.major_name, '') AS major,
+                   COALESCE(c.minor_name, '') AS minor,
+                   sum(-t.amount_jpy) AS expense
+               FROM secretary.finance_transactions t
+               LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
+               WHERE t.source_system=%s
+                 AND t.calculation_target
+                 AND t.amount_jpy < 0
+               GROUP BY c.major_name, c.minor_name
+               ORDER BY expense DESC, major, minor
+               LIMIT 50""",
+            (SOURCE_SYSTEM,),
+        )
+        categories = [
+            {"major": row[0], "minor": row[1], "expense": int(row[2])}
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """SELECT
+                   t.external_id,
+                   t.transaction_date,
+                   t.description,
+                   t.amount_jpy,
+                   COALESCE(a.external_name, ''),
+                   COALESCE(c.major_name, ''),
+                   COALESCE(c.minor_name, ''),
+                   t.memo,
+                   t.is_transfer,
+                   t.calculation_target,
+                   t.last_seen_at
+               FROM secretary.finance_transactions t
+               LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
+               LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
+               WHERE t.source_system=%s
+               ORDER BY t.transaction_date DESC, t.external_id DESC
+               LIMIT %s""",
+            (SOURCE_SYSTEM, recent_limit),
+        )
+        recent_rows = [
+            {
+                "external_id": row[0],
+                "date": row[1].isoformat(),
+                "content": row[2],
+                "amount": int(row[3]),
+                "account": row[4],
+                "major_category": row[5],
+                "minor_category": row[6],
+                "memo": row[7],
+                "is_transfer": bool(row[8]),
+                "calculation_target": bool(row[9]),
+                "last_seen_at": row[10].isoformat(),
+            }
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """SELECT id, source_filename, source_sha256, row_count, imported_at, status
+               FROM secretary.finance_import_batches
+               WHERE source_system=%s
+               ORDER BY imported_at DESC""",
+            (SOURCE_SYSTEM,),
+        )
+        import_batches = [
+            {
+                "id": str(row[0]),
+                "source_filename": row[1],
+                "source_sha256": row[2],
+                "row_count": int(row[3]),
+                "imported_at": row[4].isoformat(),
+                "status": row[5],
+            }
+            for row in cur.fetchall()
+        ]
+
+    return FinanceDashboard(
+        transaction_count=int(count),
+        start_date=start_date.isoformat() if start_date else None,
+        end_date=end_date.isoformat() if end_date else None,
+        income_total=int(income_total),
+        expense_total=int(expense_total),
+        net_total=int(income_total) - int(expense_total),
+        monthly=monthly,
+        categories=categories,
+        recent_rows=recent_rows,
+        import_batches=import_batches,
+    )
+
+
 def _guard_db(db) -> None:
     info = db.info
     if (info.dbname or "") != EXPECTED_DB:
