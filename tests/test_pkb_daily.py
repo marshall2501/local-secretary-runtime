@@ -4,6 +4,7 @@ import unittest
 from uuid import UUID
 
 from pkb_proto.daily_pkb import parse_correction, parse_query, parse_write
+from pkb_proto.daily_interpreter import inspect_output
 from pkb_proto.pending_service import acceptance_eligible
 
 
@@ -96,6 +97,72 @@ class DailyPKBParserTests(unittest.TestCase):
             "proposed_value": None,
             "raw_text": "サブPCの調子が最近よくない気がする。",
         }
+        self.assertFalse(acceptance_eligible(row))
+
+    def test_daily_interpreter_grounded_candidate(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "メインPC",
+                "predicate": "driver_updated",
+                "value": "DRV-Z10",
+                "quote": "メインPCのドライバーをDRV-Z10へ更新した",
+            }
+        }
+        result = inspect_output(
+            "今日はメインPCのドライバーをDRV-Z10へ更新した。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "candidate")
+        self.assertEqual(result.candidate.entity_mention, "メインPC")
+        self.assertEqual(result.candidate.value, "DRV-Z10")
+
+    def test_daily_interpreter_uncertainty_is_not_candidate(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "サブPC",
+                "predicate": "driver_updated",
+                "value": "DRV-X",
+                "quote": "サブPCをDRV-Xへ更新したかもしれない",
+            }
+        }
+        result = inspect_output(
+            "サブPCをDRV-Xへ更新したかもしれない。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "no_candidate")
+
+    def test_daily_interpreter_multiple_entities_is_invalid(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "メインPC",
+                "predicate": "driver_updated",
+                "value": "DRV-Z10",
+                "quote": "メインPCをDRV-Z10へ更新した",
+            }
+        }
+        result = inspect_output(
+            "メインPCをDRV-Z10へ更新した。サブPCも確認した。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "invalid")
+
+    def test_model_candidate_is_acceptance_eligible_only_with_provenance(self):
+        row = {
+            "review_status": "pending",
+            "reason": "model_candidate_needs_user_confirmation",
+            "entity_id": UUID("11111111-1111-1111-1111-111111111111"),
+            "entity_name": "メインPC",
+            "predicate": "driver_updated",
+            "proposed_value": "DRV-Z10",
+            "raw_text": "メインPCをDRV-Z10へ更新した。",
+            "interpreter_kind": "local_ollama",
+            "interpreter_model": "llama3.1:8b",
+        }
+        self.assertTrue(acceptance_eligible(row))
+        row["interpreter_model"] = None
         self.assertFalse(acceptance_eligible(row))
 
 
