@@ -781,6 +781,7 @@ def finance_page():
                 with ui.row().classes("w-full gap-3 flex-wrap"):
                     for label, value in (
                         ("明細件数", f"{stored.transaction_count:,}件"),
+                        ("集計対象", f"{stored.calculation_target_count:,}件"),
                         ("期間", f"{stored.start_date} ～ {stored.end_date}"),
                         ("収入", f"¥{stored.income_total:,.0f}"),
                         ("支出", f"¥{stored.expense_total:,.0f}"),
