@@ -4,17 +4,23 @@ on:
     branches: [main]
     paths:
       - "pkb_proto/web_workbench*.py"
+      - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/diagnostic_cases.py"
       - "pkb_proto/gui_helpers.py"
       - "pkb_proto/extraction_service.py"
       - "pkb_proto/fixtures/**"
       - "tests/test_pkb_web_workbench.py"
+      - "tests/test_pkb_daily.py"
       - "requirements-web.txt"
       - ".github/workflows/pkb-web-workbench.yml"
   pull_request:
     paths:
       - "pkb_proto/web_workbench*.py"
+      - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/launch_daily_pkb.ps1"
       - "tests/test_pkb_web_workbench.py"
+      - "tests/test_pkb_daily.py"
       - "requirements-web.txt"
       - ".github/workflows/pkb-web-workbench.yml"
   workflow_dispatch:
@@ -30,8 +36,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -r requirements-web.txt
-      - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py
+      - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py tests/test_pkb_daily.py
       - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
+      - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
       - run: python -m unittest discover -s tests -p test_pkb_diagnostic_cases.py -v
       - name: Start isolated localhost server and inspect read-only fixture API
         shell: bash
