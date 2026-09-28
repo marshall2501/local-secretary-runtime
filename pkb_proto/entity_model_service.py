@@ -45,6 +45,10 @@ STATEFUL_ENTITY_TYPES = {
     "network_adapter",
     "rc_servo",
 }
+COMPONENT_ROLE_TOKENS = {
+    "GPU": "primary_gpu",
+    "NIC": "wired_nic",
+}
 
 
 @dataclass(frozen=True)
@@ -212,6 +216,7 @@ def list_components(db, parent_entity_id: UUID) -> list[dict]:
             """SELECT r.id AS relation_id,
                       p.id AS parent_id, p.name AS parent_name,
                       r.predicate AS relation_predicate,
+                      r.relation_role,
                       c.id AS component_id, c.name AS component_name,
                       c.entity_type AS component_type,
                       st.value AS current_driver,
@@ -241,3 +246,39 @@ def list_components(db, parent_entity_id: UUID) -> list[dict]:
         )
         cols = [d.name for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def resolve_component_reference(db, parent_name: str, role_token: str) -> dict | None:
+    """Resolve a human parent+role phrase to one active component Entity."""
+    if not _allowed(db):
+        raise ValueError("Refusing non-isolated DB or non-dedicated writer")
+    role = COMPONENT_ROLE_TOKENS.get(role_token)
+    if role is None:
+        return None
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT c.id, c.name, c.entity_type, r.relation_role
+               FROM secretary.entity_relations r
+               JOIN secretary.entities p ON p.id=r.subject_entity_id
+               JOIN secretary.entities c ON c.id=r.object_entity_id
+               WHERE p.name=%s
+                 AND p.retired_at IS NULL
+                 AND c.retired_at IS NULL
+                 AND r.predicate='has_component'
+                 AND r.relation_role=%s
+                 AND r.valid_to IS NULL
+                 AND r.retracted_at IS NULL""",
+            (parent_name, role),
+        )
+        rows = cur.fetchall()
+    if len(rows) != 1:
+        return None
+    row = rows[0]
+    return {
+        "id": str(row[0]),
+        "name": row[1],
+        "entity_type": row[2],
+        "relation_role": row[3],
+        "parent_name": parent_name,
+        "role_token": role_token,
+    }
