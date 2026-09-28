@@ -78,3 +78,33 @@ def list_pending(db, limit: int = 50) -> list[dict]:
         )
         cols = [d.name for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def review_pending(db, pending_id: str, decision: str) -> PendingResult:
+    """Resolve one pending input without promoting it to a Claim.
+
+    This first review slice intentionally supports only reject / needs_edit.
+    Accepted promotion needs a structured candidate and a separate safe path.
+    """
+    if not _allowed(db):
+        raise ValueError("Refusing non-isolated DB or non-dedicated writer")
+    if decision not in {"rejected", "needs_edit"}:
+        raise ValueError("Only rejected or needs_edit is allowed in this review slice")
+    if not available(db):
+        return PendingResult("review", "pending_storage_unavailable", None)
+    try:
+        pending_uuid = UUID(pending_id)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Invalid pending ID") from exc
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """UPDATE secretary.pkb_pending_intake
+               SET review_status=%s
+               WHERE id=%s AND review_status='pending'
+               RETURNING id""",
+            (decision, pending_uuid),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return PendingResult("review", "pending_item_not_found_or_already_resolved", pending_id)
+    return PendingResult(decision, "pending_review_recorded", str(row[0]))
