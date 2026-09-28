@@ -2,6 +2,20 @@
 
 **現行状態（2026-09-28）**: PKBプロトタイプをGitHubの`main`へfast-forward統合済み（`3eb8d3cdd7802d0d05f298319f1308f9ff7736d7`）。既存の限定登録・訂正・SQL-first検索・Episode取込は隔離DBのサブPC実機試験に成功し、Tkinter診断GUIも起動・LLM比較の本人実測あり。**新Web Workbenchと日常用PKB GUIは未実装**。この下の「GitHubのみ・未実機」は各実装を追加した**当時の履歴記述**であり、最新版の実機到達点や次の操作として使わない。詳細は[設計repo STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md)。
 
+## 共通Web Workbench — 最初の実装スライス（2026-09-28）
+
+**位置づけ**: NiceGUI＋FastAPI＋独立Python Runnerの開発用Web GUI。単独の日常PKB画面とは別。GitHubへコード・オフラインCIを追加済みだが、**サブPCでのWeb画面動作は未実証**。既存Tkinter診断GUIは削除しない。
+
+- `web_workbench_core.py`: 同時実行1件・待機上限20件、架空fixtureのみ、インストール済みモデルのみをローカルOllamaへ送信。送信payload・結果・判定・エラーをRun ID単位でSQLiteへ永続化。ブラウザを閉じても処理を継続し、アプリ再起動時の未完了Runは`interrupted`へ変更する。バックエンド実行中の実験を自動再開する機能はない。
+- `web_workbench.py`: localhost `127.0.0.1:8092`のNiceGUI画面とFastAPI `/api/workbench/*`。5つの既存診断モード、モデル設定／実送信JSONのプレビュー、履歴・詳細・2件比較・保存条件による再試験・JSONコピー。**初期の診断は読取専用で、PKB／運用DBには一切接続しない。**
+- `fictional_fixture.py`: 既存PC5／RC5の同じ架空`episodes.json`を読み込む、DBパッケージ非依存の検証ローダー。正解`expected.json`はモデル送信対象にしない。
+- `requirements-web.txt`: 開発Web画面専用依存。既存本番APIの依存・Composeは変更しない。
+- `tests/test_pkb_web_workbench.py`: 架空の応答を使い、保存／再開／再試験、送信制限、タイムアウトと内容の不合格の区別をオフライン検証。
+
+**使用準備**: サブPCのruntimeチェックアウトをmainへ更新する前に、そのworktreeの未コミット変更・実行中プロセスを確認する。使用Python環境で`requirements-web.txt`を明示的にインストールした後、`Launch-PKB-Web.cmd`を実行。ブラウザから`http://127.0.0.1:8092/`へ接続。ランチャーはパッケージやモデルを自動導入せず、外部ネットワークに公開しない。実験記録は既定でユーザーホームの`.local-secretary-ai/workbench/runs.sqlite3`に保存し、Git管理には含めない。
+
+**安全と制限**: 検証は初期架空データ／localhost専用。モデルの推論本文は保存しない。正常なJSON構造でも意味の正確性を保証しない。自動登録・日常用PKB画面・スマホ/LAN公開・同時複数モデル処理は未実装。実データを入力する拡張や本番DB接続は設計RepoのD-08に従い別途許可・保護を設ける。CI合格はサブPCでのNiceGUI実機成功ではない。
+
 ## main統合後の安全な扱い
 
 `pkb_proto/sql/005〜007`と隔離DB用スクリプトは**運用`secretary`DBへ適用しない**。通常の運用migrationは`db/migrations`配下のみを対象とし、本プロトの追加SQLは別ディレクトリで管理する。既存サブPCの実験用writer／秘密ファイルを運用DBのRoleや正本に転用しない。GitHub mainへの統合は、サブPCのローカルブランチ切替・DB変更・ソフト導入・GUI実装ではない。
