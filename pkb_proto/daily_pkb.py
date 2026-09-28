@@ -689,7 +689,7 @@ def finance_page():
             "page": 1,
             "sort_by": "date",
             "sort_dir": "desc",
-            "recent_limit": 50,
+            "recent_limit": 25,
         },
         # UI-only state is kept in one named structure so refreshes do not
         # scatter hidden flags through the page code. It is intentionally
@@ -769,7 +769,7 @@ def finance_page():
                         "page": 1,
                         "sort_by": state["filters"].get("sort_by", "date"),
                         "sort_dir": state["filters"].get("sort_dir", "desc"),
-                        "recent_limit": state["filters"].get("recent_limit", 50),
+                        "recent_limit": state["filters"].get("recent_limit", 25),
                     }
                     if filters["start_date"] and filters["end_date"] and filters["start_date"] > filters["end_date"]:
                         ui.notify("開始日は終了日以前にしてください", type="warning")
@@ -791,7 +791,7 @@ def finance_page():
                 search_input_finance.value = ""
                 state["filters"]["sort_by"] = "date"
                 state["filters"]["sort_dir"] = "desc"
-                state["filters"]["recent_limit"] = 50
+                state["filters"]["recent_limit"] = 25
                 reload_stored()
 
             with ui.row().classes("gap-2"):
@@ -976,24 +976,58 @@ def finance_page():
                             if stored.page >= stored.total_pages:
                                 next_button.disable()
 
+                    def _compact_text(value: str, limit: int = 56) -> str:
+                        text = value or ""
+                        return text if len(text) <= limit else text[: limit - 1] + "…"
+
                     recent_rows = [
-                        {**row, "amount_display": f"¥{row['amount']:,}"}
+                        {
+                            **row,
+                            "content_display": _compact_text(row["content"]),
+                            "amount_display": f"¥{row['amount']:,}",
+                            "target_display": "○" if row["calculation_target"] else "",
+                            "transfer_display": "○" if row["is_transfer"] else "",
+                        }
                         for row in stored.recent_rows
                     ]
                     ui.table(
                         columns=[
-                            {"name": "date", "label": "日付", "field": "date"},
-                            {"name": "content", "label": "内容", "field": "content"},
-                            {"name": "amount", "label": "金額", "field": "amount_display"},
-                            {"name": "account", "label": "金融機関", "field": "account"},
+                            {
+                                "name": "date", "label": "日付", "field": "date",
+                                "style": "width: 7rem; white-space: nowrap;",
+                            },
+                            {
+                                "name": "content", "label": "内容", "field": "content_display",
+                                "style": (
+                                    "max-width: 34rem; overflow: hidden; "
+                                    "text-overflow: ellipsis; white-space: nowrap;"
+                                ),
+                            },
+                            {
+                                "name": "amount", "label": "金額", "field": "amount_display",
+                                "style": "width: 7rem; white-space: nowrap;",
+                            },
+                            {
+                                "name": "account", "label": "金融機関", "field": "account",
+                                "style": (
+                                    "max-width: 15rem; overflow: hidden; "
+                                    "text-overflow: ellipsis; white-space: nowrap;"
+                                ),
+                            },
                             {"name": "major", "label": "大項目", "field": "major_category"},
                             {"name": "minor", "label": "中項目", "field": "minor_category"},
-                            {"name": "target", "label": "集計対象", "field": "calculation_target"},
-                            {"name": "transfer", "label": "振替", "field": "is_transfer"},
+                            {
+                                "name": "target", "label": "集計", "field": "target_display",
+                                "style": "width: 4rem; text-align: center;",
+                            },
+                            {
+                                "name": "transfer", "label": "振替", "field": "transfer_display",
+                                "style": "width: 4rem; text-align: center;",
+                            },
                         ],
                         rows=recent_rows,
                         row_key="external_id",
-                    ).classes("w-full")
+                    ).props("dense flat").classes("w-full")
 
                 with ui.expansion(
                     "Import履歴 / Source",
