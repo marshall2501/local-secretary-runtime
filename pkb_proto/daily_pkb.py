@@ -225,10 +225,7 @@ def register_text(text: str) -> dict:
                 )
                 return payload
 
-            deterministic_reason = (
-                parsed.get("reason") if isinstance(parsed, dict) else None
-            )
-            reason = deterministic_reason or {
+            reason = {
                 "no_candidate": "local_interpreter_no_safe_candidate",
                 "invalid": "local_interpreter_invalid_candidate",
                 "unavailable": "local_interpreter_unavailable",
