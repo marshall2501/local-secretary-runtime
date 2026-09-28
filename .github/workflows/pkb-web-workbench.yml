@@ -1,0 +1,56 @@
+name: PKB Web Workbench isolated tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pkb_proto/web_workbench*.py"
+      - "pkb_proto/diagnostic_cases.py"
+      - "pkb_proto/gui_helpers.py"
+      - "pkb_proto/extraction_service.py"
+      - "pkb_proto/fixtures/**"
+      - "tests/test_pkb_web_workbench.py"
+      - "requirements-web.txt"
+      - ".github/workflows/pkb-web-workbench.yml"
+  pull_request:
+    paths:
+      - "pkb_proto/web_workbench*.py"
+      - "tests/test_pkb_web_workbench.py"
+      - "requirements-web.txt"
+      - ".github/workflows/pkb-web-workbench.yml"
+  workflow_dispatch:
+jobs:
+  offline-and-http-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LSA_WORKBENCH_DB: /tmp/secretary-workbench-ci/runs.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements-web.txt
+      - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py
+      - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
+      - run: python -m unittest discover -s tests -p test_pkb_diagnostic_cases.py -v
+      - name: Start isolated localhost server and inspect read-only fixture API
+        shell: bash
+        run: |
+          python -m pkb_proto.web_workbench >/tmp/workbench.log 2>&1 &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in {1..20}; do
+            if curl --silent --show-error --fail http://127.0.0.1:8092/api/workbench/episodes -o /tmp/episodes.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat /tmp/workbench.log
+            exit 1
+          fi
+          python -c "import json; d=json.load(open('/tmp/episodes.json')); assert len(d)==10; assert all('id' in e and 'text' in e for e in d)"
+          curl --silent --show-error --fail http://127.0.0.1:8092/api/workbench/runs -o /tmp/runs.json
+          python -c "import json; assert json.load(open('/tmp/runs.json')) == []"
