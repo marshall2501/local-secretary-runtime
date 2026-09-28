@@ -43,6 +43,27 @@ HOST = "127.0.0.1"
 
 # UI color semantics: green=create/confirm, blue=read/search, orange=edit/review, red=reject/destructive.
 
+PKB_UI_DEFAULT_OPEN = {
+    "write": True,
+    "correction": False,
+    "search": True,
+    "entities": False,
+    "pending": True,
+    "reviewed": False,
+    "limits": False,
+}
+# The daily app is localhost/single-user today. Keep navigation state in one
+# process-session dictionary so /pkb -> /entity/... -> /pkb restores the
+# accordion layout. Server restart resets it; no hidden fields or DB writes.
+_PKB_UI_OPEN = dict(PKB_UI_DEFAULT_OPEN)
+
+
+def _set_pkb_ui_open(key: str, value: bool) -> None:
+    if key not in PKB_UI_DEFAULT_OPEN:
+        raise KeyError("unknown PKB accordion key")
+    _PKB_UI_OPEN[key] = bool(value)
+
+
 COMPONENT_WRITE_PATTERN = re.compile(
     r"^(?P<parent>.+?)の(?P<role>GPU|NIC)ドライバーを"
     r"(?P<value>[A-Za-z0-9._-]+)へ"
@@ -1472,6 +1493,11 @@ def entity_page(entity_id: str):
 @ui.page("/pkb")
 def pkb_page():
     state = {"write": None, "write_busy": False, "correction": None, "search": None}
+
+    def remember_expansion(key: str):
+        def _remember(event):
+            _set_pkb_ui_open(key, event.value)
+        return _remember
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         _portal_header(
             "Local Secretary — Personal Knowledge Base",
@@ -1481,7 +1507,11 @@ def pkb_page():
             "現在は架空データ専用の隔離DB secretary_pkb_proto_20260927。運用DB・実データには接続しません。"
         ).classes("text-sm text-orange-700")
 
-        with ui.expansion("記録", value=True).classes(
+        with ui.expansion(
+            "記録",
+            value=_PKB_UI_OPEN["write"],
+            on_value_change=remember_expansion("write"),
+        ).classes(
             "w-full border-2 border-green-300 bg-green-50 text-green-900"
         ):
             ui.label("例: メインPCをDRV-A3へ更新した。 / メインPCのGPUドライバーをDRV-G1へ更新した。 / RCカーBのサーボをSERVO-X3へ交換した。").classes("text-sm")
@@ -1517,7 +1547,11 @@ def pkb_page():
             write_button = ui.button("記録する", on_click=do_write, color="green")
             write_result()
 
-        with ui.expansion("訂正", value=False).classes(
+        with ui.expansion(
+            "訂正",
+            value=_PKB_UI_OPEN["correction"],
+            on_value_change=remember_expansion("correction"),
+        ).classes(
             "w-full border-2 border-amber-300 bg-amber-50 text-amber-900"
         ):
             ui.label("例: 訂正：サブPCではなくメインPCをDRV-A1へ更新した。").classes("text-sm")
@@ -1539,7 +1573,11 @@ def pkb_page():
             ui.button("訂正する", on_click=do_correct, color="orange")
             correction_result()
 
-        with ui.expansion("検索・履歴", value=True).classes(
+        with ui.expansion(
+            "検索・履歴",
+            value=_PKB_UI_OPEN["search"],
+            on_value_change=remember_expansion("search"),
+        ).classes(
             "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
         ):
             ui.label("例: メインPCの構成 / メインPCのGPUの現在のドライバー / サブPCのドライバー更新履歴").classes("text-sm")
@@ -1593,7 +1631,11 @@ def pkb_page():
             ui.button("検索する", on_click=do_search, color="blue")
             search_result()
 
-        with ui.expansion("Entity一覧", value=False).classes(
+        with ui.expansion(
+            "Entity一覧",
+            value=_PKB_UI_OPEN["entities"],
+            on_value_change=remember_expansion("entities"),
+        ).classes(
             "w-full border-2 border-indigo-300 bg-indigo-50 text-indigo-900"
         ):
             try:
@@ -1624,14 +1666,22 @@ def pkb_page():
                 with connection() as db:
                     rows = list_pending(db)
             except Exception as exc:
-                with ui.expansion("確認待ち（Pending Claims）", value=True).classes(
+                with ui.expansion(
+                    "確認待ち（Pending Claims）",
+                    value=_PKB_UI_OPEN["pending"],
+                    on_value_change=remember_expansion("pending"),
+                ).classes(
                     "w-full border-2 border-purple-500 bg-purple-50 text-purple-900"
                 ):
                     ui.label("確認待ち一覧を取得できません: " + str(exc)).classes("text-red-600")
                 return
 
             title = f"確認待ち（Pending Claims） {len(rows)}件"
-            with ui.expansion(title, value=True).classes(
+            with ui.expansion(
+                title,
+                value=_PKB_UI_OPEN["pending"],
+                on_value_change=remember_expansion("pending"),
+            ).classes(
                 "w-full border-2 border-purple-500 bg-purple-50 text-purple-900"
             ):
                 if not rows:
@@ -1695,7 +1745,11 @@ def pkb_page():
 
         @ui.refreshable
         def reviewed_panel():
-            with ui.expansion("処理済みの確認待ち", value=False):
+            with ui.expansion(
+                "処理済みの確認待ち",
+                value=_PKB_UI_OPEN["reviewed"],
+                on_value_change=remember_expansion("reviewed"),
+            ):
                 try:
                     with connection() as db:
                         rows = list_reviewed(db)
@@ -1717,7 +1771,11 @@ def pkb_page():
                             ui.label("処理時点: " + when).classes("text-xs text-gray-600")
         reviewed_panel()
 
-        with ui.expansion("この最小実装の制限", value=False):
+        with ui.expansion(
+            "この最小実装の制限",
+            value=_PKB_UI_OPEN["limits"],
+            on_value_change=remember_expansion("limits"),
+        ):
             ui.label("限定文型は決定的に処理し、それ以外はローカルLLMで単一の構造化候補化を試みます。")
             ui.label("LLM由来候補・曖昧入力・未知Entity・複数候補はPendingへ回し、勝手に正式Claimへ登録しません。")
             ui.label("LLM解釈は現在driver_updated / servo_updatedの単一候補だけ。実データ、金融・給与・税務・Googleカレンダー連携は未実装です。")
