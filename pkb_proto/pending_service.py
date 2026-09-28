@@ -6,7 +6,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
-from .entity_model_service import classify_predicate
+from .entity_model_service import advance_state_for_event, classify_predicate
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -217,6 +217,16 @@ def accept_pending(db, pending_id: str) -> PendingResult:
             ),
         )
         claim_id = cur.fetchone()[0]
+        advance_state_for_event(
+            cur,
+            entity_id=item["entity_id"],
+            source_id=source_id,
+            event_predicate=item["predicate"],
+            value=item["proposed_value"],
+            evidence=item["raw_text"],
+            valid_from=item["recorded_at"],
+            recorded_at=item["recorded_at"],
+        )
 
         cur.execute(
             """UPDATE secretary.pkb_pending_intake
