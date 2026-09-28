@@ -127,17 +127,23 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
             if literal_error:
                 return WriteResult("review", literal_error)
 
-            # This first slice intentionally does not infer whether an existing
-            # attribute is a replacement or an additional historical event.
-            cur.execute(
-                """SELECT id FROM secretary.claims
-                   WHERE entity_id=%s AND predicate=%s
-                     AND retracted_at IS NULL
-                   LIMIT 1""",
-                (UUID(claim.entity_key), claim.predicate),
-            )
-            if cur.fetchone():
-                return WriteResult("review", "existing_claim_requires_conflict_resolution")
+            semantic_kind = classify_predicate(claim.predicate)
+
+            # Historical Events are append-only by design. A later driver update
+            # is a new Event, not a conflict with the earlier update. State
+            # succession is handled separately by advance_state_for_event().
+            # Non-event predicates remain conservative until their replacement
+            # semantics are explicitly modeled.
+            if semantic_kind != "event":
+                cur.execute(
+                    """SELECT id FROM secretary.claims
+                       WHERE entity_id=%s AND predicate=%s
+                         AND retracted_at IS NULL
+                       LIMIT 1""",
+                    (UUID(claim.entity_key), claim.predicate),
+                )
+                if cur.fetchone():
+                    return WriteResult("review", "existing_claim_requires_conflict_resolution")
 
             from psycopg.types.json import Jsonb
 
@@ -167,7 +173,7 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                    RETURNING id""",
                 (
                     UUID(claim.entity_key), source_id,
-                    classify_predicate(claim.predicate),
+                    semantic_kind,
                     claim.predicate, Jsonb(claim.value),
                     claim.evidence_quote, record.occurred_at, record.recorded_at,
                 ),
