@@ -9,6 +9,8 @@ on:
       - "pkb_proto/entity_model_service.py"
       - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/pending_service.py"
+      - "pkb_proto/write_service.py"
+      - "pkb_proto/ingestion_gate.py"
       - "pkb_proto/run_pending_setup.ps1"
       - "pkb_proto/sql/008_pkb_proto_pending_intake.sql"
       - "pkb_proto/sql/009_pkb_proto_pending_privileges.sql"
@@ -24,6 +26,7 @@ on:
       - "pkb_proto/fixtures/**"
       - "tests/test_pkb_web_workbench.py"
       - "tests/test_pkb_daily.py"
+      - "tests/test_pkb_ingestion_gate.py"
       - "requirements-web.txt"
       - ".github/workflows/pkb-web-workbench.yml"
   pull_request:
@@ -34,6 +37,8 @@ on:
       - "pkb_proto/entity_model_service.py"
       - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/pending_service.py"
+      - "pkb_proto/write_service.py"
+      - "pkb_proto/ingestion_gate.py"
       - "pkb_proto/run_pending_setup.ps1"
       - "pkb_proto/sql/008_pkb_proto_pending_intake.sql"
       - "pkb_proto/sql/009_pkb_proto_pending_privileges.sql"
@@ -45,6 +50,7 @@ on:
       - "pkb_proto/sql/015_pkb_proto_component_normalization.sql"
       - "tests/test_pkb_web_workbench.py"
       - "tests/test_pkb_daily.py"
+      - "tests/test_pkb_ingestion_gate.py"
       - "requirements-web.txt"
       - ".github/workflows/pkb-web-workbench.yml"
   workflow_dispatch:
