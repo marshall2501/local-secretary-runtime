@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from uuid import UUID
 
 from pkb_proto.daily_pkb import (
+    FINANCE_PAGE_SIZE_DEFAULT,
+    FINANCE_UI_DEFAULT_OPEN,
     PKB_UI_DEFAULT_OPEN,
     _PKB_UI_OPEN,
+    _default_ui_preferences,
     _set_pkb_ui_open,
+    _validate_ui_preferences,
+    load_ui_preferences,
     parse_component_write,
     parse_correction,
     parse_query,
     parse_write,
+    save_ui_preferences,
 )
 from pkb_proto.daily_interpreter import inspect_output
 from pkb_proto.entity_model_service import classify_predicate
@@ -52,6 +60,40 @@ ENTITIES = {
 
 
 class DailyPKBParserTests(unittest.TestCase):
+    def test_ui_preferences_validate_and_fall_back_per_field(self):
+        prefs = _validate_ui_preferences({
+            "pkb": {"write": False, "search": "invalid"},
+            "finance": {"details": True, "recent_limit": 100, "stored": 1},
+        })
+        self.assertFalse(prefs["pkb"]["write"])
+        self.assertEqual(prefs["pkb"]["search"], PKB_UI_DEFAULT_OPEN["search"])
+        self.assertTrue(prefs["finance"]["details"])
+        self.assertEqual(prefs["finance"]["stored"], FINANCE_UI_DEFAULT_OPEN["stored"])
+        self.assertEqual(prefs["finance"]["recent_limit"], 100)
+
+    def test_ui_preferences_round_trip_json_outside_pkb(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ui_preferences.json"
+            prefs = _default_ui_preferences()
+            prefs["pkb"]["entities"] = True
+            prefs["finance"]["details"] = True
+            prefs["finance"]["recent_limit"] = 50
+            saved = save_ui_preferences(prefs, path)
+            loaded = load_ui_preferences(path)
+            self.assertEqual(loaded, saved)
+            self.assertTrue(loaded["pkb"]["entities"])
+            self.assertTrue(loaded["finance"]["details"])
+            self.assertEqual(loaded["finance"]["recent_limit"], 50)
+
+    def test_ui_preferences_missing_file_uses_builtin_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            loaded = load_ui_preferences(Path(directory) / "missing.json")
+        self.assertEqual(loaded["pkb"], PKB_UI_DEFAULT_OPEN)
+        self.assertEqual(
+            loaded["finance"]["recent_limit"],
+            FINANCE_PAGE_SIZE_DEFAULT,
+        )
+
     def test_pkb_ui_open_state_is_centralized_and_resettable_by_process_restart(self):
         original = dict(_PKB_UI_OPEN)
         try:
