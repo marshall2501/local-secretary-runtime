@@ -21,7 +21,13 @@ if ($info.Count -ne 1 -or $info[0].State.Health.Status -ne 'healthy' -or
 $current = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='008_pkb_proto_pending_intake.sql';"
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect isolated schema version.' }
 if (($current | Out-String).Trim() -eq '1') {
-    Write-Host 'PASS: 008 already applied.'
+    & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "GRANT SELECT, INSERT, UPDATE ON secretary.pkb_pending_intake TO secretary_pkb_proto_writer_20260927;"
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to repair Pending Claims writer privileges.' }
+    $grants = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.pkb_pending_intake','SELECT,INSERT,UPDATE');"
+    if ($LASTEXITCODE -ne 0 -or ($grants | Out-String).Trim() -ne 't') {
+        throw 'Pending Claims writer privileges are incomplete.'
+    }
+    Write-Host 'PASS: 008 already applied; Pending Claims writer privileges verified.'
     exit 0
 }
 $exists = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT to_regclass('secretary.pkb_pending_intake') IS NOT NULL;"
