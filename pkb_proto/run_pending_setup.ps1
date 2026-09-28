@@ -14,7 +14,8 @@ $file012 = Join-Path $root 'pkb_proto\sql\012_pkb_proto_pending_interpreter.sql'
 $file013 = Join-Path $root 'pkb_proto\sql\013_pkb_proto_entity_model.sql'
 $file014 = Join-Path $root 'pkb_proto\sql\014_pkb_proto_component_state.sql'
 $file015 = Join-Path $root 'pkb_proto\sql\015_pkb_proto_component_normalization.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015)) {
+$file016 = Join-Path $root 'pkb_proto\sql\016_pkb_proto_finance.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -217,7 +218,35 @@ $verify015 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($verify015 | Out-String).Trim() -ne '1') {
     throw 'Component normalization verification failed.'
 }
-Write-Host 'PASS: PKB prototype migrations verified through 015 (normalized Entity identity + relation roles + Event/State).'
+
+$has016 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='016_pkb_proto_finance.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 016 schema version.' }
+if (($has016 | Out-String).Trim() -eq '0') {
+    $hash016 = (Get-FileHash -LiteralPath $file016 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql016 = [IO.File]::ReadAllText($file016).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash016)
+    $tmpName016 = 'pkb-finance-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp016 = Join-Path ([IO.Path]::GetTempPath()) $tmpName016
+    $remoteTmp016 = '/tmp/' + $tmpName016
+    try {
+        [IO.File]::WriteAllText($localTmp016, $sql016, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp016 ($id + ':' + $remoteTmp016) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 016 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp016
+        if ($LASTEXITCODE -ne 0) { throw '016 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp016) { Remove-Item -LiteralPath $localTmp016 }
+        & docker exec $id rm -f $remoteTmp016 | Out-Null
+    }
+} elseif (($has016 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 016 migration records.'
+}
+
+$verify016 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='016_pkb_proto_finance.sql';"
+$financeGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.finance_transactions','SELECT,INSERT,UPDATE');"
+if ($LASTEXITCODE -ne 0 -or ($verify016 | Out-String).Trim() -ne '1' -or ($financeGrant | Out-String).Trim() -ne 't') {
+    throw 'Finance schema or privilege verification failed.'
+}
+Write-Host 'PASS: PKB prototype migrations verified through 016 (finance import schema included).'
 
 
 
