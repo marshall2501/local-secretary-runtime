@@ -30,6 +30,8 @@ DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
 HOST = "127.0.0.1"
 
+# UI color semantics: green=create/confirm, blue=read/search, orange=edit/review, red=reject/destructive.
+
 ACTION_PATTERNS = (
     ("driver_updated", re.compile(r"^(?P<entity>.+?)(?:を)?(?P<value>[A-Za-z0-9._-]+)へ更新した[。.]?$")),
     ("servo_updated", re.compile(r"^(?P<entity>.+?)(?:のサーボ)?を(?P<value>[A-Za-z0-9._-]+)へ交換した[。.]?$")),
@@ -453,7 +455,7 @@ def index():
                 correction_result.refresh()
                 search_result.refresh()
                 pending_panel.refresh()
-            ui.button("訂正する", on_click=do_correct)
+            ui.button("訂正する", on_click=do_correct, color="orange")
             correction_result()
 
         with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
@@ -486,7 +488,7 @@ def index():
                 except Exception as exc:
                     state["search"] = {"status": "error", "total": 0, "items": [], "reason": str(exc)}
                 search_result.refresh()
-            ui.button("検索する", on_click=do_search)
+            ui.button("検索する", on_click=do_search, color="blue")
             search_result()
 
         @ui.refreshable
