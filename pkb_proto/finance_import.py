@@ -57,42 +57,97 @@ class FinanceDashboard:
     import_batches: list[dict]
 
 
-def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
-    """Read the normalized current finance view from the isolated prototype DB."""
+def _finance_filter_clause(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    account: str | None = None,
+    major_category: str | None = None,
+    search_text: str | None = None,
+) -> tuple[str, list]:
+    clauses = ["t.source_system=%s"]
+    params: list = [SOURCE_SYSTEM]
+
+    if start_date:
+        clauses.append("t.transaction_date >= %s::date")
+        params.append(start_date)
+    if end_date:
+        clauses.append("t.transaction_date <= %s::date")
+        params.append(end_date)
+    if account:
+        clauses.append("a.external_name = %s")
+        params.append(account)
+    if major_category:
+        clauses.append("c.major_name = %s")
+        params.append(major_category)
+    if search_text:
+        clauses.append(
+            "(t.description ILIKE %s OR t.memo ILIKE %s OR "
+            "COALESCE(a.external_name,'') ILIKE %s OR "
+            "COALESCE(c.major_name,'') ILIKE %s OR "
+            "COALESCE(c.minor_name,'') ILIKE %s)"
+        )
+        pattern = "%" + search_text.strip() + "%"
+        params.extend([pattern, pattern, pattern, pattern, pattern])
+
+    return " AND ".join(clauses), params
+
+
+def load_finance_dashboard(
+    db,
+    recent_limit: int = 100,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    account: str | None = None,
+    major_category: str | None = None,
+    search_text: str | None = None,
+) -> FinanceDashboard:
+    """Read a filtered normalized current finance view from the isolated prototype DB."""
     _guard_db(db)
     if recent_limit < 1 or recent_limit > 500:
         raise ValueError("recent_limit must be between 1 and 500")
 
+    where_sql, params = _finance_filter_clause(
+        start_date=start_date,
+        end_date=end_date,
+        account=account,
+        major_category=major_category,
+        search_text=search_text,
+    )
+
     with db.cursor() as cur:
         cur.execute(
-            """SELECT
+            f"""SELECT
                    count(*),
-                   min(transaction_date),
-                   max(transaction_date),
-                   COALESCE(sum(amount_jpy) FILTER (
-                     WHERE calculation_target AND amount_jpy > 0
+                   min(t.transaction_date),
+                   max(t.transaction_date),
+                   COALESCE(sum(t.amount_jpy) FILTER (
+                     WHERE t.calculation_target AND t.amount_jpy > 0
                    ), 0),
-                   COALESCE(sum(-amount_jpy) FILTER (
-                     WHERE calculation_target AND amount_jpy < 0
+                   COALESCE(sum(-t.amount_jpy) FILTER (
+                     WHERE t.calculation_target AND t.amount_jpy < 0
                    ), 0)
-               FROM secretary.finance_transactions
-               WHERE source_system=%s""",
-            (SOURCE_SYSTEM,),
+               FROM secretary.finance_transactions t
+               LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
+               LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
+               WHERE {where_sql}""",
+            tuple(params),
         )
         count, start_date, end_date, income_total, expense_total = cur.fetchone()
 
         cur.execute(
-            """SELECT
-                   to_char(transaction_date, 'YYYY-MM') AS month,
-                   COALESCE(sum(amount_jpy) FILTER (WHERE amount_jpy > 0), 0) AS income,
-                   COALESCE(sum(-amount_jpy) FILTER (WHERE amount_jpy < 0), 0) AS expense,
-                   COALESCE(sum(amount_jpy), 0) AS net,
+            f"""SELECT
+                   to_char(t.transaction_date, 'YYYY-MM') AS month,
+                   COALESCE(sum(t.amount_jpy) FILTER (WHERE t.amount_jpy > 0), 0) AS income,
+                   COALESCE(sum(-t.amount_jpy) FILTER (WHERE t.amount_jpy < 0), 0) AS expense,
+                   COALESCE(sum(t.amount_jpy), 0) AS net,
                    count(*) AS row_count
-               FROM secretary.finance_transactions
-               WHERE source_system=%s AND calculation_target
+               FROM secretary.finance_transactions t
+               LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
+               LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
+               WHERE {where_sql} AND t.calculation_target
                GROUP BY 1
                ORDER BY 1 DESC""",
-            (SOURCE_SYSTEM,),
+            tuple(params),
         )
         monthly = [
             {
@@ -106,19 +161,20 @@ def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
         ]
 
         cur.execute(
-            """SELECT
+            f"""SELECT
                    COALESCE(c.major_name, '') AS major,
                    COALESCE(c.minor_name, '') AS minor,
                    sum(-t.amount_jpy) AS expense
                FROM secretary.finance_transactions t
+               LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
                LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
-               WHERE t.source_system=%s
+               WHERE {where_sql}
                  AND t.calculation_target
                  AND t.amount_jpy < 0
                GROUP BY c.major_name, c.minor_name
                ORDER BY expense DESC, major, minor
                LIMIT 50""",
-            (SOURCE_SYSTEM,),
+            tuple(params),
         )
         categories = [
             {"major": row[0], "minor": row[1], "expense": int(row[2])}
@@ -126,7 +182,7 @@ def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
         ]
 
         cur.execute(
-            """SELECT
+            f"""SELECT
                    t.external_id,
                    t.transaction_date,
                    t.description,
@@ -141,10 +197,10 @@ def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
                FROM secretary.finance_transactions t
                LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
                LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
-               WHERE t.source_system=%s
+               WHERE {where_sql}
                ORDER BY t.transaction_date DESC, t.external_id DESC
                LIMIT %s""",
-            (SOURCE_SYSTEM, recent_limit),
+            tuple(params + [recent_limit]),
         )
         recent_rows = [
             {
@@ -182,6 +238,8 @@ def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
             for row in cur.fetchall()
         ]
 
+    # Import history is intentionally unfiltered because it describes source provenance,
+    # not the current transaction subset.
     return FinanceDashboard(
         transaction_count=int(count),
         start_date=start_date.isoformat() if start_date else None,
@@ -194,6 +252,30 @@ def load_finance_dashboard(db, recent_limit: int = 100) -> FinanceDashboard:
         recent_rows=recent_rows,
         import_batches=import_batches,
     )
+
+
+def finance_filter_options(db) -> dict[str, list[str]]:
+    _guard_db(db)
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT external_name
+               FROM secretary.finance_accounts
+               WHERE source_system=%s
+               ORDER BY external_name""",
+            (SOURCE_SYSTEM,),
+        )
+        accounts = [row[0] for row in cur.fetchall()]
+
+        cur.execute(
+            """SELECT DISTINCT major_name
+               FROM secretary.finance_categories
+               WHERE source_system=%s AND major_name <> ''
+               ORDER BY major_name""",
+            (SOURCE_SYSTEM,),
+        )
+        major_categories = [row[0] for row in cur.fetchall()]
+
+    return {"accounts": accounts, "major_categories": major_categories}
 
 
 def _guard_db(db) -> None:
