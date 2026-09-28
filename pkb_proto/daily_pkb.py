@@ -383,8 +383,8 @@ def index():
             "現在は架空データ専用の隔離DB secretary_pkb_proto_20260927。運用DB・実データには接続しません。"
         ).classes("text-sm text-orange-700")
 
-        with ui.card().classes("w-full"):
-            ui.label("記録").classes("text-lg font-bold")
+        with ui.card().classes("w-full border-2 border-green-300 bg-green-50"):
+            ui.label("記録").classes("text-lg font-bold text-green-900")
             ui.label("例: メインPCをDRV-A3へ更新した。 / RCカーBのサーボをSERVO-X3へ交換した。").classes("text-sm")
             write_input = ui.textarea(label="自然言語で記録").classes("w-full")
             @ui.refreshable
@@ -403,8 +403,8 @@ def index():
             ui.button("記録する", on_click=do_write, color="green")
             write_result()
 
-        with ui.card().classes("w-full"):
-            ui.label("訂正").classes("text-lg font-bold")
+        with ui.card().classes("w-full border-2 border-amber-300 bg-amber-50"):
+            ui.label("訂正").classes("text-lg font-bold text-amber-900")
             ui.label("例: 訂正：サブPCではなくメインPCをDRV-A1へ更新した。").classes("text-sm")
             correction_input = ui.textarea(label="明示的に訂正").classes("w-full")
             @ui.refreshable
@@ -424,8 +424,8 @@ def index():
             ui.button("訂正する", on_click=do_correct)
             correction_result()
 
-        with ui.card().classes("w-full"):
-            ui.label("検索・履歴").classes("text-lg font-bold")
+        with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
+            ui.label("検索・履歴").classes("text-lg font-bold text-blue-900")
             ui.label("例: サブPCのドライバー更新履歴 / RCカーBのサーボ更新").classes("text-sm")
             search_input = ui.input(label="自然言語で検索").classes("w-full")
             @ui.refreshable
