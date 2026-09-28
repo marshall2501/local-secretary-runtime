@@ -78,6 +78,7 @@ UI_VISIBILITY_DEFAULT = {
     "finance": {key: True for key in FINANCE_UI_DEFAULT_OPEN},
     "core": {
         "trace": True,
+        "screen_log": True,
         "limits": True,
     },
 }
@@ -916,6 +917,48 @@ def _contextualize_core_reply(
     return reply
 
 
+def load_recent_core_tasks(limit: int = 10) -> list[dict]:
+    """Load a compact screen-wide Core activity view for debugging."""
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("limit must be 1..50")
+    with connection() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """SELECT t.id, t.request, t.status, t.revision,
+                          t.created_at, t.updated_at, t.completed_at,
+                          t.checkpoint,
+                          count(DISTINCT a.id) AS action_count,
+                          count(DISTINCT r.id) AS result_count
+                   FROM secretary.tasks t
+                   LEFT JOIN secretary.actions a ON a.task_id=t.id
+                   LEFT JOIN secretary.results r ON r.action_id=a.id
+                   WHERE t.requested_by='local_user'
+                     AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
+                   GROUP BY t.id
+                   ORDER BY t.updated_at DESC, t.id DESC
+                   LIMIT %s""",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    result = []
+    for row in rows:
+        checkpoint = row[7] or {}
+        result.append({
+            "id": str(row[0]),
+            "request": row[1],
+            "status": row[2],
+            "revision": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+            "completed_at": row[6],
+            "phase": checkpoint.get("phase"),
+            "selected_capability": checkpoint.get("selected_capability"),
+            "action_count": row[8],
+            "result_count": row[9],
+        })
+    return result
+
+
 def load_core_task_trace(task_id: UUID) -> dict:
     """Load a structured, user-visible execution trace for one Core Task."""
     with connection() as db:
@@ -1531,7 +1574,7 @@ def core_page():
                 try:
                     trace = load_core_task_trace(UUID(task_id))
                 except Exception as exc:
-                    with ui.expansion("検証・稼働ログ", value=False).classes(
+                    with ui.expansion("Task検証・稼働ログ", value=False).classes(
                         "w-full border border-red-200 bg-red-50"
                         + _block_visibility_class("core", "trace")
                     ):
@@ -1541,7 +1584,7 @@ def core_page():
                     return
 
                 task = trace["task"]
-                with ui.expansion("検証・稼働ログ", value=False).classes(
+                with ui.expansion("Task検証・稼働ログ", value=False).classes(
                     "w-full border-2 border-slate-300 bg-slate-50"
                     + _block_visibility_class("core", "trace")
                 ):
@@ -1637,6 +1680,8 @@ def core_page():
                             resume_panel.refresh()
                             core_result.refresh()
                             trace_panel.refresh()
+                    screen_log_panel.refresh()
+                            screen_log_panel.refresh()
 
                     resume_button = ui.button(
                         "同じTaskを再開",
@@ -1678,6 +1723,62 @@ def core_page():
             resume_panel()
             trace_panel()
 
+        @ui.refreshable
+        def screen_log_panel():
+            try:
+                rows = load_recent_core_tasks(10)
+            except Exception as exc:
+                with ui.expansion(
+                    "Core画面 全体稼働ログ",
+                    value=False,
+                ).classes(
+                    "w-full border border-red-200 bg-red-50"
+                    + _block_visibility_class("core", "screen_log")
+                ):
+                    ui.label("最近のTaskを取得できません: " + str(exc)).classes(
+                        "text-red-700"
+                    )
+                return
+
+            with ui.expansion(
+                "Core画面 全体稼働ログ",
+                value=False,
+            ).classes(
+                "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
+                + _block_visibility_class("core", "screen_log")
+            ):
+                ui.label(
+                    "この画面で扱った直近のCore Taskを横断表示します。"
+                    " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
+                ).classes("text-sm text-grey-7")
+                if not rows:
+                    ui.label("Core Taskはまだありません。")
+                    return
+                for item in rows:
+                    with ui.row().classes(
+                        "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
+                    ):
+                        status_color = {
+                            "completed": "green",
+                            "waiting_external": "orange",
+                            "running": "blue",
+                            "failed": "red",
+                        }.get(item["status"], "grey")
+                        ui.badge(item["status"], color=status_color)
+                        with ui.column().classes("grow gap-0"):
+                            ui.label(item["request"]).classes("font-medium")
+                            ui.label(
+                                f"Task {item['id']} / revision={item['revision']} / "
+                                f"phase={item.get('phase') or '-'} / "
+                                f"capability={item.get('selected_capability') or '-'}"
+                            ).classes("font-mono text-xs text-grey-7")
+                            ui.label(
+                                f"Action={item['action_count']} / Result={item['result_count']} / "
+                                f"updated={item['updated_at']}"
+                            ).classes("text-xs text-grey-7")
+
+        screen_log_panel()
+
         with ui.card().classes(
             "w-full" + _block_visibility_class("core", "limits")
         ):
@@ -1715,7 +1816,8 @@ def settings_page():
         "csv": "MoneyForward CSV 取込",
     }
     core_labels = {
-        "trace": "検証・稼働ログ",
+        "trace": "Task単位の検証・稼働ログ",
+        "screen_log": "画面全体の最近のCore稼働ログ",
         "limits": "この縦断でまだ行わないこと",
     }
 
