@@ -99,7 +99,7 @@ def review_pending(db, pending_id: str, decision: str) -> PendingResult:
     with db.transaction(), db.cursor() as cur:
         cur.execute(
             """UPDATE secretary.pkb_pending_intake
-               SET review_status=%s
+               SET review_status=%s, reviewed_at=now()
                WHERE id=%s AND review_status='pending'
                RETURNING id""",
             (decision, pending_uuid),
@@ -108,3 +108,24 @@ def review_pending(db, pending_id: str, decision: str) -> PendingResult:
     if row is None:
         return PendingResult("review", "pending_item_not_found_or_already_resolved", pending_id)
     return PendingResult(decision, "pending_review_recorded", str(row[0]))
+
+
+def list_reviewed(db, limit: int = 20) -> list[dict]:
+    if not _allowed(db):
+        raise ValueError("Refusing non-isolated DB or non-dedicated writer")
+    if not available(db):
+        return []
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT p.id, p.raw_text, p.reason, p.review_status,
+                      p.recorded_at, p.reviewed_at,
+                      e.name AS entity_name
+               FROM secretary.pkb_pending_intake p
+               LEFT JOIN secretary.entities e ON e.id=p.entity_id
+               WHERE p.review_status <> 'pending'
+               ORDER BY p.reviewed_at DESC NULLS LAST, p.recorded_at DESC
+               LIMIT %s""",
+            (limit,),
+        )
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
