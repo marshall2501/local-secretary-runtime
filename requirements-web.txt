@@ -1,0 +1,2 @@
+# Optional developer Workbench only; production API requirements remain separate.
+nicegui>=3.0,<4
