@@ -78,7 +78,7 @@ def list_pending(db, limit: int = 50) -> list[dict]:
     with db.cursor() as cur:
         cur.execute(
             """SELECT p.id, p.raw_text, p.reason, p.review_status, p.recorded_at,
-                      e.name AS entity_name, p.predicate, p.proposed_value
+                      p.entity_id, e.name AS entity_name, p.predicate, p.proposed_value
                FROM secretary.pkb_pending_intake p
                LEFT JOIN secretary.entities e ON e.id=p.entity_id
                WHERE p.review_status='pending'
