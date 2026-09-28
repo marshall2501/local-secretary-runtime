@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
-from .entity_model_service import list_components
+from .entity_model_service import list_components, resolve_component_reference
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -35,11 +35,14 @@ HOST = "127.0.0.1"
 
 # UI color semantics: green=create/confirm, blue=read/search, orange=edit/review, red=reject/destructive.
 
-COMPONENT_ACTION_PATTERNS = (
-    ("driver_updated", re.compile(
-        r"^(?P<entity>.+?)(?:ドライバー)を(?P<value>[A-Za-z0-9._-]+)へ"
-        r"(?:更新した|更新しておいた|アップデートした)[。.]?$"
-    )),
+COMPONENT_WRITE_PATTERN = re.compile(
+    r"^(?P<parent>.+?)の(?P<role>GPU|NIC)ドライバーを"
+    r"(?P<value>[A-Za-z0-9._-]+)へ"
+    r"(?P<action>更新した|更新しておいた|アップデートした)[。.]?$"
+)
+COMPONENT_STATE_QUERY_PATTERN = re.compile(
+    r"^(?P<parent>.+?)の(?P<role>GPU|NIC)の?"
+    r"(?:現在の|今の|現行の?)?ドライバー"
 )
 
 ACTION_PATTERNS = (
@@ -115,22 +118,21 @@ def _entity_map(db) -> dict[str, dict]:
     return {row["name"]: row for row in _entities(db)}
 
 
+def parse_component_write(text: str) -> dict | None:
+    match = COMPONENT_WRITE_PATTERN.fullmatch(text.strip())
+    if not match:
+        return None
+    return {
+        "parent": match.group("parent").strip(),
+        "role": match.group("role"),
+        "predicate": "driver_updated",
+        "value": match.group("value"),
+        "action": match.group("action"),
+    }
+
+
 def parse_write(text: str, entity_names: set[str]) -> dict | None:
     text = text.strip()
-    for predicate, pattern in COMPONENT_ACTION_PATTERNS:
-        match = pattern.fullmatch(text)
-        if not match:
-            continue
-        entity = match.group("entity").strip()
-        if entity not in entity_names:
-            return {"status": "review", "reason": "unknown_or_ambiguous_entity", "entity": entity}
-        return {
-            "status": "parsed",
-            "intent": "assertion",
-            "entity": entity,
-            "predicate": predicate,
-            "value": match.group("value"),
-        }
     for predicate, pattern in ACTION_PATTERNS:
         match = pattern.fullmatch(text)
         if not match:
@@ -227,7 +229,33 @@ def register_text(text: str) -> dict:
         return {"status": "rejected", "reason": "empty_input"}
     with connection() as db:
         entities = _entity_map(db)
-        parsed = parse_write(text, set(entities))
+        component_parsed = parse_component_write(text)
+        component_entity = None
+        if component_parsed is not None:
+            component_entity = resolve_component_reference(
+                db, component_parsed["parent"], component_parsed["role"]
+            )
+            if component_entity is None:
+                parsed = {
+                    "status": "review",
+                    "reason": "component_relation_not_unique_or_missing",
+                }
+            else:
+                parsed = {
+                    "status": "parsed",
+                    "intent": "assertion",
+                    "entity": component_entity["name"],
+                    "predicate": component_parsed["predicate"],
+                    "value": component_parsed["value"],
+                }
+                entities[component_entity["name"]] = {
+                    "id": component_entity["id"],
+                    "name": component_entity["name"],
+                    "domain": "pc",
+                    "entity_type": component_entity["entity_type"],
+                }
+        else:
+            parsed = parse_write(text, set(entities))
         if parsed is None or parsed["status"] != "parsed":
             interpreted = interpret_daily(text, set(entities))
             if interpreted.status == "candidate" and interpreted.candidate is not None:
@@ -371,6 +399,29 @@ def search_text(text: str) -> dict:
     with connection() as db:
         entities = _entity_map(db)
         q = text.strip()
+
+        component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
+        if component_state and any(word in q for word in ("現在", "今の", "現行")):
+            resolved = resolve_component_reference(
+                db,
+                component_state.group("parent").strip(),
+                component_state.group("role"),
+            )
+            if resolved is not None:
+                page = query_claims(
+                    db,
+                    ClaimQuery(
+                        entity_id=UUID(resolved["id"]),
+                        predicate="current_driver",
+                        include_history=False,
+                        limit=100,
+                        offset=0,
+                    ),
+                )
+                result = _serialize_page(page)
+                result["result_kind"] = "claims"
+                return result
+
         if "構成" in q:
             parent = next(
                 (
@@ -603,6 +654,7 @@ def index():
                     columns = [
                         {"name": "parent", "label": "親Entity", "field": "parent_name"},
                         {"name": "relation", "label": "関係", "field": "relation_predicate"},
+                        {"name": "role", "label": "役割", "field": "relation_role"},
                         {"name": "component", "label": "構成要素", "field": "component_name"},
                         {"name": "type", "label": "型", "field": "component_type"},
                         {"name": "driver", "label": "現在ドライバー", "field": "current_driver"},
