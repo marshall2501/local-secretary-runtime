@@ -40,9 +40,9 @@ if ($info.Count -ne 1 -or $info[0].State.Health.Status -ne 'healthy' -or
     $bindings[0].HostPort -ne "$port") {
     throw 'PostgreSQL health or localhost binding is not the expected runtime configuration.'
 }
-$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM secretary.schema_migrations;'
-if ($LASTEXITCODE -ne 0 -or [int](($count | Out-String).Trim()) -lt 6) {
-    throw 'The isolated PKB database is not at the previously validated schema level.'
+$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='012_pkb_proto_pending_interpreter.sql';"
+if ($LASTEXITCODE -ne 0 -or ($count | Out-String).Trim() -ne '1') {
+    throw 'The isolated PKB database is missing migration 012. Run .\pkb_proto\run_pending_setup.ps1 first.'
 }
 $userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
 if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
