@@ -15,8 +15,8 @@ from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
 from .entity_model_service import advance_state_for_event, classify_predicate
 
 KNOWN_PREDICATES = {
-    "driver_updated": "更新した",
-    "servo_updated": "交換した",
+    "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
+    "servo_updated": ("交換した", "取り替えた"),
 }
 UNCERTAIN = ("かもしれない", "未確認", "不明", "ではなく", "訂正", "らしい")
 
@@ -59,7 +59,9 @@ def _literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
     if claim.predicate not in KNOWN_PREDICATES:
         return "predicate_not_supported_by_first_slice"
     quote = claim.evidence_quote
-    if claim.value not in quote or KNOWN_PREDICATES[claim.predicate] not in quote:
+    if claim.value not in quote or not any(
+        phrase in quote for phrase in KNOWN_PREDICATES[claim.predicate]
+    ):
         return "value_or_action_not_explicit_in_quote"
     if any(marker in quote for marker in UNCERTAIN):
         return "uncertain_or_correction_language"
