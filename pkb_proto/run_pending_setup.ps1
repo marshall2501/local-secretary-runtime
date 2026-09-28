@@ -10,7 +10,8 @@ $file008 = Join-Path $root 'pkb_proto\sql\008_pkb_proto_pending_intake.sql'
 $file009 = Join-Path $root 'pkb_proto\sql\009_pkb_proto_pending_privileges.sql'
 $file010 = Join-Path $root 'pkb_proto\sql\010_pkb_proto_pending_review_audit.sql'
 $file011 = Join-Path $root 'pkb_proto\sql\011_pkb_proto_pending_acceptance.sql'
-foreach ($file in @($file008, $file009, $file010, $file011)) {
+$file012 = Join-Path $root 'pkb_proto\sql\012_pkb_proto_pending_interpreter.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -109,6 +110,33 @@ $verify011 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($verify011 | Out-String).Trim() -ne '1') {
     throw 'Pending Claims acceptance verification failed.'
 }
-Write-Host 'PASS: Pending Claims storage, privileges, review audit and acceptance linkage verified (008 + 009 + 010 + 011).'
+$has012 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='012_pkb_proto_pending_interpreter.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 012 schema version.' }
+if (($has012 | Out-String).Trim() -eq '0') {
+    $hash012 = (Get-FileHash -LiteralPath $file012 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql012 = [IO.File]::ReadAllText($file012).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash012)
+    $tmpName012 = 'pkb-pending-interpreter-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp012 = Join-Path ([IO.Path]::GetTempPath()) $tmpName012
+    $remoteTmp012 = '/tmp/' + $tmpName012
+    try {
+        [IO.File]::WriteAllText($localTmp012, $sql012, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp012 ($id + ':' + $remoteTmp012) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 012 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp012
+        if ($LASTEXITCODE -ne 0) { throw '012 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp012) { Remove-Item -LiteralPath $localTmp012 }
+        & docker exec $id rm -f $remoteTmp012 | Out-Null
+    }
+} elseif (($has012 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 012 migration records.'
+}
+
+$verify012 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='012_pkb_proto_pending_interpreter.sql';"
+if ($LASTEXITCODE -ne 0 -or ($verify012 | Out-String).Trim() -ne '1') {
+    throw 'Pending Claims interpreter provenance verification failed.'
+}
+Write-Host 'PASS: Pending Claims storage, privileges, review audit, acceptance and interpreter provenance verified (008 + 009 + 010 + 011 + 012).'
+
 
 
