@@ -8,6 +8,7 @@ Run with: python -m pkb_proto.daily_pkb
 """
 from __future__ import annotations
 
+import inspect
 import os
 import re
 from dataclasses import asdict
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import list_components, resolve_component_reference
+from .finance_preview import analyze_moneyforward_csv
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -541,6 +543,238 @@ def api_pending_accept(pending_id: str):
         raise HTTPException(503, str(exc)) from exc
 
 
+_FEATURES = [
+    ("Personal Knowledge Base", "利用可能", "green", "/pkb", "自然言語の記録・訂正・検索・履歴・Pending"),
+    ("家計・資産", "試験中", "orange", "/finance", "MoneyForward CSVの読み取り専用プレビュー"),
+    ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
+    ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
+    ("Secretary Core", "開発予定", "blue-grey", None, "依頼・計画・承認・実行・継続"),
+    ("開発Workbench", "利用可能", "green", "http://127.0.0.1:8092/", "LLM/PKB/Coreの開発検証用。日常GUIとは分離"),
+]
+
+
+def _nav():
+    with ui.row().classes("w-full items-center gap-2 mb-2"):
+        ui.button("TOP", icon="home").props("flat href=/ tag=a")
+        ui.button("機能一覧", icon="apps").props("flat href=/features tag=a")
+        ui.button("PKB", icon="account_tree").props("flat href=/pkb tag=a")
+        ui.button("家計・資産", icon="account_balance_wallet").props("flat href=/finance tag=a")
+
+
+def _portal_header(title: str, subtitle: str):
+    _nav()
+    ui.label(title).classes("text-2xl font-bold")
+    ui.label(subtitle).classes("text-sm text-grey-7")
+
+
+def _pending_count() -> int | None:
+    try:
+        with connection() as db:
+            return len(list_pending(db))
+    except Exception:
+        return None
+
+
+async def _uploaded_bytes(event) -> tuple[str, bytes]:
+    """Support NiceGUI 3 uploads while keeping a fallback for older event shape."""
+    file_obj = getattr(event, "file", None)
+    filename = (
+        getattr(file_obj, "name", None)
+        or getattr(event, "name", None)
+        or "moneyforward.csv"
+    )
+    if file_obj is not None and hasattr(file_obj, "read"):
+        value = file_obj.read()
+        data = await value if inspect.isawaitable(value) else value
+        return filename, bytes(data)
+    content = getattr(event, "content", None)
+    if content is not None and hasattr(content, "read"):
+        value = content.read()
+        data = await value if inspect.isawaitable(value) else value
+        return filename, bytes(data)
+    if isinstance(content, (bytes, bytearray)):
+        return filename, bytes(content)
+    raise ValueError("アップロード内容を読み取れません")
+
+
+@ui.page("/")
+def top_page():
+    with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
+        _portal_header(
+            "Local Secretary",
+            "Personal Local Secretary AI — 日常用ポータル（開発中）",
+        )
+
+        pending = _pending_count()
+        with ui.row().classes("w-full gap-4 flex-wrap"):
+            with ui.card().classes("w-72 border-2 border-green-300 bg-green-50"):
+                ui.label("Personal Knowledge Base").classes("text-lg font-bold")
+                ui.label("記録・検索・履歴・例外確認").classes("text-sm")
+                ui.label(
+                    "Pending: " + (str(pending) + "件" if pending is not None else "取得不可")
+                ).classes("text-sm text-purple-800")
+                ui.button("PKBを開く", icon="arrow_forward", color="green").props(
+                    "href=/pkb tag=a"
+                )
+            with ui.card().classes("w-72 border-2 border-blue-300 bg-blue-50"):
+                ui.label("家計・資産").classes("text-lg font-bold")
+                ui.label("MoneyForward CSVプレビューを実装中").classes("text-sm")
+                ui.label("実データはDBへ保存せず、まず構造と集計を確認").classes(
+                    "text-xs text-blue-800"
+                )
+                ui.button("家計・資産を開く", icon="arrow_forward", color="blue").props(
+                    "href=/finance tag=a"
+                )
+            with ui.card().classes("w-72 border-2 border-grey-300 bg-grey-1"):
+                ui.label("予定").classes("text-lg font-bold")
+                ui.badge("未実装", color="grey")
+                ui.label("Google Calendar閲覧・検索を予定").classes("text-sm")
+            with ui.card().classes("w-72 border-2 border-grey-300 bg-grey-1"):
+                ui.label("Secretary Core").classes("text-lg font-bold")
+                ui.badge("開発予定", color="blue-grey")
+                ui.label("依頼・計画・承認・継続を同じGUIへ追加予定").classes("text-sm")
+
+        with ui.card().classes("w-full"):
+            ui.label("開発中の現在地").classes("text-lg font-bold")
+            ui.label("PKB: 架空隔離DBでEntity / Relation / Event / State縦断まで実機確認済み")
+            ui.label("家計: MoneyForward CSVの読み取り専用プレビューを開始")
+            ui.label("実データのDB投入・外部金融サービス操作はまだ行いません。").classes(
+                "text-sm text-orange-800"
+            )
+
+
+@ui.page("/features")
+def features_page():
+    with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
+        _portal_header("機能一覧", "利用可能・試験中・未実装を日常GUIから確認")
+        with ui.grid(columns=2).classes("w-full gap-4"):
+            for name, status, color, target, description in _FEATURES:
+                with ui.card().classes("w-full"):
+                    with ui.row().classes("w-full items-center justify-between"):
+                        ui.label(name).classes("text-lg font-bold")
+                        ui.badge(status, color=color)
+                    ui.label(description).classes("text-sm")
+                    if target:
+                        ui.button("開く", icon="open_in_new", color="blue").props(
+                            f"href={target} tag=a flat"
+                        )
+
+
+@ui.page("/finance")
+def finance_page():
+    state = {"preview": None, "error": None}
+
+    with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
+        _portal_header(
+            "家計・資産",
+            "最初の縦断: MoneyForward ME CSVを読み取り専用で解析",
+        )
+        with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
+            ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
+            ui.label(
+                "CSVはこのローカルWebプロセスのメモリ上で解析します。"
+                "PostgreSQLへ保存せず、LLMにも送信しません。"
+            ).classes("text-sm text-blue-900")
+            ui.label(
+                "想定列: 計算対象 / 日付 / 内容 / 金額（円） / 保有金融機関 / "
+                "大項目 / 中項目 / メモ / 振替 / ID"
+            ).classes("text-xs text-grey-7")
+
+            @ui.refreshable
+            def finance_result():
+                if state["error"]:
+                    ui.label(str(state["error"])).classes("text-red-700")
+                    return
+                preview = state["preview"]
+                if preview is None:
+                    ui.label("CSVを選択すると、DBへ登録せず内容をプレビューします。")
+                    return
+
+                with ui.row().classes("w-full gap-3 flex-wrap"):
+                    for label, value in (
+                        ("明細件数", f"{preview.row_count:,}件"),
+                        ("期間", f"{preview.start_date} ～ {preview.end_date}"),
+                        ("集計対象", f"{preview.calculation_target_count:,}件"),
+                        ("振替", f"{preview.transfer_count:,}件"),
+                        ("ID重複", f"{preview.duplicate_id_count:,}件"),
+                    ):
+                        with ui.card().classes("min-w-40"):
+                            ui.label(label).classes("text-xs text-grey-7")
+                            ui.label(value).classes("text-lg font-bold")
+
+                with ui.row().classes("w-full gap-3 flex-wrap"):
+                    for label, value in (
+                        ("収入", preview.income_total),
+                        ("支出", preview.expense_total),
+                        ("収支", preview.net_total),
+                    ):
+                        with ui.card().classes("min-w-48"):
+                            ui.label(label).classes("text-xs text-grey-7")
+                            ui.label(f"¥{value:,.0f}").classes("text-xl font-bold")
+
+                ui.label("月別集計").classes("text-lg font-bold mt-2")
+                ui.table(
+                    columns=[
+                        {"name": "month", "label": "月", "field": "month"},
+                        {"name": "income", "label": "収入", "field": "income"},
+                        {"name": "expense", "label": "支出", "field": "expense"},
+                        {"name": "net", "label": "収支", "field": "net"},
+                        {"name": "count", "label": "件数", "field": "count"},
+                    ],
+                    rows=preview.monthly,
+                    row_key="month",
+                ).classes("w-full")
+
+                ui.label("支出カテゴリ上位").classes("text-lg font-bold mt-2")
+                ui.table(
+                    columns=[
+                        {"name": "major", "label": "大項目", "field": "major"},
+                        {"name": "minor", "label": "中項目", "field": "minor"},
+                        {"name": "expense", "label": "支出", "field": "expense"},
+                    ],
+                    rows=preview.categories,
+                    row_key="minor",
+                ).classes("w-full")
+
+                with ui.expansion("直近明細（最大100件）", value=False).classes("w-full"):
+                    ui.table(
+                        columns=[
+                            {"name": "date", "label": "日付", "field": "date"},
+                            {"name": "content", "label": "内容", "field": "content"},
+                            {"name": "amount", "label": "金額", "field": "amount"},
+                            {"name": "account", "label": "金融機関", "field": "account"},
+                            {"name": "major", "label": "大項目", "field": "major_category"},
+                            {"name": "minor", "label": "中項目", "field": "minor_category"},
+                            {"name": "transfer", "label": "振替", "field": "is_transfer"},
+                        ],
+                        rows=preview.recent_rows,
+                        row_key="external_id",
+                    ).classes("w-full")
+
+            async def handle_finance_upload(event):
+                try:
+                    filename, data = await _uploaded_bytes(event)
+                    state["preview"] = analyze_moneyforward_csv(data, filename)
+                    state["error"] = None
+                    ui.notify(
+                        f"{filename}: {state['preview'].row_count:,}件を読み取り専用で解析しました",
+                        type="positive",
+                    )
+                except Exception as exc:
+                    state["preview"] = None
+                    state["error"] = str(exc)
+                    ui.notify(str(exc)[:240], type="negative")
+                finance_result.refresh()
+
+            ui.upload(
+                label="MoneyForward CSVを選択",
+                on_upload=handle_finance_upload,
+                auto_upload=True,
+                max_file_size=20_000_000,
+            ).props("accept=.csv").classes("w-full")
+            finance_result()
+
+
 def _display_result(result: dict):
     status = result.get("status", "")
     colors = {
@@ -570,14 +804,14 @@ def _display_result(result: dict):
         ui.label("Pending: " + result["pending_id"]).classes("font-mono text-xs")
 
 
-@ui.page("/")
-def index():
+@ui.page("/pkb")
+def pkb_page():
     state = {"write": None, "write_busy": False, "correction": None, "search": None}
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
-        ui.label("Local Secretary — Personal Knowledge Base").classes("text-2xl font-bold")
-        ui.label(
-            "日常用PKBの最初の縦断スライス • Core/Workbenchから独立 • localhostのみ"
-        ).classes("text-sm text-green-700")
+        _portal_header(
+            "Local Secretary — Personal Knowledge Base",
+            "日常用PKB • Core/Workbenchから独立 • localhostのみ",
+        )
         ui.label(
             "現在は架空データ専用の隔離DB secretary_pkb_proto_20260927。運用DB・実データには接続しません。"
         ).classes("text-sm text-orange-700")
