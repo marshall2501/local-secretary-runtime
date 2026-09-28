@@ -722,31 +722,37 @@ def finance_page():
                             ui.label(label).classes("text-xs text-grey-7")
                             ui.label(f"¥{value:,.0f}").classes("text-xl font-bold")
 
-                ui.label("月別集計").classes("text-lg font-bold mt-2")
-                ui.table(
-                    columns=[
-                        {"name": "month", "label": "月", "field": "month"},
-                        {"name": "income", "label": "収入", "field": "income"},
-                        {"name": "expense", "label": "支出", "field": "expense"},
-                        {"name": "net", "label": "収支", "field": "net"},
-                        {"name": "count", "label": "件数", "field": "count"},
-                    ],
-                    rows=preview.monthly,
-                    row_key="month",
-                ).classes("w-full")
+                with ui.expansion("月別集計", value=True).classes(
+                    "w-full border-2 border-blue-200 bg-white text-blue-900"
+                ):
+                    ui.table(
+                        columns=[
+                            {"name": "month", "label": "月", "field": "month"},
+                            {"name": "income", "label": "収入", "field": "income"},
+                            {"name": "expense", "label": "支出", "field": "expense"},
+                            {"name": "net", "label": "収支", "field": "net"},
+                            {"name": "count", "label": "件数", "field": "count"},
+                        ],
+                        rows=preview.monthly,
+                        row_key="month",
+                    ).classes("w-full")
 
-                ui.label("支出カテゴリ上位").classes("text-lg font-bold mt-2")
-                ui.table(
-                    columns=[
-                        {"name": "major", "label": "大項目", "field": "major"},
-                        {"name": "minor", "label": "中項目", "field": "minor"},
-                        {"name": "expense", "label": "支出", "field": "expense"},
-                    ],
-                    rows=preview.categories,
-                    row_key="minor",
-                ).classes("w-full")
+                with ui.expansion("支出カテゴリ上位", value=False).classes(
+                    "w-full border-2 border-blue-200 bg-white text-blue-900"
+                ):
+                    ui.table(
+                        columns=[
+                            {"name": "major", "label": "大項目", "field": "major"},
+                            {"name": "minor", "label": "中項目", "field": "minor"},
+                            {"name": "expense", "label": "支出", "field": "expense"},
+                        ],
+                        rows=preview.categories,
+                        row_key="minor",
+                    ).classes("w-full")
 
-                with ui.expansion("直近明細（最大100件）", value=False).classes("w-full"):
+                with ui.expansion("直近明細（最大100件）", value=False).classes(
+                    "w-full border-2 border-blue-200 bg-white text-blue-900"
+                ):
                     ui.table(
                         columns=[
                             {"name": "date", "label": "日付", "field": "date"},
@@ -763,8 +769,9 @@ def finance_page():
 
                 plan = state["import_plan"]
                 if plan is not None:
-                    with ui.card().classes("w-full border-2 border-amber-300 bg-amber-50 mt-3"):
-                        ui.label("隔離DB Import").classes("text-lg font-bold text-amber-900")
+                    with ui.expansion("隔離DB Import", value=True).classes(
+                        "w-full border-2 border-amber-300 bg-amber-50 text-amber-900 mt-3"
+                    ):
                         ui.label(
                             "保存先は secretary_pkb_proto_20260927 の金融テーブルのみ。"
                             "元CSVそのものはDBへ保存せず、ファイル名・SHA-256・Import Batchを出典として保持します。"
