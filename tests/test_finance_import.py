@@ -64,8 +64,22 @@ class FinanceImportTests(unittest.TestCase):
 
     def test_filter_clause_without_filters_scopes_only_source_system(self):
         clause, params = _finance_filter_clause()
+        self.assertEqual(clause, "t.source_system=%s AND t.calculation_target")
+        self.assertEqual(params, [SOURCE_SYSTEM])
+
+    def test_filter_clause_all_rows_does_not_add_scope_predicate(self):
+        clause, params = _finance_filter_clause(row_mode="all")
         self.assertEqual(clause, "t.source_system=%s")
         self.assertEqual(params, [SOURCE_SYSTEM])
+
+    def test_filter_clause_transfer_only(self):
+        clause, params = _finance_filter_clause(row_mode="transfer")
+        self.assertEqual(clause, "t.source_system=%s AND t.is_transfer")
+        self.assertEqual(params, [SOURCE_SYSTEM])
+
+    def test_filter_clause_rejects_unknown_row_mode(self):
+        with self.assertRaisesRegex(ValueError, "row_mode"):
+            _finance_filter_clause(row_mode="unknown")
 
     def test_guard_rejects_production_database(self):
         db = SimpleNamespace(info=SimpleNamespace(
