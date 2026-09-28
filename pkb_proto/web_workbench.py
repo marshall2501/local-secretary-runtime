@@ -103,7 +103,7 @@ def index():
                 episode = ui.select(
                     list(runner.episodes), value="pc-01", label="架空Episode"
                 ).classes("w-40")
-                mode = ui.select(MODES, value="抽出：簡略", label="検証モード").classes("w-52")
+                mode = ui.select(list(MODES), value="抽出：簡略", label="検証モード").classes("w-52")
                 predict = ui.select([1100, 2048, 4096], value=1100, label="生成上限").classes("w-36")
                 think = ui.select(["自動", "無効"], value="自動", label="Thinking").classes("w-32")
             installed_label = ui.label("モデル一覧は「モデルを確認」で取得できます。")
