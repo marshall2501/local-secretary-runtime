@@ -23,8 +23,7 @@ from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
-from .entity_model_service import list_components, resolve_component_reference
-from .entity_detail import load_entity_detail
+from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
 from .finance_import import (
     commit_import,
