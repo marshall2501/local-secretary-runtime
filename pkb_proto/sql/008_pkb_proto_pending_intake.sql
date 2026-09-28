@@ -29,7 +29,7 @@ CREATE INDEX pkb_pending_intake_status
 DO $grant$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='secretary_pkb_proto_writer_20260927') THEN
-    GRANT SELECT, INSERT, UPDATE ON secretary.pkb_pending_intake
+    GRANT SELECT, INSERT ON secretary.pkb_pending_intake
       TO secretary_pkb_proto_writer_20260927;
   END IF;
 END $grant$;
