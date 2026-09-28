@@ -202,7 +202,7 @@ def register_text(text: str) -> dict:
     with connection() as db:
         entities = _entity_map(db)
         parsed = parse_write(text, set(entities))
-        if parsed is None:
+        if parsed is None or parsed["status"] != "parsed":
             interpreted = interpret_daily(text, set(entities))
             if interpreted.status == "candidate" and interpreted.candidate is not None:
                 candidate = interpreted.candidate
@@ -225,7 +225,10 @@ def register_text(text: str) -> dict:
                 )
                 return payload
 
-            reason = {
+            deterministic_reason = (
+                parsed.get("reason") if isinstance(parsed, dict) else None
+            )
+            reason = deterministic_reason or {
                 "no_candidate": "local_interpreter_no_safe_candidate",
                 "invalid": "local_interpreter_invalid_candidate",
                 "unavailable": "local_interpreter_unavailable",
@@ -243,9 +246,6 @@ def register_text(text: str) -> dict:
                 "安全に構造化できなかったため、元の入力をそのまま確認待ちに保存しました。"
             )
             return payload
-        if parsed["status"] != "parsed":
-            result = enqueue_pending(db, input_id="daily-pkb-review-" + uuid4().hex, raw_text=text, reason=parsed["reason"])
-            return asdict(result)
         entity = entities[parsed["entity"]]
         input_id = "daily-pkb-" + uuid4().hex
         now = datetime.now(timezone.utc)
