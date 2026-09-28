@@ -198,6 +198,7 @@ def parse_query(text: str, entities: dict[str, dict]) -> ClaimQuery:
     return ClaimQuery(
         entity_id=entity_id,
         predicate=predicate,
+        effective_at=(datetime.now(timezone.utc) if predicate == "current_driver" else None),
         include_history=include_history,
         limit=100,
         offset=0,
@@ -417,6 +418,7 @@ def search_text(text: str) -> dict:
                     ClaimQuery(
                         entity_id=UUID(resolved["id"]),
                         predicate="current_driver",
+                        effective_at=datetime.now(timezone.utc),
                         include_history=False,
                         limit=100,
                         offset=0,
