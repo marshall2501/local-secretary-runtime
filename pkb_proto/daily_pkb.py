@@ -25,7 +25,12 @@ from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
-from .finance_import import commit_import, load_finance_dashboard, plan_import
+from .finance_import import (
+    commit_import,
+    finance_filter_options,
+    load_finance_dashboard,
+    plan_import,
+)
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -673,11 +678,20 @@ def finance_page():
         "import_busy": False,
         "stored": None,
         "stored_error": None,
+        "filter_options": {"accounts": [], "major_categories": []},
+        "filters": {
+            "start_date": None,
+            "end_date": None,
+            "account": None,
+            "major_category": None,
+            "search_text": None,
+        },
     }
 
     try:
         with connection() as db:
             state["stored"] = load_finance_dashboard(db)
+            state["filter_options"] = finance_filter_options(db)
     except Exception as exc:
         state["stored_error"] = str(exc)
 
@@ -686,6 +700,59 @@ def finance_page():
             "家計・資産",
             "保存済み家計をSQL-firstで表示し、MoneyForward CSVを差分Import",
         )
+
+        with ui.expansion("家計フィルタ・検索", value=True).classes(
+            "w-full border-2 border-teal-200 bg-teal-50 text-teal-900"
+        ):
+            with ui.row().classes("w-full gap-3 flex-wrap items-end"):
+                start_input = ui.input("開始日").props("type=date").classes("min-w-40")
+                end_input = ui.input("終了日").props("type=date").classes("min-w-40")
+                account_select = ui.select(
+                    options=[""] + state["filter_options"]["accounts"],
+                    label="金融機関",
+                    value="",
+                ).classes("min-w-56")
+                category_select = ui.select(
+                    options=[""] + state["filter_options"]["major_categories"],
+                    label="大項目",
+                    value="",
+                ).classes("min-w-48")
+                search_input_finance = ui.input(
+                    "明細検索",
+                    placeholder="内容・メモ・金融機関・カテゴリ",
+                ).classes("min-w-72 grow")
+
+            def reload_stored():
+                try:
+                    filters = {
+                        "start_date": (start_input.value or None),
+                        "end_date": (end_input.value or None),
+                        "account": (account_select.value or None),
+                        "major_category": (category_select.value or None),
+                        "search_text": ((search_input_finance.value or "").strip() or None),
+                    }
+                    if filters["start_date"] and filters["end_date"] and filters["start_date"] > filters["end_date"]:
+                        ui.notify("開始日は終了日以前にしてください", type="warning")
+                        return
+                    with connection() as db:
+                        state["stored"] = load_finance_dashboard(db, **filters)
+                    state["filters"] = filters
+                    state["stored_error"] = None
+                except Exception as exc:
+                    state["stored_error"] = str(exc)
+                stored_finance.refresh()
+
+            def reset_stored():
+                start_input.value = ""
+                end_input.value = ""
+                account_select.value = ""
+                category_select.value = ""
+                search_input_finance.value = ""
+                reload_stored()
+
+            with ui.row().classes("gap-2"):
+                ui.button("適用", icon="filter_alt", color="teal", on_click=reload_stored)
+                ui.button("クリア", icon="restart_alt", on_click=reset_stored).props("outline")
 
         @ui.refreshable
         def stored_finance():
@@ -703,6 +770,11 @@ def finance_page():
 
             with ui.card().classes("w-full border-2 border-green-300 bg-green-50"):
                 ui.label("保存済み家計").classes("text-xl font-bold text-green-900")
+                active_filters = [
+                    value for value in state["filters"].values() if value
+                ]
+                if active_filters:
+                    ui.badge("フィルタ適用中", color="teal")
                 ui.label(
                     "PostgreSQLの正規化済みTransactionをSQL-firstで集計しています。"
                 ).classes("text-sm text-green-900")
@@ -722,45 +794,62 @@ def finance_page():
                 with ui.expansion("保存済み月別集計", value=True).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
+                    monthly_rows = [
+                        {
+                            **row,
+                            "income_display": f"¥{row['income']:,}",
+                            "expense_display": f"¥{row['expense']:,}",
+                            "net_display": f"¥{row['net']:,}",
+                        }
+                        for row in stored.monthly
+                    ]
                     ui.table(
                         columns=[
                             {"name": "month", "label": "月", "field": "month"},
-                            {"name": "income", "label": "収入", "field": "income"},
-                            {"name": "expense", "label": "支出", "field": "expense"},
-                            {"name": "net", "label": "収支", "field": "net"},
+                            {"name": "income", "label": "収入", "field": "income_display"},
+                            {"name": "expense", "label": "支出", "field": "expense_display"},
+                            {"name": "net", "label": "収支", "field": "net_display"},
                             {"name": "count", "label": "件数", "field": "count"},
                         ],
-                        rows=stored.monthly,
+                        rows=monthly_rows,
                         row_key="month",
                     ).classes("w-full")
 
                 with ui.expansion("保存済みカテゴリ別支出", value=False).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
+                    category_rows = [
+                        {**row, "expense_display": f"¥{row['expense']:,}"}
+                        for row in stored.categories
+                    ]
                     ui.table(
                         columns=[
                             {"name": "major", "label": "大項目", "field": "major"},
                             {"name": "minor", "label": "中項目", "field": "minor"},
-                            {"name": "expense", "label": "支出", "field": "expense"},
+                            {"name": "expense", "label": "支出", "field": "expense_display"},
                         ],
-                        rows=stored.categories,
+                        rows=category_rows,
                         row_key="minor",
                     ).classes("w-full")
 
                 with ui.expansion("保存済み明細（直近100件）", value=False).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
+                    recent_rows = [
+                        {**row, "amount_display": f"¥{row['amount']:,}"}
+                        for row in stored.recent_rows
+                    ]
                     ui.table(
                         columns=[
                             {"name": "date", "label": "日付", "field": "date"},
                             {"name": "content", "label": "内容", "field": "content"},
-                            {"name": "amount", "label": "金額", "field": "amount"},
+                            {"name": "amount", "label": "金額", "field": "amount_display"},
                             {"name": "account", "label": "金融機関", "field": "account"},
                             {"name": "major", "label": "大項目", "field": "major_category"},
                             {"name": "minor", "label": "中項目", "field": "minor_category"},
                             {"name": "transfer", "label": "振替", "field": "is_transfer"},
                         ],
-                        rows=stored.recent_rows,
+                        rows=recent_rows,
                         row_key="external_id",
                     ).classes("w-full")
 
@@ -924,7 +1013,10 @@ def finance_page():
                                     state["import_plan"] = plan_import(
                                         db, state["preview"], state["csv_bytes"]
                                     )
-                                    state["stored"] = load_finance_dashboard(db)
+                                    state["stored"] = load_finance_dashboard(
+                                        db, **state["filters"]
+                                    )
+                                    state["filter_options"] = finance_filter_options(db)
                                     state["stored_error"] = None
                                 stored_finance.refresh()
                             except Exception as exc:
