@@ -203,6 +203,44 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(classify_predicate("manufacturer"), "attribute")
         self.assertIsNone(classify_predicate("unknown_predicate"))
 
+    def test_daily_interpreter_recovers_exact_source_quote(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "メインPC",
+                "predicate": "driver_updated",
+                "value": "DRV-Z13",
+                "quote": "メインPCのドライバーをDRV-Z13へ更新しておいたです",
+            }
+        }
+        result = inspect_output(
+            "さっきメインPCのドライバーをDRV-Z13へ更新しておいた。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "candidate")
+        self.assertEqual(result.candidate.value, "DRV-Z13")
+        self.assertEqual(
+            result.candidate.quote,
+            "さっきメインPCのドライバーをDRV-Z13へ更新しておいた。",
+        )
+
+    def test_daily_interpreter_rejects_multiple_grounded_update_sentences(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "メインPC",
+                "predicate": "driver_updated",
+                "value": "DRV-Z13",
+                "quote": "dummy",
+            }
+        }
+        result = inspect_output(
+            "メインPCをDRV-Z13へ更新した。メインPCをDRV-Z14へ更新した。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "invalid")
+        self.assertEqual(result.reason, "grounded_sentence_not_unique")
+
 
 if __name__ == "__main__":
     unittest.main()
