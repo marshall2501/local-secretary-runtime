@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -18,6 +19,14 @@ PREFERRED_MODELS = ("llama3.1:8b", "qwen3.5:9b")
 ALLOWED_PREDICATES = {
     "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
     "servo_updated": ("交換した", "取り替えた"),
+}
+VALUE_PATTERNS = {
+    "driver_updated": re.compile(
+        r"(?P<value>[A-Za-z0-9._-]+)へ(?:更新した|更新しておいた|アップデートした)"
+    ),
+    "servo_updated": re.compile(
+        r"(?P<value>[A-Za-z0-9._-]+)へ(?:交換した|取り替えた)"
+    ),
 }
 BLOCKED_MARKERS = (
     "かもしれない", "気がする", "たぶん", "多分", "未確認", "不明",
@@ -129,13 +138,27 @@ def inspect_output(text: str, entity_names: set[str], raw: object) -> Interpreta
     mentioned = [name for name in entity_names if name in text]
     if len(mentioned) != 1 or mentioned[0] != entity:
         return Interpretation("invalid", "ambiguous_entity_mentions")
-    if text.count(quote) != 1 or entity not in quote or value not in quote:
-        return Interpretation("invalid", "ungrounded_quote_or_value")
-    if not any(phrase in quote for phrase in ALLOWED_PREDICATES[predicate]):
-        return Interpretation("invalid", "action_not_explicit_in_quote")
+    # The model's quote/value are advisory. Ground the candidate back to the
+    # original text deterministically so minor punctuation/quoting mistakes do
+    # not turn a clearly grounded sentence into an unusable proposal.
+    sentence_matches = []
+    for match in re.finditer(r"[^。.!?\n]+[。.!?]?", text):
+        sentence = match.group(0)
+        if entity not in sentence:
+            continue
+        if not any(phrase in sentence for phrase in ALLOWED_PREDICATES[predicate]):
+            continue
+        values = [m.group("value") for m in VALUE_PATTERNS[predicate].finditer(sentence)]
+        if len(values) == 1:
+            sentence_matches.append((sentence.strip(), values[0]))
+    if len(sentence_matches) != 1:
+        return Interpretation("invalid", "grounded_sentence_not_unique")
+    grounded_quote, grounded_value = sentence_matches[0]
+    if not grounded_quote or text.count(grounded_quote) != 1:
+        return Interpretation("invalid", "grounded_quote_not_unique")
     return Interpretation(
         "candidate", "deterministically_grounded_model_candidate",
-        candidate=DailyCandidate(entity, predicate, value, quote),
+        candidate=DailyCandidate(entity, predicate, grounded_value, grounded_quote),
     )
 
 
