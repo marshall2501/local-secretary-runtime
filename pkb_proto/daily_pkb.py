@@ -25,6 +25,7 @@ from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
+from .finance_import import commit_import, plan_import
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -662,7 +663,15 @@ def features_page():
 
 @ui.page("/finance")
 def finance_page():
-    state = {"preview": None, "error": None}
+    state = {
+        "preview": None,
+        "error": None,
+        "filename": None,
+        "csv_bytes": None,
+        "import_plan": None,
+        "import_result": None,
+        "import_busy": False,
+    }
 
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         _portal_header(
@@ -672,8 +681,9 @@ def finance_page():
         with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
             ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
             ui.label(
-                "CSVはこのローカルWebプロセスのメモリ上で解析します。"
-                "PostgreSQLへ保存せず、LLMにも送信しません。"
+                "CSVはまずローカルWebプロセスのメモリ上で読み取り専用解析します。"
+                "明示的に「隔離DBへImport」を押すまでPostgreSQLへ保存しません。"
+                "LLMには送信しません。"
             ).classes("text-sm text-blue-900")
             ui.label(
                 "想定列: 計算対象 / 日付 / 内容 / 金額（円） / 保有金融機関 / "
@@ -751,17 +761,110 @@ def finance_page():
                         row_key="external_id",
                     ).classes("w-full")
 
+                plan = state["import_plan"]
+                if plan is not None:
+                    with ui.card().classes("w-full border-2 border-amber-300 bg-amber-50 mt-3"):
+                        ui.label("隔離DB Import").classes("text-lg font-bold text-amber-900")
+                        ui.label(
+                            "保存先は secretary_pkb_proto_20260927 の金融テーブルのみ。"
+                            "元CSVそのものはDBへ保存せず、ファイル名・SHA-256・Import Batchを出典として保持します。"
+                        ).classes("text-sm text-amber-900")
+                        with ui.row().classes("w-full gap-3 flex-wrap"):
+                            for label, value in (
+                                ("新規", f"{plan.inserted:,}件"),
+                                ("変更", f"{plan.updated:,}件"),
+                                ("変更なし", f"{plan.unchanged:,}件"),
+                                ("CSV内ID重複", f"{plan.duplicate_external_ids:,}件"),
+                            ):
+                                with ui.card().classes("min-w-36"):
+                                    ui.label(label).classes("text-xs text-grey-7")
+                                    ui.label(value).classes("text-lg font-bold")
+                        ui.label("Source SHA-256: " + plan.source_sha256).classes(
+                            "font-mono text-xs text-grey-7"
+                        )
+
+                        async def do_finance_import():
+                            if state["import_busy"] or state["csv_bytes"] is None:
+                                return
+                            state["import_busy"] = True
+                            import_button.disable()
+                            try:
+                                def _commit():
+                                    with connection() as db:
+                                        return commit_import(
+                                            db,
+                                            state["preview"],
+                                            state["csv_bytes"],
+                                            state["filename"] or "moneyforward.csv",
+                                        )
+                                state["import_result"] = await run.io_bound(_commit)
+                                result = state["import_result"]
+                                if result.status == "committed":
+                                    ui.notify(
+                                        f"隔離DBへImportしました: 新規{result.inserted} / "
+                                        f"変更{result.updated} / 変更なし{result.unchanged}",
+                                        type="positive",
+                                    )
+                                elif result.status == "replayed":
+                                    ui.notify("同じCSVはすでにImport済みです", type="info")
+                                else:
+                                    ui.notify("Importを実行しませんでした: " + str(result.reason), type="warning")
+                                with connection() as db:
+                                    state["import_plan"] = plan_import(
+                                        db, state["preview"], state["csv_bytes"]
+                                    )
+                            except Exception as exc:
+                                state["import_result"] = None
+                                state["error"] = str(exc)
+                                ui.notify(str(exc)[:240], type="negative")
+                            finally:
+                                state["import_busy"] = False
+                                finance_result.refresh()
+
+                        import_button = ui.button(
+                            "隔離DBへImport",
+                            icon="save",
+                            color="orange",
+                            on_click=do_finance_import,
+                        )
+                        if plan.duplicate_external_ids:
+                            import_button.disable()
+
+                        result = state["import_result"]
+                        if result is not None:
+                            ui.separator()
+                            ui.label(
+                                "直近Import結果: "
+                                + f"{result.status} / 新規 {result.inserted:,} / "
+                                + f"変更 {result.updated:,} / 変更なし {result.unchanged:,}"
+                            ).classes("text-sm font-medium")
+                            if result.batch_id:
+                                ui.label("Import Batch: " + result.batch_id).classes(
+                                    "font-mono text-xs"
+                                )
+
             async def handle_finance_upload(event):
                 try:
                     filename, data = await _uploaded_bytes(event)
-                    state["preview"] = analyze_moneyforward_csv(data, filename)
+                    preview = analyze_moneyforward_csv(data, filename)
+                    with connection() as db:
+                        import_plan = plan_import(db, preview, data)
+                    state["preview"] = preview
+                    state["filename"] = filename
+                    state["csv_bytes"] = data
+                    state["import_plan"] = import_plan
+                    state["import_result"] = None
                     state["error"] = None
                     ui.notify(
-                        f"{filename}: {state['preview'].row_count:,}件を読み取り専用で解析しました",
+                        f"{filename}: {preview.row_count:,}件を読み取り専用で解析しました",
                         type="positive",
                     )
                 except Exception as exc:
                     state["preview"] = None
+                    state["filename"] = None
+                    state["csv_bytes"] = None
+                    state["import_plan"] = None
+                    state["import_result"] = None
                     state["error"] = str(exc)
                     ui.notify(str(exc)[:240], type="negative")
                 finance_result.refresh()
