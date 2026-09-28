@@ -81,6 +81,15 @@ class WriteSliceTests(unittest.TestCase):
         self.assertEqual(write_one(IsolatedDB(), r, proposal()).reason,
                          "fictional_fixture_only")
 
+    def test_event_semantics_are_append_only(self):
+        from pkb_proto.entity_model_service import classify_predicate
+        self.assertEqual(classify_predicate("driver_updated"), "event")
+        self.assertEqual(classify_predicate("servo_updated"), "event")
+
+    def test_current_driver_semantics_are_state(self):
+        from pkb_proto.entity_model_service import classify_predicate
+        self.assertEqual(classify_predicate("current_driver"), "state")
+
 
 if __name__ == "__main__":
     unittest.main()
