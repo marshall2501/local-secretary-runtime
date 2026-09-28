@@ -4,6 +4,7 @@ import unittest
 from uuid import UUID
 
 from pkb_proto.daily_pkb import parse_correction, parse_query, parse_write
+from pkb_proto.pending_service import acceptance_eligible
 
 
 ENTITIES = {
@@ -72,6 +73,30 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIsNone(query.entity_id)
         self.assertIsNone(query.predicate)
         self.assertTrue(query.include_history)
+
+    def test_structured_conflict_is_acceptance_eligible(self):
+        row = {
+            "review_status": "pending",
+            "reason": "existing_claim_requires_conflict_resolution",
+            "entity_id": UUID("22222222-2222-2222-2222-222222222222"),
+            "entity_name": "サブPC",
+            "predicate": "driver_updated",
+            "proposed_value": "DRV-A9",
+            "raw_text": "サブPCをDRV-A9へ更新した。",
+        }
+        self.assertTrue(acceptance_eligible(row))
+
+    def test_unstructured_pending_is_not_acceptance_eligible(self):
+        row = {
+            "review_status": "pending",
+            "reason": "unsupported_natural_language_in_first_slice",
+            "entity_id": None,
+            "entity_name": None,
+            "predicate": None,
+            "proposed_value": None,
+            "raw_text": "サブPCの調子が最近よくない気がする。",
+        }
+        self.assertFalse(acceptance_eligible(row))
 
 
 if __name__ == "__main__":
