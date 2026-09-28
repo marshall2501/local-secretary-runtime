@@ -69,6 +69,8 @@ jobs:
       - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py tests/test_pkb_daily.py
       - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
+      - run: python -m unittest discover -s tests -p test_pkb_ingestion_gate.py -v
+      - run: python -m unittest discover -s tests -p test_pkb_write_slice.py -v
       - run: python -m unittest discover -s tests -p test_pkb_diagnostic_cases.py -v
       - name: Start isolated localhost server and inspect read-only fixture API
         shell: bash
