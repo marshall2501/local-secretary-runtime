@@ -6,6 +6,8 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
+from .entity_model_service import classify_predicate
+
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
 
@@ -199,13 +201,15 @@ def accept_pending(db, pending_id: str) -> PendingResult:
 
         cur.execute(
             """INSERT INTO secretary.claims
-               (entity_id, source_id, claim_type, predicate, value, evidence,
-                origin, verification_status, valid_from, recorded_at)
-               VALUES (%s,%s,'fact',%s,%s,%s,'user_explicit','unverified',%s,now())
+               (entity_id, source_id, claim_type, semantic_kind,
+                predicate, value, evidence, origin, verification_status,
+                valid_from, recorded_at)
+               VALUES (%s,%s,'fact',%s,%s,%s,%s,'user_explicit','unverified',%s,now())
                RETURNING id""",
             (
                 item["entity_id"],
                 source_id,
+                classify_predicate(item["predicate"]),
                 item["predicate"],
                 Jsonb(item["proposed_value"]),
                 item["raw_text"],
