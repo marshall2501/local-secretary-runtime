@@ -691,6 +691,18 @@ def finance_page():
             "sort_dir": "desc",
             "recent_limit": 50,
         },
+        # UI-only state is kept in one named structure so refreshes do not
+        # scatter hidden flags through the page code. It is intentionally
+        # page-instance state: operations preserve it, full reloads reset it.
+        "ui_open": {
+            "filter": True,
+            "stored": True,
+            "monthly": True,
+            "categories": False,
+            "details": False,
+            "imports": False,
+            "csv": False,
+        },
     }
 
     try:
@@ -700,13 +712,22 @@ def finance_page():
     except Exception as exc:
         state["stored_error"] = str(exc)
 
+    def remember_expansion(key: str):
+        def _remember(event):
+            state["ui_open"][key] = bool(event.value)
+        return _remember
+
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         _portal_header(
             "家計・資産",
             "保存済み家計をSQL-firstで表示し、MoneyForward CSVを差分Import",
         )
 
-        with ui.expansion("家計フィルタ・検索", value=True).classes(
+        with ui.expansion(
+            "家計フィルタ・検索",
+            value=state["ui_open"]["filter"],
+            on_value_change=remember_expansion("filter"),
+        ).classes(
             "w-full border-2 border-teal-200 bg-teal-50 text-teal-900"
         ):
             with ui.row().classes("w-full gap-3 flex-wrap items-end"):
@@ -791,8 +812,11 @@ def finance_page():
                     ui.label("保存済み家計データはまだありません。")
                 return
 
-            with ui.card().classes("w-full border-2 border-green-300 bg-green-50"):
-                ui.label("保存済み家計").classes("text-xl font-bold text-green-900")
+            with ui.expansion(
+                "保存済み家計",
+                value=state["ui_open"]["stored"],
+                on_value_change=remember_expansion("stored"),
+            ).classes("w-full border-2 border-green-300 bg-green-50 text-green-900"):
                 fstate = state["filters"]
                 has_user_filter = any(
                     fstate.get(key)
@@ -826,7 +850,11 @@ def finance_page():
                             ui.label(label).classes("text-xs text-grey-7")
                             ui.label(value).classes("text-lg font-bold")
 
-                with ui.expansion("保存済み月別集計", value=True).classes(
+                with ui.expansion(
+                    "保存済み月別集計",
+                    value=state["ui_open"]["monthly"],
+                    on_value_change=remember_expansion("monthly"),
+                ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
                     monthly_rows = [
@@ -850,7 +878,11 @@ def finance_page():
                         row_key="month",
                     ).classes("w-full")
 
-                with ui.expansion("保存済みカテゴリ別支出", value=False).classes(
+                with ui.expansion(
+                    "保存済みカテゴリ別支出",
+                    value=state["ui_open"]["categories"],
+                    on_value_change=remember_expansion("categories"),
+                ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
                     category_rows = [
@@ -867,7 +899,11 @@ def finance_page():
                         row_key="minor",
                     ).classes("w-full")
 
-                with ui.expansion("保存済み明細", value=False).classes(
+                with ui.expansion(
+                    "保存済み明細",
+                    value=state["ui_open"]["details"],
+                    on_value_change=remember_expansion("details"),
+                ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
                     with ui.row().classes("w-full gap-3 flex-wrap items-end"):
@@ -959,7 +995,11 @@ def finance_page():
                         row_key="external_id",
                     ).classes("w-full")
 
-                with ui.expansion("Import履歴 / Source", value=False).classes(
+                with ui.expansion(
+                    "Import履歴 / Source",
+                    value=state["ui_open"]["imports"],
+                    on_value_change=remember_expansion("imports"),
+                ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
                     ui.table(
@@ -975,7 +1015,11 @@ def finance_page():
                     ).classes("w-full")
         stored_finance()
 
-        with ui.expansion("MoneyForward CSV 取込", value=False).classes(
+        with ui.expansion(
+            "MoneyForward CSV 取込",
+            value=state["ui_open"]["csv"],
+            on_value_change=remember_expansion("csv"),
+        ).classes(
             "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
         ):
             ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
