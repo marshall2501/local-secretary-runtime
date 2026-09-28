@@ -685,12 +685,17 @@ def finance_page():
             "account": None,
             "major_category": None,
             "search_text": None,
+            "row_mode": "calculation_target",
+            "page": 1,
+            "sort_by": "date",
+            "sort_dir": "desc",
+            "recent_limit": 50,
         },
     }
 
     try:
         with connection() as db:
-            state["stored"] = load_finance_dashboard(db)
+            state["stored"] = load_finance_dashboard(db, **state["filters"])
             state["filter_options"] = finance_filter_options(db)
     except Exception as exc:
         state["stored_error"] = str(exc)
@@ -717,6 +722,15 @@ def finance_page():
                     label="大項目",
                     value="",
                 ).classes("min-w-48")
+                row_mode_select = ui.select(
+                    options={
+                        "calculation_target": "集計対象のみ",
+                        "all": "全明細（振替含む）",
+                        "transfer": "振替のみ",
+                    },
+                    label="対象",
+                    value="calculation_target",
+                ).classes("min-w-48")
                 search_input_finance = ui.input(
                     "明細検索",
                     placeholder="内容・メモ・金融機関・カテゴリ",
@@ -730,6 +744,11 @@ def finance_page():
                         "account": (account_select.value or None),
                         "major_category": (category_select.value or None),
                         "search_text": ((search_input_finance.value or "").strip() or None),
+                        "row_mode": (row_mode_select.value or "calculation_target"),
+                        "page": 1,
+                        "sort_by": state["filters"].get("sort_by", "date"),
+                        "sort_dir": state["filters"].get("sort_dir", "desc"),
+                        "recent_limit": state["filters"].get("recent_limit", 50),
                     }
                     if filters["start_date"] and filters["end_date"] and filters["start_date"] > filters["end_date"]:
                         ui.notify("開始日は終了日以前にしてください", type="warning")
@@ -747,7 +766,11 @@ def finance_page():
                 end_input.value = ""
                 account_select.value = ""
                 category_select.value = ""
+                row_mode_select.value = "calculation_target"
                 search_input_finance.value = ""
+                state["filters"]["sort_by"] = "date"
+                state["filters"]["sort_dir"] = "desc"
+                state["filters"]["recent_limit"] = 50
                 reload_stored()
 
             with ui.row().classes("gap-2"):
@@ -770,11 +793,22 @@ def finance_page():
 
             with ui.card().classes("w-full border-2 border-green-300 bg-green-50"):
                 ui.label("保存済み家計").classes("text-xl font-bold text-green-900")
-                active_filters = [
-                    value for value in state["filters"].values() if value
-                ]
-                if active_filters:
+                fstate = state["filters"]
+                has_user_filter = any(
+                    fstate.get(key)
+                    for key in ("start_date", "end_date", "account", "major_category", "search_text")
+                ) or fstate.get("row_mode") != "calculation_target"
+                if has_user_filter:
                     ui.badge("フィルタ適用中", color="teal")
+                mode_labels = {
+                    "calculation_target": "集計対象のみ",
+                    "all": "全明細（振替含む）",
+                    "transfer": "振替のみ",
+                }
+                ui.badge(
+                    "対象: " + mode_labels.get(stored.row_mode, stored.row_mode),
+                    color="green",
+                )
                 ui.label(
                     "PostgreSQLの正規化済みTransactionをSQL-firstで集計しています。"
                 ).classes("text-sm text-green-900")
@@ -833,9 +867,79 @@ def finance_page():
                         row_key="minor",
                     ).classes("w-full")
 
-                with ui.expansion("保存済み明細（直近100件）", value=False).classes(
+                with ui.expansion("保存済み明細", value=False).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
                 ):
+                    with ui.row().classes("w-full gap-3 flex-wrap items-end"):
+                        sort_by_select = ui.select(
+                            options={"date": "日付", "amount": "金額"},
+                            label="並び替え",
+                            value=stored.sort_by,
+                        ).classes("min-w-32")
+                        sort_dir_select = ui.select(
+                            options={"desc": "降順", "asc": "昇順"},
+                            label="順序",
+                            value=stored.sort_dir,
+                        ).classes("min-w-28")
+                        page_size_select = ui.select(
+                            options=[25, 50, 100],
+                            label="1ページ件数",
+                            value=stored.page_size,
+                        ).classes("min-w-32")
+
+                        def reload_page(
+                            target_page: int | None = None,
+                            apply_sort: bool = False,
+                        ):
+                            try:
+                                filters = dict(state["filters"])
+                                if apply_sort:
+                                    filters["sort_by"] = sort_by_select.value or "date"
+                                    filters["sort_dir"] = sort_dir_select.value or "desc"
+                                    filters["recent_limit"] = int(page_size_select.value or 50)
+                                    filters["page"] = 1
+                                elif target_page is not None:
+                                    filters["page"] = target_page
+                                with connection() as db:
+                                    state["stored"] = load_finance_dashboard(db, **filters)
+                                state["filters"] = filters
+                                state["stored_error"] = None
+                            except Exception as exc:
+                                state["stored_error"] = str(exc)
+                            stored_finance.refresh()
+
+                        ui.button(
+                            "表示更新",
+                            icon="sort",
+                            color="green",
+                            on_click=lambda: reload_page(apply_sort=True),
+                        ).props("outline")
+
+                    with ui.row().classes("w-full items-center justify-between"):
+                        ui.label(
+                            f"{stored.transaction_count:,}件中 "
+                            f"{(stored.page - 1) * stored.page_size + 1:,}～"
+                            f"{min(stored.page * stored.page_size, stored.transaction_count):,}件"
+                        ).classes("text-sm")
+                        with ui.row().classes("items-center gap-2"):
+                            prev_button = ui.button(
+                                "前へ",
+                                icon="chevron_left",
+                                on_click=lambda: reload_page(max(1, stored.page - 1)),
+                            ).props("outline")
+                            ui.label(f"{stored.page} / {stored.total_pages} ページ")
+                            next_button = ui.button(
+                                "次へ",
+                                icon="chevron_right",
+                                on_click=lambda: reload_page(
+                                    min(stored.total_pages, stored.page + 1)
+                                ),
+                            ).props("outline")
+                            if stored.page <= 1:
+                                prev_button.disable()
+                            if stored.page >= stored.total_pages:
+                                next_button.disable()
+
                     recent_rows = [
                         {**row, "amount_display": f"¥{row['amount']:,}"}
                         for row in stored.recent_rows
@@ -848,6 +952,7 @@ def finance_page():
                             {"name": "account", "label": "金融機関", "field": "account"},
                             {"name": "major", "label": "大項目", "field": "major_category"},
                             {"name": "minor", "label": "中項目", "field": "minor_category"},
+                            {"name": "target", "label": "集計対象", "field": "calculation_target"},
                             {"name": "transfer", "label": "振替", "field": "is_transfer"},
                         ],
                         rows=recent_rows,
