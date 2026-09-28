@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import list_components, resolve_component_reference
+from .entity_detail import load_entity_detail
 from .finance_preview import analyze_moneyforward_csv
 from .finance_import import (
     commit_import,
@@ -550,7 +551,7 @@ def api_pending_accept(pending_id: str):
 
 
 _FEATURES = [
-    ("Personal Knowledge Base", "利用可能", "green", "/pkb", "自然言語の記録・訂正・検索・履歴・Pending"),
+    ("Personal Knowledge Base", "利用可能", "green", "/pkb", "自然言語の記録・訂正・検索・履歴・Entity詳細・Pending"),
     ("家計・資産", "試験中", "orange", "/finance", "保存済み家計のSQL集計・明細・Import履歴とMoneyForward CSV取込"),
     ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
     ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
@@ -869,10 +870,10 @@ def finance_page():
                     ui.table(
                         columns=[
                             {"name": "month", "label": "月", "field": "month"},
-                            {"name": "income", "label": "収入", "field": "income_display"},
-                            {"name": "expense", "label": "支出", "field": "expense_display"},
-                            {"name": "net", "label": "収支", "field": "net_display"},
-                            {"name": "count", "label": "件数", "field": "count"},
+                            {"name": "income", "label": "収入", "field": "income_display", "align": "right"},
+                            {"name": "expense", "label": "支出", "field": "expense_display", "align": "right"},
+                            {"name": "net", "label": "収支", "field": "net_display", "align": "right"},
+                            {"name": "count", "label": "件数", "field": "count", "align": "right"},
                         ],
                         rows=monthly_rows,
                         row_key="month",
@@ -893,7 +894,7 @@ def finance_page():
                         columns=[
                             {"name": "major", "label": "大項目", "field": "major"},
                             {"name": "minor", "label": "中項目", "field": "minor"},
-                            {"name": "expense", "label": "支出", "field": "expense_display"},
+                            {"name": "expense", "label": "支出", "field": "expense_display", "align": "right"},
                         ],
                         rows=category_rows,
                         row_key="minor",
@@ -1008,7 +1009,8 @@ def finance_page():
                             {
                                 "name": "amount", "label": "金額", "field": "amount_display",
                                 "style": "width: 9%; white-space: nowrap;",
-                                "headerStyle": "width: 9%;",
+                                "headerStyle": "width: 9%; text-align: right;",
+                                "align": "right",
                             },
                             {
                                 "name": "account", "label": "金融機関", "field": "account",
@@ -1038,6 +1040,7 @@ def finance_page():
                                 "name": "target", "label": "集計", "field": "target_display",
                                 "style": "width: 4%; text-align: center;",
                                 "headerStyle": "width: 4%; text-align: center;",
+                                "align": "center",
                             },
                             {
                                 "name": "transfer", "label": "振替", "field": "transfer_display",
@@ -1319,6 +1322,154 @@ def _display_result(result: dict):
         ui.label("Pending: " + result["pending_id"]).classes("font-mono text-xs")
 
 
+@ui.page("/entity/{entity_id}")
+def entity_page(entity_id: str):
+    try:
+        with connection() as db:
+            detail = load_entity_detail(db, entity_id)
+    except Exception as exc:
+        detail = None
+        error = str(exc)
+    else:
+        error = None
+
+    with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
+        _portal_header(
+            "Entity 詳細",
+            "Entity / Current State / Relation / Event / Source を共通形式で表示",
+        )
+        ui.button("PKBへ戻る", icon="arrow_back").props("flat href=/pkb tag=a")
+
+        if error:
+            with ui.card().classes("w-full border-2 border-red-300 bg-red-50"):
+                ui.label("Entity詳細を読み取れません: " + error).classes("text-red-800")
+            return
+        if detail is None:
+            with ui.card().classes("w-full border-2 border-grey-300"):
+                ui.label("Entityが見つかりません。")
+            return
+
+        entity = detail["entity"]
+        with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
+            ui.label(entity["name"]).classes("text-2xl font-bold text-blue-900")
+            with ui.row().classes("w-full gap-3 flex-wrap"):
+                for label, value in (
+                    ("Domain", entity["domain"]),
+                    ("Type", entity["entity_type"]),
+                    ("Entity ID", entity["id"]),
+                ):
+                    with ui.card().classes("min-w-48"):
+                        ui.label(label).classes("text-xs text-grey-7")
+                        ui.label(str(value)).classes(
+                            "font-mono text-sm" if label == "Entity ID" else "text-base font-medium"
+                        )
+
+        with ui.expansion("現在のState / Attribute", value=True).classes(
+            "w-full border-2 border-green-300 bg-green-50 text-green-900"
+        ):
+            rows = detail["current"]
+            if not rows:
+                ui.label("現在値として表示できるState / Attributeはありません。")
+            else:
+                display = [
+                    {
+                        **row,
+                        "value_display": str(row["value"]),
+                        "valid_from_display": str(row["valid_from"]),
+                    }
+                    for row in rows
+                ]
+                ui.table(
+                    columns=[
+                        {"name": "kind", "label": "意味", "field": "semantic_kind", "align": "left"},
+                        {"name": "predicate", "label": "項目", "field": "predicate", "align": "left"},
+                        {"name": "value", "label": "現在値", "field": "value_display", "align": "left"},
+                        {"name": "since", "label": "開始", "field": "valid_from_display", "align": "left"},
+                        {"name": "source", "label": "Source", "field": "source_uri", "align": "left"},
+                    ],
+                    rows=display,
+                    row_key="id",
+                ).props("dense flat").classes("w-full")
+
+        with ui.expansion("Relations", value=True).classes(
+            "w-full border-2 border-purple-300 bg-purple-50 text-purple-900"
+        ):
+            relations = detail["relations"]
+            if not relations:
+                ui.label("現在または履歴Relationはありません。")
+            else:
+                for rel in relations:
+                    arrow = "→" if rel["direction"] == "outgoing" else "←"
+                    role = f" / role={rel['relation_role']}" if rel["relation_role"] else ""
+                    with ui.row().classes(
+                        "w-full items-center gap-3 border-b border-purple-200 py-2"
+                    ):
+                        ui.label(arrow).classes("text-lg font-bold")
+                        with ui.column().classes("grow gap-0"):
+                            ui.label(
+                                f"{rel['predicate']}{role} / {rel['other_entity_name']}"
+                            ).classes("font-medium")
+                            ui.label(
+                                f"{rel['other_entity_type']} / from {rel['valid_from']}"
+                            ).classes("text-xs text-grey-7")
+                        ui.button("詳細", icon="open_in_new").props(
+                            f"flat href=/entity/{rel['other_entity_id']} tag=a"
+                        )
+
+        with ui.expansion("Event履歴", value=True).classes(
+            "w-full border-2 border-orange-300 bg-orange-50 text-orange-900"
+        ):
+            rows = detail["events"]
+            if not rows:
+                ui.label("Event履歴はありません。")
+            else:
+                display = [
+                    {
+                        **row,
+                        "value_display": str(row["value"]),
+                        "when_display": str(row["valid_from"]),
+                    }
+                    for row in rows
+                ]
+                ui.table(
+                    columns=[
+                        {"name": "when", "label": "時点", "field": "when_display", "align": "left"},
+                        {"name": "predicate", "label": "Event", "field": "predicate", "align": "left"},
+                        {"name": "value", "label": "値", "field": "value_display", "align": "left"},
+                        {"name": "source", "label": "Source", "field": "source_uri", "align": "left"},
+                    ],
+                    rows=display,
+                    row_key="id",
+                ).props("dense flat").classes("w-full")
+
+        with ui.expansion("過去のState / Attribute", value=False).classes(
+            "w-full border-2 border-grey-300 bg-grey-1"
+        ):
+            rows = detail["history"]
+            if not rows:
+                ui.label("終了済みのState / Attributeはありません。")
+            else:
+                display = [
+                    {
+                        **row,
+                        "value_display": str(row["value"]),
+                        "period_display": f"{row['valid_from']} ～ {row['valid_to']}",
+                    }
+                    for row in rows
+                ]
+                ui.table(
+                    columns=[
+                        {"name": "kind", "label": "意味", "field": "semantic_kind", "align": "left"},
+                        {"name": "predicate", "label": "項目", "field": "predicate", "align": "left"},
+                        {"name": "value", "label": "値", "field": "value_display", "align": "left"},
+                        {"name": "period", "label": "有効期間", "field": "period_display", "align": "left"},
+                        {"name": "source", "label": "Source", "field": "source_uri", "align": "left"},
+                    ],
+                    rows=display,
+                    row_key="id",
+                ).props("dense flat").classes("w-full")
+
+
 @ui.page("/pkb")
 def pkb_page():
     state = {"write": None, "write_busy": False, "correction": None, "search": None}
@@ -1442,6 +1593,31 @@ def pkb_page():
                 search_result.refresh()
             ui.button("検索する", on_click=do_search, color="blue")
             search_result()
+
+        with ui.expansion("Entity一覧", value=False).classes(
+            "w-full border-2 border-indigo-300 bg-indigo-50 text-indigo-900"
+        ):
+            try:
+                with connection() as db:
+                    entity_rows = _entities(db)
+            except Exception as exc:
+                ui.label("Entity一覧を取得できません: " + str(exc)).classes("text-red-700")
+            else:
+                ui.label(
+                    "詳細画面は共通骨格です。PC・RCなどのEntity型ごとの専用表示は必要に応じて追加します。"
+                ).classes("text-sm")
+                for row in entity_rows:
+                    with ui.row().classes(
+                        "w-full items-center gap-3 border-b border-indigo-200 py-2"
+                    ):
+                        with ui.column().classes("grow gap-0"):
+                            ui.label(row["name"]).classes("font-medium")
+                            ui.label(
+                                f"{row['domain']} / {row['entity_type']}"
+                            ).classes("text-xs text-grey-7")
+                        ui.button("詳細", icon="open_in_new").props(
+                            f"flat href=/entity/{row['id']} tag=a"
+                        )
 
         @ui.refreshable
         def pending_panel():
