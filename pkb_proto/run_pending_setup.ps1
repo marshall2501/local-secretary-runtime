@@ -11,7 +11,8 @@ $file009 = Join-Path $root 'pkb_proto\sql\009_pkb_proto_pending_privileges.sql'
 $file010 = Join-Path $root 'pkb_proto\sql\010_pkb_proto_pending_review_audit.sql'
 $file011 = Join-Path $root 'pkb_proto\sql\011_pkb_proto_pending_acceptance.sql'
 $file012 = Join-Path $root 'pkb_proto\sql\012_pkb_proto_pending_interpreter.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012)) {
+$file013 = Join-Path $root 'pkb_proto\sql\013_pkb_proto_entity_model.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -136,7 +137,34 @@ $verify012 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($verify012 | Out-String).Trim() -ne '1') {
     throw 'Pending Claims interpreter provenance verification failed.'
 }
-Write-Host 'PASS: Pending Claims storage, privileges, review audit, acceptance and interpreter provenance verified (008 + 009 + 010 + 011 + 012).'
+$has013 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='013_pkb_proto_entity_model.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 013 schema version.' }
+if (($has013 | Out-String).Trim() -eq '0') {
+    $hash013 = (Get-FileHash -LiteralPath $file013 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql013 = [IO.File]::ReadAllText($file013).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash013)
+    $tmpName013 = 'pkb-entity-model-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp013 = Join-Path ([IO.Path]::GetTempPath()) $tmpName013
+    $remoteTmp013 = '/tmp/' + $tmpName013
+    try {
+        [IO.File]::WriteAllText($localTmp013, $sql013, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp013 ($id + ':' + $remoteTmp013) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 013 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp013
+        if ($LASTEXITCODE -ne 0) { throw '013 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp013) { Remove-Item -LiteralPath $localTmp013 }
+        & docker exec $id rm -f $remoteTmp013 | Out-Null
+    }
+} elseif (($has013 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 013 migration records.'
+}
+
+$verify013 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='013_pkb_proto_entity_model.sql';"
+if ($LASTEXITCODE -ne 0 -or ($verify013 | Out-String).Trim() -ne '1') {
+    throw 'Compositional Entity model verification failed.'
+}
+Write-Host 'PASS: PKB prototype migrations verified through 013 (Pending + interpreter + compositional Entity model).'
+
 
 
 
