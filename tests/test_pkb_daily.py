@@ -165,6 +165,36 @@ class DailyPKBParserTests(unittest.TestCase):
         row["interpreter_model"] = None
         self.assertFalse(acceptance_eligible(row))
 
+    def test_daily_interpreter_bounded_natural_update_wording(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "メインPC",
+                "predicate": "driver_updated",
+                "value": "DRV-Z11",
+                "quote": "メインPCのドライバーをDRV-Z11へ更新しておいた",
+            }
+        }
+        result = inspect_output(
+            "今日はメインPCのドライバーをDRV-Z11へ更新しておいた。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "candidate")
+
+    def test_model_candidate_natural_wording_is_acceptance_eligible(self):
+        row = {
+            "review_status": "pending",
+            "reason": "model_candidate_needs_user_confirmation",
+            "entity_id": UUID("11111111-1111-1111-1111-111111111111"),
+            "entity_name": "メインPC",
+            "predicate": "driver_updated",
+            "proposed_value": "DRV-Z11",
+            "raw_text": "今日はメインPCのドライバーをDRV-Z11へ更新しておいた。",
+            "interpreter_kind": "local_ollama",
+            "interpreter_model": "llama3.1:8b",
+        }
+        self.assertTrue(acceptance_eligible(row))
+
 
 if __name__ == "__main__":
     unittest.main()
