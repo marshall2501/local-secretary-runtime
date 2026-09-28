@@ -994,40 +994,62 @@ def finance_page():
                         columns=[
                             {
                                 "name": "date", "label": "日付", "field": "date",
-                                "style": "width: 7rem; white-space: nowrap;",
+                                "style": "width: 9%; white-space: nowrap;",
+                                "headerStyle": "width: 9%;",
                             },
                             {
                                 "name": "content", "label": "内容", "field": "content_display",
                                 "style": (
-                                    "max-width: 34rem; overflow: hidden; "
+                                    "width: 35%; max-width: 35%; overflow: hidden; "
                                     "text-overflow: ellipsis; white-space: nowrap;"
                                 ),
+                                "headerStyle": "width: 35%;",
                             },
                             {
                                 "name": "amount", "label": "金額", "field": "amount_display",
-                                "style": "width: 7rem; white-space: nowrap;",
+                                "style": "width: 9%; white-space: nowrap;",
+                                "headerStyle": "width: 9%;",
                             },
                             {
                                 "name": "account", "label": "金融機関", "field": "account",
                                 "style": (
-                                    "max-width: 15rem; overflow: hidden; "
+                                    "width: 16%; max-width: 16%; overflow: hidden; "
                                     "text-overflow: ellipsis; white-space: nowrap;"
                                 ),
+                                "headerStyle": "width: 16%;",
                             },
-                            {"name": "major", "label": "大項目", "field": "major_category"},
-                            {"name": "minor", "label": "中項目", "field": "minor_category"},
+                            {
+                                "name": "major", "label": "大項目", "field": "major_category",
+                                "style": (
+                                    "width: 10%; max-width: 10%; overflow: hidden; "
+                                    "text-overflow: ellipsis; white-space: nowrap;"
+                                ),
+                                "headerStyle": "width: 10%;",
+                            },
+                            {
+                                "name": "minor", "label": "中項目", "field": "minor_category",
+                                "style": (
+                                    "width: 13%; max-width: 13%; overflow: hidden; "
+                                    "text-overflow: ellipsis; white-space: nowrap;"
+                                ),
+                                "headerStyle": "width: 13%;",
+                            },
                             {
                                 "name": "target", "label": "集計", "field": "target_display",
-                                "style": "width: 4rem; text-align: center;",
+                                "style": "width: 4%; text-align: center;",
+                                "headerStyle": "width: 4%; text-align: center;",
                             },
                             {
                                 "name": "transfer", "label": "振替", "field": "transfer_display",
-                                "style": "width: 4rem; text-align: center;",
+                                "style": "width: 4%; text-align: center;",
+                                "headerStyle": "width: 4%; text-align: center;",
                             },
                         ],
                         rows=recent_rows,
                         row_key="external_id",
-                    ).props("dense flat").classes("w-full")
+                    ).props(
+                        'dense flat table-style="table-layout: fixed; width: 100%;"'
+                    ).classes("w-full")
 
                 with ui.expansion(
                     "Import履歴 / Source",
