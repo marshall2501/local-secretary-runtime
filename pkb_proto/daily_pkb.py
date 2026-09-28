@@ -24,7 +24,7 @@ from .correction_service import correct_entity
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
-from .pending_service import enqueue as enqueue_pending, list_pending, review_pending
+from .pending_service import enqueue as enqueue_pending, list_pending, list_reviewed, review_pending
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -389,7 +389,17 @@ def api_pending_review(pending_id: str, params: PendingDecisionInput):
 
 def _display_result(result: dict):
     status = result.get("status", "")
-    color = "green" if status in ("inserted", "replayed", "corrected", "ok") else "orange"
+    colors = {
+        "inserted": "green",
+        "replayed": "green",
+        "corrected": "orange",
+        "ok": "blue",
+        "review": "orange",
+        "needs_edit": "orange",
+        "rejected": "red",
+        "error": "red",
+    }
+    color = colors.get(status, "grey")
     ui.badge(status or "result", color=color)
     if result.get("reason"):
         ui.label("理由: " + str(result["reason"]))
@@ -511,6 +521,7 @@ def index():
                         label = "却下" if decision == "rejected" else "要修正"
                         ui.notify(label + "として記録しました", type="positive")
                         pending_panel.refresh()
+                        reviewed_panel.refresh()
                     except Exception as exc:
                         ui.notify(str(exc)[:240], type="negative")
 
@@ -536,6 +547,30 @@ def index():
                             color="red",
                         ).props("outline")
         pending_panel()
+
+        @ui.refreshable
+        def reviewed_panel():
+            with ui.expansion("処理済みの確認待ち"):
+                try:
+                    with connection() as db:
+                        rows = list_reviewed(db)
+                except Exception as exc:
+                    ui.label("処理履歴を取得できません: " + str(exc)).classes("text-red-600")
+                    return
+                if not rows:
+                    ui.label("処理済みの項目はまだありません。")
+                    return
+                for row in rows:
+                    status = row["review_status"]
+                    label = "要修正" if status == "needs_edit" else "却下" if status == "rejected" else status
+                    when = row["reviewed_at"].isoformat() if isinstance(row.get("reviewed_at"), datetime) else str(row.get("reviewed_at") or "")
+                    with ui.row().classes("w-full items-center gap-3 border-b py-2"):
+                        ui.badge(label, color="orange" if status == "needs_edit" else "red" if status == "rejected" else "grey")
+                        with ui.column().classes("grow gap-1"):
+                            ui.label(row["raw_text"]).classes("font-medium")
+                            ui.label("理由: " + row["reason"]).classes("text-sm")
+                            ui.label("処理時点: " + when).classes("text-xs text-gray-600")
+        reviewed_panel()
 
         with ui.expansion("この最小実装の制限"):
             ui.label("既知Entityへの明示的な更新／交換と、明示訂正だけを自動処理します。")
