@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from pkb_proto.finance_import import (
     SOURCE_SYSTEM,
+    _finance_filter_clause,
     _guard_db,
     source_sha256,
     transaction_content_hash,
@@ -42,6 +43,29 @@ class FinanceImportTests(unittest.TestCase):
         self.assertEqual(payload["external_id"], "mf-001")
         self.assertEqual(payload["amount_jpy"], -1234)
         self.assertEqual(SOURCE_SYSTEM, "moneyforward_me")
+
+
+    def test_filter_clause_builds_parameterized_constraints(self):
+        clause, params = _finance_filter_clause(
+            start_date="2026-09-01",
+            end_date="2026-09-30",
+            account="カードA",
+            major_category="食費",
+            search_text="スーパー",
+        )
+        self.assertIn("t.transaction_date >= %s::date", clause)
+        self.assertIn("t.transaction_date <= %s::date", clause)
+        self.assertIn("a.external_name = %s", clause)
+        self.assertIn("c.major_name = %s", clause)
+        self.assertIn("t.description ILIKE %s", clause)
+        self.assertEqual(params[0], SOURCE_SYSTEM)
+        self.assertEqual(params[1:5], ["2026-09-01", "2026-09-30", "カードA", "食費"])
+        self.assertEqual(params[5:], ["%スーパー%"] * 5)
+
+    def test_filter_clause_without_filters_scopes_only_source_system(self):
+        clause, params = _finance_filter_clause()
+        self.assertEqual(clause, "t.source_system=%s")
+        self.assertEqual(params, [SOURCE_SYSTEM])
 
     def test_guard_rejects_production_database(self):
         db = SimpleNamespace(info=SimpleNamespace(
