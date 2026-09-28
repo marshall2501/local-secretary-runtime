@@ -76,7 +76,7 @@ def _sql() -> str:
         SELECT c.id, c.entity_id, e.name AS entity_name, e.domain,
                c.source_id, s.source_type, s.uri AS source_uri,
                s.citation AS source_citation,
-               c.predicate, c.value, c.claim_type, c.origin,
+               c.predicate, c.value, c.claim_type, c.semantic_kind, c.origin,
                c.evidence, c.verification_status AS recorded_status,
                c.valid_from, c.valid_to, c.recorded_at, c.retracted_at,
                c.supersedes_id,
