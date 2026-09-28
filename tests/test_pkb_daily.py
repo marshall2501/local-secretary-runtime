@@ -14,6 +14,7 @@ from pkb_proto.daily_pkb import (
     _default_ui_preferences,
     _set_pkb_ui_open,
     _validate_ui_preferences,
+    _contextualize_core_reply,
     core_answer,
     load_ui_preferences,
     parse_component_write,
@@ -120,6 +121,39 @@ class DailyPKBParserTests(unittest.TestCase):
     def test_pkb_ui_open_rejects_unknown_key(self):
         with self.assertRaises(KeyError):
             _set_pkb_ui_open("unknown", True)
+
+    def test_core_reply_inherits_unique_entity_from_original_request(self):
+        effective = _contextualize_core_reply(
+            "メインPCについて調べて",
+            "GPUの現在のドライバーを調べて",
+            ENTITIES,
+        )
+        self.assertEqual(
+            effective,
+            "メインPCのGPUの現在のドライバーを調べて",
+        )
+
+    def test_core_reply_keeps_explicit_entity_in_reply(self):
+        effective = _contextualize_core_reply(
+            "メインPCについて調べて",
+            "サブPCのドライバー更新履歴を見て",
+            ENTITIES,
+        )
+        self.assertEqual(
+            effective,
+            "サブPCのドライバー更新履歴を見て",
+        )
+
+    def test_core_reply_does_not_guess_when_original_has_multiple_entities(self):
+        effective = _contextualize_core_reply(
+            "メインPCとサブPCについて調べて",
+            "GPUの現在のドライバーを調べて",
+            ENTITIES,
+        )
+        self.assertEqual(
+            effective,
+            "GPUの現在のドライバーを調べて",
+        )
 
     def test_core_scope_accepts_bounded_component_state_query(self):
         result = scope_core_request(
