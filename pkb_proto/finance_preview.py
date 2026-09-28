@@ -44,6 +44,7 @@ class FinancePreview:
     categories: list[dict]
     accounts: list[dict]
     recent_rows: list[dict]
+    transactions: list[dict]
 
 
 def _decode(data: bytes) -> str:
@@ -163,4 +164,5 @@ def analyze_moneyforward_csv(data: bytes, filename: str = "moneyforward.csv") ->
         categories=category_rows,
         accounts=account_rows,
         recent_rows=recent,
+        transactions=parsed,
     )
