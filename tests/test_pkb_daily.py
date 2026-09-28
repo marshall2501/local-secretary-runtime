@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 from pkb_proto.daily_pkb import (
+    ENTITY_UI_DEFAULT_OPEN,
     FINANCE_PAGE_SIZE_DEFAULT,
     FINANCE_UI_DEFAULT_OPEN,
     PKB_UI_DEFAULT_OPEN,
@@ -63,10 +64,16 @@ class DailyPKBParserTests(unittest.TestCase):
     def test_ui_preferences_validate_and_fall_back_per_field(self):
         prefs = _validate_ui_preferences({
             "pkb": {"write": False, "search": "invalid"},
+            "entity": {"history": True, "events": "invalid"},
             "finance": {"details": True, "recent_limit": 100, "stored": 1},
         })
         self.assertFalse(prefs["pkb"]["write"])
         self.assertEqual(prefs["pkb"]["search"], PKB_UI_DEFAULT_OPEN["search"])
+        self.assertTrue(prefs["entity"]["history"])
+        self.assertEqual(
+            prefs["entity"]["events"],
+            ENTITY_UI_DEFAULT_OPEN["events"],
+        )
         self.assertTrue(prefs["finance"]["details"])
         self.assertEqual(prefs["finance"]["stored"], FINANCE_UI_DEFAULT_OPEN["stored"])
         self.assertEqual(prefs["finance"]["recent_limit"], 100)
@@ -76,12 +83,14 @@ class DailyPKBParserTests(unittest.TestCase):
             path = Path(directory) / "ui_preferences.json"
             prefs = _default_ui_preferences()
             prefs["pkb"]["entities"] = True
+            prefs["entity"]["history"] = True
             prefs["finance"]["details"] = True
             prefs["finance"]["recent_limit"] = 50
             saved = save_ui_preferences(prefs, path)
             loaded = load_ui_preferences(path)
             self.assertEqual(loaded, saved)
             self.assertTrue(loaded["pkb"]["entities"])
+            self.assertTrue(loaded["entity"]["history"])
             self.assertTrue(loaded["finance"]["details"])
             self.assertEqual(loaded["finance"]["recent_limit"], 50)
 
