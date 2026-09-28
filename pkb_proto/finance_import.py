@@ -56,6 +56,12 @@ class FinanceDashboard:
     categories: list[dict]
     recent_rows: list[dict]
     import_batches: list[dict]
+    page: int
+    page_size: int
+    total_pages: int
+    sort_by: str
+    sort_dir: str
+    row_mode: str
 
 
 def _finance_filter_clause(
@@ -64,6 +70,7 @@ def _finance_filter_clause(
     account: str | None = None,
     major_category: str | None = None,
     search_text: str | None = None,
+    row_mode: str = "calculation_target",
 ) -> tuple[str, list]:
     clauses = ["t.source_system=%s"]
     params: list = [SOURCE_SYSTEM]
@@ -90,22 +97,39 @@ def _finance_filter_clause(
         pattern = "%" + search_text.strip() + "%"
         params.extend([pattern, pattern, pattern, pattern, pattern])
 
+    if row_mode == "calculation_target":
+        clauses.append("t.calculation_target")
+    elif row_mode == "transfer":
+        clauses.append("t.is_transfer")
+    elif row_mode != "all":
+        raise ValueError("unsupported finance row_mode")
+
     return " AND ".join(clauses), params
 
 
 def load_finance_dashboard(
     db,
-    recent_limit: int = 100,
+    recent_limit: int = 50,
     start_date: str | None = None,
     end_date: str | None = None,
     account: str | None = None,
     major_category: str | None = None,
     search_text: str | None = None,
+    row_mode: str = "calculation_target",
+    page: int = 1,
+    sort_by: str = "date",
+    sort_dir: str = "desc",
 ) -> FinanceDashboard:
     """Read a filtered normalized current finance view from the isolated prototype DB."""
     _guard_db(db)
-    if recent_limit < 1 or recent_limit > 500:
-        raise ValueError("recent_limit must be between 1 and 500")
+    if recent_limit < 1 or recent_limit > 200:
+        raise ValueError("recent_limit must be between 1 and 200")
+    if page < 1:
+        raise ValueError("page must be >= 1")
+    if sort_by not in {"date", "amount"}:
+        raise ValueError("unsupported finance sort_by")
+    if sort_dir not in {"asc", "desc"}:
+        raise ValueError("unsupported finance sort_dir")
 
     where_sql, params = _finance_filter_clause(
         start_date=start_date,
@@ -113,6 +137,7 @@ def load_finance_dashboard(
         account=account,
         major_category=major_category,
         search_text=search_text,
+        row_mode=row_mode,
     )
 
     with db.cursor() as cur:
@@ -123,10 +148,10 @@ def load_finance_dashboard(
                    min(t.transaction_date),
                    max(t.transaction_date),
                    COALESCE(sum(t.amount_jpy) FILTER (
-                     WHERE t.calculation_target AND t.amount_jpy > 0
+                     WHERE t.amount_jpy > 0
                    ), 0),
                    COALESCE(sum(-t.amount_jpy) FILTER (
-                     WHERE t.calculation_target AND t.amount_jpy < 0
+                     WHERE t.amount_jpy < 0
                    ), 0)
                FROM secretary.finance_transactions t
                LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
@@ -153,7 +178,7 @@ def load_finance_dashboard(
                FROM secretary.finance_transactions t
                LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
                LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
-               WHERE {where_sql} AND t.calculation_target
+               WHERE {where_sql}
                GROUP BY 1
                ORDER BY 1 DESC""",
             tuple(params),
@@ -190,6 +215,12 @@ def load_finance_dashboard(
             for row in cur.fetchall()
         ]
 
+        total_pages = max(1, (int(count) + recent_limit - 1) // recent_limit)
+        effective_page = min(page, total_pages)
+        offset = (effective_page - 1) * recent_limit
+        order_column = "t.transaction_date" if sort_by == "date" else "t.amount_jpy"
+        order_direction = "ASC" if sort_dir == "asc" else "DESC"
+
         cur.execute(
             f"""SELECT
                    t.external_id,
@@ -207,9 +238,9 @@ def load_finance_dashboard(
                LEFT JOIN secretary.finance_accounts a ON a.id=t.account_id
                LEFT JOIN secretary.finance_categories c ON c.id=t.category_id
                WHERE {where_sql}
-               ORDER BY t.transaction_date DESC, t.external_id DESC
-               LIMIT %s""",
-            tuple(params + [recent_limit]),
+               ORDER BY {order_column} {order_direction}, t.external_id {order_direction}
+               LIMIT %s OFFSET %s""",
+            tuple(params + [recent_limit, offset]),
         )
         recent_rows = [
             {
@@ -261,6 +292,12 @@ def load_finance_dashboard(
         categories=categories,
         recent_rows=recent_rows,
         import_batches=import_batches,
+        page=effective_page,
+        page_size=recent_limit,
+        total_pages=total_pages,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        row_mode=row_mode,
     )
 
 
