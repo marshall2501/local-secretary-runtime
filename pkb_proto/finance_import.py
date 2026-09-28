@@ -46,6 +46,7 @@ class ImportResult:
 @dataclass(frozen=True)
 class FinanceDashboard:
     transaction_count: int
+    calculation_target_count: int
     start_date: str | None
     end_date: str | None
     income_total: int
@@ -118,6 +119,7 @@ def load_finance_dashboard(
         cur.execute(
             f"""SELECT
                    count(*),
+                   count(*) FILTER (WHERE t.calculation_target),
                    min(t.transaction_date),
                    max(t.transaction_date),
                    COALESCE(sum(t.amount_jpy) FILTER (
@@ -132,7 +134,14 @@ def load_finance_dashboard(
                WHERE {where_sql}""",
             tuple(params),
         )
-        count, start_date, end_date, income_total, expense_total = cur.fetchone()
+        (
+            count,
+            calculation_target_count,
+            start_date,
+            end_date,
+            income_total,
+            expense_total,
+        ) = cur.fetchone()
 
         cur.execute(
             f"""SELECT
@@ -242,6 +251,7 @@ def load_finance_dashboard(
     # not the current transaction subset.
     return FinanceDashboard(
         transaction_count=int(count),
+        calculation_target_count=int(calculation_target_count),
         start_date=start_date.isoformat() if start_date else None,
         end_date=end_date.isoformat() if end_date else None,
         income_total=int(income_total),
