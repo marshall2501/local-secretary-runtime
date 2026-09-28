@@ -268,6 +268,16 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertNotIn("メインPCのGPU", ENTITIES)
         self.assertNotIn("メインPCのNIC", ENTITIES)
 
+    def test_current_driver_query_uses_effective_time(self):
+        query = parse_query("GPU1の現在のドライバー", ENTITIES)
+        self.assertEqual(
+            query.entity_id,
+            UUID("44444444-4444-4444-4444-444444444444"),
+        )
+        self.assertEqual(query.predicate, "current_driver")
+        self.assertIsNotNone(query.effective_at)
+        self.assertIsNotNone(query.effective_at.utcoffset())
+
 
 if __name__ == "__main__":
     unittest.main()
