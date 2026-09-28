@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .diagnostic_cases import MODES, build_ollama_payload, judge_response
-from .episode_intake import load_fixture
+from .fictional_fixture import load_fictional_episodes
 from .extraction_service import Extraction, inspect_model_output
 from .gui_helpers import analyze_reply
 
@@ -118,7 +118,7 @@ class ExperimentRunner:
 
     def __init__(self, store: RunStore, *, fixture: Path = FIXTURE, transport=None):
         self.store = store
-        self.episodes = {ep["id"]: ep for ep in load_fixture(fixture)}
+        self.episodes = {ep["id"]: ep for ep in load_fictional_episodes(fixture)}
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pkb-web-workbench")
         self.transport = transport or self._call_ollama
         self.lock = threading.Lock()
