@@ -53,6 +53,12 @@ PKB_UI_DEFAULT_OPEN = {
     "reviewed": False,
     "limits": False,
 }
+ENTITY_UI_DEFAULT_OPEN = {
+    "current": True,
+    "relations": True,
+    "events": True,
+    "history": False,
+}
 FINANCE_UI_DEFAULT_OPEN = {
     "filter": True,
     "stored": True,
@@ -69,6 +75,7 @@ FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
 def _default_ui_preferences() -> dict:
     return {
         "pkb": dict(PKB_UI_DEFAULT_OPEN),
+        "entity": dict(ENTITY_UI_DEFAULT_OPEN),
         "finance": {
             **FINANCE_UI_DEFAULT_OPEN,
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
@@ -96,6 +103,13 @@ def _validate_ui_preferences(raw: object) -> dict:
             value = pkb.get(key)
             if isinstance(value, bool):
                 result["pkb"][key] = value
+
+    entity = raw.get("entity")
+    if isinstance(entity, dict):
+        for key in ENTITY_UI_DEFAULT_OPEN:
+            value = entity.get(key)
+            if isinstance(value, bool):
+                result["entity"][key] = value
 
     finance = raw.get("finance")
     if isinstance(finance, dict):
@@ -137,6 +151,7 @@ _UI_PREFERENCES = load_ui_preferences()
 # user's current accordion layout while moving between pages, while settings
 # can deliberately reset the live state to newly saved defaults.
 _PKB_UI_OPEN = dict(_UI_PREFERENCES["pkb"])
+_ENTITY_UI_OPEN = dict(_UI_PREFERENCES["entity"])
 _FINANCE_UI_OPEN = {
     key: _UI_PREFERENCES["finance"][key]
     for key in FINANCE_UI_DEFAULT_OPEN
@@ -149,6 +164,8 @@ def _apply_ui_preferences(preferences: dict) -> None:
     _UI_PREFERENCES = validated
     _PKB_UI_OPEN.clear()
     _PKB_UI_OPEN.update(validated["pkb"])
+    _ENTITY_UI_OPEN.clear()
+    _ENTITY_UI_OPEN.update(validated["entity"])
     _FINANCE_UI_OPEN.clear()
     _FINANCE_UI_OPEN.update(
         {key: validated["finance"][key] for key in FINANCE_UI_DEFAULT_OPEN}
@@ -159,6 +176,12 @@ def _set_pkb_ui_open(key: str, value: bool) -> None:
     if key not in PKB_UI_DEFAULT_OPEN:
         raise KeyError("unknown PKB accordion key")
     _PKB_UI_OPEN[key] = bool(value)
+
+
+def _set_entity_ui_open(key: str, value: bool) -> None:
+    if key not in ENTITY_UI_DEFAULT_OPEN:
+        raise KeyError("unknown Entity accordion key")
+    _ENTITY_UI_OPEN[key] = bool(value)
 
 
 def _set_finance_ui_open(key: str, value: bool) -> None:
@@ -834,6 +857,24 @@ def settings_page():
                     value=_UI_PREFERENCES["pkb"][key],
                 )
 
+        entity_labels = {
+            "current": "現在のState / Attribute",
+            "relations": "Relations",
+            "events": "Event履歴",
+            "history": "過去のState / Attribute",
+        }
+        entity_controls = {}
+        with ui.card().classes("w-full border-2 border-purple-200 bg-purple-50"):
+            ui.label("Entity詳細").classes("text-lg font-bold text-purple-900")
+            ui.label("Entity詳細画面の各ブロックの初期状態を設定します。").classes(
+                "text-sm text-purple-900"
+            )
+            for key, label in entity_labels.items():
+                entity_controls[key] = ui.switch(
+                    label,
+                    value=_UI_PREFERENCES["entity"][key],
+                )
+
         finance_controls = {}
         with ui.card().classes("w-full border-2 border-blue-200 bg-blue-50"):
             ui.label("家計・資産").classes("text-lg font-bold text-blue-900")
@@ -862,6 +903,10 @@ def settings_page():
                     key: bool(control.value)
                     for key, control in pkb_controls.items()
                 },
+                "entity": {
+                    key: bool(control.value)
+                    for key, control in entity_controls.items()
+                },
                 "finance": {
                     **{
                         key: bool(control.value)
@@ -888,6 +933,8 @@ def settings_page():
             defaults = _default_ui_preferences()
             for key, control in pkb_controls.items():
                 control.value = defaults["pkb"][key]
+            for key, control in entity_controls.items():
+                control.value = defaults["entity"][key]
             for key, control in finance_controls.items():
                 control.value = defaults["finance"][key]
             page_size_select.value = defaults["finance"]["recent_limit"]
@@ -1567,6 +1614,11 @@ def _display_result(result: dict):
 
 @ui.page("/entity/{entity_id}")
 def entity_page(entity_id: str):
+    def remember_expansion(key: str):
+        def _remember(event):
+            _set_entity_ui_open(key, event.value)
+        return _remember
+
     try:
         with connection() as db:
             detail = load_entity_detail(db, entity_id)
@@ -1607,7 +1659,11 @@ def entity_page(entity_id: str):
                             "font-mono text-sm" if label == "Entity ID" else "text-base font-medium"
                         )
 
-        with ui.expansion("現在のState / Attribute", value=True).classes(
+        with ui.expansion(
+            "現在のState / Attribute",
+            value=_ENTITY_UI_OPEN["current"],
+            on_value_change=remember_expansion("current"),
+        ).classes(
             "w-full border-2 border-green-300 bg-green-50 text-green-900"
         ):
             rows = detail["current"]
@@ -1634,7 +1690,11 @@ def entity_page(entity_id: str):
                     row_key="id",
                 ).props("dense flat").classes("w-full")
 
-        with ui.expansion("Relations", value=True).classes(
+        with ui.expansion(
+            "Relations",
+            value=_ENTITY_UI_OPEN["relations"],
+            on_value_change=remember_expansion("relations"),
+        ).classes(
             "w-full border-2 border-purple-300 bg-purple-50 text-purple-900"
         ):
             relations = detail["relations"]
@@ -1659,7 +1719,11 @@ def entity_page(entity_id: str):
                             f"flat href=/entity/{rel['other_entity_id']} tag=a"
                         )
 
-        with ui.expansion("Event履歴", value=True).classes(
+        with ui.expansion(
+            "Event履歴",
+            value=_ENTITY_UI_OPEN["events"],
+            on_value_change=remember_expansion("events"),
+        ).classes(
             "w-full border-2 border-orange-300 bg-orange-50 text-orange-900"
         ):
             rows = detail["events"]
@@ -1685,7 +1749,11 @@ def entity_page(entity_id: str):
                     row_key="id",
                 ).props("dense flat").classes("w-full")
 
-        with ui.expansion("過去のState / Attribute", value=False).classes(
+        with ui.expansion(
+            "過去のState / Attribute",
+            value=_ENTITY_UI_OPEN["history"],
+            on_value_change=remember_expansion("history"),
+        ).classes(
             "w-full border-2 border-grey-300 bg-grey-1"
         ):
             rows = detail["history"]
