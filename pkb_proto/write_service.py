@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
+from .entity_model_service import classify_predicate
 
 KNOWN_PREDICATES = {
     "driver_updated": "更新した",
@@ -158,12 +159,14 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
             source_id = cur.fetchone()[0]
             cur.execute(
                 """INSERT INTO secretary.claims
-                   (entity_id, source_id, claim_type, predicate, value, evidence,
-                    origin, verification_status, valid_from, recorded_at)
-                   VALUES (%s,%s,'fact',%s,%s,%s,'user_explicit','unverified',%s,%s)
+                   (entity_id, source_id, claim_type, semantic_kind,
+                    predicate, value, evidence, origin, verification_status,
+                    valid_from, recorded_at)
+                   VALUES (%s,%s,'fact',%s,%s,%s,%s,'user_explicit','unverified',%s,%s)
                    RETURNING id""",
                 (
                     UUID(claim.entity_key), source_id,
+                    classify_predicate(claim.predicate),
                     claim.predicate, Jsonb(claim.value),
                     claim.evidence_quote, record.occurred_at, record.recorded_at,
                 ),
