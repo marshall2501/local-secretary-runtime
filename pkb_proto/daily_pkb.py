@@ -1496,6 +1496,60 @@ def core_page():
             "外部操作・承認・Web調査・自動再開はまだ実行しません。"
         ).classes("text-sm text-orange-700")
 
+        @ui.refreshable
+        def screen_log_panel():
+            try:
+                rows = load_recent_core_tasks(10)
+            except Exception as exc:
+                with ui.expansion(
+                    "Core画面 全体稼働ログ",
+                    value=False,
+                ).classes(
+                    "w-full border border-red-200 bg-red-50"
+                    + _block_visibility_class("core", "screen_log")
+                ):
+                    ui.label("最近のTaskを取得できません: " + str(exc)).classes(
+                        "text-red-700"
+                    )
+                return
+
+            with ui.expansion(
+                "Core画面 全体稼働ログ",
+                value=False,
+            ).classes(
+                "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
+                + _block_visibility_class("core", "screen_log")
+            ):
+                ui.label(
+                    "この画面で扱った直近のCore Taskを横断表示します。"
+                    " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
+                ).classes("text-sm text-grey-7")
+                if not rows:
+                    ui.label("Core Taskはまだありません。")
+                    return
+                for item in rows:
+                    with ui.row().classes(
+                        "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
+                    ):
+                        status_color = {
+                            "completed": "green",
+                            "waiting_external": "orange",
+                            "running": "blue",
+                            "failed": "red",
+                        }.get(item["status"], "grey")
+                        ui.badge(item["status"], color=status_color)
+                        with ui.column().classes("grow gap-0"):
+                            ui.label(item["request"]).classes("font-medium")
+                            ui.label(
+                                f"Task {item['id']} / revision={item['revision']} / "
+                                f"phase={item.get('phase') or '-'} / "
+                                f"capability={item.get('selected_capability') or '-'}"
+                            ).classes("font-mono text-xs text-grey-7")
+                            ui.label(
+                                f"Action={item['action_count']} / Result={item['result_count']} / "
+                                f"updated={item['updated_at']}"
+                            ).classes("text-xs text-grey-7")
+
         with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
             ui.label("依頼").classes("text-lg font-bold")
             ui.label(
@@ -1589,8 +1643,7 @@ def core_page():
                     + _block_visibility_class("core", "trace")
                 ):
                     ui.label(
-                        "DBに記録されたTask / Action / Resultを表示します。"
-                        " コンソール生ログではなく、Coreの構造化実行履歴です。"
+                        "この依頼Taskに属するDB上のAction / Result / Sourceを表示します。"
                     ).classes("text-sm text-grey-7")
                     with ui.grid(columns=2).classes("w-full gap-2"):
                         ui.label("Task ID")
@@ -1680,7 +1733,6 @@ def core_page():
                             resume_panel.refresh()
                             core_result.refresh()
                             trace_panel.refresh()
-                    screen_log_panel.refresh()
                             screen_log_panel.refresh()
 
                     resume_button = ui.button(
@@ -1712,6 +1764,7 @@ def core_page():
                     core_result.refresh()
                     resume_panel.refresh()
                     trace_panel.refresh()
+                    screen_log_panel.refresh()
 
             run_button = ui.button(
                 "依頼する",
@@ -1722,60 +1775,6 @@ def core_page():
             core_result()
             resume_panel()
             trace_panel()
-
-        @ui.refreshable
-        def screen_log_panel():
-            try:
-                rows = load_recent_core_tasks(10)
-            except Exception as exc:
-                with ui.expansion(
-                    "Core画面 全体稼働ログ",
-                    value=False,
-                ).classes(
-                    "w-full border border-red-200 bg-red-50"
-                    + _block_visibility_class("core", "screen_log")
-                ):
-                    ui.label("最近のTaskを取得できません: " + str(exc)).classes(
-                        "text-red-700"
-                    )
-                return
-
-            with ui.expansion(
-                "Core画面 全体稼働ログ",
-                value=False,
-            ).classes(
-                "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
-                + _block_visibility_class("core", "screen_log")
-            ):
-                ui.label(
-                    "この画面で扱った直近のCore Taskを横断表示します。"
-                    " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
-                ).classes("text-sm text-grey-7")
-                if not rows:
-                    ui.label("Core Taskはまだありません。")
-                    return
-                for item in rows:
-                    with ui.row().classes(
-                        "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
-                    ):
-                        status_color = {
-                            "completed": "green",
-                            "waiting_external": "orange",
-                            "running": "blue",
-                            "failed": "red",
-                        }.get(item["status"], "grey")
-                        ui.badge(item["status"], color=status_color)
-                        with ui.column().classes("grow gap-0"):
-                            ui.label(item["request"]).classes("font-medium")
-                            ui.label(
-                                f"Task {item['id']} / revision={item['revision']} / "
-                                f"phase={item.get('phase') or '-'} / "
-                                f"capability={item.get('selected_capability') or '-'}"
-                            ).classes("font-mono text-xs text-grey-7")
-                            ui.label(
-                                f"Action={item['action_count']} / Result={item['result_count']} / "
-                                f"updated={item['updated_at']}"
-                            ).classes("text-xs text-grey-7")
 
         screen_log_panel()
 
