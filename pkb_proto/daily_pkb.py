@@ -199,11 +199,15 @@ def register_text(text: str) -> dict:
         entities = _entity_map(db)
         parsed = parse_write(text, set(entities))
         if parsed is None:
-            return {
-                "status": "review",
-                "reason": "unsupported_natural_language_in_first_slice",
-                "message": "現在の最小実装では、既知Entityへの明示的な更新／交換だけを安全に自動登録します。",
-            }
+            result = enqueue_pending(
+                db,
+                input_id="daily-pkb-review-" + uuid4().hex,
+                raw_text=text,
+                reason="unsupported_natural_language_in_first_slice",
+            )
+            payload = asdict(result)
+            payload["message"] = "現在の最小実装では、既知Entityへの明示的な更新／交換だけを安全に自動登録します。"
+            return payload
         if parsed["status"] != "parsed":
             result = enqueue_pending(db, input_id="daily-pkb-review-" + uuid4().hex, raw_text=text, reason=parsed["reason"])
             return asdict(result)
@@ -242,11 +246,15 @@ def correct_text(text: str) -> dict:
         entities = _entity_map(db)
         parsed = parse_correction(text, set(entities))
         if parsed is None:
-            return {
-                "status": "review",
-                "reason": "unsupported_correction_in_first_slice",
-                "message": "「訂正：旧Entityではなく新Entityを値へ更新した。」形式の明示訂正のみ扱います。",
-            }
+            result = enqueue_pending(
+                db,
+                input_id="daily-pkb-correction-review-" + uuid4().hex,
+                raw_text=text,
+                reason="unsupported_correction_in_first_slice",
+            )
+            payload = asdict(result)
+            payload["message"] = "「訂正：旧Entityではなく新Entityを値へ更新した。」形式の明示訂正のみ扱います。"
+            return payload
         if parsed["status"] != "parsed":
             result = enqueue_pending(db, input_id="daily-pkb-correction-review-" + uuid4().hex, raw_text=text, reason=parsed["reason"])
             return asdict(result)
