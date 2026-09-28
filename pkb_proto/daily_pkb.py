@@ -748,7 +748,12 @@ def run_core_request(text: str) -> dict:
                         "question": scoped["question"],
                     }
 
-                result = _search_text_with_db(db, request)
+                # query_claims deliberately opens its own REPEATABLE READ,
+                # READ ONLY transaction for a consistent count/page snapshot.
+                # Keep that Knowledge read on a separate connection so the
+                # surrounding Task write transaction does not become a nested
+                # transaction whose isolation level is set after prior queries.
+                result = search_text(request)
                 answer = core_answer(result)
                 total = int(result.get("total") or 0)
                 phase = "completed" if total > 0 else "awaiting_clarification"
