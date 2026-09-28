@@ -10,8 +10,8 @@ DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
 
 SUPPORTED_ACCEPT_ACTIONS = {
-    "driver_updated": "更新した",
-    "servo_updated": "交換した",
+    "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
+    "servo_updated": ("交換した", "取り替えた"),
 }
 BLOCKED_ACCEPT_TEXT = ("かもしれない", "未確認", "不明", "ではなく", "訂正", "らしい")
 
@@ -115,7 +115,7 @@ def acceptance_eligible(row: dict) -> bool:
         and bool(value)
         and entity_name in raw_text
         and value in raw_text
-        and SUPPORTED_ACCEPT_ACTIONS[predicate] in raw_text
+        and any(phrase in raw_text for phrase in SUPPORTED_ACCEPT_ACTIONS[predicate])
         and not any(marker in raw_text for marker in BLOCKED_ACCEPT_TEXT)
         and (
             row.get("reason") != "model_candidate_needs_user_confirmation"
