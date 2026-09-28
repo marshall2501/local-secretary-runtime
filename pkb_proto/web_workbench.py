@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -89,6 +90,7 @@ def as_json(data):
 @ui.page("/")
 def index():
     selected = {"detail": None, "left": None, "right": None}
+    notify_on_finish = set()
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         ui.label("Local Secretary — Development Workbench").classes("text-2xl font-bold")
         ui.label("架空PC/RCのみ • 127.0.0.1のOllamaのみ • DB接続なし • 未検証の候補は記憶登録しません").classes(
@@ -127,6 +129,7 @@ def index():
                     ui.label("実験条件を確認してください。")
 
             def refresh_views():
+                status_panel.refresh()
                 history.refresh()
                 detail.refresh()
                 comparison.refresh()
@@ -139,18 +142,81 @@ def index():
                         think=think.value,
                     )
                     selected["detail"] = record["id"]
-                    ui.notify("Runを受付: " + record["id"][:10], type="positive")
+                    notify_on_finish.add(record["id"])
+                    ui.notify("実験を受付：状態を画面上部に表示します", type="info")
                     refresh_views()
                 except (ValueError, OSError, TypeError) as exc:
                     ui.notify(str(exc)[:240], type="negative")
 
             with ui.row().classes("items-center gap-3"):
                 ui.button("モデルを確認", on_click=check_models)
-                ui.button("この条件で実行", on_click=do_run, color="green")
+                run_button = ui.button("この条件で実行", on_click=do_run, color="green")
                 ui.button("結果を更新", on_click=refresh_views)
             for component in (model, episode, mode, predict, think):
                 component.on_value_change(lambda _: request_preview.refresh())
             request_preview()
+
+        @ui.refreshable
+        def status_panel():
+            # Prefer an active job; otherwise show the selected or latest run.
+            records = store.list(50)
+            active = next((r for r in records if r["status"] == "running"), None)
+            if active is None:
+                active = next((r for r in records if r["status"] == "queued"), None)
+            selected_record = store.get(selected["detail"]) if selected["detail"] else None
+            record = active or selected_record or (records[0] if records else None)
+            run_button.set_enabled(not bool(active))
+            with ui.card().classes("w-full border-2 border-blue-300"):
+                if record is None:
+                    ui.label("実行状態：未実行").classes("text-xl font-bold")
+                    ui.label("モデルと条件を選び、実行してください。")
+                    return
+                state = record["status"]
+                labels = {
+                    "queued": ("実行待ち", "orange"),
+                    "running": ("実行中", "orange"),
+                    "completed": ("実行終了・形式検査通過", "green"),
+                    "check_failed": ("実行終了・検査不合格", "red"),
+                    "timeout": ("タイムアウト", "red"),
+                    "connection_error": ("通信エラー", "red"),
+                    "error": ("実行エラー", "red"),
+                    "interrupted": ("前回起動時の処理が中断", "red"),
+                }
+                title, color = labels.get(state, (state, "grey"))
+                with ui.row().classes("items-center gap-3"):
+                    if state in ("running", "queued"):
+                        ui.spinner(size="lg", color="orange")
+                    ui.badge(title, color=color).classes("text-lg p-2")
+                    ui.label(record["model"] + " / " + record["episode_id"]).classes("text-lg")
+                    ui.label("Run " + record["id"][:10]).classes("font-mono text-xs")
+                if state in ("running", "queued"):
+                    if record["started_at"]:
+                        try:
+                            started = datetime.fromisoformat(record["started_at"])
+                            elapsed = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+                            ui.label(f"実行経過：{elapsed}秒（自動更新：2秒間隔）").classes("text-lg")
+                        except ValueError:
+                            ui.label("実行時間を取得できません")
+                    else:
+                        ui.label("モデル実行待ち")
+                    ui.label("実行中はこの条件の実行ボタンを無効化します。")
+                else:
+                    elapsed = (record["result"] or {}).get("elapsed_seconds")
+                    if elapsed is not None:
+                        ui.label(f"実行時間：{elapsed}秒").classes("text-lg")
+                    if record["result"]:
+                        ui.label("検査結果：" + record["result"].get("check", "未判定"))
+                    if state == "completed":
+                        ui.label("JSON形式などの簡易検査が通過しました。意味の正確性は別検証です。").classes("text-sm")
+                    if record["error"]:
+                        ui.label(record["error"]).classes("text-red-600")
+                    if record["id"] in notify_on_finish:
+                        notify_on_finish.discard(record["id"])
+                        ui.notify(title + "：" + record["model"], type=(
+                            "positive" if state == "completed" else "warning"
+                        ))
+
+        status_panel()
 
         def select_detail(run_id):
             selected["detail"] = run_id
@@ -164,7 +230,8 @@ def index():
             try:
                 record = runner.rerun(run_id)
                 selected["detail"] = record["id"]
-                ui.notify("保存された条件で新しいRunを受付", type="positive")
+                notify_on_finish.add(record["id"])
+                ui.notify("保存された条件で新しいRunを受付", type="info")
                 refresh_views()
             except (KeyError, ValueError, OSError) as exc:
                 ui.notify(str(exc)[:240], type="negative")
