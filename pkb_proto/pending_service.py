@@ -4,8 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
+
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
+
+SUPPORTED_ACCEPT_ACTIONS = {
+    "driver_updated": "更新した",
+    "servo_updated": "交換した",
+}
+BLOCKED_ACCEPT_TEXT = ("かもしれない", "未確認", "不明", "ではなく", "訂正", "らしい")
 
 
 @dataclass(frozen=True)
@@ -13,6 +21,8 @@ class PendingResult:
     status: str
     reason: str
     pending_id: str | None = None
+    claim_id: str | None = None
+    source_id: str | None = None
 
 
 def _allowed(db) -> bool:
@@ -79,6 +89,124 @@ def list_pending(db, limit: int = 50) -> list[dict]:
         cols = [d.name for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
+
+
+def acceptance_eligible(row: dict) -> bool:
+    """Only structured, explicit conflict rows may be manually promoted."""
+    predicate = row.get("predicate")
+    raw_text = row.get("raw_text") or ""
+    value = row.get("proposed_value") or ""
+    entity_name = row.get("entity_name") or ""
+    return (
+        row.get("review_status", "pending") == "pending"
+        and row.get("reason") == "existing_claim_requires_conflict_resolution"
+        and bool(row.get("entity_id"))
+        and predicate in SUPPORTED_ACCEPT_ACTIONS
+        and bool(value)
+        and entity_name in raw_text
+        and value in raw_text
+        and SUPPORTED_ACCEPT_ACTIONS[predicate] in raw_text
+        and not any(marker in raw_text for marker in BLOCKED_ACCEPT_TEXT)
+    )
+
+
+def accept_pending(db, pending_id: str) -> PendingResult:
+    """Promote one explicitly structured Pending row into a Claim atomically."""
+    if not _allowed(db):
+        raise ValueError("Refusing non-isolated DB or non-dedicated writer")
+    if not available(db):
+        return PendingResult("review", "pending_storage_unavailable", None)
+    try:
+        pending_uuid = UUID(pending_id)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Invalid pending ID") from exc
+
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT p.id, p.input_id, p.raw_text, p.reason, p.entity_id,
+                      p.predicate, p.proposed_value, p.review_status,
+                      p.recorded_at, p.accepted_source_id, p.accepted_claim_id,
+                      e.name AS entity_name, e.retired_at
+               FROM secretary.pkb_pending_intake p
+               LEFT JOIN secretary.entities e ON e.id=p.entity_id
+               WHERE p.id=%s
+               FOR UPDATE OF p""",
+            (pending_uuid,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return PendingResult("review", "pending_item_not_found", pending_id)
+
+        keys = (
+            "id", "input_id", "raw_text", "reason", "entity_id", "predicate",
+            "proposed_value", "review_status", "recorded_at",
+            "accepted_source_id", "accepted_claim_id", "entity_name", "retired_at",
+        )
+        item = dict(zip(keys, row))
+        if item["review_status"] == "accepted":
+            return PendingResult(
+                "accepted", "pending_already_promoted", pending_id,
+                str(item["accepted_claim_id"]), str(item["accepted_source_id"]),
+            )
+        if item["review_status"] != "pending":
+            return PendingResult("review", "pending_item_already_resolved", pending_id)
+        if item["retired_at"] is not None or not acceptance_eligible(item):
+            return PendingResult("review", "pending_not_eligible_for_acceptance", pending_id)
+
+        source_uri = "fixture://daily-pkb/pending/" + str(item["id"])
+        cur.execute(
+            """INSERT INTO secretary.sources
+               (source_type, uri, citation, retrieved_at, recorded_at,
+                confidentiality, metadata)
+               VALUES ('user_statement',%s,%s,%s,%s,'private',%s)
+               RETURNING id""",
+            (
+                source_uri,
+                item["input_id"],
+                item["recorded_at"],
+                item["recorded_at"],
+                Jsonb({
+                    "fictional_only": True,
+                    "pending_intake_id": str(item["id"]),
+                    "original_text": item["raw_text"],
+                    "promoted_by_user_review": True,
+                }),
+            ),
+        )
+        source_id = cur.fetchone()[0]
+
+        cur.execute(
+            """INSERT INTO secretary.claims
+               (entity_id, source_id, claim_type, predicate, value, evidence,
+                origin, verification_status, valid_from, recorded_at)
+               VALUES (%s,%s,'fact',%s,%s,%s,'user_explicit','unverified',%s,now())
+               RETURNING id""",
+            (
+                item["entity_id"],
+                source_id,
+                item["predicate"],
+                Jsonb(item["proposed_value"]),
+                item["raw_text"],
+                item["recorded_at"],
+            ),
+        )
+        claim_id = cur.fetchone()[0]
+
+        cur.execute(
+            """UPDATE secretary.pkb_pending_intake
+               SET review_status='accepted', reviewed_at=now(),
+                   accepted_source_id=%s, accepted_claim_id=%s
+               WHERE id=%s AND review_status='pending'
+               RETURNING id""",
+            (source_id, claim_id, pending_uuid),
+        )
+        if cur.fetchone() is None:
+            raise RuntimeError("Pending acceptance lost its lock-protected state")
+
+    return PendingResult(
+        "accepted", "pending_promoted_to_claim", pending_id,
+        str(claim_id), str(source_id),
+    )
 
 def review_pending(db, pending_id: str, decision: str) -> PendingResult:
     """Resolve one pending input without promoting it to a Claim.
