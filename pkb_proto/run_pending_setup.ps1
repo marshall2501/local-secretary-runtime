@@ -13,7 +13,8 @@ $file011 = Join-Path $root 'pkb_proto\sql\011_pkb_proto_pending_acceptance.sql'
 $file012 = Join-Path $root 'pkb_proto\sql\012_pkb_proto_pending_interpreter.sql'
 $file013 = Join-Path $root 'pkb_proto\sql\013_pkb_proto_entity_model.sql'
 $file014 = Join-Path $root 'pkb_proto\sql\014_pkb_proto_component_state.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014)) {
+$file015 = Join-Path $root 'pkb_proto\sql\015_pkb_proto_component_normalization.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -190,7 +191,34 @@ $verify014 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($verify014 | Out-String).Trim() -ne '1') {
     throw 'Component relation/current-state verification failed.'
 }
-Write-Host 'PASS: PKB prototype migrations verified through 014 (Pending + interpreter + Entity/Relation/Event/State component model).'
+$has015 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='015_pkb_proto_component_normalization.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 015 schema version.' }
+if (($has015 | Out-String).Trim() -eq '0') {
+    $hash015 = (Get-FileHash -LiteralPath $file015 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql015 = [IO.File]::ReadAllText($file015).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash015)
+    $tmpName015 = 'pkb-component-normalization-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp015 = Join-Path ([IO.Path]::GetTempPath()) $tmpName015
+    $remoteTmp015 = '/tmp/' + $tmpName015
+    try {
+        [IO.File]::WriteAllText($localTmp015, $sql015, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp015 ($id + ':' + $remoteTmp015) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 015 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp015
+        if ($LASTEXITCODE -ne 0) { throw '015 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp015) { Remove-Item -LiteralPath $localTmp015 }
+        & docker exec $id rm -f $remoteTmp015 | Out-Null
+    }
+} elseif (($has015 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 015 migration records.'
+}
+
+$verify015 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='015_pkb_proto_component_normalization.sql';"
+if ($LASTEXITCODE -ne 0 -or ($verify015 | Out-String).Trim() -ne '1') {
+    throw 'Component normalization verification failed.'
+}
+Write-Host 'PASS: PKB prototype migrations verified through 015 (normalized Entity identity + relation roles + Event/State).'
+
 
 
 
