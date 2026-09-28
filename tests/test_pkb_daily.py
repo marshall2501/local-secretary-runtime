@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pkb_proto.daily_pkb import parse_correction, parse_query, parse_write
 from pkb_proto.daily_interpreter import inspect_output
+from pkb_proto.entity_model_service import classify_predicate
 from pkb_proto.pending_service import acceptance_eligible
 
 
@@ -194,6 +195,13 @@ class DailyPKBParserTests(unittest.TestCase):
             "interpreter_model": "llama3.1:8b",
         }
         self.assertTrue(acceptance_eligible(row))
+
+    def test_entity_model_semantic_classification(self):
+        self.assertEqual(classify_predicate("driver_updated"), "event")
+        self.assertEqual(classify_predicate("servo_updated"), "event")
+        self.assertEqual(classify_predicate("current_driver"), "state")
+        self.assertEqual(classify_predicate("manufacturer"), "attribute")
+        self.assertIsNone(classify_predicate("unknown_predicate"))
 
 
 if __name__ == "__main__":
