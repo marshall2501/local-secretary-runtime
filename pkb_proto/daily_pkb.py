@@ -18,6 +18,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import psycopg
+from psycopg.types.json import Jsonb
 from fastapi import HTTPException
 from nicegui import app, run, ui
 from pydantic import BaseModel, Field
@@ -555,65 +556,305 @@ def correct_text(text: str) -> dict:
         return asdict(result)
 
 
+def _search_text_with_db(db, text: str) -> dict:
+    entities = _entity_map(db)
+    q = text.strip()
+
+    component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
+    if component_state and any(word in q for word in ("現在", "今の", "現行")):
+        resolved = resolve_component_reference(
+            db,
+            component_state.group("parent").strip(),
+            component_state.group("role"),
+        )
+        if resolved is not None:
+            page = query_claims(
+                db,
+                ClaimQuery(
+                    entity_id=UUID(resolved["id"]),
+                    predicate="current_driver",
+                    effective_at=datetime.now(timezone.utc),
+                    include_history=False,
+                    limit=100,
+                    offset=0,
+                ),
+            )
+            result = _serialize_page(page)
+            result["result_kind"] = "claims"
+            return result
+
+    if "構成" in q:
+        parent = next(
+            (
+                row for name, row in sorted(
+                    entities.items(), key=lambda item: len(item[0]), reverse=True
+                )
+                if name in q and row["entity_type"] == "computer"
+            ),
+            None,
+        )
+        if parent is not None:
+            rows = list_components(db, UUID(parent["id"]))
+            items = []
+            for row in rows:
+                item = {}
+                for key, value in row.items():
+                    if isinstance(value, (datetime, UUID)):
+                        item[key] = str(value)
+                    else:
+                        item[key] = value
+                items.append(item)
+            return {
+                "status": "ok",
+                "result_kind": "components",
+                "total": len(items),
+                "items": items,
+            }
+    page = query_claims(db, parse_query(text, entities))
+    result = _serialize_page(page)
+    result["result_kind"] = "claims"
+    return result
+
+
 def search_text(text: str) -> dict:
     with connection() as db:
-        entities = _entity_map(db)
-        q = text.strip()
+        return _search_text_with_db(db, text)
 
-        component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
-        if component_state and any(word in q for word in ("現在", "今の", "現行")):
-            resolved = resolve_component_reference(
-                db,
-                component_state.group("parent").strip(),
-                component_state.group("role"),
-            )
-            if resolved is not None:
-                page = query_claims(
-                    db,
-                    ClaimQuery(
-                        entity_id=UUID(resolved["id"]),
-                        predicate="current_driver",
-                        effective_at=datetime.now(timezone.utc),
-                        include_history=False,
-                        limit=100,
-                        offset=0,
+
+def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
+    """Fail closed unless this first Core slice can safely scope a PKB read."""
+    q = text.strip()
+    if not q:
+        return {
+            "status": "question",
+            "question": "何を確認したいか入力してください。",
+            "reason": "empty_request",
+        }
+
+    component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
+    if component_state and any(word in q for word in ("現在", "今の", "現行")):
+        return {"status": "ready", "capability": "pkb_search", "domain": "pc"}
+
+    mentioned = [
+        row for name, row in sorted(
+            entities.items(), key=lambda item: len(item[0]), reverse=True
+        )
+        if name in q
+    ]
+    if mentioned and any(word in q for word in ("構成", "ドライバ", "サーボ", "履歴")):
+        return {
+            "status": "ready",
+            "capability": "pkb_search",
+            "domain": mentioned[0]["domain"],
+        }
+
+    return {
+        "status": "question",
+        "question": (
+            "この最小Coreでは、まだ対象と確認項目を安全に特定できません。"
+            " 例: 「メインPCのGPUの現在のドライバーを調べて」のように"
+            "対象と確認したい内容を指定してください。"
+        ),
+        "reason": "request_not_safely_scoped",
+    }
+
+
+def core_answer(search_result: dict) -> str:
+    rows = search_result.get("items") or []
+    if not rows:
+        return "PKBに該当する記録が見つかりませんでした。"
+
+    if search_result.get("result_kind") == "components":
+        parts = []
+        for row in rows[:8]:
+            label = row.get("component_name") or "構成要素"
+            role = row.get("relation_role")
+            driver = row.get("current_driver")
+            detail = label
+            if role:
+                detail += f"（{role}）"
+            if driver:
+                detail += f": 現在ドライバー {driver}"
+            parts.append(detail)
+        return "PKBの構成記録では、" + " / ".join(parts) + "。"
+
+    parts = []
+    for row in rows[:8]:
+        entity = row.get("entity_name") or "対象"
+        predicate = row.get("predicate") or "項目"
+        value = row.get("value")
+        parts.append(f"{entity}: {predicate}={value}")
+    return "PKBの記録では、" + " / ".join(parts) + "。"
+
+
+def run_core_request(text: str) -> dict:
+    """First daily Secretary Core slice: Task -> bounded PKB read -> Result."""
+    request = text.strip()
+    if not request:
+        return {
+            "status": "rejected",
+            "phase": "input",
+            "message": "依頼を入力してください。",
+        }
+
+    task_id = uuid4()
+    with connection() as db:
+        with db.transaction():
+            entities = _entity_map(db)
+            scoped = scope_core_request(request, entities)
+            domain = scoped.get("domain") or "general"
+            initial_status = "running" if scoped["status"] == "ready" else "waiting_external"
+            checkpoint = {
+                "core_slice": "daily_read_only_v1",
+                "phase": (
+                    "decide"
+                    if scoped["status"] == "ready"
+                    else "awaiting_clarification"
+                ),
+                "selected_capability": scoped.get("capability"),
+                "question": scoped.get("question"),
+                "reason": scoped.get("reason"),
+            }
+            with db.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO secretary.tasks
+                       (id, request, requested_by, domain, completion_criteria,
+                        permission_scope, status, checkpoint)
+                       VALUES (%s, %s, 'local_user', %s, %s, %s, %s, %s)""",
+                    (
+                        task_id,
+                        request,
+                        domain,
+                        "Return bounded PKB evidence with provenance or ask for clarification.",
+                        Jsonb({"pkb_read": True, "external_actions": False}),
+                        initial_status,
+                        Jsonb(checkpoint),
                     ),
                 )
-                result = _serialize_page(page)
-                result["result_kind"] = "claims"
-                return result
 
-        if "構成" in q:
-            parent = next(
-                (
-                    row for name, row in sorted(
-                        entities.items(), key=lambda item: len(item[0]), reverse=True
+                if scoped["status"] != "ready":
+                    cur.execute(
+                        """INSERT INTO secretary.audit_events
+                           (actor, event_type, task_id, object_type, object_id, details)
+                           VALUES ('daily_core', 'core.awaiting_clarification',
+                                   %s, 'task', %s, %s)""",
+                        (task_id, task_id, Jsonb({"reason": scoped["reason"]})),
                     )
-                    if name in q and row["entity_type"] == "computer"
-                ),
-                None,
-            )
-            if parent is not None:
-                rows = list_components(db, UUID(parent["id"]))
-                items = []
-                for row in rows:
-                    item = {}
-                    for key, value in row.items():
-                        if isinstance(value, (datetime, UUID)):
-                            item[key] = str(value)
-                        else:
-                            item[key] = value
-                    items.append(item)
-                return {
-                    "status": "ok",
-                    "result_kind": "components",
-                    "total": len(items),
-                    "items": items,
+                    return {
+                        "task_id": str(task_id),
+                        "status": "waiting_external",
+                        "phase": "awaiting_clarification",
+                        "message": "追加情報が必要です。",
+                        "question": scoped["question"],
+                    }
+
+                result = _search_text_with_db(db, request)
+                answer = core_answer(result)
+                total = int(result.get("total") or 0)
+                phase = "completed" if total > 0 else "awaiting_clarification"
+                task_status = "completed" if total > 0 else "waiting_external"
+                question = None if total > 0 else (
+                    "該当記録が見つかりませんでした。対象名や確認したい項目を"
+                    "もう少し具体的にしてください。"
+                )
+
+                cur.execute(
+                    """INSERT INTO secretary.sources
+                       (source_type, uri, citation, retrieved_at,
+                        confidentiality, metadata)
+                       VALUES ('tool', %s, %s, now(), 'private', %s)
+                       RETURNING id""",
+                    (
+                        f"tool://daily-core/pkb-search/{task_id}",
+                        "Secretary Core read-only PKB search result",
+                        Jsonb({
+                            "task_id": str(task_id),
+                            "capability": "pkb_search",
+                            "query": request,
+                            "result_count": total,
+                        }),
+                    ),
+                )
+                source_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO secretary.actions
+                       (task_id, actor, tool, operation, parameters, risk,
+                        authorization_basis, status, idempotency_key,
+                        reversible, started_at, finished_at)
+                       VALUES (%s, 'daily_core', 'pkb', 'search', %s,
+                               'read_only', 'localhost_read_only',
+                               'succeeded', %s, true, now(), now())
+                       RETURNING id""",
+                    (
+                        task_id,
+                        Jsonb({"query": request, "bounded": True}),
+                        f"daily-core:{task_id}:pkb-search:1",
+                    ),
+                )
+                action_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO secretary.results
+                       (action_id, source_id, outcome, summary, evidence,
+                        verified_by, verified_at)
+                       VALUES (%s, %s, %s, %s, %s,
+                               'deterministic_pkb_query', now())
+                       RETURNING id""",
+                    (
+                        action_id,
+                        source_id,
+                        "success" if total > 0 else "inconclusive",
+                        answer,
+                        Jsonb({
+                            "result_kind": result.get("result_kind"),
+                            "total": total,
+                            "items": (result.get("items") or [])[:20],
+                        }),
+                    ),
+                )
+                result_id = cur.fetchone()[0]
+
+                final_checkpoint = {
+                    "core_slice": "daily_read_only_v1",
+                    "phase": phase,
+                    "selected_capability": "pkb_search",
+                    "action_id": str(action_id),
+                    "result_id": str(result_id),
+                    "result_count": total,
+                    "question": question,
                 }
-        page = query_claims(db, parse_query(text, entities))
-        result = _serialize_page(page)
-        result["result_kind"] = "claims"
-        return result
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET status=%s,
+                           checkpoint=%s,
+                           completed_at=CASE WHEN %s='completed' THEN now() ELSE NULL END
+                       WHERE id=%s""",
+                    (task_status, Jsonb(final_checkpoint), task_status, task_id),
+                )
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, action_id,
+                        object_type, object_id, details)
+                       VALUES ('daily_core', %s, %s, %s, 'task', %s, %s)""",
+                    (
+                        "core.completed" if total > 0 else "core.needs_more_context",
+                        task_id,
+                        action_id,
+                        task_id,
+                        Jsonb({"capability": "pkb_search", "result_count": total}),
+                    ),
+                )
+
+                return {
+                    "task_id": str(task_id),
+                    "status": task_status,
+                    "phase": phase,
+                    "message": answer,
+                    "question": question,
+                    "selected_capability": "pkb_search",
+                    "search": result,
+                }
 
 
 class TextInput(BaseModel):
@@ -622,6 +863,14 @@ class TextInput(BaseModel):
 
 class PendingDecisionInput(BaseModel):
     decision: str = Field(pattern="^(rejected|needs_edit)$")
+
+
+@app.post("/api/core/request")
+def api_core_request(params: TextInput):
+    try:
+        return run_core_request(params.text)
+    except (RuntimeError, ValueError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @app.get("/api/pkb/entities")
@@ -701,7 +950,7 @@ _FEATURES = [
     ("家計・資産", "試験中", "orange", "/finance", "保存済み家計のSQL集計・明細・Import履歴とMoneyForward CSV取込"),
     ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
     ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
-    ("Secretary Core", "開発予定", "blue-grey", None, "依頼・計画・承認・実行・継続"),
+    ("Secretary Core", "試験中", "blue-grey", "/core", "依頼をTask化し、最小のPKB読取能力を選択・記録"),
     ("開発Workbench", "利用可能", "green", "http://127.0.0.1:8092/", "LLM/PKB/Coreの開発検証用。日常GUIとは分離"),
 ]
 
@@ -711,6 +960,7 @@ def _nav():
         ui.button("TOP", icon="home").props("flat href=/ tag=a")
         ui.button("機能一覧", icon="apps").props("flat href=/features tag=a")
         ui.button("PKB", icon="account_tree").props("flat href=/pkb tag=a")
+        ui.button("Core", icon="hub").props("flat href=/core tag=a")
         ui.button("家計・資産", icon="account_balance_wallet").props("flat href=/finance tag=a")
         ui.button("設定", icon="settings").props("flat href=/settings tag=a")
 
@@ -783,10 +1033,13 @@ def top_page():
                 ui.label("予定").classes("text-lg font-bold")
                 ui.badge("未実装", color="grey")
                 ui.label("Google Calendar閲覧・検索を予定").classes("text-sm")
-            with ui.card().classes("w-72 border-2 border-grey-300 bg-grey-1"):
+            with ui.card().classes("w-72 border-2 border-blue-grey-300 bg-blue-grey-1"):
                 ui.label("Secretary Core").classes("text-lg font-bold")
-                ui.badge("開発予定", color="blue-grey")
-                ui.label("依頼・計画・承認・継続を同じGUIへ追加予定").classes("text-sm")
+                ui.badge("試験中", color="blue-grey")
+                ui.label("依頼をTask化し、PKBの読取能力を選んで結果を記録").classes("text-sm")
+                ui.button("Coreを開く", icon="arrow_forward", color="blue-grey").props(
+                    "href=/core tag=a"
+                )
 
         with ui.card().classes("w-full"):
             ui.label("開発中の現在地").classes("text-lg font-bold")
@@ -812,6 +1065,126 @@ def features_page():
                         ui.button("開く", icon="open_in_new", color="blue").props(
                             f"href={target} tag=a flat"
                         )
+
+
+@ui.page("/core")
+def core_page():
+    state = {"result": None, "busy": False}
+
+    with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
+        _portal_header(
+            "Secretary Core",
+            "最小縦断: 依頼 → Task → 能力選択 → PKB読取 → Result / 追加質問",
+        )
+        ui.label(
+            "現在は架空隔離DBの読み取りだけを扱います。"
+            "外部操作・承認・Web調査・自動再開はまだ実行しません。"
+        ).classes("text-sm text-orange-700")
+
+        with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
+            ui.label("依頼").classes("text-lg font-bold")
+            ui.label(
+                "例: メインPCのGPUの現在のドライバーを調べて / "
+                "メインPCの構成を確認して / GPU1のドライバー更新履歴を見て"
+            ).classes("text-sm")
+            request_input = ui.textarea(
+                label="Secretary Coreへ依頼",
+                placeholder="対象と確認したい内容を自然言語で入力",
+            ).classes("w-full")
+
+            @ui.refreshable
+            def core_result():
+                result = state["result"]
+                if state["busy"]:
+                    with ui.row().classes("items-center gap-2"):
+                        ui.spinner(size="sm", color="blue-grey")
+                        ui.label("Taskを作成してPKBを確認しています…")
+                    return
+                if not result:
+                    ui.label("まだ依頼していません。")
+                    return
+
+                status = result.get("status", "")
+                color = {
+                    "completed": "green",
+                    "waiting_external": "orange",
+                    "rejected": "red",
+                }.get(status, "grey")
+                ui.badge(status or "result", color=color)
+                if result.get("selected_capability"):
+                    ui.label(
+                        "選択した能力: " + result["selected_capability"]
+                    ).classes("text-sm text-blue-grey-800")
+                if result.get("message"):
+                    ui.label(result["message"]).classes("text-base")
+                if result.get("question"):
+                    with ui.card().classes(
+                        "w-full border-2 border-orange-300 bg-orange-50"
+                    ):
+                        ui.label("追加確認").classes("font-bold text-orange-900")
+                        ui.label(result["question"])
+                if result.get("task_id"):
+                    ui.label(
+                        "Task: " + result["task_id"]
+                    ).classes("font-mono text-xs text-grey-6")
+
+                search_result = result.get("search") or {}
+                rows = search_result.get("items") or []
+                if rows:
+                    with ui.expansion("根拠になったPKB記録", value=True).classes(
+                        "w-full border border-blue-grey-200 bg-white"
+                    ):
+                        if search_result.get("result_kind") == "components":
+                            for row in rows:
+                                ui.label(
+                                    f"{row.get('component_name')} / "
+                                    f"role={row.get('relation_role')} / "
+                                    f"current_driver={row.get('current_driver')} / "
+                                    f"Source={row.get('state_source_uri')}"
+                                ).classes("text-sm")
+                        else:
+                            for row in rows:
+                                ui.label(
+                                    f"{row.get('entity_name')} / "
+                                    f"{row.get('predicate')}={row.get('value')} / "
+                                    f"Source={row.get('source_uri')}"
+                                ).classes("text-sm")
+
+            async def submit_core():
+                if state["busy"]:
+                    return
+                state["busy"] = True
+                run_button.disable()
+                core_result.refresh()
+                try:
+                    state["result"] = await run.io_bound(
+                        run_core_request, request_input.value or ""
+                    )
+                except Exception as exc:
+                    state["result"] = {
+                        "status": "error",
+                        "phase": "failed",
+                        "message": str(exc),
+                    }
+                finally:
+                    state["busy"] = False
+                    run_button.enable()
+                    core_result.refresh()
+
+            run_button = ui.button(
+                "依頼する",
+                icon="play_arrow",
+                color="blue-grey",
+                on_click=submit_core,
+            )
+            core_result()
+
+        with ui.card().classes("w-full"):
+            ui.label("この縦断でまだ行わないこと").classes("font-bold")
+            ui.label(
+                "追加質問への同一Task再開、Web調査、外部Tool実行、承認、"
+                "結果検証による再計画は次の拡張対象です。"
+            ).classes("text-sm")
 
 
 @ui.page("/settings")
