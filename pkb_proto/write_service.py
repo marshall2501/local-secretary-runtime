@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
-from .entity_model_service import advance_state_for_event, classify_predicate
+from .entity_model_service import (
+    advance_state_for_event, authoritative_entity_aliases, classify_predicate,
+)
 
 KNOWN_PREDICATES = {
     "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
@@ -114,10 +116,7 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                                    str(claim_id), str(source_id))
 
             # Use authoritative entity IDs/names, never LLM-created identifiers.
-            cur.execute(
-                "SELECT id, name FROM secretary.entities WHERE retired_at IS NULL"
-            )
-            aliases = {str(entity_id): {name} for entity_id, name in cur.fetchall()}
+            aliases = authoritative_entity_aliases(cur)
             outcome = assess(record, claim, aliases=aliases)
             if outcome.route is not Route.AUTO_CANDIDATE:
                 return WriteResult(
