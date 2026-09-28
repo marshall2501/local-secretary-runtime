@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
-from .entity_model_service import classify_predicate
+from .entity_model_service import advance_state_for_event, classify_predicate
 
 KNOWN_PREDICATES = {
     "driver_updated": "更新した",
@@ -172,6 +172,16 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                 ),
             )
             claim_id = cur.fetchone()[0]
+            advance_state_for_event(
+                cur,
+                entity_id=UUID(claim.entity_key),
+                source_id=source_id,
+                event_predicate=claim.predicate,
+                value=claim.value,
+                evidence=claim.evidence_quote,
+                valid_from=record.occurred_at,
+                recorded_at=record.recorded_at,
+            )
             cur.execute(
                 """INSERT INTO secretary.pkb_input_receipts
                    (input_id, payload_sha256, source_id, claim_id)
