@@ -109,7 +109,7 @@ def _finance_filter_clause(
 
 def load_finance_dashboard(
     db,
-    recent_limit: int = 50,
+    recent_limit: int = 25,
     start_date: str | None = None,
     end_date: str | None = None,
     account: str | None = None,
