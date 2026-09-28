@@ -1,2 +1,4 @@
-# Optional developer Workbench only; production API requirements remain separate.
+# Optional local Web UI dependencies (developer Workbench + daily PKB prototype).
+# Production API requirements remain separate.
 nicegui>=3.0,<4
+psycopg[binary]>=3.2,<4
