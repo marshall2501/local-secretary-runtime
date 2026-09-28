@@ -7,6 +7,7 @@ experiment metadata outside the source tree, never PKB Claims or model thinking.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import re
 import sqlite3
 import threading
@@ -57,10 +58,15 @@ class RunStore:
                 error='Application restarted before run finished',
                 finished_at=? WHERE status IN ('queued','running')""", (utc_now(),))
 
+    @contextmanager
     def _connect(self):
         db = sqlite3.connect(str(self.path), timeout=10)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _decode(row):
@@ -189,7 +195,7 @@ class ExperimentRunner:
             # If content starts with a think tag, suppress it entirely.
             report["content"] = (raw[:100000] if not report["content_begins_think_tag"]
                                  else "[推論タグを検出したため非保存]")
-            report["content_truncated"] = len(raw) > 100000
+            report["full_content_truncated"] = len(raw) > 100000
             report["mode"] = run["mode"]
             report["request_payload"] = run["payload"]
             report["settings"] = {"num_predict": run["predict"], "think": run["think"]}
