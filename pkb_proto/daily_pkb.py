@@ -24,6 +24,7 @@ from .correction_service import correct_entity
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
+from .pending_service import enqueue as enqueue_pending, list_pending
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -204,7 +205,8 @@ def register_text(text: str) -> dict:
                 "message": "現在の最小実装では、既知Entityへの明示的な更新／交換だけを安全に自動登録します。",
             }
         if parsed["status"] != "parsed":
-            return parsed
+            result = enqueue_pending(db, input_id="daily-pkb-review-" + uuid4().hex, raw_text=text, reason=parsed["reason"])
+            return asdict(result)
         entity = entities[parsed["entity"]]
         input_id = "daily-pkb-" + uuid4().hex
         now = datetime.now(timezone.utc)
@@ -225,7 +227,11 @@ def register_text(text: str) -> dict:
             evidence_end=len(text),
             evidence_quote=text,
         )
-        return asdict(write_one(db, record, claim))
+        result = write_one(db, record, claim)
+        if result.status == "review":
+            pending = enqueue_pending(db, input_id="daily-pkb-review-" + uuid4().hex, raw_text=text, reason=result.reason, entity_id=entity["id"], predicate=parsed["predicate"], proposed_value=parsed["value"])
+            return asdict(pending)
+        return asdict(result)
 
 
 def correct_text(text: str) -> dict:
@@ -242,7 +248,8 @@ def correct_text(text: str) -> dict:
                 "message": "「訂正：旧Entityではなく新Entityを値へ更新した。」形式の明示訂正のみ扱います。",
             }
         if parsed["status"] != "parsed":
-            return parsed
+            result = enqueue_pending(db, input_id="daily-pkb-correction-review-" + uuid4().hex, raw_text=text, reason=parsed["reason"])
+            return asdict(result)
         old = entities[parsed["old_entity"]]
         new = entities[parsed["new_entity"]]
         with db.cursor() as cur:
@@ -261,11 +268,10 @@ def correct_text(text: str) -> dict:
             )
             rows = cur.fetchall()
         if len(rows) != 1:
-            return {
-                "status": "review",
-                "reason": "correction_target_not_unique",
-                "candidate_count": len(rows),
-            }
+            result = enqueue_pending(db, input_id="daily-pkb-correction-review-" + uuid4().hex, raw_text=text, reason="correction_target_not_unique", entity_id=old["id"], predicate=parsed["predicate"], proposed_value=parsed["value"])
+            payload = asdict(result)
+            payload["candidate_count"] = len(rows)
+            return payload
         old_claim_id, valid_from = rows[0]
         input_id = "daily-pkb-correction-" + uuid4().hex
         now = datetime.now(timezone.utc)
@@ -288,7 +294,11 @@ def correct_text(text: str) -> dict:
             intent="correction",
             corrects_claim_id=str(old_claim_id),
         )
-        return asdict(correct_entity(db, record, claim))
+        result = correct_entity(db, record, claim)
+        if result.status == "review":
+            pending = enqueue_pending(db, input_id="daily-pkb-correction-review-" + uuid4().hex, raw_text=text, reason=result.reason, entity_id=new["id"], predicate=parsed["predicate"], proposed_value=parsed["value"])
+            return asdict(pending)
+        return asdict(result)
 
 
 def search_text(text: str) -> dict:
@@ -349,6 +359,8 @@ def _display_result(result: dict):
         ui.label("旧Claim: " + result["old_claim_id"]).classes("font-mono text-xs")
     if result.get("new_claim_id"):
         ui.label("新Claim: " + result["new_claim_id"]).classes("font-mono text-xs")
+    if result.get("pending_id"):
+        ui.label("Pending: " + result["pending_id"]).classes("font-mono text-xs")
 
 
 @ui.page("/")
@@ -379,6 +391,7 @@ def index():
                 except Exception as exc:
                     state["write"] = {"status": "error", "reason": str(exc)}
                 write_result.refresh()
+                pending_panel.refresh()
             ui.button("記録する", on_click=do_write, color="green")
             write_result()
 
@@ -399,6 +412,7 @@ def index():
                     state["correction"] = {"status": "error", "reason": str(exc)}
                 correction_result.refresh()
                 search_result.refresh()
+                pending_panel.refresh()
             ui.button("訂正する", on_click=do_correct)
             correction_result()
 
@@ -434,6 +448,34 @@ def index():
                 search_result.refresh()
             ui.button("検索する", on_click=do_search)
             search_result()
+
+        @ui.refreshable
+        def pending_panel():
+            with ui.card().classes("w-full"):
+                ui.label("確認待ち（Pending Claims）").classes("text-lg font-bold")
+                try:
+                    with connection() as db:
+                        rows = list_pending(db)
+                except Exception as exc:
+                    ui.label("確認待ち一覧を取得できません: " + str(exc)).classes("text-red-600")
+                    return
+                if not rows:
+                    ui.label("確認待ちはありません。")
+                    return
+                columns = [
+                    {"name": "recorded", "label": "記録時点", "field": "recorded_at"},
+                    {"name": "entity", "label": "対象", "field": "entity_name"},
+                    {"name": "text", "label": "入力", "field": "raw_text"},
+                    {"name": "reason", "label": "保留理由", "field": "reason"},
+                ]
+                rendered = []
+                for row in rows:
+                    item = dict(row)
+                    if isinstance(item.get("recorded_at"), datetime):
+                        item["recorded_at"] = item["recorded_at"].isoformat()
+                    rendered.append(item)
+                ui.table(columns=columns, rows=rendered, row_key="id").classes("w-full")
+        pending_panel()
 
         with ui.expansion("この最小実装の制限"):
             ui.label("既知Entityへの明示的な更新／交換と、明示訂正だけを自動処理します。")
