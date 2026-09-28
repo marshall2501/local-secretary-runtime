@@ -14,12 +14,14 @@ from pkb_proto.daily_pkb import (
     _default_ui_preferences,
     _set_pkb_ui_open,
     _validate_ui_preferences,
+    core_answer,
     load_ui_preferences,
     parse_component_write,
     parse_correction,
     parse_query,
     parse_write,
     save_ui_preferences,
+    scope_core_request,
 )
 from pkb_proto.daily_interpreter import inspect_output
 from pkb_proto.entity_model_service import classify_predicate
@@ -118,6 +120,34 @@ class DailyPKBParserTests(unittest.TestCase):
     def test_pkb_ui_open_rejects_unknown_key(self):
         with self.assertRaises(KeyError):
             _set_pkb_ui_open("unknown", True)
+
+    def test_core_scope_accepts_bounded_component_state_query(self):
+        result = scope_core_request(
+            "メインPCのGPUの現在のドライバーを調べて",
+            ENTITIES,
+        )
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["capability"], "pkb_search")
+        self.assertEqual(result["domain"], "pc")
+
+    def test_core_scope_asks_when_request_is_not_safely_scoped(self):
+        result = scope_core_request("何か調べて", ENTITIES)
+        self.assertEqual(result["status"], "question")
+        self.assertEqual(result["reason"], "request_not_safely_scoped")
+        self.assertTrue(result["question"])
+
+    def test_core_answer_preserves_claim_identity_in_summary(self):
+        answer = core_answer({
+            "result_kind": "claims",
+            "total": 1,
+            "items": [{
+                "entity_name": "GPU1",
+                "predicate": "current_driver",
+                "value": "DRV-G3",
+            }],
+        })
+        self.assertIn("GPU1", answer)
+        self.assertIn("current_driver=DRV-G3", answer)
 
     def test_explicit_pc_update(self):
         result = parse_write("メインPCをDRV-A3へ更新した。", set(ENTITIES))
