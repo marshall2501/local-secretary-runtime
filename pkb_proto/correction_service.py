@@ -14,6 +14,7 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
+from .entity_model_service import classify_predicate
 
 WRITER = "secretary_pkb_proto_writer_20260927"
 
@@ -178,13 +179,15 @@ def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionR
         source_id = cur.fetchone()[0]
         cur.execute(
             """INSERT INTO secretary.claims
-               (entity_id, source_id, claim_type, predicate, value, evidence,
-                origin, verification_status, valid_from, recorded_at, supersedes_id)
-               VALUES (%s,%s,'fact',%s,%s,%s,'user_explicit','unverified',%s,%s,%s)
+               (entity_id, source_id, claim_type, semantic_kind,
+                predicate, value, evidence, origin, verification_status,
+                valid_from, recorded_at, supersedes_id)
+               VALUES (%s,%s,'fact',%s,%s,%s,%s,'user_explicit','unverified',%s,%s,%s)
                RETURNING id""",
             (
-                new_entity_id, source_id, predicate, Jsonb(value),
-                claim.evidence_quote, valid_from, record.recorded_at, old_id,
+                new_entity_id, source_id, classify_predicate(predicate),
+                predicate, Jsonb(value), claim.evidence_quote,
+                valid_from, record.recorded_at, old_id,
             ),
         )
         new_claim_id = cur.fetchone()[0]
