@@ -100,27 +100,65 @@ def index():
 
         with ui.card().classes("w-full"):
             ui.label("実験条件").classes("text-lg font-bold")
+            # Load installed local models at page opening, not on first button press.
+            # Embedding-only models are not suitable for chat experiment payloads.
+            def load_chat_models():
+                return [name for name in runner.installed_models()
+                        if not name.split(":", 1)[0].endswith("-embed-text")]
+
+            initial_model_error = False
+            try:
+                initial_models = load_chat_models()
+            except OSError:
+                initial_models = []
+                initial_model_error = True
+            initial_choice = ("llama3.1:8b" if "llama3.1:8b" in initial_models
+                              else initial_models[0] if initial_models else None)
+
             with ui.row().classes("w-full gap-4 items-end"):
-                model = ui.input("インストール済みモデル名", value="qwen3.5:9b").classes("w-52")
+                model = ui.select(
+                    initial_models, value=initial_choice, label="インストール済みモデル"
+                ).classes("w-52")
                 episode = ui.select(
                     list(runner.episodes), value="pc-01", label="架空Episode"
                 ).classes("w-40")
                 mode = ui.select(list(MODES), value="抽出：簡略", label="検証モード").classes("w-52")
                 predict = ui.select([1100, 2048, 4096], value=1100, label="生成上限").classes("w-36")
                 think = ui.select(["自動", "無効"], value="自動", label="Thinking").classes("w-32")
-            installed_label = ui.label("モデル一覧は「モデルを確認」で取得できます。")
+            installed_label = ui.label(
+                "Ollamaへ接続できません。「モデルを更新」で再試行してください。"
+                if initial_model_error else
+                f"チャット用モデル {len(initial_models)}件を取得済み（埋め込み専用は除外）"
+                if initial_models else
+                "チャット用モデルがありません。「モデルを更新」で再取得してください。"
+            )
 
-            def check_models():
+            def update_models():
                 try:
-                    installed_label.set_text("ローカルモデル: " + ", ".join(runner.installed_models()))
+                    available = load_chat_models()
                 except OSError:
+                    installed_label.set_text("Ollamaへの接続に失敗。前回取得した一覧を保持しています。")
                     ui.notify("127.0.0.1:11434 のOllamaへ接続できません", type="negative")
+                    return
+                previous = model.value
+                model.options = available
+                model.value = (previous if previous in available
+                               else available[0] if available else None)
+                model.update()
+                installed_label.set_text(
+                    f"チャット用モデル {len(available)}件を更新（埋め込み専用は除外）"
+                    if available else "チャット用モデルがありません。"
+                )
+                request_preview.refresh()
+                status_panel.refresh()
+                ui.notify(f"モデル一覧を更新：{len(available)}件",
+                          type="positive" if available else "warning")
 
             @ui.refreshable
             def request_preview():
                 try:
                     payload = build_ollama_payload(
-                        runner.episodes[episode.value], model.value.strip(),
+                        runner.episodes[episode.value], model.value,
                         int(predict.value), think.value, mode.value,
                     )
                     ui.label("実際に送信するJSON").classes("font-medium")
@@ -135,10 +173,13 @@ def index():
                 comparison.refresh()
 
             def do_run():
+                if not model.value:
+                    ui.notify("モデルを選択してください", type="warning")
+                    return
                 try:
                     record = runner.submit(
                         episode_id=episode.value, mode=mode.value,
-                        model=model.value.strip(), predict=int(predict.value),
+                        model=model.value, predict=int(predict.value),
                         think=think.value,
                     )
                     selected["detail"] = record["id"]
@@ -149,7 +190,7 @@ def index():
                     ui.notify(str(exc)[:240], type="negative")
 
             with ui.row().classes("items-center gap-3"):
-                ui.button("モデルを確認", on_click=check_models)
+                ui.button("モデルを更新", on_click=update_models)
                 run_button = ui.button("この条件で実行", on_click=do_run, color="green")
                 ui.button("結果を更新", on_click=refresh_views)
             for component in (model, episode, mode, predict, think):
@@ -165,7 +206,7 @@ def index():
                 active = next((r for r in records if r["status"] == "queued"), None)
             selected_record = store.get(selected["detail"]) if selected["detail"] else None
             record = active or selected_record or (records[0] if records else None)
-            run_button.set_enabled(not bool(active))
+            run_button.set_enabled(not bool(active) and bool(model.value))
             with ui.card().classes("w-full border-2 border-blue-300"):
                 if record is None:
                     ui.label("実行状態：未実行").classes("text-xl font-bold")
