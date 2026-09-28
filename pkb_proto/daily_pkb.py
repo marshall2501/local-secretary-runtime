@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import HTTPException
-from nicegui import app, ui
+from nicegui import app, run, ui
 from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
@@ -226,9 +226,9 @@ def register_text(text: str) -> dict:
                 return payload
 
             reason = {
-                "no_candidate": "local_interpreter_no_safe_candidate",
-                "invalid": "local_interpreter_invalid_candidate",
-                "unavailable": "local_interpreter_unavailable",
+                "no_candidate": "local_interpreter_no_safe_candidate:" + interpreted.reason,
+                "invalid": "local_interpreter_invalid_candidate:" + interpreted.reason,
+                "unavailable": "local_interpreter_unavailable:" + interpreted.reason,
             }.get(interpreted.status, "local_interpreter_no_safe_candidate")
             result = enqueue_pending(
                 db,
@@ -459,7 +459,7 @@ def _display_result(result: dict):
 
 @ui.page("/")
 def index():
-    state = {"write": None, "correction": None, "search": None}
+    state = {"write": None, "write_busy": False, "correction": None, "search": None}
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         ui.label("Local Secretary — Personal Knowledge Base").classes("text-2xl font-bold")
         ui.label(
@@ -475,18 +475,33 @@ def index():
             write_input = ui.textarea(label="自然言語で記録").classes("w-full")
             @ui.refreshable
             def write_result():
-                if state["write"]:
+                if state["write_busy"]:
+                    with ui.row().classes("items-center gap-2"):
+                        ui.spinner(size="sm", color="green")
+                        ui.label("ローカルLLMで解析中… 画面はそのまま利用できます。")
+                elif state["write"]:
                     _display_result(state["write"])
                 else:
                     ui.label("まだ記録していません。")
-            def do_write():
+            async def do_write():
+                if state["write_busy"]:
+                    return
+                state["write_busy"] = True
+                write_button.disable()
+                write_result.refresh()
                 try:
-                    state["write"] = register_text(write_input.value or "")
+                    # register_text may wait on local Ollama for tens of seconds.
+                    # Keep NiceGUI's event loop responsive by moving the blocking
+                    # DB/Ollama work to an I/O worker thread.
+                    state["write"] = await run.io_bound(register_text, write_input.value or "")
                 except Exception as exc:
                     state["write"] = {"status": "error", "reason": str(exc)}
-                write_result.refresh()
-                pending_panel.refresh()
-            ui.button("記録する", on_click=do_write, color="green")
+                finally:
+                    state["write_busy"] = False
+                    write_button.enable()
+                    write_result.refresh()
+                    pending_panel.refresh()
+            write_button = ui.button("記録する", on_click=do_write, color="green")
             write_result()
 
         with ui.card().classes("w-full border-2 border-amber-300 bg-amber-50"):
