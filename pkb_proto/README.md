@@ -1,10 +1,10 @@
 # PKB自前プロトタイプ：最初の実装単位
 
-**現行状態（2026-09-28）**: PKBプロトタイプをGitHubの`main`へfast-forward統合済み（`3eb8d3cdd7802d0d05f298319f1308f9ff7736d7`）。既存の限定登録・訂正・SQL-first検索・Episode取込は隔離DBのサブPC実機試験に成功し、Tkinter診断GUIも起動・LLM比較の本人実測あり。**新Web Workbenchと日常用PKB GUIは未実装**。この下の「GitHubのみ・未実機」は各実装を追加した**当時の履歴記述**であり、最新版の実機到達点や次の操作として使わない。詳細は[設計repo STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md)。
+**現行状態（2026-09-28）**: PKBプロトタイプをGitHubの`main`へ統合済み。既存の限定登録・訂正・SQL-first検索・Episode取込は隔離DBのサブPC実機試験に成功。開発用Web WorkbenchはサブPCで実Ollama 2件比較・履歴復帰まで確認済み。**日常用PKB GUIの最小スライスはGitHub実装＋CI成功、サブPC実機は未実証**。この下の「GitHubのみ・未実機」は各実装を追加した**当時の履歴記述**であり、最新版の実機到達点や次の操作として使わない。詳細は[設計repo STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md)。
 
 ## 共通Web Workbench — 最初の実装スライス（2026-09-28）
 
-**位置づけ**: NiceGUI＋FastAPI＋独立Python Runnerの開発用Web GUI。単独の日常PKB画面とは別。GitHubへコード・オフラインCIを追加済みだが、**サブPCでのWeb画面動作は未実証**。既存Tkinter診断GUIは削除しない。
+**位置づけ**: NiceGUI＋FastAPI＋独立Python Runnerの開発用Web GUI。単独の日常PKB画面とは別。GitHubコード・CIに加え、サブPCで実Ollama 2件比較と履歴復帰まで実証済み。既存Tkinter診断GUIは削除しない。
 
 - `web_workbench_core.py`: 同時実行1件・待機上限20件、架空fixtureのみ、インストール済みモデルのみをローカルOllamaへ送信。送信payload・結果・判定・エラーをRun ID単位でSQLiteへ永続化。ブラウザを閉じても処理を継続し、アプリ再起動時の未完了Runは`interrupted`へ変更する。バックエンド実行中の実験を自動再開する機能はない。
 - `web_workbench.py`: localhost `127.0.0.1:8092`のNiceGUI画面とFastAPI `/api/workbench/*`。5つの既存診断モード、モデル設定／実送信JSONのプレビュー、履歴・詳細・2件比較・保存条件による再試験・JSONコピー。**初期の診断は読取専用で、PKB／運用DBには一切接続しない。**
@@ -104,3 +104,10 @@ GUI上ではモデル一覧更新、Episode1件／全10件、生成上限1100／
 GUIの「検証」欄で「疎通：固定文字列」（出力`ABC123`）、「理解：原文復唱」（選択Episodeの原文を一字一句復唱）、「推論：簡単な計算」（リンゴ2個＋3個、期待する短答`5`）、「抽出：簡略」（対象と出来事だけの2項目JSON）、「抽出：現行」（これまでの5項目候補・原文照合）を選べる。先頭3モードはOllamaへ`format=json`を強制せず、回答をJSON不正と誤認しない。簡略抽出の構文合格を意味的な抽出精度の合格とは扱わず、元10 Episodeのgold正解はモデルに渡さない。
 
 基本3モード・簡略抽出は1件ずつ実行可能、現行抽出のみ10件一括ボタンを使える。結果JSONに`mode`、`check`、`elapsed_seconds`、推論本文の有無・文字数、終了理由と回答本文を保存／コピーする（推論本文そのものは出力しない）。設定は既存GUIのモデル・生成上限・推論自動／無効を再利用する。現在の目的はモデル側と指示／検査側を**少ない実測で切り分けること**であり、抽出チューニングの継続やMAGI実装ではない。
+
+## 日常用PKB Web GUI — 最小スライス（2026-09-28）
+
+- `daily_pkb.py`: localhost:8093 の利用者向けNiceGUI＋FastAPI。Workbenchとは別API。既存の架空隔離DB `secretary_pkb_proto_20260927` と専用writer以外を拒否する。
+- `launch_daily_pkb.ps1`: 既存PostgreSQLコンテナのlocalhost binding、隔離DB schema、専用writer、秘密ファイルを確認してから起動。パッケージやDBを自動変更しない。
+- 最初の対応は既知Entityへの明示的PCドライバ更新／RCサーボ交換、明示訂正、限定自然言語検索・履歴。曖昧・未知・複数訂正候補はreviewへ回し、自動登録しない。
+- `tests/test_pkb_daily.py`: 登録・訂正・検索の限定意図解釈を6件検査。CI #36377136020 成功。サブPCで8093画面と隔離PostgreSQLを通した縦断操作は未実証。
