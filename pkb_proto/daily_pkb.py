@@ -886,6 +886,74 @@ def _contextualize_core_reply(
     return reply
 
 
+def load_core_task_trace(task_id: UUID) -> dict:
+    """Load a structured, user-visible execution trace for one Core Task."""
+    with connection() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """SELECT id, request, domain, status, revision,
+                          created_at, updated_at, completed_at, checkpoint
+                   FROM secretary.tasks
+                   WHERE id=%s""",
+                (task_id,),
+            )
+            task = cur.fetchone()
+            if task is None:
+                raise ValueError("Taskが見つかりません。")
+
+            cur.execute(
+                """SELECT a.id, a.tool, a.operation, a.risk, a.status,
+                          a.recorded_at, a.started_at, a.finished_at,
+                          r.id, r.outcome, r.summary, r.verified_by,
+                          r.verified_at, s.uri
+                   FROM secretary.actions a
+                   LEFT JOIN secretary.results r ON r.action_id=a.id
+                   LEFT JOIN secretary.sources s ON s.id=r.source_id
+                   WHERE a.task_id=%s
+                   ORDER BY a.recorded_at, a.id""",
+                (task_id,),
+            )
+            action_rows = cur.fetchall()
+
+    checkpoint = task[8] or {}
+    return {
+        "task": {
+            "id": str(task[0]),
+            "request": task[1],
+            "domain": task[2],
+            "status": task[3],
+            "revision": task[4],
+            "created_at": task[5],
+            "updated_at": task[6],
+            "completed_at": task[7],
+            "phase": checkpoint.get("phase"),
+            "selected_capability": checkpoint.get("selected_capability"),
+            "effective_request": checkpoint.get("effective_request"),
+            "user_replies": list(checkpoint.get("user_replies") or []),
+            "result_count": checkpoint.get("result_count"),
+        },
+        "actions": [
+            {
+                "action_id": str(row[0]),
+                "tool": row[1],
+                "operation": row[2],
+                "risk": row[3],
+                "action_status": row[4],
+                "recorded_at": row[5],
+                "started_at": row[6],
+                "finished_at": row[7],
+                "result_id": str(row[8]) if row[8] else None,
+                "outcome": row[9],
+                "summary": row[10],
+                "verified_by": row[11],
+                "verified_at": row[12],
+                "source_uri": row[13],
+            }
+            for row in action_rows
+        ],
+    }
+
+
 def resume_core_task(task_id: UUID, reply: str) -> dict:
     """Resume one waiting Core task with a user clarification, preserving Task ID."""
     user_reply = reply.strip()
@@ -926,6 +994,22 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                 replies = list(checkpoint.get("user_replies") or [])
                 replies.append(user_reply)
 
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, object_type, object_id, details)
+                       VALUES ('daily_core', 'core.clarification_received',
+                               %s, 'task', %s, %s)""",
+                    (
+                        task_id,
+                        task_id,
+                        Jsonb({
+                            "resolved": scoped["status"] == "ready",
+                            "reason": scoped.get("reason"),
+                            "reply_count": len(replies),
+                        }),
+                    ),
+                )
+
                 if scoped["status"] != "ready":
                     next_checkpoint = {
                         **checkpoint,
@@ -940,21 +1024,6 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                            SET checkpoint=%s
                            WHERE id=%s""",
                         (Jsonb(next_checkpoint), task_id),
-                    )
-                    cur.execute(
-                        """INSERT INTO secretary.audit_events
-                           (actor, event_type, task_id, object_type, object_id, details)
-                           VALUES ('daily_core', 'core.clarification_received',
-                                   %s, 'task', %s, %s)""",
-                        (
-                            task_id,
-                            task_id,
-                            Jsonb({
-                                "resolved": False,
-                                "reason": scoped.get("reason"),
-                                "reply_count": len(replies),
-                            }),
-                        ),
                     )
                     return {
                         "task_id": str(task_id),
@@ -1116,6 +1185,16 @@ class TextInput(BaseModel):
 
 class PendingDecisionInput(BaseModel):
     decision: str = Field(pattern="^(rejected|needs_edit)$")
+
+
+@app.get("/api/core/tasks/{task_id}/trace")
+def api_core_trace(task_id: UUID):
+    try:
+        return load_core_task_trace(task_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (RuntimeError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @app.post("/api/core/tasks/{task_id}/resume")
@@ -1414,6 +1493,81 @@ def core_page():
                                 ).classes("text-sm")
 
             @ui.refreshable
+            def trace_panel():
+                result = state["result"] or {}
+                task_id = result.get("task_id")
+                if not task_id:
+                    return
+                try:
+                    trace = load_core_task_trace(UUID(task_id))
+                except Exception as exc:
+                    with ui.expansion("検証・稼働ログ", value=False).classes(
+                        "w-full border border-red-200 bg-red-50"
+                    ):
+                        ui.label("Traceを取得できません: " + str(exc)).classes(
+                            "text-red-700"
+                        )
+                    return
+
+                task = trace["task"]
+                with ui.expansion("検証・稼働ログ", value=False).classes(
+                    "w-full border-2 border-slate-300 bg-slate-50"
+                ):
+                    ui.label(
+                        "DBに記録されたTask / Action / Resultを表示します。"
+                        " コンソール生ログではなく、Coreの構造化実行履歴です。"
+                    ).classes("text-sm text-grey-7")
+                    with ui.grid(columns=2).classes("w-full gap-2"):
+                        ui.label("Task ID")
+                        ui.label(task["id"]).classes("font-mono text-xs")
+                        ui.label("Status / Revision")
+                        ui.label(f"{task['status']} / {task['revision']}")
+                        ui.label("Phase")
+                        ui.label(str(task.get("phase") or "-"))
+                        ui.label("能力")
+                        ui.label(str(task.get("selected_capability") or "-"))
+                        ui.label("元依頼")
+                        ui.label(task["request"])
+                        if task.get("effective_request"):
+                            ui.label("実効依頼")
+                            ui.label(task["effective_request"])
+                        if task.get("user_replies"):
+                            ui.label("追加回答")
+                            ui.label(" / ".join(task["user_replies"]))
+                        ui.label("更新時刻")
+                        ui.label(str(task["updated_at"]))
+
+                    actions = trace["actions"]
+                    ui.separator()
+                    ui.label(f"Action / Result: {len(actions)}件").classes("font-bold")
+                    if not actions:
+                        ui.label(
+                            "まだActionはありません。追加確認待ちTaskでは正常です。"
+                        ).classes("text-sm")
+                    for index, item in enumerate(actions, start=1):
+                        with ui.card().classes("w-full bg-white"):
+                            ui.label(
+                                f"{index}. {item['tool']}.{item['operation']} "
+                                f"[{item['risk']}] → {item['action_status']}"
+                            ).classes("font-medium")
+                            if item.get("outcome"):
+                                ui.label(
+                                    f"Result: {item['outcome']} / "
+                                    f"{item.get('summary') or ''}"
+                                ).classes("text-sm")
+                            if item.get("source_uri"):
+                                ui.label(
+                                    "Source: " + item["source_uri"]
+                                ).classes("font-mono text-xs text-grey-7")
+                            if item.get("verified_by"):
+                                ui.label(
+                                    "Verified: "
+                                    + str(item["verified_by"])
+                                    + " / "
+                                    + str(item.get("verified_at") or "")
+                                ).classes("text-xs text-grey-7")
+
+            @ui.refreshable
             def resume_panel():
                 result = state["result"] or {}
                 if result.get("status") != "waiting_external" or not result.get("task_id"):
@@ -1450,6 +1604,7 @@ def core_page():
                             state["resume_busy"] = False
                             resume_panel.refresh()
                             core_result.refresh()
+                            trace_panel.refresh()
 
                     resume_button = ui.button(
                         "同じTaskを再開",
@@ -1479,6 +1634,7 @@ def core_page():
                     run_button.enable()
                     core_result.refresh()
                     resume_panel.refresh()
+                    trace_panel.refresh()
 
             run_button = ui.button(
                 "依頼する",
@@ -1488,6 +1644,7 @@ def core_page():
             )
             core_result()
             resume_panel()
+            trace_panel()
 
         with ui.card().classes("w-full"):
             ui.label("この縦断でまだ行わないこと").classes("font-bold")
