@@ -11,7 +11,6 @@ on:
       - "pkb_proto/verify_finance_versioning.ps1"
       - "pkb_proto/daily_interpreter.py"
       - "pkb_proto/entity_model_service.py"
-      - "pkb_proto/entity_detail.py"
       - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/pending_service.py"
       - "pkb_proto/write_service.py"
@@ -34,7 +33,6 @@ on:
       - "tests/test_pkb_daily.py"
       - "tests/test_finance_preview.py"
       - "tests/test_finance_import.py"
-      - "tests/test_entity_detail.py"
       - "tests/test_pkb_write_slice.py"
       - "tests/test_pkb_ingestion_gate.py"
       - "requirements-web.txt"
@@ -49,7 +47,6 @@ on:
       - "pkb_proto/verify_finance_versioning.ps1"
       - "pkb_proto/daily_interpreter.py"
       - "pkb_proto/entity_model_service.py"
-      - "pkb_proto/entity_detail.py"
       - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/pending_service.py"
       - "pkb_proto/write_service.py"
@@ -68,7 +65,6 @@ on:
       - "tests/test_pkb_daily.py"
       - "tests/test_finance_preview.py"
       - "tests/test_finance_import.py"
-      - "tests/test_entity_detail.py"
       - "tests/test_pkb_write_slice.py"
       - "tests/test_pkb_ingestion_gate.py"
       - "requirements-web.txt"
@@ -86,12 +82,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -r requirements-web.txt
-      - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py tests/test_pkb_daily.py tests/test_finance_preview.py tests/test_finance_import.py tests/test_entity_detail.py
+      - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py tests/test_pkb_daily.py tests/test_finance_preview.py tests/test_finance_import.py
       - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
       - run: python -m unittest discover -s tests -p test_finance_preview.py -v
       - run: python -m unittest discover -s tests -p test_finance_import.py -v
-      - run: python -m unittest discover -s tests -p test_entity_detail.py -v
       - run: python -m unittest discover -s tests -p test_pkb_ingestion_gate.py -v
       - run: python -m unittest discover -s tests -p test_pkb_write_slice.py -v
       - run: python -m unittest discover -s tests -p test_pkb_diagnostic_cases.py -v
