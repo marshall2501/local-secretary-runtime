@@ -862,12 +862,270 @@ def run_core_request(text: str) -> dict:
                 }
 
 
+def _contextualize_core_reply(
+    original_request: str,
+    reply: str,
+    entities: dict[str, dict],
+) -> str:
+    """Carry a uniquely named Entity from the original request into a short reply."""
+    reply = reply.strip()
+    if not reply:
+        return reply
+
+    ordered = sorted(entities.items(), key=lambda item: len(item[0]), reverse=True)
+    reply_mentions = [name for name, _ in ordered if name in reply]
+    if reply_mentions:
+        return reply
+
+    original_mentions = [name for name, _ in ordered if name in original_request]
+    if len(original_mentions) == 1:
+        entity_name = original_mentions[0]
+        if reply.startswith(("の", "について", "に関して")):
+            return entity_name + reply
+        return entity_name + "の" + reply
+    return reply
+
+
+def resume_core_task(task_id: UUID, reply: str) -> dict:
+    """Resume one waiting Core task with a user clarification, preserving Task ID."""
+    user_reply = reply.strip()
+    if not user_reply:
+        return {
+            "task_id": str(task_id),
+            "status": "waiting_external",
+            "phase": "awaiting_clarification",
+            "message": "追加回答を入力してください。",
+        }
+
+    with connection() as db:
+        with db.transaction():
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT id, request, domain, status, checkpoint
+                       FROM secretary.tasks
+                       WHERE id=%s
+                       FOR UPDATE""",
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ValueError("Taskが見つかりません。")
+                original_request, current_domain, status, checkpoint = (
+                    row[1], row[2], row[3], row[4] or {}
+                )
+                if status != "waiting_external":
+                    raise ValueError("waiting_external のTaskだけ再開できます。")
+                if checkpoint.get("core_slice") != "daily_read_only_v1":
+                    raise ValueError("このTaskは日常Core最小縦断のTaskではありません。")
+
+                entities = _entity_map(db)
+                effective_request = _contextualize_core_reply(
+                    original_request, user_reply, entities
+                )
+                scoped = scope_core_request(effective_request, entities)
+                replies = list(checkpoint.get("user_replies") or [])
+                replies.append(user_reply)
+
+                if scoped["status"] != "ready":
+                    next_checkpoint = {
+                        **checkpoint,
+                        "phase": "awaiting_clarification",
+                        "question": scoped.get("question"),
+                        "reason": scoped.get("reason"),
+                        "user_replies": replies,
+                        "effective_request": effective_request,
+                    }
+                    cur.execute(
+                        """UPDATE secretary.tasks
+                           SET checkpoint=%s
+                           WHERE id=%s""",
+                        (Jsonb(next_checkpoint), task_id),
+                    )
+                    cur.execute(
+                        """INSERT INTO secretary.audit_events
+                           (actor, event_type, task_id, object_type, object_id, details)
+                           VALUES ('daily_core', 'core.clarification_received',
+                                   %s, 'task', %s, %s)""",
+                        (
+                            task_id,
+                            task_id,
+                            Jsonb({
+                                "resolved": False,
+                                "reason": scoped.get("reason"),
+                                "reply_count": len(replies),
+                            }),
+                        ),
+                    )
+                    return {
+                        "task_id": str(task_id),
+                        "status": "waiting_external",
+                        "phase": "awaiting_clarification",
+                        "message": "まだ追加情報が必要です。",
+                        "question": scoped["question"],
+                    }
+
+                cur.execute(
+                    "UPDATE secretary.tasks SET status='running' WHERE id=%s",
+                    (task_id,),
+                )
+
+                # Keep the consistent PKB snapshot on its own read-only connection.
+                result = search_text(effective_request)
+                answer = core_answer(result)
+                total = int(result.get("total") or 0)
+                phase = "completed" if total > 0 else "awaiting_clarification"
+                task_status = "completed" if total > 0 else "waiting_external"
+                question = None if total > 0 else (
+                    "該当記録が見つかりませんでした。対象名や確認したい項目を"
+                    "もう少し具体的にしてください。"
+                )
+
+                cur.execute(
+                    "SELECT count(*) FROM secretary.actions WHERE task_id=%s",
+                    (task_id,),
+                )
+                attempt = int(cur.fetchone()[0]) + 1
+
+                cur.execute(
+                    """INSERT INTO secretary.sources
+                       (source_type, uri, citation, retrieved_at,
+                        confidentiality, metadata)
+                       VALUES ('tool', %s, %s, now(), 'private', %s)
+                       RETURNING id""",
+                    (
+                        f"tool://daily-core/pkb-search/{task_id}/{attempt}",
+                        "Secretary Core resumed read-only PKB search result",
+                        Jsonb({
+                            "task_id": str(task_id),
+                            "capability": "pkb_search",
+                            "original_request": original_request,
+                            "user_reply": user_reply,
+                            "effective_request": effective_request,
+                            "result_count": total,
+                        }),
+                    ),
+                )
+                source_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO secretary.actions
+                       (task_id, actor, tool, operation, parameters, risk,
+                        authorization_basis, status, idempotency_key,
+                        reversible, started_at, finished_at)
+                       VALUES (%s, 'daily_core', 'pkb', 'search', %s,
+                               'read_only', 'localhost_read_only',
+                               'succeeded', %s, true, now(), now())
+                       RETURNING id""",
+                    (
+                        task_id,
+                        Jsonb({
+                            "query": effective_request,
+                            "bounded": True,
+                            "resumed": True,
+                        }),
+                        f"daily-core:{task_id}:pkb-search:{attempt}",
+                    ),
+                )
+                action_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO secretary.results
+                       (action_id, source_id, outcome, summary, evidence,
+                        verified_by, verified_at)
+                       VALUES (%s, %s, %s, %s, %s,
+                               'deterministic_pkb_query', now())
+                       RETURNING id""",
+                    (
+                        action_id,
+                        source_id,
+                        "success" if total > 0 else "inconclusive",
+                        answer,
+                        Jsonb({
+                            "result_kind": result.get("result_kind"),
+                            "total": total,
+                            "items": (result.get("items") or [])[:20],
+                            "resumed": True,
+                        }),
+                    ),
+                )
+                result_id = cur.fetchone()[0]
+
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": phase,
+                    "selected_capability": "pkb_search",
+                    "action_id": str(action_id),
+                    "result_id": str(result_id),
+                    "result_count": total,
+                    "question": question,
+                    "reason": None,
+                    "user_replies": replies,
+                    "effective_request": effective_request,
+                }
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET status=%s,
+                           domain=%s,
+                           checkpoint=%s,
+                           completed_at=CASE WHEN %s='completed' THEN now() ELSE NULL END
+                       WHERE id=%s""",
+                    (
+                        task_status,
+                        scoped.get("domain") or current_domain,
+                        Jsonb(next_checkpoint),
+                        task_status,
+                        task_id,
+                    ),
+                )
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, action_id,
+                        object_type, object_id, details)
+                       VALUES ('daily_core', %s, %s, %s, 'task', %s, %s)""",
+                    (
+                        "core.resumed_completed"
+                        if total > 0
+                        else "core.resumed_needs_more_context",
+                        task_id,
+                        action_id,
+                        task_id,
+                        Jsonb({
+                            "capability": "pkb_search",
+                            "result_count": total,
+                            "reply_count": len(replies),
+                        }),
+                    ),
+                )
+
+                return {
+                    "task_id": str(task_id),
+                    "status": task_status,
+                    "phase": phase,
+                    "message": answer,
+                    "question": question,
+                    "selected_capability": "pkb_search",
+                    "search": result,
+                    "resumed": True,
+                    "effective_request": effective_request,
+                }
+
+
 class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
 class PendingDecisionInput(BaseModel):
     decision: str = Field(pattern="^(rejected|needs_edit)$")
+
+
+@app.post("/api/core/tasks/{task_id}/resume")
+def api_core_resume(task_id: UUID, params: TextInput):
+    try:
+        return resume_core_task(task_id, params.text)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (RuntimeError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @app.post("/api/core/request")
@@ -1074,7 +1332,7 @@ def features_page():
 
 @ui.page("/core")
 def core_page():
-    state = {"result": None, "busy": False}
+    state = {"result": None, "busy": False, "resume_busy": False}
 
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
         _portal_header(
@@ -1155,6 +1413,51 @@ def core_page():
                                     f"Source={row.get('source_uri')}"
                                 ).classes("text-sm")
 
+            @ui.refreshable
+            def resume_panel():
+                result = state["result"] or {}
+                if result.get("status") != "waiting_external" or not result.get("task_id"):
+                    return
+
+                with ui.card().classes(
+                    "w-full border-2 border-orange-300 bg-orange-50"
+                ):
+                    ui.label("このTaskへ追加回答").classes(
+                        "font-bold text-orange-900"
+                    )
+                    ui.label(
+                        "新しいTaskは作らず、上のTask IDをそのまま再開します。"
+                    ).classes("text-sm")
+                    reply_input = ui.textarea(
+                        label="追加回答",
+                        placeholder="例: GPUの現在のドライバーを調べて",
+                    ).classes("w-full")
+
+                    async def submit_resume():
+                        if state["resume_busy"]:
+                            return
+                        state["resume_busy"] = True
+                        resume_button.disable()
+                        try:
+                            state["result"] = await run.io_bound(
+                                resume_core_task,
+                                UUID(result["task_id"]),
+                                reply_input.value or "",
+                            )
+                        except Exception as exc:
+                            ui.notify(str(exc)[:240], type="negative")
+                        finally:
+                            state["resume_busy"] = False
+                            resume_panel.refresh()
+                            core_result.refresh()
+
+                    resume_button = ui.button(
+                        "同じTaskを再開",
+                        icon="resume",
+                        color="orange",
+                        on_click=submit_resume,
+                    )
+
             async def submit_core():
                 if state["busy"]:
                     return
@@ -1175,6 +1478,7 @@ def core_page():
                     state["busy"] = False
                     run_button.enable()
                     core_result.refresh()
+                    resume_panel.refresh()
 
             run_button = ui.button(
                 "依頼する",
@@ -1183,12 +1487,13 @@ def core_page():
                 on_click=submit_core,
             )
             core_result()
+            resume_panel()
 
         with ui.card().classes("w-full"):
             ui.label("この縦断でまだ行わないこと").classes("font-bold")
             ui.label(
-                "追加質問への同一Task再開、Web調査、外部Tool実行、承認、"
-                "結果検証による再計画は次の拡張対象です。"
+                "Web調査、外部Tool実行、承認、結果検証による再計画は"
+                "次の拡張対象です。追加質問への同一Task再開はこの画面で試験中です。"
             ).classes("text-sm")
 
 
