@@ -2042,7 +2042,10 @@ def finance_page():
                 "保存済み家計",
                 value=state["ui_open"]["stored"],
                 on_value_change=remember_expansion("stored"),
-            ).classes("w-full border-2 border-green-300 bg-green-50 text-green-900"):
+            ).classes(
+                "w-full border-2 border-green-300 bg-green-50 text-green-900"
+                + _block_visibility_class("finance", "stored")
+            ):
                 fstate = state["filters"]
                 has_user_filter = any(
                     fstate.get(key)
@@ -2082,6 +2085,7 @@ def finance_page():
                     on_value_change=remember_expansion("monthly"),
                 ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
+                    + _block_visibility_class("finance", "monthly")
                 ):
                     monthly_rows = [
                         {
@@ -2110,6 +2114,7 @@ def finance_page():
                     on_value_change=remember_expansion("categories"),
                 ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
+                    + _block_visibility_class("finance", "categories")
                 ):
                     category_rows = [
                         {**row, "expense_display": f"¥{row['expense']:,}"}
@@ -2131,6 +2136,7 @@ def finance_page():
                     on_value_change=remember_expansion("details"),
                 ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
+                    + _block_visibility_class("finance", "details")
                 ):
                     with ui.row().classes("w-full gap-3 flex-wrap items-end"):
                         sort_by_select = ui.select(
@@ -2288,6 +2294,7 @@ def finance_page():
                     on_value_change=remember_expansion("imports"),
                 ).classes(
                     "w-full border-2 border-green-200 bg-white text-green-900"
+                    + _block_visibility_class("finance", "imports")
                 ):
                     ui.table(
                         columns=[
@@ -2307,7 +2314,8 @@ def finance_page():
             value=state["ui_open"]["csv"],
             on_value_change=remember_expansion("csv"),
         ).classes(
-            "w-full border-2 border-blue-300 bg-blue-50 text-blue-900" + _block_visibility_class("pkb", "search")
+            "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
+            + _block_visibility_class("finance", "csv")
         ):
             ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
             ui.label(
@@ -2602,7 +2610,8 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["current"],
             on_value_change=remember_expansion("current"),
         ).classes(
-            "w-full border-2 border-green-300 bg-green-50 text-green-900" + _block_visibility_class("pkb", "write")
+            "w-full border-2 border-green-300 bg-green-50 text-green-900"
+            + _block_visibility_class("entity", "current")
         ):
             rows = detail["current"]
             if not rows:
@@ -2633,7 +2642,9 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["relations"],
             on_value_change=remember_expansion("relations"),
         ).classes(
-            "w-full border-2 border-purple-300 bg-purple-50 text-purple-900" + _block_visibility_class("entity", "current")\n        )):
+            "w-full border-2 border-purple-300 bg-purple-50 text-purple-900"
+            + _block_visibility_class("entity", "relations")
+        ):
             relations = detail["relations"]
             if not relations:
                 ui.label("現在または履歴Relationはありません。")
@@ -2642,7 +2653,8 @@ def entity_page(entity_id: str):
                     arrow = "→" if rel["direction"] == "outgoing" else "←"
                     role = f" / role={rel['relation_role']}" if rel["relation_role"] else ""
                     with ui.row().classes(
-                        "w-full items-center gap-3 border-b border-purple-200 py-2" + _block_visibility_class("entity", "relations")\n                    )):
+                        "w-full items-center gap-3 border-b border-purple-200 py-2"
+                    ):
                         ui.label(arrow).classes("text-lg font-bold")
                         with ui.column().classes("grow gap-0"):
                             ui.label(
@@ -2660,7 +2672,9 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["events"],
             on_value_change=remember_expansion("events"),
         ).classes(
-            "w-full border-2 border-orange-300 bg-orange-50 text-orange-900" + _block_visibility_class("entity", "events")\n        )):
+            "w-full border-2 border-orange-300 bg-orange-50 text-orange-900"
+            + _block_visibility_class("entity", "events")
+        ):
             rows = detail["events"]
             if not rows:
                 ui.label("Event履歴はありません。")
@@ -2689,7 +2703,9 @@ def entity_page(entity_id: str):
             value=_ENTITY_UI_OPEN["history"],
             on_value_change=remember_expansion("history"),
         ).classes(
-            "w-full border-2 border-grey-300 bg-grey-1" + _block_visibility_class("entity", "history")\n        )):
+            "w-full border-2 border-grey-300 bg-grey-1"
+            + _block_visibility_class("entity", "history")
+        ):
             rows = detail["history"]
             if not rows:
                 ui.label("終了済みのState / Attributeはありません。")
@@ -2738,6 +2754,7 @@ def pkb_page():
             on_value_change=remember_expansion("write"),
         ).classes(
             "w-full border-2 border-green-300 bg-green-50 text-green-900"
+            + _block_visibility_class("pkb", "write")
         ):
             ui.label("例: メインPCをDRV-A3へ更新した。 / メインPCのGPUドライバーをDRV-G1へ更新した。 / RCカーBのサーボをSERVO-X3へ交換した。").classes("text-sm")
             write_input = ui.textarea(label="自然言語で記録").classes("w-full")
@@ -2804,6 +2821,7 @@ def pkb_page():
             on_value_change=remember_expansion("search"),
         ).classes(
             "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
+            + _block_visibility_class("pkb", "search")
         ):
             ui.label("例: メインPCの構成 / メインPCのGPUの現在のドライバー / サブPCのドライバー更新履歴").classes("text-sm")
             search_input = ui.input(label="自然言語で検索").classes("w-full")
@@ -2974,7 +2992,7 @@ def pkb_page():
                 "処理済みの確認待ち",
                 value=_PKB_UI_OPEN["reviewed"],
                 on_value_change=remember_expansion("reviewed"),
-            ):
+            ).classes(_block_visibility_class("pkb", "reviewed")):
                 try:
                     with connection() as db:
                         rows = list_reviewed(db)
