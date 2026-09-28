@@ -95,6 +95,26 @@ class IngestionGateTests(unittest.TestCase):
                               recorded_at=AT, occurred_at=AT)
         self.assertEqual(assess(invalid, proposal(), aliases=ALIASES).route, Route.REJECT)
 
+    def test_normalized_component_can_use_parent_role_alias(self):
+        text = "メインPCのGPUドライバーをDRV-G1へ更新した。"
+        aliases = {
+            "gpu-1": {"GPU1", "メインPCのGPU"},
+            "pc-main": {"メインPC"},
+        }
+        claim = ProposedClaim(
+            entity_key="gpu-1",
+            entity_mention="メインPCのGPU",
+            predicate="driver_updated",
+            value="DRV-G1",
+            evidence_start=0,
+            evidence_end=len(text),
+            evidence_quote=text,
+        )
+        result = assess(record(text), claim, aliases=aliases)
+        self.assertEqual(result.route, Route.AUTO_CANDIDATE)
+        self.assertEqual(result.reason, "eligible_for_db_conflict_check")
+
+
 
 if __name__ == "__main__":
     unittest.main()
