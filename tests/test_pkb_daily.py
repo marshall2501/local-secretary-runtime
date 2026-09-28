@@ -3,7 +3,15 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
-from pkb_proto.daily_pkb import parse_component_write, parse_correction, parse_query, parse_write
+from pkb_proto.daily_pkb import (
+    PKB_UI_DEFAULT_OPEN,
+    _PKB_UI_OPEN,
+    _set_pkb_ui_open,
+    parse_component_write,
+    parse_correction,
+    parse_query,
+    parse_write,
+)
 from pkb_proto.daily_interpreter import inspect_output
 from pkb_proto.entity_model_service import classify_predicate
 from pkb_proto.pending_service import acceptance_eligible
@@ -44,6 +52,22 @@ ENTITIES = {
 
 
 class DailyPKBParserTests(unittest.TestCase):
+    def test_pkb_ui_open_state_is_centralized_and_resettable_by_process_restart(self):
+        original = dict(_PKB_UI_OPEN)
+        try:
+            self.assertEqual(set(_PKB_UI_OPEN), set(PKB_UI_DEFAULT_OPEN))
+            _set_pkb_ui_open("entities", True)
+            _set_pkb_ui_open("search", False)
+            self.assertTrue(_PKB_UI_OPEN["entities"])
+            self.assertFalse(_PKB_UI_OPEN["search"])
+        finally:
+            _PKB_UI_OPEN.clear()
+            _PKB_UI_OPEN.update(original)
+
+    def test_pkb_ui_open_rejects_unknown_key(self):
+        with self.assertRaises(KeyError):
+            _set_pkb_ui_open("unknown", True)
+
     def test_explicit_pc_update(self):
         result = parse_write("メインPCをDRV-A3へ更新した。", set(ENTITIES))
         self.assertEqual(result["status"], "parsed")
