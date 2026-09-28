@@ -25,7 +25,7 @@ from .correction_service import correct_entity
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
-from .finance_import import commit_import, plan_import
+from .finance_import import commit_import, load_finance_dashboard, plan_import
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -546,7 +546,7 @@ def api_pending_accept(pending_id: str):
 
 _FEATURES = [
     ("Personal Knowledge Base", "利用可能", "green", "/pkb", "自然言語の記録・訂正・検索・履歴・Pending"),
-    ("家計・資産", "試験中", "orange", "/finance", "MoneyForward CSVの読み取り専用プレビュー"),
+    ("家計・資産", "試験中", "orange", "/finance", "保存済み家計のSQL集計・明細・Import履歴とMoneyForward CSV取込"),
     ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
     ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
     ("Secretary Core", "開発予定", "blue-grey", None, "依頼・計画・承認・実行・継続"),
@@ -619,8 +619,8 @@ def top_page():
                 )
             with ui.card().classes("w-72 border-2 border-blue-300 bg-blue-50"):
                 ui.label("家計・資産").classes("text-lg font-bold")
-                ui.label("MoneyForward CSVプレビューを実装中").classes("text-sm")
-                ui.label("実データはDBへ保存せず、まず構造と集計を確認").classes(
+                ui.label("保存済み家計表示＋MoneyForward CSV取込").classes("text-sm")
+                ui.label("隔離DBの保存済み明細・集計・Import履歴を表示").classes(
                     "text-xs text-blue-800"
                 )
                 ui.button("家計・資産を開く", icon="arrow_forward", color="blue").props(
@@ -638,8 +638,8 @@ def top_page():
         with ui.card().classes("w-full"):
             ui.label("開発中の現在地").classes("text-lg font-bold")
             ui.label("PKB: 架空隔離DBでEntity / Relation / Event / State縦断まで実機確認済み")
-            ui.label("家計: MoneyForward CSVの読み取り専用プレビューを開始")
-            ui.label("実データのDB投入・外部金融サービス操作はまだ行いません。").classes(
+            ui.label("家計: MoneyForward CSV 2,270件を隔離DBへ保存し、保存済み表示へ拡張")
+            ui.label("金融実データは隔離DBのみ。運用DB・外部金融サービス操作はまだ行いません。").classes(
                 "text-sm text-orange-800"
             )
 
@@ -671,14 +671,118 @@ def finance_page():
         "import_plan": None,
         "import_result": None,
         "import_busy": False,
+        "stored": None,
+        "stored_error": None,
     }
+
+    try:
+        with connection() as db:
+            state["stored"] = load_finance_dashboard(db)
+    except Exception as exc:
+        state["stored_error"] = str(exc)
 
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         _portal_header(
             "家計・資産",
-            "最初の縦断: MoneyForward ME CSVを読み取り専用で解析",
+            "保存済み家計をSQL-firstで表示し、MoneyForward CSVを差分Import",
         )
-        with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
+
+        @ui.refreshable
+        def stored_finance():
+            if state["stored_error"]:
+                with ui.card().classes("w-full border-2 border-red-300 bg-red-50"):
+                    ui.label("保存済み家計を読み取れません: " + state["stored_error"]).classes(
+                        "text-red-800"
+                    )
+                return
+            stored = state["stored"]
+            if stored is None or stored.transaction_count == 0:
+                with ui.card().classes("w-full border-2 border-grey-300"):
+                    ui.label("保存済み家計データはまだありません。")
+                return
+
+            with ui.card().classes("w-full border-2 border-green-300 bg-green-50"):
+                ui.label("保存済み家計").classes("text-xl font-bold text-green-900")
+                ui.label(
+                    "PostgreSQLの正規化済みTransactionをSQL-firstで集計しています。"
+                ).classes("text-sm text-green-900")
+                with ui.row().classes("w-full gap-3 flex-wrap"):
+                    for label, value in (
+                        ("明細件数", f"{stored.transaction_count:,}件"),
+                        ("期間", f"{stored.start_date} ～ {stored.end_date}"),
+                        ("収入", f"¥{stored.income_total:,.0f}"),
+                        ("支出", f"¥{stored.expense_total:,.0f}"),
+                        ("収支", f"¥{stored.net_total:,.0f}"),
+                        ("Import Batch", f"{len(stored.import_batches):,}件"),
+                    ):
+                        with ui.card().classes("min-w-40"):
+                            ui.label(label).classes("text-xs text-grey-7")
+                            ui.label(value).classes("text-lg font-bold")
+
+                with ui.expansion("保存済み月別集計", value=True).classes(
+                    "w-full border-2 border-green-200 bg-white text-green-900"
+                ):
+                    ui.table(
+                        columns=[
+                            {"name": "month", "label": "月", "field": "month"},
+                            {"name": "income", "label": "収入", "field": "income"},
+                            {"name": "expense", "label": "支出", "field": "expense"},
+                            {"name": "net", "label": "収支", "field": "net"},
+                            {"name": "count", "label": "件数", "field": "count"},
+                        ],
+                        rows=stored.monthly,
+                        row_key="month",
+                    ).classes("w-full")
+
+                with ui.expansion("保存済みカテゴリ別支出", value=False).classes(
+                    "w-full border-2 border-green-200 bg-white text-green-900"
+                ):
+                    ui.table(
+                        columns=[
+                            {"name": "major", "label": "大項目", "field": "major"},
+                            {"name": "minor", "label": "中項目", "field": "minor"},
+                            {"name": "expense", "label": "支出", "field": "expense"},
+                        ],
+                        rows=stored.categories,
+                        row_key="minor",
+                    ).classes("w-full")
+
+                with ui.expansion("保存済み明細（直近100件）", value=False).classes(
+                    "w-full border-2 border-green-200 bg-white text-green-900"
+                ):
+                    ui.table(
+                        columns=[
+                            {"name": "date", "label": "日付", "field": "date"},
+                            {"name": "content", "label": "内容", "field": "content"},
+                            {"name": "amount", "label": "金額", "field": "amount"},
+                            {"name": "account", "label": "金融機関", "field": "account"},
+                            {"name": "major", "label": "大項目", "field": "major_category"},
+                            {"name": "minor", "label": "中項目", "field": "minor_category"},
+                            {"name": "transfer", "label": "振替", "field": "is_transfer"},
+                        ],
+                        rows=stored.recent_rows,
+                        row_key="external_id",
+                    ).classes("w-full")
+
+                with ui.expansion("Import履歴 / Source", value=False).classes(
+                    "w-full border-2 border-green-200 bg-white text-green-900"
+                ):
+                    ui.table(
+                        columns=[
+                            {"name": "filename", "label": "ファイル", "field": "source_filename"},
+                            {"name": "rows", "label": "行数", "field": "row_count"},
+                            {"name": "imported", "label": "Import時刻", "field": "imported_at"},
+                            {"name": "status", "label": "状態", "field": "status"},
+                            {"name": "sha", "label": "SHA-256", "field": "source_sha256"},
+                        ],
+                        rows=stored.import_batches,
+                        row_key="id",
+                    ).classes("w-full")
+        stored_finance()
+
+        with ui.expansion("MoneyForward CSV 取込", value=False).classes(
+            "w-full border-2 border-blue-300 bg-blue-50 text-blue-900"
+        ):
             ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
             ui.label(
                 "CSVはまずローカルWebプロセスのメモリ上で読み取り専用解析します。"
@@ -820,6 +924,9 @@ def finance_page():
                                     state["import_plan"] = plan_import(
                                         db, state["preview"], state["csv_bytes"]
                                     )
+                                    state["stored"] = load_finance_dashboard(db)
+                                    state["stored_error"] = None
+                                stored_finance.refresh()
                             except Exception as exc:
                                 state["import_result"] = None
                                 state["error"] = str(exc)
