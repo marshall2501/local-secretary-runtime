@@ -51,6 +51,8 @@ def enqueue(
     entity_id: str | None = None,
     predicate: str | None = None,
     proposed_value: str | None = None,
+    interpreter_kind: str | None = None,
+    interpreter_model: str | None = None,
 ) -> PendingResult:
     if not _allowed(db):
         raise ValueError("Refusing non-isolated DB or non-dedicated writer")
@@ -60,11 +62,15 @@ def enqueue(
     with db.transaction(), db.cursor() as cur:
         cur.execute(
             """INSERT INTO secretary.pkb_pending_intake
-               (input_id, raw_text, reason, entity_id, predicate, proposed_value)
-               VALUES (%s,%s,%s,%s,%s,%s)
+               (input_id, raw_text, reason, entity_id, predicate, proposed_value,
+                interpreter_kind, interpreter_model)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (input_id) DO UPDATE SET input_id=EXCLUDED.input_id
                RETURNING id""",
-            (input_id, raw_text, reason, entity_uuid, predicate, proposed_value),
+            (
+                input_id, raw_text, reason, entity_uuid, predicate, proposed_value,
+                interpreter_kind, interpreter_model,
+            ),
         )
         pending_id = cur.fetchone()[0]
     return PendingResult("review", reason, str(pending_id))
@@ -78,7 +84,8 @@ def list_pending(db, limit: int = 50) -> list[dict]:
     with db.cursor() as cur:
         cur.execute(
             """SELECT p.id, p.raw_text, p.reason, p.review_status, p.recorded_at,
-                      p.entity_id, e.name AS entity_name, p.predicate, p.proposed_value
+                      p.entity_id, e.name AS entity_name, p.predicate, p.proposed_value,
+                      p.interpreter_kind, p.interpreter_model
                FROM secretary.pkb_pending_intake p
                LEFT JOIN secretary.entities e ON e.id=p.entity_id
                WHERE p.review_status='pending'
@@ -99,7 +106,10 @@ def acceptance_eligible(row: dict) -> bool:
     entity_name = row.get("entity_name") or ""
     return (
         row.get("review_status", "pending") == "pending"
-        and row.get("reason") == "existing_claim_requires_conflict_resolution"
+        and row.get("reason") in {
+            "existing_claim_requires_conflict_resolution",
+            "model_candidate_needs_user_confirmation",
+        }
         and bool(row.get("entity_id"))
         and predicate in SUPPORTED_ACCEPT_ACTIONS
         and bool(value)
@@ -107,6 +117,13 @@ def acceptance_eligible(row: dict) -> bool:
         and value in raw_text
         and SUPPORTED_ACCEPT_ACTIONS[predicate] in raw_text
         and not any(marker in raw_text for marker in BLOCKED_ACCEPT_TEXT)
+        and (
+            row.get("reason") != "model_candidate_needs_user_confirmation"
+            or (
+                row.get("interpreter_kind") == "local_ollama"
+                and bool(row.get("interpreter_model"))
+            )
+        )
     )
 
 
@@ -126,6 +143,7 @@ def accept_pending(db, pending_id: str) -> PendingResult:
             """SELECT p.id, p.input_id, p.raw_text, p.reason, p.entity_id,
                       p.predicate, p.proposed_value, p.review_status,
                       p.recorded_at, p.accepted_source_id, p.accepted_claim_id,
+                      p.interpreter_kind, p.interpreter_model,
                       e.name AS entity_name, e.retired_at
                FROM secretary.pkb_pending_intake p
                LEFT JOIN secretary.entities e ON e.id=p.entity_id
@@ -140,7 +158,9 @@ def accept_pending(db, pending_id: str) -> PendingResult:
         keys = (
             "id", "input_id", "raw_text", "reason", "entity_id", "predicate",
             "proposed_value", "review_status", "recorded_at",
-            "accepted_source_id", "accepted_claim_id", "entity_name", "retired_at",
+            "accepted_source_id", "accepted_claim_id",
+            "interpreter_kind", "interpreter_model",
+            "entity_name", "retired_at",
         )
         item = dict(zip(keys, row))
         if item["review_status"] == "accepted":
@@ -170,6 +190,8 @@ def accept_pending(db, pending_id: str) -> PendingResult:
                     "pending_intake_id": str(item["id"]),
                     "original_text": item["raw_text"],
                     "promoted_by_user_review": True,
+                    "interpreter_kind": item["interpreter_kind"],
+                    "interpreter_model": item["interpreter_model"],
                 }),
             ),
         )
