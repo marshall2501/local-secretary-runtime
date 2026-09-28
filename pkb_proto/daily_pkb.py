@@ -21,6 +21,7 @@ from nicegui import app, ui
 from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
+from .daily_interpreter import interpret as interpret_daily
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
@@ -202,14 +203,45 @@ def register_text(text: str) -> dict:
         entities = _entity_map(db)
         parsed = parse_write(text, set(entities))
         if parsed is None:
+            interpreted = interpret_daily(text, set(entities))
+            if interpreted.status == "candidate" and interpreted.candidate is not None:
+                candidate = interpreted.candidate
+                entity = entities[candidate.entity_mention]
+                result = enqueue_pending(
+                    db,
+                    input_id="daily-pkb-model-review-" + uuid4().hex,
+                    raw_text=text,
+                    reason="model_candidate_needs_user_confirmation",
+                    entity_id=entity["id"],
+                    predicate=candidate.predicate,
+                    proposed_value=candidate.value,
+                    interpreter_kind="local_ollama",
+                    interpreter_model=interpreted.model,
+                )
+                payload = asdict(result)
+                payload["message"] = (
+                    "ローカルLLMが出典付き候補を作成しました。"
+                    "自動登録せず、確認待ちから承認・要修正・却下を選べます。"
+                )
+                return payload
+
+            reason = {
+                "no_candidate": "local_interpreter_no_safe_candidate",
+                "invalid": "local_interpreter_invalid_candidate",
+                "unavailable": "local_interpreter_unavailable",
+            }.get(interpreted.status, "local_interpreter_no_safe_candidate")
             result = enqueue_pending(
                 db,
                 input_id="daily-pkb-review-" + uuid4().hex,
                 raw_text=text,
-                reason="unsupported_natural_language_in_first_slice",
+                reason=reason,
+                interpreter_kind=("local_ollama" if interpreted.model else None),
+                interpreter_model=interpreted.model,
             )
             payload = asdict(result)
-            payload["message"] = "現在の最小実装では、既知Entityへの明示的な更新／交換だけを安全に自動登録します。"
+            payload["message"] = (
+                "安全に構造化できなかったため、元の入力をそのまま確認待ちに保存しました。"
+            )
             return payload
         if parsed["status"] != "parsed":
             result = enqueue_pending(db, input_id="daily-pkb-review-" + uuid4().hex, raw_text=text, reason=parsed["reason"])
@@ -493,6 +525,12 @@ def index():
                     return
                 ui.label(f'件数: {result.get("total", 0)}')
                 rows = result.get("items", [])
+                for row in rows:
+                    raw_status = row.get("status_at_cutoff")
+                    if raw_status == "active":
+                        row["status_at_cutoff"] = "現行記録"
+                    elif raw_status == "superseded":
+                        row["status_at_cutoff"] = "旧版・訂正済み"
                 if not rows:
                     ui.label("該当する記録はありません。")
                     return
@@ -501,7 +539,7 @@ def index():
                     {"name": "predicate", "label": "種類", "field": "predicate"},
                     {"name": "value", "label": "値", "field": "value"},
                     {"name": "valid_from", "label": "有効時点", "field": "valid_from"},
-                    {"name": "status", "label": "状態", "field": "status_at_cutoff"},
+                    {"name": "status", "label": "記録状態", "field": "status_at_cutoff"},
                     {"name": "source", "label": "出典", "field": "source_uri"},
                 ]
                 ui.table(columns=columns, rows=rows, row_key="id").classes("w-full")
@@ -561,6 +599,8 @@ def index():
                             meta = when
                             if row.get("entity_name"):
                                 meta += " / " + row["entity_name"]
+                            if row.get("interpreter_model"):
+                                meta += " / 解釈: " + row["interpreter_model"]
                             ui.label(meta).classes("text-xs text-gray-600")
                         if acceptance_eligible(row):
                             ui.button(
@@ -605,9 +645,9 @@ def index():
         reviewed_panel()
 
         with ui.expansion("この最小実装の制限"):
-            ui.label("既知Entityへの明示的な更新／交換と、明示訂正だけを自動処理します。")
-            ui.label("曖昧な入力・未知Entity・複数候補はPending扱い相当のreviewとして返し、勝手に登録しません。")
-            ui.label("LLMによる一般的な日本語解釈、実データ、金融・給与・税務・Googleカレンダー連携はまだ未実装です。")
+            ui.label("限定文型は決定的に処理し、それ以外はローカルLLMで単一の構造化候補化を試みます。")
+            ui.label("LLM由来候補・曖昧入力・未知Entity・複数候補はPendingへ回し、勝手に正式Claimへ登録しません。")
+            ui.label("LLM解釈は現在driver_updated / servo_updatedの単一候補だけ。実データ、金融・給与・税務・Googleカレンダー連携は未実装です。")
 
 
 if __name__ == "__main__":
