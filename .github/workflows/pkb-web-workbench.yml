@@ -5,6 +5,7 @@ on:
     paths:
       - "pkb_proto/web_workbench*.py"
       - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/daily_interpreter.py"
       - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/pending_service.py"
       - "pkb_proto/run_pending_setup.ps1"
@@ -12,6 +13,7 @@ on:
       - "pkb_proto/sql/009_pkb_proto_pending_privileges.sql"
       - "pkb_proto/sql/010_pkb_proto_pending_review_audit.sql"
       - "pkb_proto/sql/011_pkb_proto_pending_acceptance.sql"
+      - "pkb_proto/sql/012_pkb_proto_pending_interpreter.sql"
       - "pkb_proto/diagnostic_cases.py"
       - "pkb_proto/gui_helpers.py"
       - "pkb_proto/extraction_service.py"
@@ -24,6 +26,7 @@ on:
     paths:
       - "pkb_proto/web_workbench*.py"
       - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/daily_interpreter.py"
       - "pkb_proto/launch_daily_pkb.ps1"
       - "pkb_proto/pending_service.py"
       - "pkb_proto/run_pending_setup.ps1"
@@ -31,6 +34,7 @@ on:
       - "pkb_proto/sql/009_pkb_proto_pending_privileges.sql"
       - "pkb_proto/sql/010_pkb_proto_pending_review_audit.sql"
       - "pkb_proto/sql/011_pkb_proto_pending_acceptance.sql"
+      - "pkb_proto/sql/012_pkb_proto_pending_interpreter.sql"
       - "tests/test_pkb_web_workbench.py"
       - "tests/test_pkb_daily.py"
       - "requirements-web.txt"
