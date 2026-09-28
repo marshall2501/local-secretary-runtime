@@ -28,6 +28,18 @@ ENTITIES = {
         "domain": "rc",
         "entity_type": "rc_car",
     },
+    "メインPCのGPU": {
+        "id": "44444444-4444-4444-4444-444444444444",
+        "name": "メインPCのGPU",
+        "domain": "pc",
+        "entity_type": "gpu",
+    },
+    "メインPCのNIC": {
+        "id": "55555555-5555-5555-5555-555555555555",
+        "name": "メインPCのNIC",
+        "domain": "pc",
+        "entity_type": "network_adapter",
+    },
 }
 
 
@@ -240,6 +252,41 @@ class DailyPKBParserTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "invalid")
         self.assertEqual(result.reason, "grounded_sentence_not_unique")
+
+    def test_component_driver_update_targets_component_entity(self):
+        result = parse_write(
+            "メインPCのGPUドライバーをDRV-G1へ更新した。",
+            set(ENTITIES),
+        )
+        self.assertEqual(result["status"], "parsed")
+        self.assertEqual(result["entity"], "メインPCのGPU")
+        self.assertEqual(result["predicate"], "driver_updated")
+        self.assertEqual(result["value"], "DRV-G1")
+
+    def test_current_driver_query_targets_component_state(self):
+        query = parse_query("メインPCのGPUの現在のドライバー", ENTITIES)
+        self.assertEqual(
+            query.entity_id,
+            UUID("44444444-4444-4444-4444-444444444444"),
+        )
+        self.assertEqual(query.predicate, "current_driver")
+
+    def test_nested_component_entity_is_not_ambiguous_for_interpreter(self):
+        raw = {
+            "candidate": {
+                "entity_mention": "メインPCのGPU",
+                "predicate": "driver_updated",
+                "value": "DRV-G2",
+                "quote": "メインPCのGPUドライバーをDRV-G2へ更新しておいた。",
+            }
+        }
+        result = inspect_output(
+            "メインPCのGPUドライバーをDRV-G2へ更新しておいた。",
+            set(ENTITIES),
+            raw,
+        )
+        self.assertEqual(result.status, "candidate")
+        self.assertEqual(result.candidate.entity_mention, "メインPCのGPU")
 
 
 if __name__ == "__main__":
