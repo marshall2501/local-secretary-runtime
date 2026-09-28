@@ -145,7 +145,8 @@ class ExperimentRunner:
                predict: int = 1100, think: str = "自動", verify_model: bool = True) -> dict:
         if episode_id not in self.episodes or mode not in MODES:
             raise ValueError("Unknown fictional episode or diagnostic mode")
-        if not isinstance(model, str) or not MODEL_PATTERN.fullmatch(model):
+        if (not isinstance(model, str) or not MODEL_PATTERN.fullmatch(model)
+                or "://" in model):
             raise ValueError("Invalid model name")
         if type(predict) is not int or predict not in (1100, 2048, 4096):
             raise ValueError("Unsupported token limit")
