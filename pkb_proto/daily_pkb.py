@@ -24,7 +24,8 @@ from .correction_service import correct_entity
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
-from .pending_service import enqueue as enqueue_pending, list_pending, list_reviewed, review_pending
+from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
+    list_pending, list_reviewed, review_pending)
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -387,6 +388,17 @@ def api_pending_review(pending_id: str, params: PendingDecisionInput):
         raise HTTPException(503, str(exc)) from exc
 
 
+@app.post("/api/pkb/pending/{pending_id}/accept")
+def api_pending_accept(pending_id: str):
+    try:
+        with connection() as db:
+            return asdict(accept_pending(db, pending_id))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (RuntimeError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 def _display_result(result: dict):
     status = result.get("status", "")
     colors = {
@@ -397,6 +409,7 @@ def _display_result(result: dict):
         "review": "orange",
         "needs_edit": "orange",
         "rejected": "red",
+        "accepted": "green",
         "error": "red",
     }
     color = colors.get(status, "grey")
@@ -525,6 +538,19 @@ def index():
                     except Exception as exc:
                         ui.notify(str(exc)[:240], type="negative")
 
+                def accept(pending_id: str):
+                    try:
+                        with connection() as db:
+                            result = accept_pending(db, pending_id)
+                        if result.status == "accepted":
+                            ui.notify("承認して正式Claimへ登録しました", type="positive")
+                        else:
+                            ui.notify("この候補は承認できません: " + result.reason, type="warning")
+                        pending_panel.refresh()
+                        reviewed_panel.refresh()
+                    except Exception as exc:
+                        ui.notify(str(exc)[:240], type="negative")
+
                 for row in rows:
                     pending_id = str(row["id"])
                     when = row["recorded_at"].isoformat() if isinstance(row["recorded_at"], datetime) else str(row["recorded_at"])
@@ -536,6 +562,12 @@ def index():
                             if row.get("entity_name"):
                                 meta += " / " + row["entity_name"]
                             ui.label(meta).classes("text-xs text-gray-600")
+                        if acceptance_eligible(row):
+                            ui.button(
+                                "承認",
+                                on_click=lambda pid=pending_id: accept(pid),
+                                color="green",
+                            ).props("outline")
                         ui.button(
                             "要修正",
                             on_click=lambda pid=pending_id: decide(pid, "needs_edit"),
@@ -562,10 +594,10 @@ def index():
                     return
                 for row in rows:
                     status = row["review_status"]
-                    label = "要修正" if status == "needs_edit" else "却下" if status == "rejected" else status
+                    label = "承認" if status == "accepted" else "要修正" if status == "needs_edit" else "却下" if status == "rejected" else status
                     when = row["reviewed_at"].isoformat() if isinstance(row.get("reviewed_at"), datetime) else str(row.get("reviewed_at") or "")
                     with ui.row().classes("w-full items-center gap-3 border-b py-2"):
-                        ui.badge(label, color="orange" if status == "needs_edit" else "red" if status == "rejected" else "grey")
+                        ui.badge(label, color="green" if status == "accepted" else "orange" if status == "needs_edit" else "red" if status == "rejected" else "grey")
                         with ui.column().classes("grow gap-1"):
                             ui.label(row["raw_text"]).classes("font-medium")
                             ui.label("理由: " + row["reason"]).classes("text-sm")
