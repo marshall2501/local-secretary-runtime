@@ -24,7 +24,7 @@ from .correction_service import correct_entity
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
-from .pending_service import enqueue as enqueue_pending, list_pending
+from .pending_service import enqueue as enqueue_pending, list_pending, review_pending
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -320,6 +320,10 @@ class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+class PendingDecisionInput(BaseModel):
+    decision: str = Field(pattern="^(rejected|needs_edit)$")
+
+
 @app.get("/api/pkb/entities")
 def api_entities():
     try:
@@ -350,6 +354,34 @@ def api_search(params: TextInput):
     try:
         return search_text(params.text)
     except (RuntimeError, ValueError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/api/pkb/pending")
+def api_pending():
+    try:
+        with connection() as db:
+            rows = list_pending(db)
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["id"] = str(item["id"])
+                if isinstance(item.get("recorded_at"), datetime):
+                    item["recorded_at"] = item["recorded_at"].isoformat()
+                result.append(item)
+            return result
+    except (RuntimeError, ValueError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/pkb/pending/{pending_id}/review")
+def api_pending_review(pending_id: str, params: PendingDecisionInput):
+    try:
+        with connection() as db:
+            return asdict(review_pending(db, pending_id, params.decision))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (RuntimeError, psycopg.Error) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -459,8 +491,8 @@ def index():
 
         @ui.refreshable
         def pending_panel():
-            with ui.card().classes("w-full"):
-                ui.label("確認待ち（Pending Claims）").classes("text-lg font-bold")
+            with ui.card().classes("w-full border-2 border-purple-500 bg-purple-50"):
+                ui.label("確認待ち（Pending Claims）").classes("text-lg font-bold text-purple-900")
                 try:
                     with connection() as db:
                         rows = list_pending(db)
@@ -470,19 +502,37 @@ def index():
                 if not rows:
                     ui.label("確認待ちはありません。")
                     return
-                columns = [
-                    {"name": "recorded", "label": "記録時点", "field": "recorded_at"},
-                    {"name": "entity", "label": "対象", "field": "entity_name"},
-                    {"name": "text", "label": "入力", "field": "raw_text"},
-                    {"name": "reason", "label": "保留理由", "field": "reason"},
-                ]
-                rendered = []
+                def decide(pending_id: str, decision: str):
+                    try:
+                        with connection() as db:
+                            result = review_pending(db, pending_id, decision)
+                        label = "却下" if decision == "rejected" else "要修正"
+                        ui.notify(label + "として記録しました", type="positive")
+                        pending_panel.refresh()
+                    except Exception as exc:
+                        ui.notify(str(exc)[:240], type="negative")
+
                 for row in rows:
-                    item = dict(row)
-                    if isinstance(item.get("recorded_at"), datetime):
-                        item["recorded_at"] = item["recorded_at"].isoformat()
-                    rendered.append(item)
-                ui.table(columns=columns, rows=rendered, row_key="id").classes("w-full")
+                    pending_id = str(row["id"])
+                    when = row["recorded_at"].isoformat() if isinstance(row["recorded_at"], datetime) else str(row["recorded_at"])
+                    with ui.row().classes("w-full items-center gap-3 border-b border-purple-200 py-2"):
+                        with ui.column().classes("grow gap-1"):
+                            ui.label(row["raw_text"]).classes("font-medium")
+                            ui.label("保留理由: " + row["reason"]).classes("text-sm text-purple-900")
+                            meta = when
+                            if row.get("entity_name"):
+                                meta += " / " + row["entity_name"]
+                            ui.label(meta).classes("text-xs text-gray-600")
+                        ui.button(
+                            "要修正",
+                            on_click=lambda pid=pending_id: decide(pid, "needs_edit"),
+                            color="orange",
+                        ).props("outline")
+                        ui.button(
+                            "却下",
+                            on_click=lambda pid=pending_id: decide(pid, "rejected"),
+                            color="red",
+                        ).props("outline")
         pending_panel()
 
         with ui.expansion("この最小実装の制限"):
