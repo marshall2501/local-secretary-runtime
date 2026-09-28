@@ -231,6 +231,7 @@ def register_text(text: str) -> dict:
         entities = _entity_map(db)
         component_parsed = parse_component_write(text)
         component_entity = None
+        resolved_entity_mention = None
         if component_parsed is not None:
             component_entity = resolve_component_reference(
                 db, component_parsed["parent"], component_parsed["role"]
@@ -241,6 +242,9 @@ def register_text(text: str) -> dict:
                     "reason": "component_relation_not_unique_or_missing",
                 }
             else:
+                resolved_entity_mention = (
+                    component_parsed["parent"] + "の" + component_parsed["role"]
+                )
                 parsed = {
                     "status": "parsed",
                     "intent": "assertion",
@@ -310,7 +314,7 @@ def register_text(text: str) -> dict:
         )
         claim = ProposedClaim(
             entity_key=entity["id"],
-            entity_mention=entity["name"],
+            entity_mention=resolved_entity_mention or entity["name"],
             predicate=parsed["predicate"],
             value=parsed["value"],
             evidence_start=0,
