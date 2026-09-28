@@ -534,6 +534,7 @@ def index():
                 columns = [
                     {"name": "entity", "label": "対象", "field": "entity_name"},
                     {"name": "predicate", "label": "種類", "field": "predicate"},
+                    {"name": "semantic", "label": "意味", "field": "semantic_kind"},
                     {"name": "value", "label": "値", "field": "value"},
                     {"name": "valid_from", "label": "有効時点", "field": "valid_from"},
                     {"name": "status", "label": "記録状態", "field": "status_at_cutoff"},
