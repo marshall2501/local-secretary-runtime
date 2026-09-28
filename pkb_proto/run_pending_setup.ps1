@@ -15,7 +15,8 @@ $file013 = Join-Path $root 'pkb_proto\sql\013_pkb_proto_entity_model.sql'
 $file014 = Join-Path $root 'pkb_proto\sql\014_pkb_proto_component_state.sql'
 $file015 = Join-Path $root 'pkb_proto\sql\015_pkb_proto_component_normalization.sql'
 $file016 = Join-Path $root 'pkb_proto\sql\016_pkb_proto_finance.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016)) {
+$file017 = Join-Path $root 'pkb_proto\sql\017_pkb_proto_core_task_privileges.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -246,7 +247,36 @@ $financeGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_
 if ($LASTEXITCODE -ne 0 -or ($verify016 | Out-String).Trim() -ne '1' -or ($financeGrant | Out-String).Trim() -ne 't') {
     throw 'Finance schema or privilege verification failed.'
 }
-Write-Host 'PASS: PKB prototype migrations verified through 016 (finance import schema included).'
+
+$has017 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='017_pkb_proto_core_task_privileges.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 017 schema version.' }
+if (($has017 | Out-String).Trim() -eq '0') {
+    $hash017 = (Get-FileHash -LiteralPath $file017 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql017 = [IO.File]::ReadAllText($file017).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash017)
+    $tmpName017 = 'pkb-core-task-privileges-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp017 = Join-Path ([IO.Path]::GetTempPath()) $tmpName017
+    $remoteTmp017 = '/tmp/' + $tmpName017
+    try {
+        [IO.File]::WriteAllText($localTmp017, $sql017, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp017 ($id + ':' + $remoteTmp017) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 017 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp017
+        if ($LASTEXITCODE -ne 0) { throw '017 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp017) { Remove-Item -LiteralPath $localTmp017 }
+        & docker exec $id rm -f $remoteTmp017 | Out-Null
+    }
+} elseif (($has017 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 017 migration records.'
+}
+
+$verify017 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='017_pkb_proto_core_task_privileges.sql';"
+$coreTaskGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.tasks','SELECT,INSERT,UPDATE') AND has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.actions','SELECT,INSERT') AND has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.results','SELECT,INSERT') AND has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.audit_events','INSERT') AND NOT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.approvals','INSERT,UPDATE,DELETE');"
+if ($LASTEXITCODE -ne 0 -or ($verify017 | Out-String).Trim() -ne '1' -or ($coreTaskGrant | Out-String).Trim() -ne 't') {
+    throw 'Secretary Core task privilege verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 017 (read-only Core task recording included).'
 
 
 
