@@ -109,6 +109,46 @@ class _MixedVersionDDGS:
         return {"url": url, "content": "Radeon RX 9070 XT driver 26.5.2."}
 
 
+
+class _SamePageMultipleAdrenalinDDGS:
+    def __init__(self, timeout=8):
+        self.timeout = timeout
+
+    def text(self, query, **kwargs):
+        return [
+            {
+                "title": "AMD Radeon RX 9070 XT Drivers and Downloads | Latest Version",
+                "href": "https://www.amd.com/en/support/downloads/drivers/radeon-rx-9070-xt.html",
+                "body": (
+                    "AMD Software: Adrenalin Edition 26.8.1 release date 2026-08-20. "
+                    "AMD Software: Adrenalin Edition 26.9.1 release date 2026-09-03."
+                ),
+            },
+            {
+                "title": "AMD Radeon RX 9070 XT Release Notes",
+                "href": "https://www.amd.com/en/resources/support-articles/release-notes/rn-rad-win-26-9-1.html",
+                "body": "Latest AMD Software: Adrenalin Edition 26.9.1 released 2026-09-03.",
+            },
+        ]
+
+    def extract(self, url, fmt="text_plain"):
+        if "rn-rad-win-26-9-1" in url:
+            return {
+                "url": url,
+                "content": (
+                    "Latest release. AMD Software: Adrenalin Edition 26.9.1. "
+                    "Release date: 2026-09-03."
+                ),
+            }
+        return {
+            "url": url,
+            "content": (
+                "AMD Software: Adrenalin Edition 26.8.1. Release date: 2026-08-20. "
+                "AMD Software: Adrenalin Edition 26.9.1. Release date: 2026-09-03."
+            ),
+        }
+
+
 class WebResearchTests(unittest.TestCase):
     def test_safe_external_url_rejects_local_and_private_targets(self):
         self.assertFalse(_safe_external_url("http://127.0.0.1/test"))
@@ -184,6 +224,23 @@ class WebResearchTests(unittest.TestCase):
             historical["driver_version"]["best_candidate"],
             "26.1.1",
         )
+
+    @patch("pkb_proto.web_research.DDGS", _SamePageMultipleAdrenalinDDGS)
+    def test_same_page_multiple_versions_uses_nearby_release_dates(self):
+        result = research_web(
+            "RX 9070 XTの最新ドライバーをWebで調べて",
+            max_results=2,
+            max_fetches=2,
+            region="jp-jp",
+        ).as_dict()
+        summary = result["fact_summary"]
+        groups = {group["kind"]: group for group in summary["groups"]}
+        adrenalin = groups["adrenalin_version"]
+        self.assertEqual(adrenalin["best_candidate"], "26.9.1")
+        self.assertEqual(adrenalin["status"], "latest_by_date")
+        candidates = {row["value"]: row for row in adrenalin["candidates"]}
+        self.assertEqual(candidates["26.8.1"]["latest_date"], "2026-08-20")
+        self.assertEqual(candidates["26.9.1"]["latest_date"], "2026-09-03")
 
     @patch("pkb_proto.web_research.DDGS", _FakeDDGS)
     def test_query_and_result_bounds_fail_closed(self):
