@@ -105,9 +105,12 @@ class CoreAdvisorTests(unittest.TestCase):
             current_selection="pkb_search",
             deterministic_status="ready",
             timeout=0.1,
+            model="llama3.1:8b",
         )
         self.assertEqual(result.status, "unavailable")
         self.assertEqual(result.comparison, "unavailable")
+        self.assertEqual(result.model, "llama3.1:8b")
+        self.assertEqual(result.timeout_seconds, 0.1)
         self.assertEqual(result.error, "URLError")
 
 
