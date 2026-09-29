@@ -77,6 +77,38 @@ class _DriverDDGS:
         return {"url": url, "content": "Generic board support."}
 
 
+
+class _MixedVersionDDGS:
+    def __init__(self, timeout=8):
+        self.timeout = timeout
+
+    def text(self, query, **kwargs):
+        return [
+            {
+                "title": "AMD Software: SI Driver for Radeon RX 9070 XT Driver Version Release Notes",
+                "href": "https://www.amd.com/en/resources/support-articles/release-notes/si-driver.html",
+                "body": "SI Driver Version 25.10.2 for Radeon RX 9070 XT.",
+            },
+            {
+                "title": "Radeon RX 9070 XT",
+                "href": "https://www.amd.com/en/products/graphics/radeon-rx-9070-xt.html",
+                "body": "Radeon RX 9070 XT driver 26.5.2.",
+            },
+            {
+                "title": "AMD Radeon RX 9070 XT Drivers and Downloads | Previous Versions",
+                "href": "https://www.amd.com/en/support/downloads/previous-drivers/radeon-rx-9070-xt.html",
+                "body": "Previous driver version 26.1.1.",
+            },
+        ]
+
+    def extract(self, url, fmt="text_plain"):
+        if "si-driver" in url:
+            return {"url": url, "content": "SI Driver Version 25.10.2."}
+        if "previous-drivers" in url:
+            return {"url": url, "content": "Previous driver version 26.1.1."}
+        return {"url": url, "content": "Radeon RX 9070 XT driver 26.5.2."}
+
+
 class WebResearchTests(unittest.TestCase):
     def test_safe_external_url_rejects_local_and_private_targets(self):
         self.assertFalse(_safe_external_url("http://127.0.0.1/test"))
@@ -127,6 +159,30 @@ class WebResearchTests(unittest.TestCase):
         self.assertIn(
             result["fact_summary"]["status"],
             {"single_candidate", "leading_consensus"},
+        )
+
+    @patch("pkb_proto.web_research.DDGS", _MixedVersionDDGS)
+    def test_semantically_different_driver_versions_are_not_cross_compared(self):
+        result = research_web(
+            "RX 9070 XTの最新ドライバーをWebで調べて",
+            max_results=3,
+            max_fetches=2,
+            region="jp-jp",
+        ).as_dict()
+        summary = result["fact_summary"]
+        groups = {group["kind"]: group for group in summary["groups"]}
+        self.assertEqual(groups["driver_version"]["best_candidate"], "26.5.2")
+        self.assertEqual(
+            groups["si_driver_version"]["best_candidate"],
+            "25.10.2",
+        )
+        self.assertNotEqual(summary["status"], "conflicting_candidates")
+        historical = {
+            group["kind"]: group for group in summary["historical_groups"]
+        }
+        self.assertEqual(
+            historical["driver_version"]["best_candidate"],
+            "26.1.1",
         )
 
     @patch("pkb_proto.web_research.DDGS", _FakeDDGS)
