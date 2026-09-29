@@ -245,11 +245,20 @@ class DailyPKBParserTests(unittest.TestCase):
             "fact_summary": {
                 "kind": "driver_version",
                 "status": "conflicting_candidates",
+                "preferred_kind": "driver_version",
                 "best_candidate": "26.9.1",
-                "candidates": [
-                    {"value": "26.9.1"},
-                    {"value": "26.8.1"},
+                "groups": [
+                    {
+                        "kind": "driver_version",
+                        "status": "conflicting_candidates",
+                        "best_candidate": "26.9.1",
+                        "candidates": [
+                            {"value": "26.9.1"},
+                            {"value": "26.8.1"},
+                        ],
+                    }
                 ],
+                "historical_groups": [],
             },
         })
         self.assertIn("一致していません", answer)
@@ -263,12 +272,28 @@ class DailyPKBParserTests(unittest.TestCase):
             "fact_summary": {
                 "kind": "driver_version",
                 "status": "single_candidate",
+                "preferred_kind": "driver_version",
                 "best_candidate": "26.9.1",
-                "candidates": [{"value": "26.9.1", "source_count": 1}],
+                "groups": [
+                    {
+                        "kind": "driver_version",
+                        "status": "single_candidate",
+                        "best_candidate": "26.9.1",
+                        "candidates": [{"value": "26.9.1", "source_count": 1}],
+                    },
+                    {
+                        "kind": "si_driver_version",
+                        "status": "single_candidate",
+                        "best_candidate": "25.10.2",
+                        "candidates": [{"value": "25.10.2", "source_count": 1}],
+                    },
+                ],
+                "historical_groups": [],
             },
         })
         self.assertIn("26.9.1", answer)
         self.assertIn("確定値とは扱いません", answer)
+        self.assertIn("si_driver_version=25.10.2", answer)
 
     def test_core_scope_routes_finance_request_to_finance_read(self):
         result = scope_core_request("2026年9月の支出を調べて", ENTITIES)
