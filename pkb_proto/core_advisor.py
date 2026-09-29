@@ -215,6 +215,7 @@ def advise(
     available = set(CAPABILITY_REGISTRY)
     context = {
         "goal": request_text,
+        "task_state": task_state,
         "magi_member": "CASPER",
         "observation_pack": observations if observations is not None else {},
         "available_capabilities": [
