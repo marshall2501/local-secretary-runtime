@@ -216,6 +216,7 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.model, "llama3.1:8b")
         self.assertEqual(result.timeout_seconds, 0.1)
         self.assertEqual(result.error, "URLError")
+        self.assertNotIn("task_status", result.request_context)
 
 
 if __name__ == "__main__":
