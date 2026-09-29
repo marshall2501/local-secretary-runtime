@@ -908,10 +908,122 @@ def _compare_driver_values(pkb_result: dict, web_result: dict) -> dict:
     }
 
 
+def _plain_claim_value(value):
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip() if value is not None else None
+
+
+def _driver_web_query_from_detail(detail: dict | None) -> dict:
+    if not detail:
+        return {
+            "status": "missing_target",
+            "query": None,
+            "manufacturer": None,
+            "model": None,
+            "entity_name": None,
+        }
+
+    current = detail.get("current") or []
+    attrs = {}
+    for row in current:
+        predicate = row.get("predicate")
+        if predicate in {"manufacturer", "model"} and predicate not in attrs:
+            value = _plain_claim_value(row.get("value"))
+            if value:
+                attrs[predicate] = value
+
+    entity = detail.get("entity") or {}
+    entity_name = str(entity.get("name") or "").strip() or None
+    manufacturer = attrs.get("manufacturer")
+    model = attrs.get("model")
+
+    # Prefer explicit authoritative attributes. A generic Entity name such as
+    # GPU1 is not safe enough to send to web search as the product identity.
+    if not model:
+        return {
+            "status": "missing_model",
+            "query": None,
+            "manufacturer": manufacturer,
+            "model": None,
+            "entity_name": entity_name,
+        }
+
+    parts = [part for part in (manufacturer, model) if part]
+    return {
+        "status": "ready",
+        "query": " ".join(parts) + " latest driver official",
+        "manufacturer": manufacturer,
+        "model": model,
+        "entity_name": entity_name,
+    }
+
+
+def _resolve_driver_web_target(text: str) -> dict:
+    component_state = COMPONENT_STATE_QUERY_PATTERN.search(text.strip())
+    if not component_state:
+        return {
+            "status": "missing_component_reference",
+            "query": None,
+            "manufacturer": None,
+            "model": None,
+            "entity_name": None,
+        }
+
+    parent_name = component_state.group("parent").strip()
+    role_token = component_state.group("role")
+    with connection() as db:
+        resolved = resolve_component_reference(db, parent_name, role_token)
+        if resolved is None:
+            return {
+                "status": "component_not_unique_or_missing",
+                "query": None,
+                "manufacturer": None,
+                "model": None,
+                "entity_name": None,
+            }
+        detail = load_entity_detail(db, resolved["id"])
+    target = _driver_web_query_from_detail(detail)
+    target["parent_name"] = parent_name
+    target["role_token"] = role_token
+    target["component_id"] = resolved["id"]
+    return target
+
+
 def _execute_pkb_web_compare(text: str) -> dict:
     pkb = _execute_core_read("pkb_search", text)
-    web = _execute_core_read("web_research", text)
+    target = _resolve_driver_web_target(text)
+    if target.get("status") != "ready":
+        comparison = {
+            "status": "insufficient_target",
+            "current": _pkb_current_driver_value(pkb["result"]),
+            "latest": None,
+            "latest_kind": None,
+            "web_status": None,
+            "web_query": None,
+            "target": target,
+            "message": (
+                "PKBで現在ドライバーは取得できましたが、Web検索に使うGPUの"
+                "manufacturer / model をPKBから安全に特定できません。"
+                "GPUモデルをPKBへ登録するか、依頼で明示してください。"
+            ),
+        }
+        return {
+            "capability": "pkb_web_compare",
+            "executions": [pkb],
+            "comparison": comparison,
+            "answer": comparison["message"],
+            "pkb": pkb["result"],
+            "web": None,
+            "web_query": None,
+            "needs_clarification": True,
+        }
+
+    web_query = target["query"]
+    web = _execute_core_read("web_research", web_query)
     comparison = _compare_driver_values(pkb["result"], web["result"])
+    comparison["web_query"] = web_query
+    comparison["target"] = target
     return {
         "capability": "pkb_web_compare",
         "executions": [pkb, web],
@@ -919,6 +1031,8 @@ def _execute_pkb_web_compare(text: str) -> dict:
         "answer": comparison["message"],
         "pkb": pkb["result"],
         "web": web["result"],
+        "web_query": web_query,
+        "needs_clarification": False,
     }
 
 
@@ -1169,12 +1283,18 @@ def run_core_request(text: str) -> dict:
                     comparison = None
                     total = execution["total"]
 
-                enough = all(int(item.get("total") or 0) > 0 for item in executions)
+                enough = (
+                    all(int(item.get("total") or 0) > 0 for item in executions)
+                    and not (
+                        scoped["capability"] == "pkb_web_compare"
+                        and plan_result.get("needs_clarification")
+                    )
+                )
                 phase = "completed" if enough else "awaiting_clarification"
                 task_status = "completed" if enough else "waiting_external"
                 question = None if enough else (
-                    "比較に必要な記録またはWeb根拠が不足しています。"
-                    "対象名や確認したい項目をもう少し具体的にしてください。"
+                    "比較に必要な記録またはWeb検索対象が不足しています。"
+                    "GPUのメーカー・モデルをPKBへ登録するか、依頼で明示してください。"
                 )
 
                 action_ids = []
@@ -2171,6 +2291,10 @@ def core_page():
                             + " / kind="
                             + str(comparison.get("latest_kind") or "-")
                         ).classes("font-mono text-xs")
+                        if comparison.get("web_query"):
+                            ui.label(
+                                "Web検索語: " + str(comparison.get("web_query"))
+                            ).classes("text-xs text-grey-7")
                         ui.label(
                             comparison.get("message") or "比較結果はありません。"
                         ).classes("text-sm")
