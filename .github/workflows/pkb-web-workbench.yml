@@ -7,6 +7,7 @@ on:
       - "pkb_proto/daily_pkb.py"
       - "pkb_proto/core_ooda.py"
       - "pkb_proto/core_advisor.py"
+      - "pkb_proto/background_jobs.py"
       - "tests/test_core_ooda.py"
       - "tests/test_core_advisor.py"
       - "pkb_proto/web_research.py"
