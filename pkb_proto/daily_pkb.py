@@ -2313,6 +2313,15 @@ def core_page():
             return derive_ooda(trace["task"], trace["actions"])
         return derive_ooda(state["result"])
 
+    def current_advisor_shadow():
+        result = state["result"] or {}
+        if result.get("advisor_shadow"):
+            return result["advisor_shadow"]
+        trace = state["trace"]
+        if trace:
+            return (trace.get("task") or {}).get("advisor_shadow")
+        return None
+
     def load_current_trace():
         # Share one snapshot between the bar, Task detail and execution log.
         state["trace"] = None
@@ -2541,6 +2550,49 @@ def core_page():
                     suffix = "（完了直前の表示用段階）" if display.terminal == "completed" else ""
                     ui.label(f"OODA: {display.label}{suffix}").classes("font-medium")
                     ui.label("理由: " + display.reason).classes("text-sm")
+                advisor = current_advisor_shadow()
+                if advisor:
+                    with ui.card().classes(
+                        "w-full border border-indigo-200 bg-indigo-50"
+                    ):
+                        ui.label("LLM Advisor · Shadow Mode").classes(
+                            "font-bold text-indigo-900"
+                        )
+                        ui.label(
+                            "実行には使用していません。現行Coreの選択と比較する観測用提案です。"
+                        ).classes("text-xs text-grey-7")
+                        ui.label(
+                            "Current selection: "
+                            + str(result.get("selected_capability") or "-")
+                            + " / LLM proposal: "
+                            + str(advisor.get("proposed_action") or "-")
+                            + " / comparison="
+                            + str(advisor.get("comparison") or "-")
+                        ).classes("font-mono text-xs")
+                        ui.label(
+                            "model="
+                            + str(advisor.get("model") or "-")
+                            + " / status="
+                            + str(advisor.get("status") or "-")
+                        ).classes("font-mono text-xs text-grey-7")
+                        if advisor.get("situation"):
+                            ui.label("状況整理: " + str(advisor["situation"])).classes(
+                                "text-sm"
+                            )
+                        if advisor.get("reason"):
+                            ui.label("提案理由: " + str(advisor["reason"])).classes(
+                                "text-sm"
+                            )
+                        missing = advisor.get("missing_information") or []
+                        if missing:
+                            ui.label(
+                                "不足情報: " + " / ".join(str(x) for x in missing)
+                            ).classes("text-xs text-orange-800")
+                        if advisor.get("error"):
+                            ui.label(
+                                "Advisor error: " + str(advisor["error"])
+                            ).classes("text-xs text-red-700")
+
                 if state["busy"]:
                     with ui.row().classes("items-center gap-2"):
                         ui.spinner(size="sm", color="blue-grey")
