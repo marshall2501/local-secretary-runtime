@@ -207,6 +207,35 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIn("保存済みTask", result["message"])
         self.assertTrue(result["question"])
 
+    def test_saved_completed_task_is_restored_as_read_only_history(self):
+        result = core_task_selection_result({
+            "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "request": "メインPCのGPUを比較して",
+            "status": "completed",
+            "phase": "completed",
+            "selected_capability": "pkb_web_compare",
+            "question": None,
+            "effective_request": "メインPCのGPUを比較して",
+            "comparison": {
+                "status": "insufficient_evidence",
+                "current": "DRV-G3",
+                "latest": None,
+            },
+        })
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["read_only_history"])
+        self.assertTrue(result["resumed_from_storage"])
+        self.assertIn("完了済みTask", result["message"])
+        self.assertEqual(
+            result["selected_capability"],
+            "pkb_web_compare",
+        )
+        self.assertEqual(
+            result["comparison"]["status"],
+            "insufficient_evidence",
+        )
+        self.assertIsNone(result["question"])
+
     def test_saved_task_selection_rejects_unknown_status(self):
         with self.assertRaises(ValueError):
             core_task_selection_result({
