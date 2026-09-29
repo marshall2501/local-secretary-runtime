@@ -5,6 +5,8 @@ on:
     paths:
       - "pkb_proto/web_workbench*.py"
       - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/core_ooda.py"
+      - "tests/test_core_ooda.py"
       - "pkb_proto/web_research.py"
       - "pkb_proto/finance_preview.py"
       - "pkb_proto/finance_import.py"
@@ -43,6 +45,8 @@ on:
     paths:
       - "pkb_proto/web_workbench*.py"
       - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/core_ooda.py"
+      - "tests/test_core_ooda.py"
       - "pkb_proto/web_research.py"
       - "pkb_proto/finance_preview.py"
       - "pkb_proto/finance_import.py"
@@ -89,6 +93,7 @@ jobs:
       - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py tests/test_pkb_daily.py tests/test_web_research.py tests/test_finance_preview.py tests/test_finance_import.py
       - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
+      - run: python -m unittest discover -s tests -p test_core_ooda.py -v
       - run: python -m unittest discover -s tests -p test_web_research.py -v
       - run: python -m unittest discover -s tests -p test_finance_preview.py -v
       - run: python -m unittest discover -s tests -p test_finance_import.py -v

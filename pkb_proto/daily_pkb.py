@@ -24,6 +24,7 @@ from nicegui import app, run, ui
 from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
+from .core_ooda import OODA_PHASES, derive_ooda
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -2214,7 +2215,27 @@ def features_page():
 
 @ui.page("/core")
 def core_page():
-    state = {"result": None, "busy": False, "resume_busy": False}
+    state = {"result": None, "busy": False, "resume_busy": False,
+             "trace": None, "trace_error": None}
+
+    def current_ooda():
+        if state["busy"] or state["resume_busy"]:
+            return derive_ooda({"status": "received", "phase": "observe"})
+        trace = state["trace"]
+        if trace:
+            return derive_ooda(trace["task"], trace["actions"])
+        return derive_ooda(state["result"])
+
+    def load_current_trace():
+        # Share one snapshot between the bar, Task detail and execution log.
+        state["trace"] = None
+        state["trace_error"] = None
+        task_id = (state["result"] or {}).get("task_id")
+        if task_id:
+            try:
+                state["trace"] = load_core_task_trace(UUID(task_id))
+            except Exception as exc:
+                state["trace_error"] = str(exc)
 
     # NiceGUI drawers are top-level layout elements and must be created as
     # direct children of the page, not inside the central content column.
@@ -2228,9 +2249,35 @@ def core_page():
         return _remember
 
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
-        _portal_header(
-            "Secretary Core",
-            "最小縦断: 依頼 → Task → 能力選択 → PKB読取 → Result / 追加質問",
+        _nav()
+        ui.label("Secretary Core").classes("text-2xl font-bold")
+
+        @ui.refreshable
+        def ooda_bar():
+            display = current_ooda()
+            with ui.column().classes("w-full gap-1").props('role=status aria-live=polite'):
+                with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+                    ui.label("OODA").classes("font-bold")
+                    for index, (key, name, note) in enumerate(OODA_PHASES):
+                        if index:
+                            ui.label("→").classes("text-grey-6").props('aria-hidden=true')
+                        active = display.phase == key and not display.terminal
+                        label = f"{name}（{note}）" + (" · 現在" if active else "")
+                        badge = ui.badge(label, color="blue" if active else "grey-3",
+                                         text_color="white" if active else "grey-8")
+                        if active:
+                            badge.classes("font-bold").props('aria-current=step')
+                if display.terminal:
+                    ui.label(f"最終状態: {display.terminal}（OODA外）").classes("font-bold")
+                elif display.phase is None:
+                    ui.label(display.reason).classes("text-sm text-grey-7")
+                ui.label("既存状態からの表示用推定（途中段階のライブ配信ではありません）").classes(
+                    "text-xs text-grey-6"
+                )
+
+        ooda_bar()
+        ui.label("最小縦断: 依頼 → Task → 能力選択 → 読取 → Result / 追加質問").classes(
+            "text-sm text-grey-7"
         )
         ui.label(
             "現在は架空隔離DBの読み取りだけを扱います。"
@@ -2238,7 +2285,11 @@ def core_page():
         ).classes("text-sm text-orange-700")
 
         def select_saved_task(item: dict):
+            if state["busy"] or state["resume_busy"]:
+                return
             state["result"] = core_task_selection_result(item)
+            load_current_trace()
+            ooda_bar.refresh()
             core_result.refresh()
             resume_panel.refresh()
             trace_panel.refresh()
@@ -2357,6 +2408,11 @@ def core_page():
             @ui.refreshable
             def core_result():
                 result = state["result"]
+                if result or state["busy"] or state["resume_busy"]:
+                    display = current_ooda()
+                    suffix = "（完了直前の表示用段階）" if display.terminal == "completed" else ""
+                    ui.label(f"OODA: {display.label}{suffix}").classes("font-medium")
+                    ui.label("理由: " + display.reason).classes("text-sm")
                 if state["busy"]:
                     with ui.row().classes("items-center gap-2"):
                         ui.spinner(size="sm", color="blue-grey")
@@ -2555,9 +2611,8 @@ def core_page():
                 task_id = result.get("task_id")
                 if not task_id:
                     return
-                try:
-                    trace = load_core_task_trace(UUID(task_id))
-                except Exception as exc:
+                trace = state["trace"]
+                if not trace:
                     with ui.expansion(
                         "Task検証・稼働ログ",
                         value=_CORE_UI_OPEN["trace"],
@@ -2566,7 +2621,7 @@ def core_page():
                         "w-full border border-red-200 bg-red-50"
                         + _block_visibility_class("core", "trace")
                     ):
-                        ui.label("Traceを取得できません: " + str(exc)).classes(
+                        ui.label("Traceを取得できません: " + str(state["trace_error"] or "未取得")).classes(
                             "text-red-700"
                         )
                     return
@@ -2654,10 +2709,12 @@ def core_page():
                     ).classes("w-full")
 
                     async def submit_resume():
-                        if state["resume_busy"]:
+                        if state["busy"] or state["resume_busy"]:
                             return
                         state["resume_busy"] = True
                         resume_button.disable()
+                        ooda_bar.refresh()
+                        core_result.refresh()
                         try:
                             state["result"] = await run.io_bound(
                                 resume_core_task,
@@ -2668,6 +2725,8 @@ def core_page():
                             ui.notify(str(exc)[:240], type="negative")
                         finally:
                             state["resume_busy"] = False
+                            load_current_trace()
+                            ooda_bar.refresh()
                             resume_panel.refresh()
                             core_result.refresh()
                             trace_panel.refresh()
@@ -2682,11 +2741,16 @@ def core_page():
                     )
 
             async def submit_core():
-                if state["busy"]:
+                if state["busy"] or state["resume_busy"]:
                     return
                 state["busy"] = True
+                state["result"] = None
+                state["trace"] = None
                 run_button.disable()
+                ooda_bar.refresh()
                 core_result.refresh()
+                resume_panel.refresh()
+                trace_panel.refresh()
                 try:
                     state["result"] = await run.io_bound(
                         run_core_request, request_input.value or ""
@@ -2700,6 +2764,8 @@ def core_page():
                 finally:
                     state["busy"] = False
                     run_button.enable()
+                    load_current_trace()
+                    ooda_bar.refresh()
                     core_result.refresh()
                     resume_panel.refresh()
                     trace_panel.refresh()
