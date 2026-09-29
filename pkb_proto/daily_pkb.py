@@ -760,9 +760,6 @@ def finance_core_answer(result: dict) -> str:
 
 def web_core_answer(result: dict) -> str:
     hits = result.get("hits") or []
-    if not hits:
-        return "Web検索で結果が見つかりませんでした。"
-
     facts = result.get("fact_summary") or {}
     if facts.get("kind") == "driver_version":
         status = facts.get("status")
@@ -788,6 +785,9 @@ def web_core_answer(result: dict) -> str:
                 "Web調査ではドライバーバージョン候補が一致していません。"
                 f"候補: {values}。一次Sourceと対象期間を追加確認する必要があります。"
             )
+
+    if not hits:
+        return "Web検索で結果が見つかりませんでした。"
 
     parts = []
     for hit in hits[:3]:
