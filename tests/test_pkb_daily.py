@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 from pkb_proto.daily_pkb import (
+    CORE_UI_DEFAULT_OPEN,
     ENTITY_UI_DEFAULT_OPEN,
     FINANCE_PAGE_SIZE_DEFAULT,
     FINANCE_UI_DEFAULT_OPEN,
@@ -70,6 +71,7 @@ class DailyPKBParserTests(unittest.TestCase):
             "pkb": {"write": False, "search": "invalid"},
             "entity": {"history": True, "events": "invalid"},
             "finance": {"details": True, "recent_limit": 100, "stored": 1},
+            "core": {"trace": False, "screen_log": True},
             "visibility": {
                 "pkb": {"limits": False, "write": "invalid"},
                 "core": {"trace": False},
@@ -85,6 +87,8 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertTrue(prefs["finance"]["details"])
         self.assertEqual(prefs["finance"]["stored"], FINANCE_UI_DEFAULT_OPEN["stored"])
         self.assertEqual(prefs["finance"]["recent_limit"], 100)
+        self.assertFalse(prefs["core"]["trace"])
+        self.assertTrue(prefs["core"]["screen_log"])
         self.assertFalse(prefs["visibility"]["pkb"]["limits"])
         self.assertEqual(
             prefs["visibility"]["pkb"]["write"],
@@ -100,6 +104,8 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["entity"]["history"] = True
             prefs["finance"]["details"] = True
             prefs["finance"]["recent_limit"] = 50
+            prefs["core"]["trace"] = False
+            prefs["core"]["screen_log"] = False
             prefs["visibility"]["pkb"]["limits"] = False
             prefs["visibility"]["core"]["trace"] = False
             saved = save_ui_preferences(prefs, path)
@@ -109,6 +115,8 @@ class DailyPKBParserTests(unittest.TestCase):
             self.assertTrue(loaded["entity"]["history"])
             self.assertTrue(loaded["finance"]["details"])
             self.assertEqual(loaded["finance"]["recent_limit"], 50)
+            self.assertFalse(loaded["core"]["trace"])
+            self.assertFalse(loaded["core"]["screen_log"])
             self.assertFalse(loaded["visibility"]["pkb"]["limits"])
             self.assertFalse(loaded["visibility"]["core"]["trace"])
 
@@ -116,6 +124,7 @@ class DailyPKBParserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             loaded = load_ui_preferences(Path(directory) / "missing.json")
         self.assertEqual(loaded["pkb"], PKB_UI_DEFAULT_OPEN)
+        self.assertEqual(loaded["core"], CORE_UI_DEFAULT_OPEN)
         self.assertEqual(loaded["visibility"], UI_VISIBILITY_DEFAULT)
         self.assertEqual(
             loaded["finance"]["recent_limit"],
