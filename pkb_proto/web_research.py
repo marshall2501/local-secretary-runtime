@@ -67,6 +67,7 @@ class WebHit:
     quality_score: int
     authority_hint: str
     version_candidates: list[str]
+    version_facts: list[dict]
     date_hints: list[str]
 
 
@@ -181,29 +182,47 @@ def _extract_candidates(text: str, patterns: tuple[re.Pattern[str], ...]) -> lis
     return seen[:8]
 
 
-def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
-    if intent != "latest_driver":
-        return {"kind": "none", "status": "not_applicable"}
+def _extract_version_facts(text: str) -> list[dict]:
+    """Extract version values together with their local semantic label."""
+    patterns = (
+        (
+            "si_driver_version",
+            re.compile(
+                r"SI\s+Driver(?:\s+Version)?[^0-9]{0,20}"
+                r"(\d{2,4}\.\d{1,3}(?:\.\d{1,4}){1,2})",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "adrenalin_version",
+            re.compile(
+                r"Adrenalin(?:\s+Edition)?[^0-9]{0,30}"
+                r"(\d{2,4}\.\d{1,3}(?:\.\d{1,4}){1,2})",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "driver_version",
+            re.compile(
+                r"(?:Driver(?:\s+Version)?|ドライバー)[^0-9]{0,30}"
+                r"(\d{2,4}\.\d{1,3}(?:\.\d{1,4}){1,2})",
+                re.IGNORECASE,
+            ),
+        ),
+    )
+    facts: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for kind, pattern in patterns:
+        for match in pattern.finditer(text):
+            value = match.group(1).strip()
+            key = (kind, value)
+            if key not in seen:
+                seen.add(key)
+                facts.append({"kind": kind, "value": value})
+    return facts[:12]
 
-    by_version: dict[str, list[dict]] = defaultdict(list)
-    historical_by_version: dict[str, list[dict]] = defaultdict(list)
-    for hit in hits:
-        hit_text = " ".join((hit.title, hit.url, hit.snippet)).lower()
-        target = (
-            historical_by_version
-            if any(word in hit_text for word in _PREVIOUS_WORDS)
-            else by_version
-        )
-        for value in hit.version_candidates:
-            target[value].append({
-                "url": hit.url,
-                "title": hit.title,
-                "domain": hit.domain,
-                "quality_score": hit.quality_score,
-                "authority_hint": hit.authority_hint,
-                "evidence_rank": hit.evidence_rank,
-            })
 
+def _summarize_version_group(kind: str, by_version: dict[str, list[dict]]) -> dict:
     candidates = []
     for value, sources in by_version.items():
         domains = sorted({row["domain"] for row in sources if row["domain"]})
@@ -215,7 +234,6 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
             "best_quality_score": max(row["quality_score"] for row in sources),
             "sources": sorted(sources, key=lambda row: row["evidence_rank"]),
         })
-
     candidates.sort(
         key=lambda row: (
             row["domain_count"],
@@ -225,7 +243,7 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
         reverse=True,
     )
     if not candidates:
-        status = "no_version_candidate"
+        status = "no_candidate"
         best = None
     elif len(candidates) == 1:
         status = "single_candidate"
@@ -239,26 +257,80 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
     else:
         status = "conflicting_candidates"
         best = candidates[0]["value"]
-
-    historical_candidates = []
-    for value, sources in historical_by_version.items():
-        historical_candidates.append({
-            "value": value,
-            "source_count": len(sources),
-            "domains": sorted({row["domain"] for row in sources if row["domain"]}),
-            "sources": sorted(sources, key=lambda row: row["evidence_rank"]),
-        })
-    historical_candidates.sort(
-        key=lambda row: (row["source_count"], row["value"]),
-        reverse=True,
-    )
-
     return {
-        "kind": "driver_version",
+        "kind": kind,
         "status": status,
         "best_candidate": best,
         "candidates": candidates[:8],
-        "historical_candidates": historical_candidates[:8],
+    }
+
+
+def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
+    if intent != "latest_driver":
+        return {"kind": "none", "status": "not_applicable"}
+
+    current_by_kind: dict[str, dict[str, list[dict]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    historical_by_kind: dict[str, dict[str, list[dict]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+
+    for hit in hits:
+        hit_text = " ".join((hit.title, hit.url, hit.snippet)).lower()
+        historical = any(word in hit_text for word in _PREVIOUS_WORDS)
+        target = historical_by_kind if historical else current_by_kind
+        for fact in hit.version_facts:
+            kind = fact["kind"]
+            value = fact["value"]
+            target[kind][value].append({
+                "url": hit.url,
+                "title": hit.title,
+                "domain": hit.domain,
+                "quality_score": hit.quality_score,
+                "authority_hint": hit.authority_hint,
+                "evidence_rank": hit.evidence_rank,
+            })
+
+    groups = [
+        _summarize_version_group(kind, versions)
+        for kind, versions in current_by_kind.items()
+    ]
+    priority = {
+        "adrenalin_version": 0,
+        "driver_version": 1,
+        "si_driver_version": 2,
+    }
+    groups.sort(
+        key=lambda row: (
+            priority.get(row["kind"], 99),
+            -(row["candidates"][0]["best_quality_score"] if row["candidates"] else 0),
+        )
+    )
+
+    historical_groups = [
+        _summarize_version_group(kind, versions)
+        for kind, versions in historical_by_kind.items()
+    ]
+    historical_groups.sort(key=lambda row: priority.get(row["kind"], 99))
+
+    preferred = groups[0] if groups else None
+    if not preferred:
+        overall_status = "no_version_candidate"
+        best = None
+        preferred_kind = None
+    else:
+        overall_status = preferred["status"]
+        best = preferred["best_candidate"]
+        preferred_kind = preferred["kind"]
+
+    return {
+        "kind": "driver_version",
+        "status": overall_status,
+        "preferred_kind": preferred_kind,
+        "best_candidate": best,
+        "groups": groups,
+        "historical_groups": historical_groups,
     }
 
 
@@ -356,6 +428,7 @@ def research_web(
                 version_candidates=_extract_candidates(
                     evidence_text, _VERSION_PATTERNS
                 ),
+                version_facts=_extract_version_facts(evidence_text),
                 date_hints=_extract_candidates(evidence_text, _DATE_PATTERNS),
             )
         )
