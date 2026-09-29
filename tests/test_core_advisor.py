@@ -267,6 +267,117 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(final["timeout_seconds"], 900)
         self.assertEqual(final["error"], "TimeoutError")
 
+
+    @patch("pkb_proto.daily_pkb._finalize_cooperative_probe")
+    @patch(
+        "pkb_proto.daily_pkb._record_cooperative_probe",
+        return_value=(
+            __import__("uuid").UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            __import__("uuid").UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        ),
+    )
+    @patch(
+        "pkb_proto.daily_pkb._execute_core_read",
+        return_value={
+            "capability": "pkb_search",
+            "result": {
+                "result_kind": "components",
+                "items": [{"component_name": "GPU1"}],
+                "total": 1,
+            },
+            "answer": "PKBの構成記録では、GPU1。",
+            "total": 1,
+            "tool": "pkb",
+            "operation": "search",
+            "source_slug": "pkb-search",
+            "citation": "test",
+            "verified_by": "deterministic_pkb_query",
+        },
+    )
+    @patch("pkb_proto.daily_pkb._claim_cooperative_probe", return_value=True)
+    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
+    @patch("pkb_proto.daily_pkb.advise_core")
+    @patch("pkb_proto.daily_pkb.choose_advisor_model", return_value="gemma3:12b")
+    @patch("pkb_proto.daily_pkb.list_advisor_models", return_value=["gemma3:12b"])
+    def test_ambiguous_worker_executes_synthesized_pkb_probe_then_reorients(
+        self,
+        _models,
+        _choose,
+        advise_mock,
+        write_mock,
+        claim_mock,
+        execute_mock,
+        record_mock,
+        finalize_mock,
+    ):
+        advise_mock.side_effect = [
+            AdvisorResult(
+                "ok",
+                "mismatch",
+                model="gemma3:12b",
+                situation="Main PC is known locally.",
+                next_step="observe",
+                proposed_action="pkb_web_compare",
+                reason="Compare local and public information.",
+                expected_result="Comparison",
+                timeout_seconds=900,
+            ),
+            AdvisorResult(
+                "ok",
+                "mismatch",
+                model="gemma3:12b",
+                situation="Local PKB evidence is now available.",
+                next_step="respond",
+                proposed_action=None,
+                reason="The bounded local observation is enough for an initial answer.",
+                expected_result="Local summary",
+                timeout_seconds=900,
+            ),
+        ]
+        from uuid import UUID
+
+        task_id = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+        _run_core_advisor_shadow(
+            task_id,
+            "メインPCについて調べて",
+            {
+                "member": "MELCHIOR",
+                "status": "question",
+                "selected_capability": None,
+            },
+            {
+                "version": "magi_observation_v1",
+                "matched_entities": [{"name": "メインPC"}],
+            },
+            "gemma3:12b",
+            900,
+        )
+
+        self.assertEqual(advise_mock.call_count, 2)
+        self.assertEqual(
+            advise_mock.call_args_list[0].kwargs["task_state"],
+            "received",
+        )
+        self.assertEqual(
+            advise_mock.call_args_list[1].kwargs["task_state"],
+            "observed",
+        )
+        self.assertEqual(
+            advise_mock.call_args_list[1].kwargs["observations"]["version"],
+            "magi_observation_v2",
+        )
+        claim_mock.assert_called_once_with(task_id, "pkb_search")
+        execute_mock.assert_called_once_with("pkb_search", "メインPCについて調べて")
+        record_mock.assert_called_once()
+        finalize_mock.assert_called_once()
+        final_decision = finalize_mock.call_args.args[1]
+        self.assertEqual(final_decision["next_step"], "respond")
+        final_shadow = write_mock.call_args_list[-1].args[1]
+        self.assertEqual(final_shadow["job_status"], "completed")
+        self.assertEqual(final_shadow["cooperative_execution"]["capability"], "pkb_search")
+        self.assertEqual(final_shadow["cooperative_execution"]["final_next_step"], "respond")
+        self.assertEqual(len(final_shadow["cycles"]), 2)
+
     @patch("pkb_proto.core_advisor.list_chat_models", return_value=["llama3.1:8b"])
     @patch("pkb_proto.core_advisor.urlopen", side_effect=URLError("offline"))
     def test_provider_error_never_raises_into_core(self, _urlopen, _models):
