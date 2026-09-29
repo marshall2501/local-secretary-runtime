@@ -149,6 +149,41 @@ class _SamePageMultipleAdrenalinDDGS:
         }
 
 
+
+class _PrimaryWithoutVersionDDGS:
+    def __init__(self, timeout=8):
+        self.timeout = timeout
+
+    def text(self, query, **kwargs):
+        return [
+            {
+                "title": "AMD Radeon RX 9070 XT Drivers and Downloads - Latest Version",
+                "href": "https://www.amd.com/en/support/downloads/drivers/radeon-rx-9070-xt.html",
+                "body": "Official AMD driver download page for Radeon RX 9070 XT.",
+            },
+            {
+                "title": "Latest AMD Radeon Graphics Drivers 26.9.1 WHQL Download",
+                "href": "https://third.example.com/amd-driver-26-9-1",
+                "body": "AMD Radeon driver version 26.9.1.",
+            },
+            {
+                "title": "AMD Software Adrenalin 26.6.4 driver download",
+                "href": "https://other.example.net/adrenalin-26-6-4",
+                "body": "AMD Software: Adrenalin Edition 26.6.4.",
+            },
+        ]
+
+    def extract(self, url, fmt="text_plain"):
+        if "amd.com" in url:
+            return {
+                "url": url,
+                "content": "Official Radeon RX 9070 XT driver download page without a visible version number.",
+            }
+        if "26-9-1" in url:
+            return {"url": url, "content": "Driver version 26.9.1."}
+        return {"url": url, "content": "Adrenalin Edition 26.6.4."}
+
+
 class WebResearchTests(unittest.TestCase):
     def test_safe_external_url_rejects_local_and_private_targets(self):
         self.assertFalse(_safe_external_url("http://127.0.0.1/test"))
@@ -241,6 +276,29 @@ class WebResearchTests(unittest.TestCase):
         candidates = {row["value"]: row for row in adrenalin["candidates"]}
         self.assertEqual(candidates["26.8.1"]["latest_date"], "2026-08-20")
         self.assertEqual(candidates["26.9.1"]["latest_date"], "2026-09-03")
+
+    @patch("pkb_proto.web_research.DDGS", _PrimaryWithoutVersionDDGS)
+    def test_primary_domain_without_current_version_does_not_promote_secondary_candidate(self):
+        result = research_web(
+            "Radeon RX 9070 XT latest driver official",
+            max_results=3,
+            max_fetches=2,
+            region="jp-jp",
+        ).as_dict()
+        summary = result["fact_summary"]
+        self.assertEqual(summary["primary_domains"], ["www.amd.com"])
+        self.assertEqual(
+            summary["status"],
+            "primary_source_no_current_candidate",
+        )
+        self.assertIsNone(summary["best_candidate"])
+        secondary_values = {
+            candidate["value"]
+            for group in summary["groups"]
+            for candidate in group["candidates"]
+        }
+        self.assertIn("26.9.1", secondary_values)
+        self.assertIn("26.6.4", secondary_values)
 
     @patch("pkb_proto.web_research.DDGS", _FakeDDGS)
     def test_query_and_result_bounds_fail_closed(self):
