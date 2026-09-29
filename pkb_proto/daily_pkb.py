@@ -795,6 +795,14 @@ def web_core_answer(result: dict) -> str:
                     + other_text
                     + "異なる種類の版番号同士は競合扱いしていません。"
                 )
+            if status == "latest_by_date" and best:
+                leading = candidates[0] if candidates else {}
+                return (
+                    f"Web調査では{kind_label}候補 {best} が、"
+                    f"近傍日付 {leading.get('latest_date') or '-'} を持つ最新候補として上位です。"
+                    + other_text
+                    + "ただし日付対応はページ本文の近傍文脈から抽出したため、一次Source表示で最終確認してください。"
+                )
             if status == "single_candidate" and best:
                 return (
                     f"Web調査では{kind_label}候補 {best} を1系統で抽出しました。"
@@ -2044,6 +2052,8 @@ def core_page():
                                             f"  {candidate.get('value')} / "
                                             f"sources={candidate.get('source_count', 0)} / "
                                             f"domains={candidate.get('domain_count', 0)} / "
+                                            f"date={candidate.get('latest_date') or '-'} / "
+                                            f"context={candidate.get('best_context_score', 0)} / "
                                             f"best_quality={candidate.get('best_quality_score', 0)}"
                                         ).classes("text-xs")
                                 historical = fact_summary.get("historical_groups") or []
@@ -2082,6 +2092,11 @@ def core_page():
                                         "version候補: "
                                         + ", ".join(
                                             f"{fact.get('kind')}={fact.get('value')}"
+                                            + (
+                                                f"@{fact.get('date_hint')}"
+                                                if fact.get("date_hint")
+                                                else ""
+                                            )
                                             for fact in (hit.get("version_facts") or [])
                                         )
                                     ).classes("text-xs text-indigo-8")
