@@ -1611,39 +1611,33 @@ def core_page():
                     )
                 return
 
-            with ui.expansion(
-                "進行中・確認待ちTask",
-                value=True,
-            ).classes("w-full border-2 border-orange-200 bg-orange-50"):
-                ui.label(
-                    "複数の依頼をDBに並行保持します。ブラウザF5やサーバー再起動後も、"
-                    "ここから任意の未完了Taskを選び直せます。"
-                ).classes("text-sm text-orange-900")
-                if not rows:
-                    ui.label("未完了Taskはありません。").classes("text-sm")
-                    return
-                for item in rows:
-                    with ui.row().classes(
-                        "w-full items-center gap-3 border-b border-orange-100 py-2"
-                    ):
-                        status_color = {
-                            "waiting_external": "orange",
-                            "running": "blue",
-                        }.get(item["status"], "grey")
-                        ui.badge(item["status"], color=status_color)
-                        with ui.column().classes("grow gap-0"):
-                            ui.label(item["request"]).classes("font-medium")
-                            ui.label(
-                                f"Task {item['id']} / revision={item['revision']} / "
-                                f"phase={item.get('phase') or '-'} / "
-                                f"updated={item['updated_at']}"
-                            ).classes("font-mono text-xs text-grey-7")
-                        ui.button(
-                            "このTaskを開く",
-                            icon="open_in_new",
-                            color="orange",
-                            on_click=lambda item=item: select_saved_task(item),
-                        ).props("outline")
+            ui.label("進行中・確認待ち").classes("text-base font-bold")
+            ui.label(
+                "未完了Taskを選ぶと中央に開きます。F5・サーバー再起動後もDBから復元します。"
+            ).classes("text-xs text-grey-7")
+            if not rows:
+                ui.label("未完了Taskはありません。").classes("text-sm text-grey-7")
+                return
+            for item in rows:
+                status_color = {
+                    "waiting_external": "orange",
+                    "running": "blue",
+                }.get(item["status"], "grey")
+                with ui.card().classes("w-full p-2 gap-1"):
+                    with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                        ui.badge(item["status"], color=status_color).classes("shrink-0")
+                        ui.label(item["request"]).classes(
+                            "font-medium text-sm grow overflow-hidden"
+                        )
+                    ui.label(
+                        f"rev={item['revision']} / {item.get('phase') or '-'}"
+                    ).classes("font-mono text-xs text-grey-6")
+                    ui.button(
+                        "開く",
+                        icon="open_in_new",
+                        color="orange",
+                        on_click=lambda item=item: select_saved_task(item),
+                    ).props("flat dense").classes("self-start")
 
         @ui.refreshable
         def screen_log_panel():
@@ -1701,7 +1695,12 @@ def core_page():
                                 f"updated={item['updated_at']}"
                             ).classes("text-xs text-grey-7")
 
-        open_tasks_panel()
+        with ui.left_drawer(value=True).classes("bg-orange-50 p-3").props(
+            "bordered width=300 breakpoint=700"
+        ):
+            with ui.column().classes("w-full gap-3"):
+                ui.label("Core Tasks").classes("text-lg font-bold")
+                open_tasks_panel()
 
         with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
             ui.label("依頼").classes("text-lg font-bold")
