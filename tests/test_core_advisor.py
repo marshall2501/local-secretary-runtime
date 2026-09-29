@@ -4,7 +4,13 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from pkb_proto.core_advisor import AdvisorResult, advise, choose_model, diagnose_response, inspect_output
+from pkb_proto.core_advisor import (
+    AdvisorResult,
+    advise,
+    choose_model,
+    diagnose_response,
+    inspect_output,
+)
 from pkb_proto.daily_pkb import _run_core_advisor_shadow
 
 
@@ -25,20 +31,23 @@ class CoreAdvisorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             choose_model(["llama3.1:8b"], "gemma4:12b")
 
-    def test_valid_matching_proposal(self):
+    def test_valid_matching_observe_proposal(self):
         result = inspect_output(
             {
                 "situation": "PKB現在値とWeb最新値の比較が必要です。",
                 "missing_information": [],
+                "next_step": "observe",
                 "proposed_action": "pkb_web_compare",
                 "reason": "現在値と公開情報の両方が必要です。",
                 "expected_result": "両者の比較結果",
             },
             {"pkb_search", "web_research", "pkb_web_compare"},
             "pkb_web_compare",
+            "observe",
         )
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.comparison, "match")
+        self.assertEqual(result.next_step, "observe")
         self.assertEqual(result.proposed_action, "pkb_web_compare")
 
     def test_valid_mismatch_is_observed_not_rejected(self):
@@ -46,12 +55,14 @@ class CoreAdvisorTests(unittest.TestCase):
             {
                 "situation": "Webだけでよいと判断しました。",
                 "missing_information": [],
+                "next_step": "observe",
                 "proposed_action": "web_research",
                 "reason": "公開情報が必要です。",
                 "expected_result": "Web調査結果",
             },
             {"pkb_search", "web_research", "pkb_web_compare"},
             "pkb_web_compare",
+            "observe",
         )
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.comparison, "mismatch")
@@ -59,8 +70,9 @@ class CoreAdvisorTests(unittest.TestCase):
 
     def test_response_diagnostic_keeps_only_contract_fields(self):
         diagnostic = diagnose_response(
-            '{"situation":"ok","missing_information":[],"proposed_action":"pkb_search",'
-            '"reason":"use PKB","expected_result":null,"private_reasoning":"do not keep"}'
+            '{"situation":"ok","missing_information":[],"next_step":"observe",'
+            '"proposed_action":"pkb_search","reason":"use PKB","expected_result":null,'
+            '"private_reasoning":"do not keep"}'
         )
         self.assertTrue(diagnostic["json_valid"])
         self.assertEqual(
@@ -91,6 +103,7 @@ class CoreAdvisorTests(unittest.TestCase):
             "not json",
             {"pkb_search", "web_research"},
             "pkb_search",
+            "observe",
         )
         self.assertEqual(result.status, "invalid")
         self.assertEqual(result.comparison, "invalid")
@@ -101,31 +114,71 @@ class CoreAdvisorTests(unittest.TestCase):
             {
                 "situation": "何か実行します。",
                 "missing_information": [],
+                "next_step": "observe",
                 "proposed_action": "delete_everything",
                 "reason": "test",
                 "expected_result": "test",
             },
             {"pkb_search", "web_research"},
             "pkb_search",
+            "observe",
         )
         self.assertEqual(result.status, "invalid")
         self.assertEqual(result.error, "unknown_capability")
 
-    def test_no_proposal_can_match_clarification_state(self):
+    def test_clarify_can_match_melchior_clarification_state(self):
         result = inspect_output(
             {
                 "situation": "対象が不足しています。",
                 "missing_information": ["対象GPU"],
+                "next_step": "clarify",
                 "proposed_action": None,
                 "reason": "対象を特定できません。",
                 "expected_result": "追加情報",
             },
             {"pkb_search", "web_research"},
             None,
+            "clarify",
         )
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.comparison, "match")
+        self.assertEqual(result.next_step, "clarify")
         self.assertIsNone(result.proposed_action)
+
+    def test_respond_requires_no_capability_or_missing_information(self):
+        result = inspect_output(
+            {
+                "situation": "観測済み情報で回答できます。",
+                "missing_information": [],
+                "next_step": "respond",
+                "proposed_action": None,
+                "reason": "追加取得は不要です。",
+                "expected_result": "現在値の回答",
+            },
+            {"pkb_search", "web_research"},
+            "pkb_search",
+            "observe",
+        )
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.next_step, "respond")
+        self.assertEqual(result.comparison, "mismatch")
+
+    def test_observe_rejects_optional_missing_information(self):
+        result = inspect_output(
+            {
+                "situation": "家計を集計できます。",
+                "missing_information": ["表示形式"],
+                "next_step": "observe",
+                "proposed_action": "finance_read",
+                "reason": "家計データを読みます。",
+                "expected_result": "9月支出",
+            },
+            {"finance_read"},
+            "finance_read",
+            "observe",
+        )
+        self.assertEqual(result.status, "invalid")
+        self.assertEqual(result.error, "non_clarify_missing_information")
 
     @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
     @patch("pkb_proto.daily_pkb.advise_core")
@@ -139,12 +192,14 @@ class CoreAdvisorTests(unittest.TestCase):
             "match",
             model="gemma3:12b",
             situation="PKB lookup is sufficient.",
+            next_step="observe",
             proposed_action="pkb_search",
             reason="Use local PKB.",
             expected_result="Current driver",
             timeout_seconds=600,
         )
         from uuid import UUID
+
         task_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         _run_core_advisor_shadow(
             task_id,
@@ -169,6 +224,8 @@ class CoreAdvisorTests(unittest.TestCase):
             advise_kwargs["observations"]["version"],
             "magi_observation_v1",
         )
+        self.assertEqual(advise_kwargs["melchior_next_step"], "observe")
+        self.assertEqual(advise_kwargs["task_state"], "received")
 
     @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
     @patch("pkb_proto.daily_pkb.advise_core")
@@ -185,6 +242,7 @@ class CoreAdvisorTests(unittest.TestCase):
             timeout_seconds=900,
         )
         from uuid import UUID
+
         _run_core_advisor_shadow(
             UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
             "test",
@@ -205,6 +263,7 @@ class CoreAdvisorTests(unittest.TestCase):
         result = advise(
             "メインPCのGPUを調べて",
             current_selection="pkb_search",
+            melchior_next_step="observe",
             task_state="received",
             timeout=0.1,
             model="llama3.1:8b",
@@ -215,7 +274,6 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.timeout_seconds, 0.1)
         self.assertEqual(result.error, "URLError")
         self.assertEqual(result.request_context["task_state"], "received")
-        self.assertNotIn("task_status", result.request_context)
         self.assertNotIn("task_status", result.request_context)
 
 
