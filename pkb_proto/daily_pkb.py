@@ -36,6 +36,7 @@ from .finance_import import (
 from .ingestion_gate import InputRecord, ProposedClaim
 from .query_service import ClaimQuery, query_claims
 from .write_service import write_one
+from .web_research import research_web
 from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
 
@@ -757,6 +758,27 @@ def finance_core_answer(result: dict) -> str:
     )
 
 
+def web_core_answer(result: dict) -> str:
+    hits = result.get("hits") or []
+    if not hits:
+        return "Web検索で結果が見つかりませんでした。"
+    parts = []
+    for hit in hits[:3]:
+        title = hit.get("title") or hit.get("url") or "検索結果"
+        snippet = (hit.get("snippet") or "").strip()
+        if len(snippet) > 220:
+            snippet = snippet[:217] + "..."
+        parts.append(title + (f" — {snippet}" if snippet else ""))
+    return "Web調査では、" + " / ".join(parts) + "。"
+
+
+def web_text(text: str) -> dict:
+    result = research_web(text, max_results=5, max_fetches=2).as_dict()
+    result["status"] = "ok"
+    result["result_kind"] = "web_research"
+    return result
+
+
 def _execute_core_read(capability: str, text: str) -> dict:
     """Execute one bounded read-only capability and return normalized evidence metadata."""
     if capability == "pkb_search":
@@ -785,6 +807,19 @@ def _execute_core_read(capability: str, text: str) -> dict:
             "citation": "Secretary Core read-only finance summary",
             "verified_by": "deterministic_finance_query",
         }
+    if capability == "web_research":
+        result = web_text(text)
+        return {
+            "capability": capability,
+            "result": result,
+            "answer": web_core_answer(result),
+            "total": int(result.get("total") or 0),
+            "tool": "web",
+            "operation": "research",
+            "source_slug": "web-research",
+            "citation": "Secretary Core bounded read-only web research result",
+            "verified_by": "bounded_web_research",
+        }
     raise ValueError("Unsupported Core read capability")
 
 
@@ -796,6 +831,16 @@ def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
             "status": "question",
             "question": "何を確認したいか入力してください。",
             "reason": "empty_request",
+        }
+
+    if any(
+        word in q
+        for word in ("Web", "WEB", "web", "ウェブ", "ネット", "インターネット", "公式サイト")
+    ):
+        return {
+            "status": "ready",
+            "capability": "web_research",
+            "domain": "research",
         }
 
     if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
@@ -903,6 +948,7 @@ def run_core_request(text: str) -> dict:
                         Jsonb({
                             "pkb_read": True,
                             "finance_read": True,
+                            "web_research": True,
                             "external_actions": False,
                         }),
                         initial_status,
@@ -1040,6 +1086,7 @@ def run_core_request(text: str) -> dict:
                     "capability_result": result,
                     "search": result if execution["capability"] == "pkb_search" else None,
                     "finance": result if execution["capability"] == "finance_read" else None,
+                    "web": result if execution["capability"] == "web_research" else None,
                 }
 
 
@@ -1468,6 +1515,7 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     "capability_result": result,
                     "search": result if execution["capability"] == "pkb_search" else None,
                     "finance": result if execution["capability"] == "finance_read" else None,
+                    "web": result if execution["capability"] == "web_research" else None,
                     "resumed": True,
                     "effective_request": effective_request,
                 }
@@ -1888,6 +1936,32 @@ def core_page():
                     ui.label(
                         "Task: " + result["task_id"]
                     ).classes("font-mono text-xs text-grey-6")
+
+                web_result = result.get("web") or {}
+                if web_result:
+                    with ui.expansion("根拠になったWeb調査", value=True).classes(
+                        "w-full border border-cyan-200 bg-white"
+                    ):
+                        ui.label(
+                            f"Provider: {web_result.get('provider') or '-'} / "
+                            f"Query: {web_result.get('query') or '-'}"
+                        ).classes("text-xs text-grey-7")
+                        for hit in (web_result.get("hits") or [])[:5]:
+                            with ui.card().classes("w-full p-2 gap-1"):
+                                ui.label(
+                                    f"{hit.get('rank')}. {hit.get('title') or hit.get('url') or '検索結果'}"
+                                ).classes("font-medium text-sm")
+                                if hit.get("url"):
+                                    ui.link(
+                                        hit["url"],
+                                        hit["url"],
+                                        new_tab=True,
+                                    ).classes("text-xs")
+                                if hit.get("snippet"):
+                                    ui.label(hit["snippet"]).classes("text-xs text-grey-8")
+                                ui.label(
+                                    "fetch=" + str(hit.get("fetch_status") or "unknown")
+                                ).classes("font-mono text-xs text-grey-6")
 
                 finance_result = result.get("finance") or {}
                 if finance_result:
