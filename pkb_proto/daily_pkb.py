@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
 from .core_ooda import OODA_PHASES, derive_ooda
-from .core_advisor import advise as advise_core
+from .core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -100,6 +100,7 @@ def _default_ui_preferences() -> dict:
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
         },
         "core": dict(CORE_UI_DEFAULT_OPEN),
+        "core_advisor_model": None,
         "visibility": {
             section: dict(values)
             for section, values in UI_VISIBILITY_DEFAULT.items()
@@ -151,6 +152,12 @@ def _validate_ui_preferences(raw: object) -> dict:
             value = core.get(key)
             if isinstance(value, bool):
                 result["core"][key] = value
+
+    advisor_model = raw.get("core_advisor_model")
+    if isinstance(advisor_model, str):
+        advisor_model = advisor_model.strip()
+        if advisor_model and len(advisor_model) <= 100 and not any(ch.isspace() for ch in advisor_model):
+            result["core_advisor_model"] = advisor_model
 
     visibility = raw.get("visibility")
     if isinstance(visibility, dict):
@@ -239,6 +246,24 @@ def _set_core_ui_open(key: str, value: bool) -> None:
     if key not in CORE_UI_DEFAULT_OPEN:
         raise KeyError("unknown Core accordion key")
     _CORE_UI_OPEN[key] = bool(value)
+
+
+def _save_core_advisor_model(model: str | None) -> str | None:
+    preferences = {
+        **_UI_PREFERENCES,
+        "pkb": dict(_UI_PREFERENCES["pkb"]),
+        "entity": dict(_UI_PREFERENCES["entity"]),
+        "finance": dict(_UI_PREFERENCES["finance"]),
+        "core": dict(_UI_PREFERENCES["core"]),
+        "visibility": {
+            section: dict(values)
+            for section, values in _UI_PREFERENCES["visibility"].items()
+        },
+        "core_advisor_model": model,
+    }
+    saved = save_ui_preferences(preferences)
+    _apply_ui_preferences(saved)
+    return saved.get("core_advisor_model")
 
 
 def _block_visibility_class(section: str, key: str) -> str:
@@ -1245,7 +1270,7 @@ def core_answer(search_result: dict) -> str:
     return "PKBの記録では、" + " / ".join(parts) + "。"
 
 
-def run_core_request(text: str) -> dict:
+def run_core_request(text: str, advisor_model: str | None = None) -> dict:
     """First daily Secretary Core slice: Task -> bounded PKB read -> Result."""
     request = text.strip()
     if not request:
@@ -1264,6 +1289,7 @@ def run_core_request(text: str) -> dict:
         request,
         current_selection=scoped.get("capability"),
         deterministic_status=scoped["status"],
+        model=advisor_model,
     ).as_dict()
 
     task_id = uuid4()
@@ -2303,7 +2329,8 @@ def features_page():
 @ui.page("/core")
 def core_page():
     state = {"result": None, "busy": False, "resume_busy": False,
-             "trace": None, "trace_error": None}
+             "trace": None, "trace_error": None,
+             "advisor_model": _UI_PREFERENCES.get("core_advisor_model")}
 
     def current_ooda():
         if state["busy"] or state["resume_busy"]:
@@ -2347,6 +2374,70 @@ def core_page():
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
         _nav()
         ui.label("Secretary Core").classes("text-2xl font-bold")
+
+        try:
+            installed_advisor_models = list_advisor_models()
+        except Exception:
+            installed_advisor_models = []
+
+        saved_advisor_model = state.get("advisor_model")
+        if saved_advisor_model not in installed_advisor_models:
+            try:
+                saved_advisor_model = choose_advisor_model(installed_advisor_models)
+            except Exception:
+                saved_advisor_model = None
+            state["advisor_model"] = saved_advisor_model
+
+        with ui.row().classes("w-full items-end gap-2 flex-wrap"):
+            advisor_model_select = ui.select(
+                options=installed_advisor_models,
+                value=saved_advisor_model,
+                label="Advisor Model",
+            ).classes("min-w-64")
+            ui.label(
+                "Shadow Mode用。変更は次の新規Taskから反映します。"
+            ).classes("text-xs text-grey-7")
+
+            def save_advisor_model():
+                selected = str(advisor_model_select.value or "").strip() or None
+                if selected and selected not in advisor_model_select.options:
+                    ui.notify("インストール済みモデルを選択してください", type="negative")
+                    return
+                state["advisor_model"] = _save_core_advisor_model(selected)
+                ui.notify(
+                    "Advisor Modelを保存しました: " + str(state["advisor_model"] or "自動"),
+                    type="positive",
+                )
+
+            def refresh_advisor_models():
+                try:
+                    available = list_advisor_models()
+                except Exception as exc:
+                    ui.notify("Ollamaモデル一覧を取得できません: " + str(exc)[:180], type="negative")
+                    return
+                previous = advisor_model_select.value
+                advisor_model_select.options = available
+                if previous in available:
+                    advisor_model_select.value = previous
+                else:
+                    try:
+                        advisor_model_select.value = choose_advisor_model(available)
+                    except Exception:
+                        advisor_model_select.value = None
+                advisor_model_select.update()
+                ui.notify(f"Chat model {len(available)}件を取得しました", type="positive")
+
+            ui.button(
+                "保存",
+                icon="save",
+                color="indigo",
+                on_click=save_advisor_model,
+            ).props("dense")
+            ui.button(
+                "モデル一覧更新",
+                icon="refresh",
+                on_click=refresh_advisor_models,
+            ).props("flat dense")
 
         @ui.refreshable
         def ooda_bar():
@@ -2934,7 +3025,9 @@ def core_page():
                 trace_panel.refresh()
                 try:
                     state["result"] = await run.io_bound(
-                        run_core_request, request_input.value or ""
+                        run_core_request,
+                        request_input.value or "",
+                        state.get("advisor_model"),
                     )
                 except Exception as exc:
                     state["result"] = {
@@ -3124,6 +3217,7 @@ def settings_page():
                     key: bool(control.value)
                     for key, control in core_open_controls.items()
                 },
+                "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
                 "visibility": {
                     "pkb": {
                         key: bool(control.value)
