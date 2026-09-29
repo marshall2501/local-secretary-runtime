@@ -1906,6 +1906,16 @@ def load_core_task_trace(task_id: UUID) -> dict:
             )
             action_rows = cur.fetchall()
 
+            cur.execute(
+                """SELECT event_type, occurred_at
+                   FROM secretary.audit_events
+                   WHERE task_id=%s
+                     AND actor='daily_core_advisor'
+                   ORDER BY occurred_at, id""",
+                (task_id,),
+            )
+            advisor_event_rows = cur.fetchall()
+
     checkpoint = task[8] or {}
     return {
         "task": {
@@ -1942,6 +1952,13 @@ def load_core_task_trace(task_id: UUID) -> dict:
                 "source_uri": row[13],
             }
             for row in action_rows
+        ],
+        "advisor_events": [
+            {
+                "event_type": row[0],
+                "occurred_at": row[1],
+            }
+            for row in advisor_event_rows
         ],
     }
 
