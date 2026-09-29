@@ -186,9 +186,16 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
         return {"kind": "none", "status": "not_applicable"}
 
     by_version: dict[str, list[dict]] = defaultdict(list)
+    historical_by_version: dict[str, list[dict]] = defaultdict(list)
     for hit in hits:
+        hit_text = " ".join((hit.title, hit.url, hit.snippet)).lower()
+        target = (
+            historical_by_version
+            if any(word in hit_text for word in _PREVIOUS_WORDS)
+            else by_version
+        )
         for value in hit.version_candidates:
-            by_version[value].append({
+            target[value].append({
                 "url": hit.url,
                 "title": hit.title,
                 "domain": hit.domain,
@@ -233,11 +240,25 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
         status = "conflicting_candidates"
         best = candidates[0]["value"]
 
+    historical_candidates = []
+    for value, sources in historical_by_version.items():
+        historical_candidates.append({
+            "value": value,
+            "source_count": len(sources),
+            "domains": sorted({row["domain"] for row in sources if row["domain"]}),
+            "sources": sorted(sources, key=lambda row: row["evidence_rank"]),
+        })
+    historical_candidates.sort(
+        key=lambda row: (row["source_count"], row["value"]),
+        reverse=True,
+    )
+
     return {
         "kind": "driver_version",
         "status": status,
         "best_candidate": best,
         "candidates": candidates[:8],
+        "historical_candidates": historical_candidates[:8],
     }
 
 
