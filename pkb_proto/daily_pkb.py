@@ -980,6 +980,70 @@ def load_recent_core_tasks(limit: int = 10) -> list[dict]:
     return result
 
 
+def load_open_core_tasks(limit: int = 20) -> list[dict]:
+    """Load unfinished daily Core tasks so they can survive page/server restarts."""
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("limit must be 1..50")
+    with connection() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """SELECT t.id, t.request, t.status, t.revision,
+                          t.created_at, t.updated_at, t.checkpoint,
+                          count(DISTINCT a.id) AS action_count,
+                          count(DISTINCT r.id) AS result_count
+                   FROM secretary.tasks t
+                   LEFT JOIN secretary.actions a ON a.task_id=t.id
+                   LEFT JOIN secretary.results r ON r.action_id=a.id
+                   WHERE t.requested_by='local_user'
+                     AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
+                     AND t.status IN ('waiting_external', 'running')
+                   GROUP BY t.id
+                   ORDER BY t.updated_at DESC, t.id DESC
+                   LIMIT %s""",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    result = []
+    for row in rows:
+        checkpoint = row[6] or {}
+        result.append({
+            "id": str(row[0]),
+            "request": row[1],
+            "status": row[2],
+            "revision": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+            "phase": checkpoint.get("phase"),
+            "selected_capability": checkpoint.get("selected_capability"),
+            "question": checkpoint.get("question"),
+            "effective_request": checkpoint.get("effective_request"),
+            "user_replies": list(checkpoint.get("user_replies") or []),
+            "action_count": row[7],
+            "result_count": row[8],
+        })
+    return result
+
+
+def core_task_selection_result(item: dict) -> dict:
+    """Convert one persisted Task summary into the same UI state as a live request."""
+    task_id = str(item.get("id") or "").strip()
+    status = str(item.get("status") or "").strip()
+    if not task_id:
+        raise ValueError("Task ID is required")
+    if status not in {"waiting_external", "running", "completed", "failed"}:
+        raise ValueError("Unsupported Task status")
+    return {
+        "task_id": task_id,
+        "status": status,
+        "phase": item.get("phase"),
+        "selected_capability": item.get("selected_capability"),
+        "question": item.get("question"),
+        "message": "保存済みTaskを選択しました。",
+        "effective_request": item.get("effective_request"),
+        "resumed_from_storage": True,
+    }
+
+
 def load_core_task_trace(task_id: UUID) -> dict:
     """Load a structured, user-visible execution trace for one Core Task."""
     with connection() as db:
@@ -1281,6 +1345,14 @@ class PendingDecisionInput(BaseModel):
     decision: str = Field(pattern="^(rejected|needs_edit)$")
 
 
+@app.get("/api/core/tasks/open")
+def api_core_open_tasks():
+    try:
+        return {"items": load_open_core_tasks(20)}
+    except (RuntimeError, ValueError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 @app.get("/api/core/tasks/{task_id}/trace")
 def api_core_trace(task_id: UUID):
     try:
@@ -1522,6 +1594,57 @@ def core_page():
             "外部操作・承認・Web調査・自動再開はまだ実行しません。"
         ).classes("text-sm text-orange-700")
 
+        def select_saved_task(item: dict):
+            state["result"] = core_task_selection_result(item)
+            core_result.refresh()
+            resume_panel.refresh()
+            trace_panel.refresh()
+
+        @ui.refreshable
+        def open_tasks_panel():
+            try:
+                rows = load_open_core_tasks(20)
+            except Exception as exc:
+                with ui.card().classes("w-full border border-red-200 bg-red-50"):
+                    ui.label("未完了Taskを取得できません: " + str(exc)).classes(
+                        "text-red-700"
+                    )
+                return
+
+            with ui.expansion(
+                "進行中・確認待ちTask",
+                value=True,
+            ).classes("w-full border-2 border-orange-200 bg-orange-50"):
+                ui.label(
+                    "複数の依頼をDBに並行保持します。ブラウザF5やサーバー再起動後も、"
+                    "ここから任意の未完了Taskを選び直せます。"
+                ).classes("text-sm text-orange-900")
+                if not rows:
+                    ui.label("未完了Taskはありません。").classes("text-sm")
+                    return
+                for item in rows:
+                    with ui.row().classes(
+                        "w-full items-center gap-3 border-b border-orange-100 py-2"
+                    ):
+                        status_color = {
+                            "waiting_external": "orange",
+                            "running": "blue",
+                        }.get(item["status"], "grey")
+                        ui.badge(item["status"], color=status_color)
+                        with ui.column().classes("grow gap-0"):
+                            ui.label(item["request"]).classes("font-medium")
+                            ui.label(
+                                f"Task {item['id']} / revision={item['revision']} / "
+                                f"phase={item.get('phase') or '-'} / "
+                                f"updated={item['updated_at']}"
+                            ).classes("font-mono text-xs text-grey-7")
+                        ui.button(
+                            "このTaskを開く",
+                            icon="open_in_new",
+                            color="orange",
+                            on_click=lambda item=item: select_saved_task(item),
+                        ).props("outline")
+
         @ui.refreshable
         def screen_log_panel():
             try:
@@ -1577,6 +1700,8 @@ def core_page():
                                 f"Action={item['action_count']} / Result={item['result_count']} / "
                                 f"updated={item['updated_at']}"
                             ).classes("text-xs text-grey-7")
+
+        open_tasks_panel()
 
         with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
             ui.label("依頼").classes("text-lg font-bold")
@@ -1769,6 +1894,7 @@ def core_page():
                             resume_panel.refresh()
                             core_result.refresh()
                             trace_panel.refresh()
+                            open_tasks_panel.refresh()
                             screen_log_panel.refresh()
 
                     resume_button = ui.button(
@@ -1800,6 +1926,7 @@ def core_page():
                     core_result.refresh()
                     resume_panel.refresh()
                     trace_panel.refresh()
+                    open_tasks_panel.refresh()
                     screen_log_panel.refresh()
 
             run_button = ui.button(
@@ -1820,7 +1947,8 @@ def core_page():
             ui.label("この縦断でまだ行わないこと").classes("font-bold")
             ui.label(
                 "Web調査、外部Tool実行、承認、結果検証による再計画は"
-                "次の拡張対象です。追加質問への同一Task再開はこの画面で試験中です。"
+                "次の拡張対象です。複数Taskの並行保持と、保存済みwaiting_external "
+                "Taskの手動選択・同一Task再開をこの画面で試験します。"
             ).classes("text-sm")
 
 
