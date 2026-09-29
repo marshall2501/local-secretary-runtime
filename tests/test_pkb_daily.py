@@ -345,6 +345,47 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(comparison["status"], "not_comparable")
         self.assertIn("安全に比較できません", comparison["message"])
 
+    def test_web_core_answer_requires_primary_source_for_latest_value(self):
+        answer = web_core_answer({
+            "hits": [{"title": "AMD Drivers", "url": "https://www.amd.com"}],
+            "fact_summary": {
+                "kind": "driver_version",
+                "status": "primary_source_no_current_candidate",
+                "preferred_kind": "adrenalin_version",
+                "best_candidate": None,
+                "primary_domains": ["www.amd.com"],
+                "groups": [
+                    {
+                        "kind": "adrenalin_version",
+                        "status": "single_candidate",
+                        "best_candidate": "26.6.4",
+                        "candidates": [
+                            {
+                                "value": "26.6.4",
+                                "primary_source_count": 0,
+                            }
+                        ],
+                    },
+                    {
+                        "kind": "driver_version",
+                        "status": "single_candidate",
+                        "best_candidate": "26.9.1",
+                        "candidates": [
+                            {
+                                "value": "26.9.1",
+                                "primary_source_count": 0,
+                            }
+                        ],
+                    },
+                ],
+                "historical_groups": [],
+            },
+        })
+        self.assertIn("www.amd.com", answer)
+        self.assertIn("確定しません", answer)
+        self.assertIn("26.6.4", answer)
+        self.assertIn("26.9.1", answer)
+
     def test_web_core_answer_does_not_overstate_conflicting_driver_candidates(self):
         answer = web_core_answer({
             "hits": [],
