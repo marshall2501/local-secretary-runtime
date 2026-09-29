@@ -762,29 +762,55 @@ def web_core_answer(result: dict) -> str:
     hits = result.get("hits") or []
     facts = result.get("fact_summary") or {}
     if facts.get("kind") == "driver_version":
-        status = facts.get("status")
-        best = facts.get("best_candidate")
-        candidates = facts.get("candidates") or []
-        if status == "leading_consensus" and best:
-            leading = candidates[0] if candidates else {}
-            return (
-                f"Web調査ではドライバーバージョン候補 {best} が"
-                f"{leading.get('source_count', 0)}件のSourceで一致しています。"
-                "ただし検索結果だけで最終確定せず、上位根拠Sourceを確認してください。"
-            )
-        if status == "single_candidate" and best:
-            return (
-                f"Web調査ではドライバーバージョン候補 {best} を1系統で抽出しました。"
-                "複数Sourceでの一致はまだ確認できていないため、確定値とは扱いません。"
-            )
-        if status == "conflicting_candidates":
-            values = " / ".join(
-                str(row.get("value")) for row in candidates[:4] if row.get("value")
-            )
-            return (
-                "Web調査ではドライバーバージョン候補が一致していません。"
-                f"候補: {values}。一次Sourceと対象期間を追加確認する必要があります。"
-            )
+        groups = facts.get("groups") or []
+        preferred_kind = facts.get("preferred_kind")
+        preferred = next(
+            (group for group in groups if group.get("kind") == preferred_kind),
+            groups[0] if groups else None,
+        )
+        if preferred:
+            status = preferred.get("status")
+            best = preferred.get("best_candidate")
+            candidates = preferred.get("candidates") or []
+            kind_label = {
+                "adrenalin_version": "Adrenalin版",
+                "driver_version": "ドライバー版",
+                "si_driver_version": "SI Driver版",
+            }.get(preferred.get("kind"), preferred.get("kind") or "版番号")
+            other_groups = [
+                group for group in groups if group is not preferred and group.get("best_candidate")
+            ]
+            other_text = ""
+            if other_groups:
+                other_text = " 別種の版番号: " + " / ".join(
+                    f"{group.get('kind')}={group.get('best_candidate')}"
+                    for group in other_groups[:3]
+                ) + "。"
+
+            if status == "leading_consensus" and best:
+                leading = candidates[0] if candidates else {}
+                return (
+                    f"Web調査では{kind_label}候補 {best} が"
+                    f"{leading.get('source_count', 0)}件のSourceで一致しています。"
+                    + other_text
+                    + "異なる種類の版番号同士は競合扱いしていません。"
+                )
+            if status == "single_candidate" and best:
+                return (
+                    f"Web調査では{kind_label}候補 {best} を1系統で抽出しました。"
+                    + other_text
+                    + "同じ種類の複数Source一致はまだ確認できていないため、確定値とは扱いません。"
+                )
+            if status == "conflicting_candidates":
+                values = " / ".join(
+                    str(row.get("value")) for row in candidates[:4] if row.get("value")
+                )
+                return (
+                    f"Web調査では同じ種類の{kind_label}候補が一致していません。"
+                    f"候補: {values}。"
+                    + other_text
+                    + "一次Sourceと対象期間を追加確認する必要があります。"
+                )
 
     if not hits:
         return "Web検索で結果が見つかりませんでした。"
@@ -860,6 +886,7 @@ def _execute_core_read(capability: str, text: str) -> dict:
                         "quality_score": hit.get("quality_score"),
                         "authority_hint": hit.get("authority_hint"),
                         "version_candidates": hit.get("version_candidates"),
+                        "version_facts": hit.get("version_facts"),
                         "date_hints": hit.get("date_hints"),
                     }
                     for hit in (result.get("hits") or [])
@@ -1999,18 +2026,33 @@ def core_page():
                             with ui.card().classes("w-full border border-indigo-200 bg-indigo-50"):
                                 ui.label("抽出した事実候補").classes("font-bold text-indigo-900")
                                 ui.label(
-                                    "status="
+                                    "preferred_kind="
+                                    + str(fact_summary.get("preferred_kind") or "-")
+                                    + " / status="
                                     + str(fact_summary.get("status") or "-")
                                     + " / best="
                                     + str(fact_summary.get("best_candidate") or "-")
                                 ).classes("font-mono text-xs")
-                                for candidate in (fact_summary.get("candidates") or [])[:5]:
+                                for group in (fact_summary.get("groups") or [])[:5]:
                                     ui.label(
-                                        f"{candidate.get('value')} / "
-                                        f"sources={candidate.get('source_count', 0)} / "
-                                        f"domains={candidate.get('domain_count', 0)} / "
-                                        f"best_quality={candidate.get('best_quality_score', 0)}"
-                                    ).classes("text-xs")
+                                        f"{group.get('kind')} / "
+                                        f"status={group.get('status')} / "
+                                        f"best={group.get('best_candidate')}"
+                                    ).classes("font-medium text-xs text-indigo-900")
+                                    for candidate in (group.get("candidates") or [])[:5]:
+                                        ui.label(
+                                            f"  {candidate.get('value')} / "
+                                            f"sources={candidate.get('source_count', 0)} / "
+                                            f"domains={candidate.get('domain_count', 0)} / "
+                                            f"best_quality={candidate.get('best_quality_score', 0)}"
+                                        ).classes("text-xs")
+                                historical = fact_summary.get("historical_groups") or []
+                                if historical:
+                                    ui.label("過去版候補").classes("font-bold text-xs text-grey-7")
+                                    for group in historical[:5]:
+                                        ui.label(
+                                            f"{group.get('kind')} / best={group.get('best_candidate')}"
+                                        ).classes("text-xs text-grey-7")
                         for hit in (web_result.get("hits") or [])[:5]:
                             with ui.card().classes("w-full p-2 gap-1"):
                                 ui.label(
@@ -2035,7 +2077,15 @@ def core_page():
                                 ui.label(
                                     "fetch=" + str(hit.get("fetch_status") or "unknown")
                                 ).classes("font-mono text-xs text-grey-6")
-                                if hit.get("version_candidates"):
+                                if hit.get("version_facts"):
+                                    ui.label(
+                                        "version候補: "
+                                        + ", ".join(
+                                            f"{fact.get('kind')}={fact.get('value')}"
+                                            for fact in (hit.get("version_facts") or [])
+                                        )
+                                    ).classes("text-xs text-indigo-8")
+                                elif hit.get("version_candidates"):
                                     ui.label(
                                         "version候補: "
                                         + ", ".join(hit.get("version_candidates") or [])
