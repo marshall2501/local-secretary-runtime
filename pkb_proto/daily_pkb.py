@@ -612,16 +612,6 @@ def _search_text_with_db(db, text: str) -> dict:
     entities = _entity_map(db)
     q = text.strip()
 
-    if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
-        return {"status": "ready", "capability": "finance_read", "domain": "finance"}
-
-    if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
-        return {
-            "status": "ready",
-            "capability": "finance_read",
-            "domain": "finance",
-        }
-
     component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
     if component_state and any(word in q for word in ("現在", "今の", "現行")):
         resolved = resolve_component_reference(
@@ -801,6 +791,13 @@ def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
             "status": "question",
             "question": "何を確認したいか入力してください。",
             "reason": "empty_request",
+        }
+
+    if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
+        return {
+            "status": "ready",
+            "capability": "finance_read",
+            "domain": "finance",
         }
 
     component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
