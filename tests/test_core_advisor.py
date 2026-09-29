@@ -204,7 +204,11 @@ class CoreAdvisorTests(unittest.TestCase):
         _run_core_advisor_shadow(
             task_id,
             "メインPCのGPUの現在のドライバーを調べて",
-            "pkb_search",
+            {
+                "member": "MELCHIOR",
+                "status": "ready",
+                "selected_capability": "pkb_search",
+            },
             {"version": "magi_observation_v1", "matched_entities": []},
             "gemma3:12b",
             600,
@@ -216,6 +220,8 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(running["model"], "gemma3:12b")
         self.assertEqual(final["job_status"], "completed")
         self.assertEqual(final["comparison"], "match")
+        self.assertEqual(final["synthesis"]["next_step"], "observe")
+        self.assertEqual(final["synthesis"]["selected_capability"], "pkb_search")
         self.assertEqual(final["model"], "gemma3:12b")
         self.assertEqual(final["timeout_seconds"], 600)
         self.assertIsNotNone(final["elapsed_seconds"])
@@ -246,7 +252,11 @@ class CoreAdvisorTests(unittest.TestCase):
         _run_core_advisor_shadow(
             UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
             "test",
-            "pkb_search",
+            {
+                "member": "MELCHIOR",
+                "status": "ready",
+                "selected_capability": "pkb_search",
+            },
             {"version": "magi_observation_v1", "matched_entities": []},
             "gemma3:12b",
             900,
