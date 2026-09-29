@@ -57,7 +57,7 @@ class AdvisorResult:
         return value
 
 
-def _chat_models(timeout: float = 3.0) -> list[str]:
+def list_chat_models(timeout: float = 3.0) -> list[str]:
     req = Request(OLLAMA + "/api/tags", method="GET")
     with urlopen(req, timeout=timeout) as resp:
         data = json.load(resp)
@@ -72,8 +72,8 @@ def _chat_models(timeout: float = 3.0) -> list[str]:
     return result
 
 
-def choose_model(models: list[str]) -> str:
-    configured = os.environ.get("LSA_CORE_ADVISOR_MODEL", "").strip()
+def choose_model(models: list[str], requested: str | None = None) -> str:
+    configured = (requested or "").strip() or os.environ.get("LSA_CORE_ADVISOR_MODEL", "").strip()
     if configured:
         if configured not in models:
             raise ValueError("Configured Core advisor model is not installed")
@@ -158,6 +158,7 @@ def advise(
     observations: list[str] | None = None,
     permissions: dict[str, bool] | None = None,
     timeout: float = 60.0,
+    model: str | None = None,
 ) -> AdvisorResult:
     if os.environ.get("LSA_CORE_ADVISOR_ENABLED", "1").strip().lower() in {"0", "false", "off", "no"}:
         return AdvisorResult("disabled", "unavailable", error="advisor_disabled")
@@ -180,9 +181,9 @@ def advise(
     }
 
     try:
-        model = choose_model(_chat_models())
+        selected_model = choose_model(list_chat_models(), model)
         payload = {
-            "model": model,
+            "model": selected_model,
             "stream": False,
             "format": "json",
             "messages": _messages(context),
@@ -199,12 +200,12 @@ def advise(
         message = outer.get("message") if isinstance(outer, dict) else None
         raw = message.get("content") if isinstance(message, dict) else None
         if not isinstance(raw, str):
-            return AdvisorResult("invalid", "invalid", model=model, error="missing_model_content")
+            return AdvisorResult("invalid", "invalid", model=selected_model, error="missing_model_content")
         checked = inspect_output(raw, available, current_selection)
         return AdvisorResult(
             checked.status,
             checked.comparison,
-            model=model,
+            model=selected_model,
             situation=checked.situation,
             missing_information=checked.missing_information,
             proposed_action=checked.proposed_action,
