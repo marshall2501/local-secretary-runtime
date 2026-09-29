@@ -1126,6 +1126,68 @@ def _execute_pkb_web_compare(text: str, *, target_override: str | None = None) -
     }
 
 
+def _execute_cooperative_local_probe(
+    capability: str,
+    text: str,
+    observation_pack: dict,
+) -> dict:
+    """Expand a synthesized local probe without broadening to finance or Web."""
+    if capability != "pkb_search":
+        raise ValueError("Cooperative ambiguous probe only permits pkb_search")
+
+    matched = list(observation_pack.get("matched_entities") or [])
+    target = (
+        matched[0]
+        if len(matched) == 1 and matched[0].get("entity_type") == "computer"
+        else None
+    )
+    if target and target.get("id"):
+        with connection() as db:
+            detail = load_entity_detail(db, str(target["id"])) or {}
+            rows = list_components(db, UUID(str(target["id"])))
+        items = []
+        for row in rows:
+            item = {}
+            for key, value in row.items():
+                if isinstance(value, (datetime, UUID)):
+                    item[key] = str(value)
+                else:
+                    item[key] = value
+            items.append(item)
+        result = {
+            "status": "ok",
+            "result_kind": "components",
+            "total": len(items),
+            "items": items,
+            "entity": detail.get("entity"),
+            "current": (detail.get("current") or [])[:12],
+            "relations": [
+                row for row in (detail.get("relations") or [])
+                if row.get("valid_to") is None
+            ][:12],
+            "events": (detail.get("events") or [])[:12],
+            "probe_kind": "entity_overview",
+        }
+        return {
+            "capability": "pkb_search",
+            "result": result,
+            "answer": core_answer(result),
+            "total": len(items),
+            "tool": "pkb",
+            "operation": "entity_overview",
+            "source_slug": "pkb-overview",
+            "citation": "Secretary Core bounded PKB Entity/Component overview",
+            "verified_by": "deterministic_pkb_query",
+            "source_metadata": {
+                "probe_kind": "entity_overview",
+                "entity_id": str(target["id"]),
+                "entity_name": target.get("name"),
+            },
+        }
+
+    return _execute_core_read("pkb_search", text)
+
+
 def _execute_core_read(capability: str, text: str) -> dict:
     """Execute one bounded read-only capability and return normalized evidence metadata."""
     if capability == "pkb_search":
@@ -1795,7 +1857,11 @@ def _run_core_advisor_shadow(
                 )
                 return
 
-            execution = _execute_core_read(capability, request)
+            execution = _execute_cooperative_local_probe(
+                capability,
+                request,
+                observation_pack,
+            )
             second_observation = extend_observation_pack(
                 observation_pack,
                 execution,
