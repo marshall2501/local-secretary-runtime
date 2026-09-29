@@ -818,7 +818,21 @@ def _execute_core_read(capability: str, text: str) -> dict:
             "operation": "research",
             "source_slug": "web-research",
             "citation": "Secretary Core bounded read-only web research result",
-            "verified_by": "bounded_web_research",
+            "verified_by": "bounded_web_retrieval",
+            "source_metadata": {
+                "provider": result.get("provider"),
+                "region": result.get("region"),
+                "web_sources": [
+                    {
+                        "rank": hit.get("rank"),
+                        "title": hit.get("title"),
+                        "url": hit.get("url"),
+                        "snippet": hit.get("snippet"),
+                        "fetch_status": hit.get("fetch_status"),
+                    }
+                    for hit in (result.get("hits") or [])
+                ],
+            },
         }
     raise ValueError("Unsupported Core read capability")
 
@@ -999,6 +1013,7 @@ def run_core_request(text: str) -> dict:
                             "capability": execution["capability"],
                             "query": request,
                             "result_count": total,
+                            **(execution.get("source_metadata") or {}),
                         }),
                     ),
                 )
@@ -1407,6 +1422,7 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                             "user_reply": user_reply,
                             "effective_request": effective_request,
                             "result_count": total,
+                            **(execution.get("source_metadata") or {}),
                         }),
                     ),
                 )
