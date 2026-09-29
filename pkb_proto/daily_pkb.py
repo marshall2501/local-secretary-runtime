@@ -2930,6 +2930,78 @@ def core_page():
                                 "Advisor error: " + str(advisor["error"])
                             ).classes("text-xs text-red-700")
 
+                        with ui.expansion(
+                            "Advisor 稼働ログ",
+                            value=bool(advisor.get("error")),
+                        ).classes("w-full border border-indigo-100 bg-white"):
+                            ui.label(
+                                "Shadow評価の入力・状態遷移・形式検査を確認するためのログです。"
+                                " 推論過程は保存・表示しません。"
+                            ).classes("text-xs text-grey-7")
+
+                            lifecycle = []
+                            trace = state.get("trace") or {}
+                            for event in trace.get("advisor_events") or []:
+                                lifecycle.append(
+                                    str(event.get("occurred_at") or "")
+                                    + "  "
+                                    + str(event.get("event_type") or "")
+                                )
+                            if lifecycle:
+                                ui.label("状態遷移").classes("font-medium text-sm")
+                                for line in lifecycle:
+                                    ui.label(line).classes("font-mono text-xs")
+                            else:
+                                ui.label(
+                                    "状態遷移: DB監査イベントはまだありません。"
+                                ).classes("text-xs text-grey-6")
+
+                            ui.label("検査結果").classes("font-medium text-sm")
+                            ui.label(
+                                "job="
+                                + str(advisor.get("job_status") or "-")
+                                + " / status="
+                                + str(advisor.get("status") or "-")
+                                + " / comparison="
+                                + str(advisor.get("comparison") or "-")
+                                + " / error="
+                                + str(advisor.get("error") or "-")
+                            ).classes("font-mono text-xs")
+
+                            request_context = advisor.get("request_context")
+                            if request_context:
+                                ui.label("Ollamaへ渡した判断コンテキスト").classes(
+                                    "font-medium text-sm"
+                                )
+                                ui.code(
+                                    json.dumps(
+                                        request_context,
+                                        ensure_ascii=False,
+                                        indent=2,
+                                        default=str,
+                                    ),
+                                    language="json",
+                                ).classes("w-full text-xs")
+
+                            response_diagnostic = advisor.get("response_diagnostic")
+                            if response_diagnostic:
+                                ui.label(
+                                    "LLM返却値の形式検査（安全化済み）"
+                                ).classes("font-medium text-sm")
+                                ui.label(
+                                    "契約対象5フィールドだけを保存しています。"
+                                    " 追加キーは名前だけ記録し、値は保存しません。"
+                                ).classes("text-xs text-grey-7")
+                                ui.code(
+                                    json.dumps(
+                                        response_diagnostic,
+                                        ensure_ascii=False,
+                                        indent=2,
+                                        default=str,
+                                    ),
+                                    language="json",
+                                ).classes("w-full text-xs")
+
                 if state["busy"]:
                     with ui.row().classes("items-center gap-2"):
                         ui.spinner(size="sm", color="blue-grey")
