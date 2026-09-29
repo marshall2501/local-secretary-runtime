@@ -990,9 +990,39 @@ def _resolve_driver_web_target(text: str) -> dict:
     return target
 
 
-def _execute_pkb_web_compare(text: str) -> dict:
+def _clarified_driver_web_target(reply: str) -> dict:
+    value = reply.strip()
+    value = re.sub(
+        r"^(?:GPU(?:の)?モデル|モデル|製品名|GPU)\s*(?:は|:|：)?\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not value:
+        return {
+            "status": "missing_model",
+            "query": None,
+            "manufacturer": None,
+            "model": None,
+            "entity_name": None,
+        }
+    return {
+        "status": "ready",
+        "query": value + " latest driver official",
+        "manufacturer": None,
+        "model": value,
+        "entity_name": None,
+        "clarified_by_user": True,
+    }
+
+
+def _execute_pkb_web_compare(text: str, *, target_override: str | None = None) -> dict:
     pkb = _execute_core_read("pkb_search", text)
-    target = _resolve_driver_web_target(text)
+    target = (
+        _clarified_driver_web_target(target_override)
+        if target_override is not None
+        else _resolve_driver_web_target(text)
+    )
     if target.get("status") != "ready":
         comparison = {
             "status": "insufficient_target",
@@ -1660,10 +1690,19 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     raise ValueError("このTaskは日常Core最小縦断のTaskではありません。")
 
                 entities = _entity_map(db)
-                effective_request = _contextualize_core_reply(
-                    original_request, user_reply, entities
-                )
-                scoped = scope_core_request(effective_request, entities)
+                prior_capability = checkpoint.get("selected_capability")
+                if prior_capability == "pkb_web_compare":
+                    effective_request = original_request
+                    scoped = {
+                        "status": "ready",
+                        "capability": "pkb_web_compare",
+                        "domain": current_domain or "pc",
+                    }
+                else:
+                    effective_request = _contextualize_core_reply(
+                        original_request, user_reply, entities
+                    )
+                    scoped = scope_core_request(effective_request, entities)
                 replies = list(checkpoint.get("user_replies") or [])
                 replies.append(user_reply)
 
@@ -1711,17 +1750,40 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     (task_id,),
                 )
 
-                execution = _execute_core_read(
-                    scoped["capability"], effective_request
-                )
-                result = execution["result"]
-                answer = execution["answer"]
-                total = execution["total"]
-                phase = "completed" if total > 0 else "awaiting_clarification"
-                task_status = "completed" if total > 0 else "waiting_external"
-                question = None if total > 0 else (
-                    "該当記録が見つかりませんでした。対象名や確認したい項目を"
-                    "もう少し具体的にしてください。"
+                if scoped["capability"] == "pkb_web_compare":
+                    plan_result = _execute_pkb_web_compare(
+                        original_request,
+                        target_override=user_reply,
+                    )
+                    executions = plan_result["executions"]
+                    comparison = plan_result["comparison"]
+                    answer = plan_result["answer"]
+                    result = {
+                        "status": "ok",
+                        "result_kind": "pkb_web_compare",
+                        "comparison": comparison,
+                    }
+                    total = sum(int(item.get("total") or 0) for item in executions)
+                    enough = (
+                        all(int(item.get("total") or 0) > 0 for item in executions)
+                        and not plan_result.get("needs_clarification")
+                    )
+                else:
+                    execution = _execute_core_read(
+                        scoped["capability"], effective_request
+                    )
+                    executions = [execution]
+                    comparison = None
+                    answer = execution["answer"]
+                    result = execution["result"]
+                    total = execution["total"]
+                    enough = total > 0
+
+                phase = "completed" if enough else "awaiting_clarification"
+                task_status = "completed" if enough else "waiting_external"
+                question = None if enough else (
+                    "比較に必要な対象情報または根拠が不足しています。"
+                    "GPUのメーカー・モデルを確認してください。"
                 )
 
                 cur.execute(
@@ -1729,82 +1791,104 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     (task_id,),
                 )
                 attempt = int(cur.fetchone()[0]) + 1
+                action_ids = []
+                result_ids = []
 
-                cur.execute(
-                    """INSERT INTO secretary.sources
-                       (source_type, uri, citation, retrieved_at,
-                        confidentiality, metadata)
-                       VALUES ('tool', %s, %s, now(), 'private', %s)
-                       RETURNING id""",
-                    (
-                        f"tool://daily-core/{execution['source_slug']}/{task_id}/{attempt}",
-                        "Secretary Core resumed " + execution["citation"],
-                        Jsonb({
-                            "task_id": str(task_id),
-                            "capability": execution["capability"],
-                            "original_request": original_request,
-                            "user_reply": user_reply,
-                            "effective_request": effective_request,
-                            "result_count": total,
-                            **(execution.get("source_metadata") or {}),
-                        }),
-                    ),
-                )
-                source_id = cur.fetchone()[0]
+                for step_offset, execution in enumerate(executions):
+                    step = attempt + step_offset
+                    execution_result = execution["result"]
+                    execution_total = int(execution.get("total") or 0)
 
-                cur.execute(
-                    """INSERT INTO secretary.actions
-                       (task_id, actor, tool, operation, parameters, risk,
-                        authorization_basis, status, idempotency_key,
-                        reversible, started_at, finished_at)
-                       VALUES (%s, 'daily_core', %s, %s, %s,
-                               'read_only', 'localhost_read_only',
-                               'succeeded', %s, true, now(), now())
-                       RETURNING id""",
-                    (
-                        task_id,
-                        execution["tool"],
-                        execution["operation"],
-                        Jsonb({
-                            "query": effective_request,
-                            "bounded": True,
-                            "resumed": True,
-                        }),
-                        f"daily-core:{task_id}:{execution['source_slug']}:{attempt}",
-                    ),
-                )
-                action_id = cur.fetchone()[0]
+                    cur.execute(
+                        """INSERT INTO secretary.sources
+                           (source_type, uri, citation, retrieved_at,
+                            confidentiality, metadata)
+                           VALUES ('tool', %s, %s, now(), 'private', %s)
+                           RETURNING id""",
+                        (
+                            f"tool://daily-core/{execution['source_slug']}/{task_id}/{step}",
+                            "Secretary Core resumed " + execution["citation"],
+                            Jsonb({
+                                "task_id": str(task_id),
+                                "capability": execution["capability"],
+                                "original_request": original_request,
+                                "user_reply": user_reply,
+                                "effective_request": effective_request,
+                                "result_count": execution_total,
+                                **(execution.get("source_metadata") or {}),
+                            }),
+                        ),
+                    )
+                    source_id = cur.fetchone()[0]
 
-                cur.execute(
-                    """INSERT INTO secretary.results
-                       (action_id, source_id, outcome, summary, evidence,
-                        verified_by, verified_at)
-                       VALUES (%s, %s, %s, %s, %s,
-                               %s, now())
-                       RETURNING id""",
-                    (
-                        action_id,
-                        source_id,
-                        "success" if total > 0 else "inconclusive",
-                        answer,
-                        Jsonb({
-                            "result_kind": result.get("result_kind"),
-                            "total": total,
-                            "data": result,
-                            "resumed": True,
-                        }),
-                        execution["verified_by"],
-                    ),
-                )
-                result_id = cur.fetchone()[0]
+                    cur.execute(
+                        """INSERT INTO secretary.actions
+                           (task_id, actor, tool, operation, parameters, risk,
+                            authorization_basis, status, idempotency_key,
+                            reversible, started_at, finished_at)
+                           VALUES (%s, 'daily_core', %s, %s, %s,
+                                   'read_only', 'localhost_read_only',
+                                   'succeeded', %s, true, now(), now())
+                           RETURNING id""",
+                        (
+                            task_id,
+                            execution["tool"],
+                            execution["operation"],
+                            Jsonb({
+                                "query": (
+                                    plan_result.get("web_query")
+                                    if (
+                                        scoped["capability"] == "pkb_web_compare"
+                                        and execution["capability"] == "web_research"
+                                    )
+                                    else effective_request
+                                ),
+                                "bounded": True,
+                                "resumed": True,
+                                "step": step,
+                            }),
+                            f"daily-core:{task_id}:{execution['source_slug']}:{step}",
+                        ),
+                    )
+                    action_id = cur.fetchone()[0]
+                    action_ids.append(action_id)
+
+                    cur.execute(
+                        """INSERT INTO secretary.results
+                           (action_id, source_id, outcome, summary, evidence,
+                            verified_by, verified_at)
+                           VALUES (%s, %s, %s, %s, %s,
+                                   %s, now())
+                           RETURNING id""",
+                        (
+                            action_id,
+                            source_id,
+                            "success" if execution_total > 0 else "inconclusive",
+                            execution["answer"],
+                            Jsonb({
+                                "result_kind": execution_result.get("result_kind"),
+                                "total": execution_total,
+                                "data": execution_result,
+                                "resumed": True,
+                            }),
+                            execution["verified_by"],
+                        ),
+                    )
+                    result_ids.append(cur.fetchone()[0])
+
+                action_id = action_ids[-1]
+                result_id = result_ids[-1]
 
                 next_checkpoint = {
                     **checkpoint,
                     "phase": phase,
-                    "selected_capability": execution["capability"],
+                    "selected_capability": scoped["capability"],
                     "action_id": str(action_id),
                     "result_id": str(result_id),
+                    "action_ids": [str(value) for value in action_ids],
+                    "result_ids": [str(value) for value in result_ids],
                     "result_count": total,
+                    "comparison": comparison,
                     "question": question,
                     "reason": None,
                     "user_replies": replies,
@@ -1838,9 +1922,11 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                         action_id,
                         task_id,
                         Jsonb({
-                            "capability": execution["capability"],
+                            "capability": scoped["capability"],
                             "result_count": total,
                             "reply_count": len(replies),
+                            "action_count": len(action_ids),
+                            "comparison": comparison,
                         }),
                     ),
                 )
@@ -1851,11 +1937,20 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     "phase": phase,
                     "message": answer,
                     "question": question,
-                    "selected_capability": execution["capability"],
+                    "selected_capability": scoped["capability"],
                     "capability_result": result,
-                    "search": result if execution["capability"] == "pkb_search" else None,
-                    "finance": result if execution["capability"] == "finance_read" else None,
-                    "web": result if execution["capability"] == "web_research" else None,
+                    "comparison": comparison,
+                    "search": (
+                        plan_result["pkb"]
+                        if scoped["capability"] == "pkb_web_compare"
+                        else result if scoped["capability"] == "pkb_search" else None
+                    ),
+                    "finance": result if scoped["capability"] == "finance_read" else None,
+                    "web": (
+                        plan_result["web"]
+                        if scoped["capability"] == "pkb_web_compare"
+                        else result if scoped["capability"] == "web_research" else None
+                    ),
                     "resumed": True,
                     "effective_request": effective_request,
                 }
