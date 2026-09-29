@@ -200,7 +200,7 @@ def advise(
     request_text: str,
     *,
     current_selection: str | None,
-    deterministic_status: str,
+    task_state: str = "received",
     observations: object | None = None,
     permissions: dict[str, bool] | None = None,
     timeout: float = 60.0,
