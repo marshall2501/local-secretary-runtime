@@ -18,6 +18,7 @@ from pkb_proto.daily_pkb import (
     _validate_ui_preferences,
     _contextualize_core_reply,
     core_answer,
+    core_task_selection_result,
     load_ui_preferences,
     parse_component_write,
     parse_correction,
@@ -179,6 +180,33 @@ class DailyPKBParserTests(unittest.TestCase):
             effective,
             "GPUの現在のドライバーを調べて",
         )
+
+    def test_saved_waiting_task_can_be_restored_as_ui_result(self):
+        result = core_task_selection_result({
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "request": "メインPCについて調べて",
+            "status": "waiting_external",
+            "phase": "awaiting_clarification",
+            "selected_capability": None,
+            "question": "確認したい内容を指定してください。",
+            "effective_request": None,
+        })
+        self.assertEqual(
+            result["task_id"],
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        )
+        self.assertEqual(result["status"], "waiting_external")
+        self.assertEqual(result["phase"], "awaiting_clarification")
+        self.assertTrue(result["resumed_from_storage"])
+        self.assertIn("保存済みTask", result["message"])
+        self.assertTrue(result["question"])
+
+    def test_saved_task_selection_rejects_unknown_status(self):
+        with self.assertRaises(ValueError):
+            core_task_selection_result({
+                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "status": "mystery",
+            })
 
     def test_core_scope_accepts_bounded_component_state_query(self):
         result = scope_core_request(
