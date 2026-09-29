@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED_MODELS = ("llama3.1:8b", "qwen3.5:9b")
+ADVISOR_FIELDS = ("situation", "missing_information", "proposed_action", "reason", "expected_result")
 
 CAPABILITY_REGISTRY = {
     "pkb_search": {
@@ -51,6 +52,8 @@ class AdvisorResult:
     expected_result: str | None = None
     error: str | None = None
     timeout_seconds: float | None = None
+    request_context: dict | None = None
+    response_diagnostic: dict | None = None
 
     def as_dict(self) -> dict:
         value = asdict(self)
@@ -106,15 +109,53 @@ def _messages(context: dict) -> list[dict[str, str]]:
     ]
 
 
+def diagnose_response(raw: str) -> dict:
+    """Return a user-visible, reasoning-safe diagnostic of model output.
+
+    Only the contracted Advisor fields are retained. Unknown key names are
+    recorded without their values. Non-JSON prose is never persisted.
+    """
+    diagnostic = {
+        "json_valid": False,
+        "raw_length": len(raw),
+        "contract_fields": list(ADVISOR_FIELDS),
+        "safe_response": None,
+        "field_types": {},
+        "missing_keys": [],
+        "unexpected_keys": [],
+    }
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return diagnostic
+    diagnostic["json_valid"] = True
+    if not isinstance(parsed, dict):
+        diagnostic["response_type"] = type(parsed).__name__
+        return diagnostic
+
+    safe = {key: parsed.get(key) for key in ADVISOR_FIELDS if key in parsed}
+    diagnostic["safe_response"] = safe
+    diagnostic["field_types"] = {
+        key: type(parsed[key]).__name__
+        for key in ADVISOR_FIELDS
+        if key in parsed
+    }
+    diagnostic["missing_keys"] = [
+        key for key in ADVISOR_FIELDS if key not in parsed
+    ]
+    diagnostic["unexpected_keys"] = sorted(
+        str(key) for key in parsed.keys() if key not in ADVISOR_FIELDS
+    )
+    return diagnostic
+
+
 def inspect_output(raw: object, available: set[str], current_selection: str | None) -> AdvisorResult:
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
         except (TypeError, ValueError):
             return AdvisorResult("invalid", "invalid", error="invalid_json")
-    expected = {
-        "situation", "missing_information", "proposed_action", "reason", "expected_result"
-    }
+    expected = set(ADVISOR_FIELDS)
     if not isinstance(raw, dict) or set(raw) != expected:
         return AdvisorResult("invalid", "invalid", error="invalid_response_schema")
 
@@ -209,7 +250,9 @@ def advise(
             return AdvisorResult(
                 "invalid", "invalid", model=selected_model,
                 error="missing_model_content", timeout_seconds=timeout,
+                request_context=context,
             )
+        response_diagnostic = diagnose_response(raw)
         checked = inspect_output(raw, available, current_selection)
         return AdvisorResult(
             checked.status,
@@ -222,6 +265,8 @@ def advise(
             expected_result=checked.expected_result,
             error=checked.error,
             timeout_seconds=timeout,
+            request_context=context,
+            response_diagnostic=response_diagnostic,
         )
     except (OSError, HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         return AdvisorResult(
@@ -230,4 +275,5 @@ def advise(
             model=attempted_model,
             error=type(exc).__name__,
             timeout_seconds=timeout,
+            request_context=context,
         )
