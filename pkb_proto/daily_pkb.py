@@ -762,6 +762,33 @@ def web_core_answer(result: dict) -> str:
     hits = result.get("hits") or []
     if not hits:
         return "Web検索で結果が見つかりませんでした。"
+
+    facts = result.get("fact_summary") or {}
+    if facts.get("kind") == "driver_version":
+        status = facts.get("status")
+        best = facts.get("best_candidate")
+        candidates = facts.get("candidates") or []
+        if status == "leading_consensus" and best:
+            leading = candidates[0] if candidates else {}
+            return (
+                f"Web調査ではドライバーバージョン候補 {best} が"
+                f"{leading.get('source_count', 0)}件のSourceで一致しています。"
+                "ただし検索結果だけで最終確定せず、上位根拠Sourceを確認してください。"
+            )
+        if status == "single_candidate" and best:
+            return (
+                f"Web調査ではドライバーバージョン候補 {best} を1系統で抽出しました。"
+                "複数Sourceでの一致はまだ確認できていないため、確定値とは扱いません。"
+            )
+        if status == "conflicting_candidates":
+            values = " / ".join(
+                str(row.get("value")) for row in candidates[:4] if row.get("value")
+            )
+            return (
+                "Web調査ではドライバーバージョン候補が一致していません。"
+                f"候補: {values}。一次Sourceと対象期間を追加確認する必要があります。"
+            )
+
     parts = []
     for hit in hits[:3]:
         title = hit.get("title") or hit.get("url") or "検索結果"
@@ -769,7 +796,7 @@ def web_core_answer(result: dict) -> str:
         if len(snippet) > 220:
             snippet = snippet[:217] + "..."
         parts.append(title + (f" — {snippet}" if snippet else ""))
-    return "Web調査では、" + " / ".join(parts) + "。"
+    return "Web調査では、根拠候補の上位は " + " / ".join(parts) + "。"
 
 
 def web_text(text: str) -> dict:
@@ -829,6 +856,11 @@ def _execute_core_read(capability: str, text: str) -> dict:
                         "url": hit.get("url"),
                         "snippet": hit.get("snippet"),
                         "fetch_status": hit.get("fetch_status"),
+                        "evidence_rank": hit.get("evidence_rank"),
+                        "quality_score": hit.get("quality_score"),
+                        "authority_hint": hit.get("authority_hint"),
+                        "version_candidates": hit.get("version_candidates"),
+                        "date_hints": hit.get("date_hints"),
                     }
                     for hit in (result.get("hits") or [])
                 ],
@@ -1962,6 +1994,23 @@ def core_page():
                             f"Provider: {web_result.get('provider') or '-'} / "
                             f"Query: {web_result.get('query') or '-'}"
                         ).classes("text-xs text-grey-7")
+                        fact_summary = web_result.get("fact_summary") or {}
+                        if fact_summary.get("kind") == "driver_version":
+                            with ui.card().classes("w-full border border-indigo-200 bg-indigo-50"):
+                                ui.label("抽出した事実候補").classes("font-bold text-indigo-900")
+                                ui.label(
+                                    "status="
+                                    + str(fact_summary.get("status") or "-")
+                                    + " / best="
+                                    + str(fact_summary.get("best_candidate") or "-")
+                                ).classes("font-mono text-xs")
+                                for candidate in (fact_summary.get("candidates") or [])[:5]:
+                                    ui.label(
+                                        f"{candidate.get('value')} / "
+                                        f"sources={candidate.get('source_count', 0)} / "
+                                        f"domains={candidate.get('domain_count', 0)} / "
+                                        f"best_quality={candidate.get('best_quality_score', 0)}"
+                                    ).classes("text-xs")
                         for hit in (web_result.get("hits") or [])[:5]:
                             with ui.card().classes("w-full p-2 gap-1"):
                                 ui.label(
@@ -1976,8 +2025,25 @@ def core_page():
                                 if hit.get("snippet"):
                                     ui.label(hit["snippet"]).classes("text-xs text-grey-8")
                                 ui.label(
+                                    "evidence_rank="
+                                    + str(hit.get("evidence_rank") or "-")
+                                    + " / quality="
+                                    + str(hit.get("quality_score") or 0)
+                                    + " / "
+                                    + str(hit.get("authority_hint") or "-")
+                                ).classes("font-mono text-xs text-grey-6")
+                                ui.label(
                                     "fetch=" + str(hit.get("fetch_status") or "unknown")
                                 ).classes("font-mono text-xs text-grey-6")
+                                if hit.get("version_candidates"):
+                                    ui.label(
+                                        "version候補: "
+                                        + ", ".join(hit.get("version_candidates") or [])
+                                    ).classes("text-xs text-indigo-8")
+                                if hit.get("date_hints"):
+                                    ui.label(
+                                        "日付候補: " + ", ".join(hit.get("date_hints") or [])
+                                    ).classes("text-xs text-grey-7")
 
                 finance_result = result.get("finance") or {}
                 if finance_result:
