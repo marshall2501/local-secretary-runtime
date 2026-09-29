@@ -17,8 +17,10 @@ from pkb_proto.daily_pkb import (
     _set_pkb_ui_open,
     _validate_ui_preferences,
     _contextualize_core_reply,
+    _core_finance_filters,
     core_answer,
     core_task_selection_result,
+    finance_core_answer,
     load_ui_preferences,
     parse_component_write,
     parse_correction,
@@ -207,6 +209,33 @@ class DailyPKBParserTests(unittest.TestCase):
                 "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 "status": "mystery",
             })
+
+    def test_core_scope_routes_finance_request_to_finance_read(self):
+        result = scope_core_request("2026年9月の支出を調べて", ENTITIES)
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["capability"], "finance_read")
+        self.assertEqual(result["domain"], "finance")
+
+    def test_core_finance_filters_parse_explicit_month(self):
+        filters = _core_finance_filters("2026年9月の家計を確認して")
+        self.assertEqual(filters["start_date"], "2026-09-01")
+        self.assertEqual(filters["end_date"], "2026-09-30")
+        self.assertEqual(filters["row_mode"], "calculation_target")
+
+    def test_finance_core_answer_formats_deterministic_totals(self):
+        answer = finance_core_answer({
+            "total": 3,
+            "transaction_count": 3,
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30",
+            "income_total": 100000,
+            "expense_total": 25000,
+            "net_total": 75000,
+        })
+        self.assertIn("3件", answer)
+        self.assertIn("¥100,000", answer)
+        self.assertIn("¥25,000", answer)
+        self.assertIn("¥75,000", answer)
 
     def test_core_scope_accepts_bounded_component_state_query(self):
         result = scope_core_request(
