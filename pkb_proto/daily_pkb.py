@@ -80,7 +80,7 @@ CORE_UI_DEFAULT_OPEN = {
 }
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
-CORE_ADVISOR_TIMEOUT_OPTIONS = (30, 60, 120, 180)
+CORE_ADVISOR_TIMEOUT_OPTIONS = (30, 60, 120, 180, 300, 600, 900)
 
 UI_VISIBILITY_DEFAULT = {
     "pkb": {key: True for key in PKB_UI_DEFAULT_OPEN},
@@ -2507,13 +2507,15 @@ def core_page():
         return derive_ooda(state["result"])
 
     def current_advisor_shadow():
-        result = state["result"] or {}
-        if result.get("advisor_shadow"):
-            return result["advisor_shadow"]
+        # Prefer DB trace because background Advisor updates arrive after the
+        # deterministic result object has already been returned to the UI.
         trace = state["trace"]
         if trace:
-            return (trace.get("task") or {}).get("advisor_shadow")
-        return None
+            shadow = (trace.get("task") or {}).get("advisor_shadow")
+            if shadow:
+                return shadow
+        result = state["result"] or {}
+        return result.get("advisor_shadow")
 
     def load_current_trace():
         # Share one snapshot between the bar, Task detail and execution log.
@@ -2525,6 +2527,26 @@ def core_page():
                 state["trace"] = load_core_task_trace(UUID(task_id))
             except Exception as exc:
                 state["trace_error"] = str(exc)
+
+    async def poll_advisor_shadow():
+        result = state["result"] or {}
+        task_id = result.get("task_id")
+        if not task_id:
+            return
+        advisor = current_advisor_shadow() or {}
+        if advisor.get("job_status") not in {"queued", "running"}:
+            return
+        try:
+            state["trace"] = await run.io_bound(
+                load_core_task_trace, UUID(task_id)
+            )
+            state["trace_error"] = None
+        except Exception as exc:
+            state["trace_error"] = str(exc)
+            return
+        ooda_bar.refresh()
+        core_result.refresh()
+        trace_panel.refresh()
 
     # NiceGUI drawers are top-level layout elements and must be created as
     # direct children of the page, not inside the central content column.
@@ -2841,14 +2863,38 @@ def core_page():
                             + " / comparison="
                             + str(advisor.get("comparison") or "-")
                         ).classes("font-mono text-xs")
+                        job_status = str(
+                            advisor.get("job_status") or advisor.get("status") or "-"
+                        )
+                        elapsed = advisor.get("elapsed_seconds")
+                        if job_status in {"queued", "running"} and advisor.get("started_at"):
+                            try:
+                                started = datetime.fromisoformat(str(advisor["started_at"]))
+                                elapsed = max(
+                                    0.0,
+                                    (datetime.now(timezone.utc) - started).total_seconds(),
+                                )
+                            except ValueError:
+                                pass
                         ui.label(
                             "model="
                             + str(advisor.get("model") or "-")
                             + " / timeout="
                             + str(advisor.get("timeout_seconds") or "-")
-                            + "s / status="
+                            + "s / job="
+                            + job_status
+                            + " / status="
                             + str(advisor.get("status") or "-")
+                            + " / elapsed="
+                            + (f"{float(elapsed):.1f}s" if elapsed is not None else "-")
                         ).classes("font-mono text-xs text-grey-7")
+                        if job_status in {"queued", "running"}:
+                            with ui.row().classes("items-center gap-2"):
+                                ui.spinner(size="sm", color="indigo")
+                                ui.label(
+                                    "Advisorはバックグラウンド評価中です。"
+                                    " Core本体の結果には影響しません。"
+                                ).classes("text-xs text-indigo-800")
                         if advisor.get("situation"):
                             ui.label("状況整理: " + str(advisor["situation"])).classes(
                                 "text-sm"
@@ -3240,6 +3286,7 @@ def core_page():
             core_result()
             resume_panel()
             trace_panel()
+            ui.timer(2.0, poll_advisor_shadow)
 
         screen_log_panel()
 
@@ -4605,5 +4652,53 @@ def pkb_page():
             ui.label("LLM解釈は現在driver_updated / servo_updatedの単一候補だけ。実データ、金融・給与・税務・Googleカレンダー連携は未実装です。")
 
 
+def _recover_interrupted_core_advisors() -> int:
+    """Mark queued/running advisor jobs from a previous process as interrupted."""
+    try:
+        with connection() as db:
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT id, checkpoint->'advisor_shadow'
+                       FROM secretary.tasks
+                       WHERE requested_by='local_user'
+                         AND COALESCE(checkpoint->>'core_slice', '')='daily_read_only_v1'
+                         AND COALESCE(checkpoint->'advisor_shadow'->>'job_status', '')
+                             IN ('queued', 'running')"""
+                )
+                rows = cur.fetchall()
+    except Exception:
+        return 0
+
+    recovered = 0
+    now = datetime.now(timezone.utc)
+    for task_id, shadow in rows:
+        current = dict(shadow or {})
+        started_text = current.get("started_at")
+        elapsed = current.get("elapsed_seconds") or 0.0
+        if started_text:
+            try:
+                started = datetime.fromisoformat(str(started_text))
+                elapsed = max(0.0, (now - started).total_seconds())
+            except ValueError:
+                pass
+        current.update({
+            "job_status": "error",
+            "status": "unavailable",
+            "comparison": "unavailable",
+            "finished_at": now.isoformat(),
+            "elapsed_seconds": round(float(elapsed), 3),
+            "error": "interrupted_by_server_restart",
+        })
+        try:
+            if _write_core_advisor_shadow(
+                UUID(str(task_id)), current, "core.advisor.interrupted"
+            ):
+                recovered += 1
+        except Exception:
+            pass
+    return recovered
+
+
 if __name__ == "__main__":
+    _recover_interrupted_core_advisors()
     ui.run(host="127.0.0.1", port=8093, reload=False, show=False, title="Local Secretary PKB")
