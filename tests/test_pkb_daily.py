@@ -20,6 +20,7 @@ from pkb_proto.daily_pkb import (
     _core_finance_filters,
     _compare_driver_values,
     _driver_web_query_from_detail,
+    _clarified_driver_web_target,
     core_answer,
     core_task_selection_result,
     finance_core_answer,
@@ -249,6 +250,20 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIn("AMD Drivers", answer)
         self.assertIn("Latest driver information.", answer)
         self.assertIn("Release Notes", answer)
+
+    def test_clarified_driver_target_builds_bounded_web_query(self):
+        target = _clarified_driver_web_target("GPUモデルは Radeon RX 9070 XT")
+        self.assertEqual(target["status"], "ready")
+        self.assertEqual(
+            target["query"],
+            "Radeon RX 9070 XT latest driver official",
+        )
+        self.assertTrue(target["clarified_by_user"])
+
+    def test_clarified_driver_target_rejects_empty_label_only_reply(self):
+        target = _clarified_driver_web_target("GPUモデルは")
+        self.assertEqual(target["status"], "missing_model")
+        self.assertIsNone(target["query"])
 
     def test_driver_web_query_prefers_authoritative_model_attributes(self):
         target = _driver_web_query_from_detail({
