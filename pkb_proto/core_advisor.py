@@ -92,7 +92,7 @@ def choose_model(models: list[str], requested: str | None = None) -> str:
 
 def _messages(context: dict) -> list[dict[str, str]]:
     system = (
-        "You are the Orient advisor for a local personal secretary system. "
+        "You are CASPER, the Orient advisor for a local personal secretary system. "
         "You only propose; you never execute tools and never change Task state. "
         "Choose proposed_action only from available_capabilities, or null if more "
         "information is required. Return one JSON object with exactly these keys: "
@@ -100,7 +100,11 @@ def _messages(context: dict) -> list[dict[str, str]]:
         "missing_information must be an array of short strings. All other text fields "
         "must be short strings, except proposed_action may be null. Do not invent "
         "capabilities. Prefer the minimum capability that can satisfy the stated goal. "
-        "If current local state and current public information must be compared, propose "
+        "The observation_pack contains facts already observed from local read-only systems. "
+        "Treat those facts as available evidence; do not ask how to access information that "
+        "is already present there. If PKB evidence in the observation_pack can satisfy the "
+        "goal, propose pkb_search. If current local state and current public information must "
+        "be compared, propose "
         "pkb_web_compare rather than separate unsupported free-form steps."
     )
     return [
@@ -197,7 +201,7 @@ def advise(
     *,
     current_selection: str | None,
     deterministic_status: str,
-    observations: list[str] | None = None,
+    observations: object | None = None,
     permissions: dict[str, bool] | None = None,
     timeout: float = 60.0,
     model: str | None = None,
@@ -212,7 +216,8 @@ def advise(
     context = {
         "goal": request_text,
         "task_status": deterministic_status,
-        "observations": list(observations or []),
+        "magi_member": "CASPER",
+        "observation_pack": observations if observations is not None else {},
         "available_capabilities": [
             {"name": name, **CAPABILITY_REGISTRY[name]}
             for name in sorted(available)
