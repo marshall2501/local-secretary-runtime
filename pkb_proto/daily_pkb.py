@@ -1368,7 +1368,7 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                        (task_id, actor, tool, operation, parameters, risk,
                         authorization_basis, status, idempotency_key,
                         reversible, started_at, finished_at)
-                       VALUES (%s, 'daily_core', 'pkb', 'search', %s,
+                       VALUES (%s, 'daily_core', %s, %s, %s,
                                'read_only', 'localhost_read_only',
                                'succeeded', %s, true, now(), now())
                        RETURNING id""",
@@ -1391,7 +1391,7 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                        (action_id, source_id, outcome, summary, evidence,
                         verified_by, verified_at)
                        VALUES (%s, %s, %s, %s, %s,
-                               'deterministic_pkb_query', now())
+                               %s, now())
                        RETURNING id""",
                     (
                         action_id,
@@ -1449,7 +1449,7 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                         action_id,
                         task_id,
                         Jsonb({
-                            "capability": "pkb_search",
+                            "capability": execution["capability"],
                             "result_count": total,
                             "reply_count": len(replies),
                         }),
