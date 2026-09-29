@@ -1126,6 +1126,19 @@ def _execute_pkb_web_compare(text: str, *, target_override: str | None = None) -
     }
 
 
+def _json_safe(value):
+    """Convert bounded Core evidence into JSON-safe values without dropping structure."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _execute_cooperative_local_probe(
     capability: str,
     text: str,
@@ -1143,17 +1156,12 @@ def _execute_cooperative_local_probe(
     )
     if target and target.get("id"):
         with connection() as db:
-            detail = load_entity_detail(db, str(target["id"])) or {}
-            rows = list_components(db, UUID(str(target["id"])))
-        items = []
-        for row in rows:
-            item = {}
-            for key, value in row.items():
-                if isinstance(value, (datetime, UUID)):
-                    item[key] = str(value)
-                else:
-                    item[key] = value
-            items.append(item)
+            detail = _json_safe(
+                load_entity_detail(db, str(target["id"])) or {}
+            )
+            items = _json_safe(
+                list_components(db, UUID(str(target["id"])))
+            )
         result = {
             "status": "ok",
             "result_kind": "components",
@@ -1379,7 +1387,9 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
             "melchior_scope_status": (
                 (trace_task.get("magi_baseline") or {}).get("status")
             ),
-            "melchior_baseline": result.get("selected_capability"),
+            "melchior_baseline": (
+                (trace_task.get("magi_baseline") or {}).get("selected_capability")
+            ),
             "casper_next_step": advisor.get("next_step"),
             "casper_proposal": advisor.get("proposed_action"),
             "synthesis": advisor.get("synthesis"),
