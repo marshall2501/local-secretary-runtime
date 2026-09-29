@@ -14,6 +14,16 @@ class CoreAdvisorTests(unittest.TestCase):
             "llama3.1:8b",
         )
 
+    def test_choose_model_honors_runtime_selection(self):
+        self.assertEqual(
+            choose_model(["llama3.1:8b", "gemma4:12b"], "gemma4:12b"),
+            "gemma4:12b",
+        )
+
+    def test_choose_model_rejects_uninstalled_runtime_selection(self):
+        with self.assertRaises(ValueError):
+            choose_model(["llama3.1:8b"], "gemma4:12b")
+
     def test_valid_matching_proposal(self):
         result = inspect_output(
             {
