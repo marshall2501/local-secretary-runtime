@@ -18,6 +18,7 @@ from pkb_proto.daily_pkb import (
     _validate_ui_preferences,
     _contextualize_core_reply,
     _core_finance_filters,
+    _compare_driver_values,
     core_answer,
     core_task_selection_result,
     finance_core_answer,
@@ -211,6 +212,15 @@ class DailyPKBParserTests(unittest.TestCase):
                 "status": "mystery",
             })
 
+    def test_core_scope_routes_current_vs_latest_driver_to_pkb_web_compare(self):
+        result = scope_core_request(
+            "メインPCのGPUの現在のドライバーをPKBで確認し、Webの最新と比較して",
+            ENTITIES,
+        )
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["capability"], "pkb_web_compare")
+        self.assertEqual(result["domain"], "pc")
+
     def test_core_scope_routes_explicit_web_request_to_web_research(self):
         result = scope_core_request(
             "RX 9070 XTの最新ドライバーをWebで調べて",
@@ -238,6 +248,39 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIn("AMD Drivers", answer)
         self.assertIn("Latest driver information.", answer)
         self.assertIn("Release Notes", answer)
+
+    def test_compare_driver_values_reports_match_for_same_version_format(self):
+        comparison = _compare_driver_values(
+            {
+                "items": [{"current_driver": "26.9.1"}],
+            },
+            {
+                "fact_summary": {
+                    "best_candidate": "26.9.1",
+                    "preferred_kind": "adrenalin_version",
+                    "status": "latest_by_date",
+                }
+            },
+        )
+        self.assertEqual(comparison["status"], "match")
+        self.assertEqual(comparison["current"], "26.9.1")
+        self.assertEqual(comparison["latest"], "26.9.1")
+
+    def test_compare_driver_values_refuses_incompatible_fixture_value(self):
+        comparison = _compare_driver_values(
+            {
+                "items": [{"current_driver": "DRV-G3"}],
+            },
+            {
+                "fact_summary": {
+                    "best_candidate": "26.9.1",
+                    "preferred_kind": "adrenalin_version",
+                    "status": "latest_by_date",
+                }
+            },
+        )
+        self.assertEqual(comparison["status"], "not_comparable")
+        self.assertIn("安全に比較できません", comparison["message"])
 
     def test_web_core_answer_does_not_overstate_conflicting_driver_candidates(self):
         answer = web_core_answer({
