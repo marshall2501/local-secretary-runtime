@@ -840,6 +840,88 @@ def web_text(text: str) -> dict:
     return result
 
 
+_VERSION_VALUE_PATTERN = re.compile(r"\b\d{2,4}\.\d{1,3}(?:\.\d{1,4}){1,2}\b")
+
+
+def _pkb_current_driver_value(result: dict) -> str | None:
+    for row in result.get("items") or []:
+        value = row.get("current_driver")
+        if value:
+            return str(value).strip()
+        if row.get("predicate") == "current_driver" and row.get("value"):
+            return str(row.get("value")).strip()
+    return None
+
+
+def _web_latest_version_value(result: dict) -> tuple[str | None, str | None, str | None]:
+    summary = result.get("fact_summary") or {}
+    return (
+        summary.get("best_candidate"),
+        summary.get("preferred_kind"),
+        summary.get("status"),
+    )
+
+
+def _compare_driver_values(pkb_result: dict, web_result: dict) -> dict:
+    current = _pkb_current_driver_value(pkb_result)
+    latest, latest_kind, web_status = _web_latest_version_value(web_result)
+
+    if not current or not latest:
+        return {
+            "status": "insufficient_evidence",
+            "current": current,
+            "latest": latest,
+            "latest_kind": latest_kind,
+            "web_status": web_status,
+            "message": "PKB現在値またはWeb最新候補が不足しているため比較できません。",
+        }
+
+    current_match = _VERSION_VALUE_PATTERN.search(current)
+    latest_match = _VERSION_VALUE_PATTERN.search(str(latest))
+    if not current_match or not latest_match:
+        return {
+            "status": "not_comparable",
+            "current": current,
+            "latest": str(latest),
+            "latest_kind": latest_kind,
+            "web_status": web_status,
+            "message": (
+                f"PKB現在値は {current}、Web最新候補は {latest} ですが、"
+                "同じ版番号形式として安全に比較できません。"
+            ),
+        }
+
+    current_value = current_match.group(0)
+    latest_value = latest_match.group(0)
+    same = current_value == latest_value
+    return {
+        "status": "match" if same else "different",
+        "current": current_value,
+        "latest": latest_value,
+        "latest_kind": latest_kind,
+        "web_status": web_status,
+        "message": (
+            f"PKB現在値 {current_value} とWeb最新候補 {latest_value} は一致しています。"
+            if same
+            else f"PKB現在値 {current_value} とWeb最新候補 {latest_value} は異なります。"
+        ),
+    }
+
+
+def _execute_pkb_web_compare(text: str) -> dict:
+    pkb = _execute_core_read("pkb_search", text)
+    web = _execute_core_read("web_research", text)
+    comparison = _compare_driver_values(pkb["result"], web["result"])
+    return {
+        "capability": "pkb_web_compare",
+        "executions": [pkb, web],
+        "comparison": comparison,
+        "answer": comparison["message"],
+        "pkb": pkb["result"],
+        "web": web["result"],
+    }
+
+
 def _execute_core_read(capability: str, text: str) -> dict:
     """Execute one bounded read-only capability and return normalized evidence metadata."""
     if capability == "pkb_search":
@@ -914,10 +996,22 @@ def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
             "reason": "empty_request",
         }
 
-    if any(
+    wants_web = any(
         word in q
         for word in ("Web", "WEB", "web", "ウェブ", "ネット", "インターネット", "公式サイト")
-    ):
+    )
+    wants_compare = any(word in q for word in ("比較", "最新か", "新しいか", "最新版か"))
+    wants_current_driver = "ドライバ" in q and any(
+        word in q for word in ("現在", "今の", "現行")
+    )
+    if wants_web and wants_compare and wants_current_driver:
+        return {
+            "status": "ready",
+            "capability": "pkb_web_compare",
+            "domain": "pc",
+        }
+
+    if wants_web:
         return {
             "status": "ready",
             "capability": "web_research",
@@ -1030,6 +1124,7 @@ def run_core_request(text: str) -> dict:
                             "pkb_read": True,
                             "finance_read": True,
                             "web_research": True,
+                            "pkb_web_compare": True,
                             "external_actions": False,
                         }),
                         initial_status,
@@ -1055,85 +1150,113 @@ def run_core_request(text: str) -> dict:
 
                 # Read capabilities use their own bounded DB connections so the
                 # surrounding Task write transaction remains independent.
-                execution = _execute_core_read(scoped["capability"], request)
-                result = execution["result"]
-                answer = execution["answer"]
-                total = execution["total"]
-                phase = "completed" if total > 0 else "awaiting_clarification"
-                task_status = "completed" if total > 0 else "waiting_external"
-                question = None if total > 0 else (
-                    "該当記録が見つかりませんでした。対象名や確認したい項目を"
-                    "もう少し具体的にしてください。"
+                if scoped["capability"] == "pkb_web_compare":
+                    plan_result = _execute_pkb_web_compare(request)
+                    executions = plan_result["executions"]
+                    answer = plan_result["answer"]
+                    comparison = plan_result["comparison"]
+                    result = {
+                        "status": "ok",
+                        "result_kind": "pkb_web_compare",
+                        "comparison": comparison,
+                    }
+                    total = sum(int(item.get("total") or 0) for item in executions)
+                else:
+                    execution = _execute_core_read(scoped["capability"], request)
+                    executions = [execution]
+                    answer = execution["answer"]
+                    result = execution["result"]
+                    comparison = None
+                    total = execution["total"]
+
+                enough = all(int(item.get("total") or 0) > 0 for item in executions)
+                phase = "completed" if enough else "awaiting_clarification"
+                task_status = "completed" if enough else "waiting_external"
+                question = None if enough else (
+                    "比較に必要な記録またはWeb根拠が不足しています。"
+                    "対象名や確認したい項目をもう少し具体的にしてください。"
                 )
 
-                cur.execute(
-                    """INSERT INTO secretary.sources
-                       (source_type, uri, citation, retrieved_at,
-                        confidentiality, metadata)
-                       VALUES ('tool', %s, %s, now(), 'private', %s)
-                       RETURNING id""",
-                    (
-                        f"tool://daily-core/{execution['source_slug']}/{task_id}",
-                        execution["citation"],
-                        Jsonb({
-                            "task_id": str(task_id),
-                            "capability": execution["capability"],
-                            "query": request,
-                            "result_count": total,
-                            **(execution.get("source_metadata") or {}),
-                        }),
-                    ),
-                )
-                source_id = cur.fetchone()[0]
+                action_ids = []
+                result_ids = []
+                for attempt, execution in enumerate(executions, start=1):
+                    execution_result = execution["result"]
+                    execution_total = int(execution.get("total") or 0)
+                    cur.execute(
+                        """INSERT INTO secretary.sources
+                           (source_type, uri, citation, retrieved_at,
+                            confidentiality, metadata)
+                           VALUES ('tool', %s, %s, now(), 'private', %s)
+                           RETURNING id""",
+                        (
+                            f"tool://daily-core/{execution['source_slug']}/{task_id}/{attempt}",
+                            execution["citation"],
+                            Jsonb({
+                                "task_id": str(task_id),
+                                "capability": execution["capability"],
+                                "query": request,
+                                "result_count": execution_total,
+                                **(execution.get("source_metadata") or {}),
+                            }),
+                        ),
+                    )
+                    source_id = cur.fetchone()[0]
 
-                cur.execute(
-                    """INSERT INTO secretary.actions
-                       (task_id, actor, tool, operation, parameters, risk,
-                        authorization_basis, status, idempotency_key,
-                        reversible, started_at, finished_at)
-                       VALUES (%s, 'daily_core', %s, %s, %s,
-                               'read_only', 'localhost_read_only',
-                               'succeeded', %s, true, now(), now())
-                       RETURNING id""",
-                    (
-                        task_id,
-                        execution["tool"],
-                        execution["operation"],
-                        Jsonb({"query": request, "bounded": True}),
-                        f"daily-core:{task_id}:{execution['source_slug']}:1",
-                    ),
-                )
-                action_id = cur.fetchone()[0]
+                    cur.execute(
+                        """INSERT INTO secretary.actions
+                           (task_id, actor, tool, operation, parameters, risk,
+                            authorization_basis, status, idempotency_key,
+                            reversible, started_at, finished_at)
+                           VALUES (%s, 'daily_core', %s, %s, %s,
+                                   'read_only', 'localhost_read_only',
+                                   'succeeded', %s, true, now(), now())
+                           RETURNING id""",
+                        (
+                            task_id,
+                            execution["tool"],
+                            execution["operation"],
+                            Jsonb({"query": request, "bounded": True, "step": attempt}),
+                            f"daily-core:{task_id}:{execution['source_slug']}:{attempt}",
+                        ),
+                    )
+                    action_id = cur.fetchone()[0]
+                    action_ids.append(action_id)
 
-                cur.execute(
-                    """INSERT INTO secretary.results
-                       (action_id, source_id, outcome, summary, evidence,
-                        verified_by, verified_at)
-                       VALUES (%s, %s, %s, %s, %s,
-                               %s, now())
-                       RETURNING id""",
-                    (
-                        action_id,
-                        source_id,
-                        "success" if total > 0 else "inconclusive",
-                        answer,
-                        Jsonb({
-                            "result_kind": result.get("result_kind"),
-                            "total": total,
-                            "data": result,
-                        }),
-                        execution["verified_by"],
-                    ),
-                )
-                result_id = cur.fetchone()[0]
+                    cur.execute(
+                        """INSERT INTO secretary.results
+                           (action_id, source_id, outcome, summary, evidence,
+                            verified_by, verified_at)
+                           VALUES (%s, %s, %s, %s, %s,
+                                   %s, now())
+                           RETURNING id""",
+                        (
+                            action_id,
+                            source_id,
+                            "success" if execution_total > 0 else "inconclusive",
+                            execution["answer"],
+                            Jsonb({
+                                "result_kind": execution_result.get("result_kind"),
+                                "total": execution_total,
+                                "data": execution_result,
+                            }),
+                            execution["verified_by"],
+                        ),
+                    )
+                    result_ids.append(cur.fetchone()[0])
+
+                action_id = action_ids[-1]
+                result_id = result_ids[-1]
 
                 final_checkpoint = {
                     "core_slice": "daily_read_only_v1",
                     "phase": phase,
-                    "selected_capability": execution["capability"],
+                    "selected_capability": scoped["capability"],
                     "action_id": str(action_id),
                     "result_id": str(result_id),
+                    "action_ids": [str(value) for value in action_ids],
+                    "result_ids": [str(value) for value in result_ids],
                     "result_count": total,
+                    "comparison": comparison,
                     "question": question,
                 }
                 cur.execute(
@@ -1154,7 +1277,12 @@ def run_core_request(text: str) -> dict:
                         task_id,
                         action_id,
                         task_id,
-                        Jsonb({"capability": execution["capability"], "result_count": total}),
+                        Jsonb({
+                            "capability": scoped["capability"],
+                            "result_count": total,
+                            "action_count": len(action_ids),
+                            "comparison": comparison,
+                        }),
                     ),
                 )
 
@@ -1164,11 +1292,20 @@ def run_core_request(text: str) -> dict:
                     "phase": phase,
                     "message": answer,
                     "question": question,
-                    "selected_capability": execution["capability"],
+                    "selected_capability": scoped["capability"],
                     "capability_result": result,
-                    "search": result if execution["capability"] == "pkb_search" else None,
-                    "finance": result if execution["capability"] == "finance_read" else None,
-                    "web": result if execution["capability"] == "web_research" else None,
+                    "comparison": comparison,
+                    "search": (
+                        plan_result["pkb"]
+                        if scoped["capability"] == "pkb_web_compare"
+                        else result if scoped["capability"] == "pkb_search" else None
+                    ),
+                    "finance": result if scoped["capability"] == "finance_read" else None,
+                    "web": (
+                        plan_result["web"]
+                        if scoped["capability"] == "pkb_web_compare"
+                        else result if scoped["capability"] == "web_research" else None
+                    ),
                 }
 
 
