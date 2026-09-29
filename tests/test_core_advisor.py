@@ -151,6 +151,7 @@ class CoreAdvisorTests(unittest.TestCase):
             "メインPCのGPUの現在のドライバーを調べて",
             "pkb_search",
             "ready",
+            {"version": "magi_observation_v1", "matched_entities": []},
             "gemma3:12b",
             600,
         )
@@ -164,6 +165,11 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(final["model"], "gemma3:12b")
         self.assertEqual(final["timeout_seconds"], 600)
         self.assertIsNotNone(final["elapsed_seconds"])
+        advise_kwargs = advise_mock.call_args.kwargs
+        self.assertEqual(
+            advise_kwargs["observations"]["version"],
+            "magi_observation_v1",
+        )
 
     @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
     @patch("pkb_proto.daily_pkb.advise_core")
@@ -185,6 +191,7 @@ class CoreAdvisorTests(unittest.TestCase):
             "test",
             "pkb_search",
             "ready",
+            {"version": "magi_observation_v1", "matched_entities": []},
             "gemma3:12b",
             900,
         )
