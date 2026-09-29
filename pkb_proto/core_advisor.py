@@ -11,33 +11,12 @@ from dataclasses import asdict, dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .core_capabilities import CAPABILITY_REGISTRY
+
 
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED_MODELS = ("llama3.1:8b", "qwen3.5:9b")
 ADVISOR_FIELDS = ("situation", "missing_information", "next_step", "proposed_action", "reason", "expected_result")
-
-CAPABILITY_REGISTRY = {
-    "pkb_search": {
-        "description": "Search the user's local PKB for PC/RC configuration, state and history.",
-        "risk": "local_read_only",
-        "permissions": ["pkb_read"],
-    },
-    "finance_read": {
-        "description": "Read and aggregate already imported household-finance data.",
-        "risk": "local_read_only",
-        "permissions": ["finance_read"],
-    },
-    "web_research": {
-        "description": "Perform bounded read-only public Web research.",
-        "risk": "external_read",
-        "permissions": ["web_research"],
-    },
-    "pkb_web_compare": {
-        "description": "Use both PKB current state and bounded Web research in one Task for comparison.",
-        "risk": "external_read",
-        "permissions": ["pkb_read", "web_research"],
-    },
-}
 
 
 @dataclass(frozen=True)
