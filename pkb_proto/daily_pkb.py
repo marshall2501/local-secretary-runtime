@@ -726,8 +726,10 @@ def finance_text(text: str) -> dict:
         "total": dashboard.transaction_count,
         "transaction_count": dashboard.transaction_count,
         "calculation_target_count": dashboard.calculation_target_count,
-        "start_date": dashboard.start_date,
-        "end_date": dashboard.end_date,
+        "requested_start_date": filters["start_date"],
+        "requested_end_date": filters["end_date"],
+        "data_start_date": dashboard.start_date,
+        "data_end_date": dashboard.end_date,
         "income_total": dashboard.income_total,
         "expense_total": dashboard.expense_total,
         "net_total": dashboard.net_total,
@@ -742,8 +744,11 @@ def finance_core_answer(result: dict) -> str:
     if int(result.get("total") or 0) == 0:
         return "保存済み家計に該当する明細が見つかりませんでした。"
     period = ""
-    if result.get("start_date") or result.get("end_date"):
-        period = f"{result.get('start_date') or '-'}〜{result.get('end_date') or '-'}の"
+    if result.get("requested_start_date") or result.get("requested_end_date"):
+        period = (
+            f"{result.get('requested_start_date') or '-'}〜"
+            f"{result.get('requested_end_date') or '-'}の"
+        )
     return (
         f"保存済み家計では、{period}集計対象は{result['transaction_count']}件、"
         f"収入は¥{int(result['income_total']):,}、"
@@ -1890,9 +1895,13 @@ def core_page():
                         "w-full border border-teal-200 bg-white"
                     ):
                         ui.label(
-                            f"期間: {finance_result.get('start_date') or '-'}"
-                            f" 〜 {finance_result.get('end_date') or '-'}"
+                            f"検索期間: {finance_result.get('requested_start_date') or '-'}"
+                            f" 〜 {finance_result.get('requested_end_date') or '-'}"
                         ).classes("text-sm")
+                        ui.label(
+                            f"明細存在期間: {finance_result.get('data_start_date') or '-'}"
+                            f" 〜 {finance_result.get('data_end_date') or '-'}"
+                        ).classes("text-xs text-grey-7")
                         ui.label(
                             f"明細 {finance_result.get('transaction_count', 0)}件 / "
                             f"収入 ¥{int(finance_result.get('income_total') or 0):,} / "
