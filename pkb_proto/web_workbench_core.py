@@ -13,12 +13,12 @@ import sqlite3
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .background_jobs import SerialBackgroundExecutor
 from .diagnostic_cases import MODES, build_ollama_payload, judge_response
 from .fictional_fixture import load_fictional_episodes
 from .extraction_service import Extraction, inspect_model_output
@@ -119,7 +119,7 @@ class ExperimentRunner:
     def __init__(self, store: RunStore, *, fixture: Path = FIXTURE, transport=None):
         self.store = store
         self.episodes = {ep["id"]: ep for ep in load_fictional_episodes(fixture)}
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pkb-web-workbench")
+        self.pool = SerialBackgroundExecutor("pkb-web-workbench")
         self.transport = transport or self._call_ollama
         self.lock = threading.Lock()
 
@@ -215,4 +215,4 @@ class ExperimentRunner:
             self.store.update(run_id, "error", error=f"{type(exc).__name__}: {exc}"[:500])
 
     def close(self):
-        self.pool.shutdown(wait=True)
+        self.pool.close(wait=True)
