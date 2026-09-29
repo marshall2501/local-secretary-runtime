@@ -19,6 +19,7 @@ from pkb_proto.daily_pkb import (
     _contextualize_core_reply,
     _core_finance_filters,
     _compare_driver_values,
+    _driver_web_query_from_detail,
     core_answer,
     core_task_selection_result,
     finance_core_answer,
@@ -248,6 +249,53 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIn("AMD Drivers", answer)
         self.assertIn("Latest driver information.", answer)
         self.assertIn("Release Notes", answer)
+
+    def test_driver_web_query_prefers_authoritative_model_attributes(self):
+        target = _driver_web_query_from_detail({
+            "entity": {
+                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "name": "GPU1",
+                "domain": "pc",
+                "entity_type": "gpu",
+            },
+            "current": [
+                {
+                    "predicate": "manufacturer",
+                    "value": "AMD",
+                    "semantic_kind": "attribute",
+                },
+                {
+                    "predicate": "model",
+                    "value": "Radeon RX 9070 XT",
+                    "semantic_kind": "attribute",
+                },
+            ],
+        })
+        self.assertEqual(target["status"], "ready")
+        self.assertEqual(
+            target["query"],
+            "AMD Radeon RX 9070 XT latest driver official",
+        )
+        self.assertEqual(target["model"], "Radeon RX 9070 XT")
+
+    def test_driver_web_query_refuses_generic_entity_without_model(self):
+        target = _driver_web_query_from_detail({
+            "entity": {
+                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "name": "GPU1",
+                "domain": "pc",
+                "entity_type": "gpu",
+            },
+            "current": [
+                {
+                    "predicate": "current_driver",
+                    "value": "DRV-G3",
+                    "semantic_kind": "state",
+                },
+            ],
+        })
+        self.assertEqual(target["status"], "missing_model")
+        self.assertIsNone(target["query"])
 
     def test_compare_driver_values_reports_match_for_same_version_format(self):
         comparison = _compare_driver_values(
