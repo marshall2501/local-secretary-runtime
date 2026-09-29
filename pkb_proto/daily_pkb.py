@@ -78,6 +78,7 @@ CORE_UI_DEFAULT_OPEN = {
 }
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
+CORE_ADVISOR_TIMEOUT_OPTIONS = (30, 60, 120, 180)
 
 UI_VISIBILITY_DEFAULT = {
     "pkb": {key: True for key in PKB_UI_DEFAULT_OPEN},
@@ -101,6 +102,7 @@ def _default_ui_preferences() -> dict:
         },
         "core": dict(CORE_UI_DEFAULT_OPEN),
         "core_advisor_model": None,
+        "core_advisor_timeout": 60,
         "visibility": {
             section: dict(values)
             for section, values in UI_VISIBILITY_DEFAULT.items()
@@ -158,6 +160,10 @@ def _validate_ui_preferences(raw: object) -> dict:
         advisor_model = advisor_model.strip()
         if advisor_model and len(advisor_model) <= 100 and not any(ch.isspace() for ch in advisor_model):
             result["core_advisor_model"] = advisor_model
+
+    advisor_timeout = raw.get("core_advisor_timeout")
+    if type(advisor_timeout) is int and advisor_timeout in CORE_ADVISOR_TIMEOUT_OPTIONS:
+        result["core_advisor_timeout"] = advisor_timeout
 
     visibility = raw.get("visibility")
     if isinstance(visibility, dict):
@@ -248,7 +254,7 @@ def _set_core_ui_open(key: str, value: bool) -> None:
     _CORE_UI_OPEN[key] = bool(value)
 
 
-def _save_core_advisor_model(model: str | None) -> str | None:
+def _save_core_advisor_settings(model: str | None, timeout_seconds: int) -> tuple[str | None, int]:
     preferences = {
         **_UI_PREFERENCES,
         "pkb": dict(_UI_PREFERENCES["pkb"]),
@@ -260,10 +266,11 @@ def _save_core_advisor_model(model: str | None) -> str | None:
             for section, values in _UI_PREFERENCES["visibility"].items()
         },
         "core_advisor_model": model,
+        "core_advisor_timeout": timeout_seconds,
     }
     saved = save_ui_preferences(preferences)
     _apply_ui_preferences(saved)
-    return saved.get("core_advisor_model")
+    return saved.get("core_advisor_model"), int(saved["core_advisor_timeout"])
 
 
 def _block_visibility_class(section: str, key: str) -> str:
@@ -1270,7 +1277,11 @@ def core_answer(search_result: dict) -> str:
     return "PKBの記録では、" + " / ".join(parts) + "。"
 
 
-def run_core_request(text: str, advisor_model: str | None = None) -> dict:
+def run_core_request(
+    text: str,
+    advisor_model: str | None = None,
+    advisor_timeout: float = 60.0,
+) -> dict:
     """First daily Secretary Core slice: Task -> bounded PKB read -> Result."""
     request = text.strip()
     if not request:
@@ -1290,6 +1301,7 @@ def run_core_request(text: str, advisor_model: str | None = None) -> dict:
         current_selection=scoped.get("capability"),
         deterministic_status=scoped["status"],
         model=advisor_model,
+        timeout=advisor_timeout,
     ).as_dict()
 
     task_id = uuid4()
@@ -2330,7 +2342,8 @@ def features_page():
 def core_page():
     state = {"result": None, "busy": False, "resume_busy": False,
              "trace": None, "trace_error": None,
-             "advisor_model": _UI_PREFERENCES.get("core_advisor_model")}
+             "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
+             "advisor_timeout": int(_UI_PREFERENCES.get("core_advisor_timeout") or 60)}
 
     def current_ooda():
         if state["busy"] or state["resume_busy"]:
@@ -2394,6 +2407,11 @@ def core_page():
                 value=saved_advisor_model,
                 label="Advisor Model",
             ).classes("min-w-64")
+            advisor_timeout_select = ui.select(
+                options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                value=int(state.get("advisor_timeout") or 60),
+                label="Advisor Timeout (秒)",
+            ).classes("min-w-40")
             ui.label(
                 "Shadow Mode用。変更は次の新規Taskから反映します。"
             ).classes("text-xs text-grey-7")
@@ -2403,9 +2421,19 @@ def core_page():
                 if selected and selected not in advisor_model_select.options:
                     ui.notify("インストール済みモデルを選択してください", type="negative")
                     return
-                state["advisor_model"] = _save_core_advisor_model(selected)
+                timeout_seconds = int(advisor_timeout_select.value or 60)
+                if timeout_seconds not in CORE_ADVISOR_TIMEOUT_OPTIONS:
+                    ui.notify("Timeoutは一覧から選択してください", type="negative")
+                    return
+                saved_model, saved_timeout = _save_core_advisor_settings(
+                    selected, timeout_seconds
+                )
+                state["advisor_model"] = saved_model
+                state["advisor_timeout"] = saved_timeout
                 ui.notify(
-                    "Advisor Modelを保存しました: " + str(state["advisor_model"] or "自動"),
+                    "Advisor設定を保存しました: "
+                    + str(state["advisor_model"] or "自動")
+                    + f" / {state['advisor_timeout']}秒",
                     type="positive",
                 )
 
@@ -2663,7 +2691,9 @@ def core_page():
                         ui.label(
                             "model="
                             + str(advisor.get("model") or "-")
-                            + " / status="
+                            + " / timeout="
+                            + str(advisor.get("timeout_seconds") or "-")
+                            + "s / status="
                             + str(advisor.get("status") or "-")
                         ).classes("font-mono text-xs text-grey-7")
                         if advisor.get("situation"):
@@ -3028,6 +3058,7 @@ def core_page():
                         run_core_request,
                         request_input.value or "",
                         state.get("advisor_model"),
+                        float(state.get("advisor_timeout") or 60),
                     )
                 except Exception as exc:
                     state["result"] = {
@@ -3218,6 +3249,7 @@ def settings_page():
                     for key, control in core_open_controls.items()
                 },
                 "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
+                "core_advisor_timeout": _UI_PREFERENCES.get("core_advisor_timeout", 60),
                 "visibility": {
                     "pkb": {
                         key: bool(control.value)
