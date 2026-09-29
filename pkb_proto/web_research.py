@@ -425,7 +425,15 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
     ]
     historical_groups.sort(key=lambda row: priority.get(row["kind"], 99))
 
-    preferred = groups[0] if groups else None
+    primary_groups = [
+        group
+        for group in groups
+        if any(
+            int(candidate.get("primary_source_count") or 0) > 0
+            for candidate in (group.get("candidates") or [])
+        )
+    ]
+    preferred = primary_groups[0] if primary_groups else (groups[0] if groups else None)
     primary_current_candidates = [
         candidate
         for group in groups
