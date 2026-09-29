@@ -21,7 +21,7 @@ if (-not (Test-Path -LiteralPath $secret -PathType Leaf)) {
     throw 'Missing isolated PKB writer secret. Run the already validated prototype setup/smoke path first.'
 }
 
-& $python -c 'import nicegui, fastapi, psycopg'
+& $python -c 'import nicegui, fastapi, psycopg, ddgs'
 if ($LASTEXITCODE -ne 0) {
     throw 'Required Python packages are missing. Install the existing runtime/web requirements explicitly; this launcher installs nothing.'
 }
