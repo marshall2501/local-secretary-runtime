@@ -90,6 +90,7 @@ class DailyPKBParserTests(unittest.TestCase):
                 "job_status": "completed",
                 "status": "ok",
                 "elapsed_seconds": 66.2,
+                "next_step": "observe",
                 "proposed_action": "pkb_search",
                 "comparison": "match",
                 "missing_information": [],
@@ -113,6 +114,7 @@ class DailyPKBParserTests(unittest.TestCase):
         )
         self.assertEqual(payload["task_id"], "task-1")
         self.assertEqual(payload["magi"]["melchior_baseline"], "pkb_search")
+        self.assertEqual(payload["magi"]["casper_next_step"], "observe")
         self.assertEqual(payload["magi"]["casper_proposal"], "pkb_search")
         self.assertEqual(payload["magi"]["comparison"], "match")
         self.assertEqual(payload["magi"]["melchior_scope_status"], "ready")
