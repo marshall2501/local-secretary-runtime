@@ -150,7 +150,6 @@ class CoreAdvisorTests(unittest.TestCase):
             task_id,
             "メインPCのGPUの現在のドライバーを調べて",
             "pkb_search",
-            "ready",
             {"version": "magi_observation_v1", "matched_entities": []},
             "gemma3:12b",
             600,
@@ -190,7 +189,6 @@ class CoreAdvisorTests(unittest.TestCase):
             UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
             "test",
             "pkb_search",
-            "ready",
             {"version": "magi_observation_v1", "matched_entities": []},
             "gemma3:12b",
             900,
@@ -207,7 +205,7 @@ class CoreAdvisorTests(unittest.TestCase):
         result = advise(
             "メインPCのGPUを調べて",
             current_selection="pkb_search",
-            deterministic_status="ready",
+            task_state="received",
             timeout=0.1,
             model="llama3.1:8b",
         )
@@ -216,6 +214,8 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.model, "llama3.1:8b")
         self.assertEqual(result.timeout_seconds, 0.1)
         self.assertEqual(result.error, "URLError")
+        self.assertEqual(result.request_context["task_state"], "received")
+        self.assertNotIn("task_status", result.request_context)
         self.assertNotIn("task_status", result.request_context)
 
 
