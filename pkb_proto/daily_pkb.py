@@ -2917,16 +2917,16 @@ def core_page():
                     with ui.card().classes(
                         "w-full border border-indigo-200 bg-indigo-50"
                     ):
-                        ui.label("LLM Advisor · Shadow Mode").classes(
+                        ui.label("MAGI v0 · CASPER Shadow Advisor").classes(
                             "font-bold text-indigo-900"
                         )
                         ui.label(
                             "実行には使用していません。現行Coreの選択と比較する観測用提案です。"
                         ).classes("text-xs text-grey-7")
                         ui.label(
-                            "Current selection: "
+                            "MELCHIOR baseline: "
                             + str(result.get("selected_capability") or "-")
-                            + " / LLM proposal: "
+                            + " / CASPER proposal: "
                             + str(advisor.get("proposed_action") or "-")
                             + " / comparison="
                             + str(advisor.get("comparison") or "-")
@@ -3018,6 +3018,25 @@ def core_page():
                                 + " / error="
                                 + str(advisor.get("error") or "-")
                             ).classes("font-mono text-xs")
+
+                            trace_task = (state.get("trace") or {}).get("task") or {}
+                            observation_pack = (
+                                trace_task.get("observation_pack")
+                                or result.get("observation_pack")
+                            )
+                            if observation_pack:
+                                ui.label("MELCHIOR / CASPER 共通 Observation Pack").classes(
+                                    "font-medium text-sm"
+                                )
+                                ui.code(
+                                    json.dumps(
+                                        observation_pack,
+                                        ensure_ascii=False,
+                                        indent=2,
+                                        default=str,
+                                    ),
+                                    language="json",
+                                ).classes("w-full text-xs")
 
                             request_context = advisor.get("request_context")
                             if request_context:
