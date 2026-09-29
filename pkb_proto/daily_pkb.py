@@ -612,6 +612,9 @@ def _search_text_with_db(db, text: str) -> dict:
     entities = _entity_map(db)
     q = text.strip()
 
+    if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
+        return {"status": "ready", "capability": "finance_read", "domain": "finance"}
+
     component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
     if component_state and any(word in q for word in ("現在", "今の", "現行")):
         resolved = resolve_component_reference(
@@ -671,6 +674,116 @@ def _search_text_with_db(db, text: str) -> dict:
 def search_text(text: str) -> dict:
     with connection() as db:
         return _search_text_with_db(db, text)
+
+
+def _core_finance_filters(text: str) -> dict:
+    """Parse the intentionally small date scope supported by the first finance Core slice."""
+    q = text.strip()
+    start_date = None
+    end_date = None
+
+    explicit = re.search(r"(?P<year>20\\d{2})年(?P<month>1[0-2]|0?[1-9])月", q)
+    if explicit:
+        year = int(explicit.group("year"))
+        month = int(explicit.group("month"))
+        start = datetime(year, month, 1).date()
+        if month == 12:
+            next_month = datetime(year + 1, 1, 1).date()
+        else:
+            next_month = datetime(year, month + 1, 1).date()
+        start_date = start.isoformat()
+        end_date = (next_month.fromordinal(next_month.toordinal() - 1)).isoformat()
+    elif "今月" in q:
+        today = datetime.now().date()
+        start = today.replace(day=1)
+        if today.month == 12:
+            next_month = today.replace(year=today.year + 1, month=1, day=1)
+        else:
+            next_month = today.replace(month=today.month + 1, day=1)
+        start_date = start.isoformat()
+        end_date = next_month.fromordinal(next_month.toordinal() - 1).isoformat()
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "row_mode": "calculation_target",
+    }
+
+
+def finance_text(text: str) -> dict:
+    filters = _core_finance_filters(text)
+    with connection() as db:
+        dashboard = load_finance_dashboard(
+            db,
+            recent_limit=5,
+            start_date=filters["start_date"],
+            end_date=filters["end_date"],
+            row_mode=filters["row_mode"],
+            page=1,
+            sort_by="date",
+            sort_dir="desc",
+        )
+    return {
+        "status": "ok",
+        "result_kind": "finance_summary",
+        "total": dashboard.transaction_count,
+        "transaction_count": dashboard.transaction_count,
+        "calculation_target_count": dashboard.calculation_target_count,
+        "start_date": dashboard.start_date,
+        "end_date": dashboard.end_date,
+        "income_total": dashboard.income_total,
+        "expense_total": dashboard.expense_total,
+        "net_total": dashboard.net_total,
+        "monthly": dashboard.monthly[:12],
+        "categories": dashboard.categories[:10],
+        "recent_rows": dashboard.recent_rows[:5],
+        "import_batches": dashboard.import_batches[:1],
+    }
+
+
+def finance_core_answer(result: dict) -> str:
+    if int(result.get("total") or 0) == 0:
+        return "保存済み家計に該当する明細が見つかりませんでした。"
+    period = ""
+    if result.get("start_date") or result.get("end_date"):
+        period = f"{result.get('start_date') or '-'}〜{result.get('end_date') or '-'}の"
+    return (
+        f"保存済み家計では、{period}集計対象は{result['transaction_count']}件、"
+        f"収入は¥{int(result['income_total']):,}、"
+        f"支出は¥{int(result['expense_total']):,}、"
+        f"収支は¥{int(result['net_total']):,}です。"
+    )
+
+
+def _execute_core_read(capability: str, text: str) -> dict:
+    """Execute one bounded read-only capability and return normalized evidence metadata."""
+    if capability == "pkb_search":
+        result = search_text(text)
+        return {
+            "capability": capability,
+            "result": result,
+            "answer": core_answer(result),
+            "total": int(result.get("total") or 0),
+            "tool": "pkb",
+            "operation": "search",
+            "source_slug": "pkb-search",
+            "citation": "Secretary Core read-only PKB search result",
+            "verified_by": "deterministic_pkb_query",
+        }
+    if capability == "finance_read":
+        result = finance_text(text)
+        return {
+            "capability": capability,
+            "result": result,
+            "answer": finance_core_answer(result),
+            "total": int(result.get("total") or 0),
+            "tool": "finance",
+            "operation": "summary",
+            "source_slug": "finance-read",
+            "citation": "Secretary Core read-only finance summary",
+            "verified_by": "deterministic_finance_query",
+        }
+    raise ValueError("Unsupported Core read capability")
 
 
 def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
@@ -777,8 +890,12 @@ def run_core_request(text: str) -> dict:
                         task_id,
                         request,
                         domain,
-                        "Return bounded PKB evidence with provenance or ask for clarification.",
-                        Jsonb({"pkb_read": True, "external_actions": False}),
+                        "Return bounded local evidence with provenance or ask for clarification.",
+                        Jsonb({
+                            "pkb_read": True,
+                            "finance_read": True,
+                            "external_actions": False,
+                        }),
                         initial_status,
                         Jsonb(checkpoint),
                     ),
@@ -800,14 +917,12 @@ def run_core_request(text: str) -> dict:
                         "question": scoped["question"],
                     }
 
-                # query_claims deliberately opens its own REPEATABLE READ,
-                # READ ONLY transaction for a consistent count/page snapshot.
-                # Keep that Knowledge read on a separate connection so the
-                # surrounding Task write transaction does not become a nested
-                # transaction whose isolation level is set after prior queries.
-                result = search_text(request)
-                answer = core_answer(result)
-                total = int(result.get("total") or 0)
+                # Read capabilities use their own bounded DB connections so the
+                # surrounding Task write transaction remains independent.
+                execution = _execute_core_read(scoped["capability"], request)
+                result = execution["result"]
+                answer = execution["answer"]
+                total = execution["total"]
                 phase = "completed" if total > 0 else "awaiting_clarification"
                 task_status = "completed" if total > 0 else "waiting_external"
                 question = None if total > 0 else (
@@ -822,11 +937,11 @@ def run_core_request(text: str) -> dict:
                        VALUES ('tool', %s, %s, now(), 'private', %s)
                        RETURNING id""",
                     (
-                        f"tool://daily-core/pkb-search/{task_id}",
-                        "Secretary Core read-only PKB search result",
+                        f"tool://daily-core/{execution['source_slug']}/{task_id}",
+                        execution["citation"],
                         Jsonb({
                             "task_id": str(task_id),
-                            "capability": "pkb_search",
+                            "capability": execution["capability"],
                             "query": request,
                             "result_count": total,
                         }),
@@ -839,14 +954,16 @@ def run_core_request(text: str) -> dict:
                        (task_id, actor, tool, operation, parameters, risk,
                         authorization_basis, status, idempotency_key,
                         reversible, started_at, finished_at)
-                       VALUES (%s, 'daily_core', 'pkb', 'search', %s,
+                       VALUES (%s, 'daily_core', %s, %s, %s,
                                'read_only', 'localhost_read_only',
                                'succeeded', %s, true, now(), now())
                        RETURNING id""",
                     (
                         task_id,
+                        execution["tool"],
+                        execution["operation"],
                         Jsonb({"query": request, "bounded": True}),
-                        f"daily-core:{task_id}:pkb-search:1",
+                        f"daily-core:{task_id}:{execution['source_slug']}:1",
                     ),
                 )
                 action_id = cur.fetchone()[0]
@@ -856,7 +973,7 @@ def run_core_request(text: str) -> dict:
                        (action_id, source_id, outcome, summary, evidence,
                         verified_by, verified_at)
                        VALUES (%s, %s, %s, %s, %s,
-                               'deterministic_pkb_query', now())
+                               %s, now())
                        RETURNING id""",
                     (
                         action_id,
@@ -866,8 +983,9 @@ def run_core_request(text: str) -> dict:
                         Jsonb({
                             "result_kind": result.get("result_kind"),
                             "total": total,
-                            "items": (result.get("items") or [])[:20],
+                            "data": result,
                         }),
+                        execution["verified_by"],
                     ),
                 )
                 result_id = cur.fetchone()[0]
@@ -875,7 +993,7 @@ def run_core_request(text: str) -> dict:
                 final_checkpoint = {
                     "core_slice": "daily_read_only_v1",
                     "phase": phase,
-                    "selected_capability": "pkb_search",
+                    "selected_capability": execution["capability"],
                     "action_id": str(action_id),
                     "result_id": str(result_id),
                     "result_count": total,
@@ -899,7 +1017,7 @@ def run_core_request(text: str) -> dict:
                         task_id,
                         action_id,
                         task_id,
-                        Jsonb({"capability": "pkb_search", "result_count": total}),
+                        Jsonb({"capability": execution["capability"], "result_count": total}),
                     ),
                 )
 
@@ -909,8 +1027,10 @@ def run_core_request(text: str) -> dict:
                     "phase": phase,
                     "message": answer,
                     "question": question,
-                    "selected_capability": "pkb_search",
-                    "search": result,
+                    "selected_capability": execution["capability"],
+                    "capability_result": result,
+                    "search": result if execution["capability"] == "pkb_search" else None,
+                    "finance": result if execution["capability"] == "finance_read" else None,
                 }
 
 
@@ -1196,10 +1316,12 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     (task_id,),
                 )
 
-                # Keep the consistent PKB snapshot on its own read-only connection.
-                result = search_text(effective_request)
-                answer = core_answer(result)
-                total = int(result.get("total") or 0)
+                execution = _execute_core_read(
+                    scoped["capability"], effective_request
+                )
+                result = execution["result"]
+                answer = execution["answer"]
+                total = execution["total"]
                 phase = "completed" if total > 0 else "awaiting_clarification"
                 task_status = "completed" if total > 0 else "waiting_external"
                 question = None if total > 0 else (
@@ -1220,11 +1342,11 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                        VALUES ('tool', %s, %s, now(), 'private', %s)
                        RETURNING id""",
                     (
-                        f"tool://daily-core/pkb-search/{task_id}/{attempt}",
-                        "Secretary Core resumed read-only PKB search result",
+                        f"tool://daily-core/{execution['source_slug']}/{task_id}/{attempt}",
+                        "Secretary Core resumed " + execution["citation"],
                         Jsonb({
                             "task_id": str(task_id),
-                            "capability": "pkb_search",
+                            "capability": execution["capability"],
                             "original_request": original_request,
                             "user_reply": user_reply,
                             "effective_request": effective_request,
@@ -1245,12 +1367,14 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                        RETURNING id""",
                     (
                         task_id,
+                        execution["tool"],
+                        execution["operation"],
                         Jsonb({
                             "query": effective_request,
                             "bounded": True,
                             "resumed": True,
                         }),
-                        f"daily-core:{task_id}:pkb-search:{attempt}",
+                        f"daily-core:{task_id}:{execution['source_slug']}:{attempt}",
                     ),
                 )
                 action_id = cur.fetchone()[0]
@@ -1270,9 +1394,10 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                         Jsonb({
                             "result_kind": result.get("result_kind"),
                             "total": total,
-                            "items": (result.get("items") or [])[:20],
+                            "data": result,
                             "resumed": True,
                         }),
+                        execution["verified_by"],
                     ),
                 )
                 result_id = cur.fetchone()[0]
@@ -1280,7 +1405,7 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                 next_checkpoint = {
                     **checkpoint,
                     "phase": phase,
-                    "selected_capability": "pkb_search",
+                    "selected_capability": execution["capability"],
                     "action_id": str(action_id),
                     "result_id": str(result_id),
                     "result_count": total,
@@ -1330,8 +1455,10 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                     "phase": phase,
                     "message": answer,
                     "question": question,
-                    "selected_capability": "pkb_search",
-                    "search": result,
+                    "selected_capability": execution["capability"],
+                    "capability_result": result,
+                    "search": result if execution["capability"] == "pkb_search" else None,
+                    "finance": result if execution["capability"] == "finance_read" else None,
                     "resumed": True,
                     "effective_request": effective_request,
                 }
@@ -1752,6 +1879,22 @@ def core_page():
                     ui.label(
                         "Task: " + result["task_id"]
                     ).classes("font-mono text-xs text-grey-6")
+
+                finance_result = result.get("finance") or {}
+                if finance_result:
+                    with ui.expansion("根拠になった家計集計", value=True).classes(
+                        "w-full border border-teal-200 bg-white"
+                    ):
+                        ui.label(
+                            f"期間: {finance_result.get('start_date') or '-'}"
+                            f" 〜 {finance_result.get('end_date') or '-'}"
+                        ).classes("text-sm")
+                        ui.label(
+                            f"明細 {finance_result.get('transaction_count', 0)}件 / "
+                            f"収入 ¥{int(finance_result.get('income_total') or 0):,} / "
+                            f"支出 ¥{int(finance_result.get('expense_total') or 0):,} / "
+                            f"収支 ¥{int(finance_result.get('net_total') or 0):,}"
+                        ).classes("text-sm")
 
                 search_result = result.get("search") or {}
                 rows = search_result.get("items") or []
