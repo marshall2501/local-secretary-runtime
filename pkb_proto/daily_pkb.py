@@ -13,7 +13,7 @@ import json
 import os
 import re
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -615,6 +615,13 @@ def _search_text_with_db(db, text: str) -> dict:
     if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
         return {"status": "ready", "capability": "finance_read", "domain": "finance"}
 
+    if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
+        return {
+            "status": "ready",
+            "capability": "finance_read",
+            "domain": "finance",
+        }
+
     component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
     if component_state and any(word in q for word in ("現在", "今の", "現行")):
         resolved = resolve_component_reference(
@@ -682,7 +689,7 @@ def _core_finance_filters(text: str) -> dict:
     start_date = None
     end_date = None
 
-    explicit = re.search(r"(?P<year>20\\d{2})年(?P<month>1[0-2]|0?[1-9])月", q)
+    explicit = re.search(r"(?P<year>20\d{2})年(?P<month>1[0-2]|0?[1-9])月", q)
     if explicit:
         year = int(explicit.group("year"))
         month = int(explicit.group("month"))
@@ -692,7 +699,7 @@ def _core_finance_filters(text: str) -> dict:
         else:
             next_month = datetime(year, month + 1, 1).date()
         start_date = start.isoformat()
-        end_date = (next_month.fromordinal(next_month.toordinal() - 1)).isoformat()
+        end_date = (next_month - timedelta(days=1)).isoformat()
     elif "今月" in q:
         today = datetime.now().date()
         start = today.replace(day=1)
@@ -701,7 +708,7 @@ def _core_finance_filters(text: str) -> dict:
         else:
             next_month = today.replace(month=today.month + 1, day=1)
         start_date = start.isoformat()
-        end_date = next_month.fromordinal(next_month.toordinal() - 1).isoformat()
+        end_date = (next_month - timedelta(days=1)).isoformat()
 
     return {
         "start_date": start_date,
