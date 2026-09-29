@@ -13,6 +13,7 @@ on:
       - "pkb_proto/core_observation.py"
       - "pkb_proto/background_jobs.py"
       - "tests/test_core_ooda.py"
+      - "tests/test_core_gui.py"
       - "tests/test_core_advisor.py"
       - "tests/test_core_coordinator.py"
       - "tests/test_core_synthesis.py"
@@ -63,6 +64,7 @@ on:
       - "pkb_proto/core_synthesis.py"
       - "pkb_proto/core_observation.py"
       - "tests/test_core_ooda.py"
+      - "tests/test_core_gui.py"
       - "tests/test_core_advisor.py"
       - "tests/test_core_synthesis.py"
       - "tests/test_core_observation.py"
@@ -114,6 +116,7 @@ jobs:
       - run: python -m compileall -q pkb_proto tests/test_pkb_web_workbench.py tests/test_pkb_daily.py tests/test_core_ooda.py tests/test_core_advisor.py tests/test_core_coordinator.py tests/test_core_synthesis.py tests/test_web_research.py tests/test_finance_preview.py tests/test_finance_import.py
       - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
+      - run: python -m unittest discover -s tests -p test_core_gui.py -v
       - run: python -m unittest discover -s tests -p test_core_ooda.py -v
       - run: python -m unittest discover -s tests -p test_core_advisor.py -v
       - run: python -m unittest discover -s tests -p test_core_coordinator.py -v

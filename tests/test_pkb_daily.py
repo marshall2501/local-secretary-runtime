@@ -196,7 +196,7 @@ class DailyPKBParserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             loaded = load_ui_preferences(Path(directory) / "missing.json")
         self.assertEqual(loaded["pkb"], PKB_UI_DEFAULT_OPEN)
-        self.assertEqual(loaded["core"], CORE_UI_DEFAULT_OPEN)
+        self.assertEqual(loaded["core"], {**CORE_UI_DEFAULT_OPEN, "open_limit": 5, "completed_limit": 5})
         self.assertEqual(loaded["visibility"], UI_VISIBILITY_DEFAULT)
         self.assertEqual(
             loaded["finance"]["recent_limit"],

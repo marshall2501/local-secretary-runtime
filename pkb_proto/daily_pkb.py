@@ -87,6 +87,13 @@ CORE_UI_DEFAULT_OPEN = {
 }
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
+CORE_TASK_PAGE_SIZE_OPTIONS = (5, 10, 20)
+CORE_TASK_LIST_DEFAULTS = {"open_limit": 5, "completed_limit": 5}
+CORE_FLOW_STEPS = (
+    "User request", "Observation v1", "MELCHIOR + CASPER", "Synthesis",
+    "bounded Action / Result", "Observation v2", "re-Orient",
+    "Coordinator Guard", "FINAL CORE DECISION",
+)
 CORE_ADVISOR_TIMEOUT_OPTIONS = (30, 60, 120, 180, 300, 600, 900)
 
 UI_VISIBILITY_DEFAULT = {
@@ -109,7 +116,7 @@ def _default_ui_preferences() -> dict:
             **FINANCE_UI_DEFAULT_OPEN,
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
         },
-        "core": dict(CORE_UI_DEFAULT_OPEN),
+        "core": {**CORE_UI_DEFAULT_OPEN, **CORE_TASK_LIST_DEFAULTS},
         "core_advisor_model": None,
         "core_advisor_timeout": 60,
         "visibility": {
@@ -162,6 +169,11 @@ def _validate_ui_preferences(raw: object) -> dict:
         for key in CORE_UI_DEFAULT_OPEN:
             value = core.get(key)
             if isinstance(value, bool):
+                result["core"][key] = value
+
+        for key in CORE_TASK_LIST_DEFAULTS:
+            value = core.get(key)
+            if type(value) is int and value in CORE_TASK_PAGE_SIZE_OPTIONS:
                 result["core"][key] = value
 
     advisor_model = raw.get("core_advisor_model")
@@ -220,7 +232,7 @@ _FINANCE_UI_OPEN = {
     key: _UI_PREFERENCES["finance"][key]
     for key in FINANCE_UI_DEFAULT_OPEN
 }
-_CORE_UI_OPEN = dict(_UI_PREFERENCES["core"])
+_CORE_UI_OPEN = {key: _UI_PREFERENCES["core"][key] for key in CORE_UI_DEFAULT_OPEN}
 
 
 def _apply_ui_preferences(preferences: dict) -> None:
@@ -236,7 +248,7 @@ def _apply_ui_preferences(preferences: dict) -> None:
         {key: validated["finance"][key] for key in FINANCE_UI_DEFAULT_OPEN}
     )
     _CORE_UI_OPEN.clear()
-    _CORE_UI_OPEN.update(validated["core"])
+    _CORE_UI_OPEN.update({key: validated["core"][key] for key in CORE_UI_DEFAULT_OPEN})
 
 
 def _set_pkb_ui_open(key: str, value: bool) -> None:
@@ -1363,6 +1375,56 @@ def core_answer(search_result: dict) -> str:
     return "PKBの記録では、" + " / ".join(parts) + "。"
 
 
+def load_core_task_window(loader, visible_count: int) -> tuple[list[dict], bool]:
+    """Read a user-expanded window in bounded SQL pages plus one lookahead row."""
+    if type(visible_count) is not int or visible_count < 1:
+        raise ValueError("visible_count must be positive")
+    rows = []
+    while len(rows) < visible_count + 1:
+        size = min(50, visible_count + 1 - len(rows))
+        page = loader(limit=size, offset=len(rows))
+        rows.extend(page)
+        if len(page) < size:
+            break
+    return rows[:visible_count], len(rows) > visible_count
+
+
+def core_magi_presentation(result: dict, advisor: dict, trace: dict) -> dict:
+    """Present saved proposals and decisions; never promote a synthesis to final."""
+    from copy import deepcopy
+
+    task = {**result, **(trace.get("task") or {})}
+    baseline = task.get("magi_baseline")
+    pack = task.get("observation_pack") or advisor.get("observation_pack_after_action") or {}
+    execution = advisor.get("cooperative_execution") or {}
+    cycles = deepcopy(advisor.get("cycles") or [])
+    if not cycles and advisor.get("synthesis"):
+        cycles = [{"cycle": advisor.get("cycle") or 1,
+                   "casper": {key: advisor.get(key) for key in
+                              ("status", "next_step", "proposed_action", "reason")},
+                   "synthesis": deepcopy(advisor["synthesis"])}]
+    for cycle in cycles:
+        if "melchior" not in cycle and baseline:
+            cycle["melchior"] = deepcopy(baseline)
+            cycle["melchior_reused"] = cycle.get("cycle", 1) > 1
+        # Existing v0 records put the Action/Result references outside cycles.
+        if cycle.get("cycle") == 1 and execution.get("action_id"):
+            cycle.setdefault("action", {"action_id": execution["action_id"],
+                                        "capability": execution.get("capability")})
+            observation = next((o for o in pack.get("task_observations", [])
+                                if o.get("cycle") == 1), {})
+            cycle.setdefault("result", {"result_id": execution.get("result_id"),
+                                        "result_count": execution.get("result_count"),
+                                        **deepcopy(observation)})
+    final = deepcopy(task.get("final_core_decision") or advisor.get("final_core_decision"))
+    if final is None and execution.get("final_next_step"):
+        final = {"next_step": execution["final_next_step"],
+                 "reason": execution.get("final_reason"),
+                 "task_status": task.get("status"),
+                 "source": "saved_cooperative_execution"}
+    return {"cycles": cycles, "final_core_decision": final}
+
+
 def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
     """Build one copy-friendly Advisor log payload from the current UI state."""
     trace_task = trace.get("task") or {}
@@ -1370,18 +1432,16 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
         trace_task.get("observation_pack")
         or result.get("observation_pack")
     )
+    presentation = core_magi_presentation(result, advisor, trace)
+    current = {**result, **trace_task}
     return {
         "task_id": result.get("task_id") or trace_task.get("id"),
         "request": result.get("request") or trace_task.get("request"),
         "core": {
-            "status": result.get("status") or trace_task.get("status"),
-            "phase": result.get("phase") or trace_task.get("phase"),
-            "question": result.get("question") or trace_task.get("question"),
-            "selected_capability": (
-                result.get("selected_capability")
-                if "selected_capability" in result
-                else trace_task.get("selected_capability")
-            ),
+            "status": current.get("status"),
+            "phase": current.get("phase"),
+            "question": current.get("question"),
+            "selected_capability": current.get("selected_capability"),
         },
         "magi": {
             "melchior_scope_status": (
@@ -1394,6 +1454,7 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
             "casper_proposal": advisor.get("proposed_action"),
             "synthesis": advisor.get("synthesis"),
             "comparison": advisor.get("comparison"),
+            "cycles": presentation["cycles"],
         },
         "advisor": {
             "model": advisor.get("model"),
@@ -1408,6 +1469,7 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
             "expected_result": advisor.get("expected_result"),
             "error": advisor.get("error"),
         },
+        "final_core_decision": presentation["final_core_decision"],
         "state_transitions": list(trace.get("advisor_events") or []),
         "observation_pack": observation_pack,
         "request_context": advisor.get("request_context"),
@@ -1695,6 +1757,7 @@ def _finalize_cooperative_probe(
                     "observation_pack": final_observation_pack,
                     "cooperative_result": execution.get("result"),
                     "cooperative_cycle": 2,
+                    "final_core_decision": {**final_decision, "task_status": task_status},
                 }
                 cur.execute(
                     """UPDATE secretary.tasks
@@ -1814,6 +1877,8 @@ def _run_core_advisor_shadow(
         ).as_dict()
         first_cycle = {
             "cycle": 1,
+            "melchior": dict(melchior),
+            "observation_version": observation_pack.get("version"),
             "casper": {
                 "status": first_result.get("status"),
                 "next_step": first_result.get("next_step"),
@@ -1884,6 +1949,13 @@ def _run_core_advisor_shadow(
                 second_observation,
             )
 
+            first_cycle["action"] = {
+                "action_id": str(action_id), "capability": capability,
+            }
+            first_cycle["result"] = {
+                "result_id": str(result_id),
+                **second_observation["task_observations"][-1],
+            }
             observed = {
                 **intermediate,
                 "cycle": 2,
@@ -1920,6 +1992,9 @@ def _run_core_advisor_shadow(
             ).as_dict()
             second_cycle = {
                 "cycle": 2,
+                "melchior": dict(melchior),
+                "melchior_reused": True,
+                "observation_version": second_observation.get("version"),
                 "casper": {
                     "status": second_result.get("status"),
                     "next_step": second_result.get("next_step"),
@@ -1958,6 +2033,10 @@ def _run_core_advisor_shadow(
                     "result_id": str(result_id),
                     "final_next_step": final_decision.get("next_step"),
                     "final_reason": final_decision.get("reason"),
+                },
+                "final_core_decision": {
+                    **final_decision,
+                    "task_status": "completed" if final_decision["next_step"] == "respond" else "waiting_external",
                 },
                 "observation_pack_after_action": second_observation,
             }
@@ -2352,10 +2431,12 @@ def _contextualize_core_reply(
     return reply
 
 
-def load_recent_core_tasks(limit: int = 10) -> list[dict]:
+def load_recent_core_tasks(limit: int = 10, offset: int = 0) -> list[dict]:
     """Load a compact screen-wide Core activity view for debugging."""
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("limit must be 1..50")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("offset must be a nonnegative integer")
     with connection() as db:
         with db.cursor() as cur:
             cur.execute(
@@ -2371,8 +2452,8 @@ def load_recent_core_tasks(limit: int = 10) -> list[dict]:
                      AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
                    GROUP BY t.id
                    ORDER BY t.updated_at DESC, t.id DESC
-                   LIMIT %s""",
-                (limit,),
+                   LIMIT %s OFFSET %s""",
+                (limit, offset),
             )
             rows = cur.fetchall()
     result = []
@@ -2394,10 +2475,12 @@ def load_recent_core_tasks(limit: int = 10) -> list[dict]:
     return result
 
 
-def load_open_core_tasks(limit: int = 20) -> list[dict]:
+def load_open_core_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
     """Load unfinished daily Core tasks so they can survive page/server restarts."""
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("limit must be 1..50")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("offset must be a nonnegative integer")
     with connection() as db:
         with db.cursor() as cur:
             cur.execute(
@@ -2413,8 +2496,8 @@ def load_open_core_tasks(limit: int = 20) -> list[dict]:
                      AND t.status IN ('waiting_external', 'running')
                    GROUP BY t.id
                    ORDER BY t.updated_at DESC, t.id DESC
-                   LIMIT %s""",
-                (limit,),
+                   LIMIT %s OFFSET %s""",
+                (limit, offset),
             )
             rows = cur.fetchall()
     result = []
@@ -2439,10 +2522,12 @@ def load_open_core_tasks(limit: int = 20) -> list[dict]:
     return result
 
 
-def load_completed_core_tasks(limit: int = 8) -> list[dict]:
+def load_completed_core_tasks(limit: int = 8, offset: int = 0) -> list[dict]:
     """Load recently completed daily Core tasks for read-only review."""
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("limit must be 1..50")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("offset must be a nonnegative integer")
     with connection() as db:
         with db.cursor() as cur:
             cur.execute(
@@ -2459,8 +2544,8 @@ def load_completed_core_tasks(limit: int = 8) -> list[dict]:
                      AND t.status='completed'
                    GROUP BY t.id
                    ORDER BY COALESCE(t.completed_at, t.updated_at) DESC, t.id DESC
-                   LIMIT %s""",
-                (limit,),
+                   LIMIT %s OFFSET %s""",
+                (limit, offset),
             )
             rows = cur.fetchall()
     result = []
@@ -2575,6 +2660,8 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "message": checkpoint.get("message"),
             "cooperative_result": checkpoint.get("cooperative_result"),
             "cooperative_cycle": checkpoint.get("cooperative_cycle"),
+            "reason": checkpoint.get("reason"),
+            "final_core_decision": checkpoint.get("final_core_decision"),
             "result_count": checkpoint.get("result_count"),
         },
         "actions": [
@@ -3151,12 +3238,56 @@ def features_page():
                         )
 
 
+@ui.page("/core/history")
+def core_history_page():
+    state = {"offset": 0}
+    page_size = 20
+    with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-3"):
+        _nav()
+        ui.label("Task履歴").classes("text-2xl font-bold")
+        ui.link("Secretary Coreへ戻る", "/core")
+        ui.label("失敗を含む全状態のTaskを更新日時の新しい順で表示します。")
+
+        def move_page(delta):
+            state["offset"] = max(0, state["offset"] + delta * page_size)
+            history.refresh()
+
+        @ui.refreshable
+        def history():
+            try:
+                rows = load_recent_core_tasks(limit=page_size + 1, offset=state["offset"])
+            except Exception as exc:
+                ui.label("履歴を取得できません: " + str(exc)).classes("text-red-700")
+                ui.button("再読み込み", on_click=history.refresh)
+                return
+            with ui.row().classes("items-center"):
+                ui.button("前へ", on_click=lambda: move_page(-1)).set_enabled(state["offset"] > 0)
+                ui.label(f"{state['offset'] // page_size + 1}ページ")
+                ui.button("次へ", on_click=lambda: move_page(1)).set_enabled(len(rows) > page_size)
+            if not rows:
+                ui.label("Taskはありません。")
+            for item in rows[:page_size]:
+                with ui.card().classes("w-full gap-1"):
+                    ui.badge(item["status"])
+                    ui.label(item["request"])
+                    ui.label(str(item["updated_at"])).classes("text-xs text-grey-7")
+                    ui.link("Taskを開く", "/core?task_id=" + item["id"])
+        history()
+
+
 @ui.page("/core")
-def core_page():
+def core_page(task_id: str = ""):
     state = {"result": None, "busy": False, "resume_busy": False,
              "trace": None, "trace_error": None,
              "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
              "advisor_timeout": int(_UI_PREFERENCES.get("core_advisor_timeout") or 60)}
+
+    list_limits = {key: _UI_PREFERENCES["core"][key] for key in CORE_TASK_LIST_DEFAULTS}
+    list_defaults = dict(list_limits)
+
+    def more_tasks(key, panel):
+        list_limits[key] += _UI_PREFERENCES["core"][key]
+        panel.refresh()
 
     def current_ooda():
         if state["busy"] or state["resume_busy"]:
@@ -3216,6 +3347,10 @@ def core_page():
         ooda_bar.refresh()
         core_result.refresh()
         trace_panel.refresh()
+        resume_panel.refresh()
+        open_tasks_panel.refresh()
+        completed_tasks_panel.refresh()
+        screen_log_panel.refresh()
 
     # NiceGUI drawers are top-level layout elements and must be created as
     # direct children of the page, not inside the central content column.
@@ -3257,7 +3392,7 @@ def core_page():
                 label="Advisor Timeout (秒)",
             ).classes("min-w-40")
             ui.label(
-                "Shadow Mode用。変更は次の新規Taskから反映します。"
+                "CASPER用。変更は次の新規Taskから反映します。"
             ).classes("text-xs text-grey-7")
 
             def save_advisor_model():
@@ -3339,9 +3474,22 @@ def core_page():
             "text-sm text-grey-7"
         )
         ui.label(
-            "現在は架空隔離DBの読み取りだけを扱います。"
-            "外部操作・承認・Web調査・自動再開はまだ実行しません。"
+            "PKB・家計・明示的なWeb調査を読み取り専用で扱います。"
+            "曖昧依頼からの自動実行は限定PKB readのみです。"
         ).classes("text-sm text-orange-700")
+
+        with ui.expansion("Coreの処理フロー", icon="account_tree").classes("w-full border"):
+            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+                for index, step in enumerate(CORE_FLOW_STEPS):
+                    if index:
+                        ui.label("→").props("aria-hidden=true")
+                    ui.label(step).classes("border rounded p-2 text-sm")
+            ui.label(
+                "曖昧依頼の協調経路です。Cycle 1で安全なPKB readを行い、"
+                "結果をObservation v2へ戻してCycle 2で再検討します。"
+                "Synthesisは中間提案。Coordinatorが反復・最大2 cycle・外部への拡張を制限し、最終判断を保存します。"
+                "明示的な能力指定と追加回答による再開は既存経路で処理します。"
+            ).classes("text-sm")
 
         def select_saved_task(item: dict):
             if state["busy"] or state["resume_busy"]:
@@ -3356,7 +3504,7 @@ def core_page():
         @ui.refreshable
         def completed_tasks_panel():
             try:
-                rows = load_completed_core_tasks(8)
+                rows, has_more = load_core_task_window(load_completed_core_tasks, list_limits["completed_limit"])
             except Exception as exc:
                 with ui.card().classes("w-full border border-red-200 bg-red-50"):
                     ui.label("完了済みTaskを取得できません: " + str(exc)).classes(
@@ -3393,10 +3541,13 @@ def core_page():
                         on_click=lambda item=item: select_saved_task(item),
                     ).props("flat dense").classes("self-start")
 
+            if has_more:
+                ui.button("さらに読み込む", on_click=lambda: more_tasks("completed_limit", completed_tasks_panel)).props("flat dense")
+
         @ui.refreshable
         def open_tasks_panel():
             try:
-                rows = load_open_core_tasks(20)
+                rows, has_more = load_core_task_window(load_open_core_tasks, list_limits["open_limit"])
             except Exception as exc:
                 with ui.card().classes("w-full border border-red-200 bg-red-50"):
                     ui.label("未完了Taskを取得できません: " + str(exc)).classes(
@@ -3431,6 +3582,21 @@ def core_page():
                         color="orange",
                         on_click=lambda item=item: select_saved_task(item),
                     ).props("flat dense").classes("self-start")
+
+            if has_more:
+                ui.button("さらに読み込む", on_click=lambda: more_tasks("open_limit", open_tasks_panel)).props("flat dense")
+
+        def sync_task_preferences():
+            changed = False
+            for key in list_defaults:
+                value = _UI_PREFERENCES["core"][key]
+                if value != list_defaults[key]:
+                    list_defaults[key] = value
+                    list_limits[key] = value
+                    changed = True
+            if changed:
+                open_tasks_panel.refresh()
+                completed_tasks_panel.refresh()
 
         @ui.refreshable
         def screen_log_panel():
@@ -3489,10 +3655,14 @@ def core_page():
                             ).classes("text-xs text-grey-7")
 
         with task_drawer:
-            with ui.column().classes("w-full gap-3"):
-                ui.label("Core Tasks").classes("text-lg font-bold")
-                open_tasks_panel()
-                completed_tasks_panel()
+            with ui.column().classes("w-full h-full gap-2 no-wrap"):
+                ui.label("Core Tasks").classes("text-lg font-bold shrink-0")
+                ui.link("Task履歴を見る", "/core/history").classes("shrink-0")
+                with ui.column().classes("w-full flex-1 min-h-0 overflow-y-auto no-wrap"):
+                    open_tasks_panel()
+                with ui.column().classes("w-full flex-1 min-h-0 overflow-y-auto no-wrap"):
+                    completed_tasks_panel()
+            ui.timer(1.0, sync_task_preferences)
 
         with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
             ui.label("依頼").classes("text-lg font-bold")
@@ -3525,38 +3695,33 @@ def core_page():
                             "MELCHIORのGuardとCASPERの前進案をCoreが統合します。"
                             "曖昧依頼では、Synthesisが選んだ限定的なPKB readだけを自動実行できます。"
                         ).classes("text-xs text-grey-7")
-                        synthesis = advisor.get("synthesis") or {}
-                        cooperative_execution = advisor.get("cooperative_execution") or {}
-                        ui.label(
-                            "MELCHIOR: "
-                            + str(result.get("selected_capability") or "clarify")
-                            + " / CASPER: "
-                            + str(advisor.get("next_step") or "-")
-                            + "+"
-                            + str(advisor.get("proposed_action") or "-")
-                            + " / SYNTHESIS: "
-                            + str(synthesis.get("next_step") or "-")
-                            + "+"
-                            + str(synthesis.get("selected_capability") or "-")
-                        ).classes("font-mono text-xs")
-                        if synthesis.get("reason"):
-                            ui.label(
-                                "統合理由: " + str(synthesis["reason"])
-                            ).classes("text-sm text-indigo-900")
-                        if synthesis.get("scope_adjustment"):
-                            ui.label(
-                                "Scope adjustment: "
-                                + str(synthesis["scope_adjustment"])
-                            ).classes("font-mono text-xs text-indigo-800")
-                        if cooperative_execution:
-                            ui.label(
-                                "Cooperative execution: "
-                                + str(cooperative_execution.get("status") or "-")
-                                + " / capability="
-                                + str(cooperative_execution.get("capability") or "-")
-                                + " / final="
-                                + str(cooperative_execution.get("final_next_step") or "-")
-                            ).classes("font-mono text-xs text-green-800")
+                        presentation = core_magi_presentation(result or {}, advisor, state.get("trace") or {})
+                        for cycle in presentation["cycles"]:
+                            with ui.card().classes("w-full bg-white gap-1"):
+                                ui.label(f"Cycle {cycle['cycle']}").classes("font-bold")
+                                for key, label in (("melchior", "MELCHIOR"), ("casper", "CASPER"),
+                                                   ("synthesis", "Synthesis（中間提案）"),
+                                                   ("action", "Action"), ("result", "Result")):
+                                    if cycle.get(key) is not None:
+                                        note = "（初回Guardを再利用）" if key == "melchior" and cycle.get("melchior_reused") else ""
+                                        ui.label(label + note).classes("font-medium text-sm")
+                                        entry = cycle[key]
+                                        if key == "result":
+                                            summary = f"result_count={entry.get('result_count', '-')} / {entry.get('answer') or entry.get('result_id') or '-'}"
+                                        else:
+                                            summary = " / ".join(str(entry[field]) for field in
+                                                ("status", "next_step", "proposed_action", "selected_capability", "capability", "reason")
+                                                if entry.get(field) is not None) or "未記録"
+                                        ui.label(summary).classes("text-sm break-words")
+                                with ui.expansion("Cycle詳細").classes("w-full"):
+                                    ui.code(json.dumps(cycle, ensure_ascii=False, indent=2, default=str), language="json").classes("w-full text-xs")
+                        with ui.card().classes("w-full border-2 border-green-600 bg-green-50"):
+                            ui.label("FINAL CORE DECISION").classes("font-bold")
+                            final = presentation["final_core_decision"]
+                            for key in ("next_step", "reason", "task_status"):
+                                ui.label(f"{key} = {final.get(key) if final and final.get(key) is not None else '未記録'}").classes("font-mono text-sm")
+                            if not final:
+                                ui.label("最終判断は未記録です。Synthesisからは補完しません。").classes("text-xs")
                         job_status = str(
                             advisor.get("job_status") or advisor.get("status") or "-"
                         )
@@ -3587,7 +3752,7 @@ def core_page():
                                 ui.spinner(size="sm", color="indigo")
                                 ui.label(
                                     "Advisorはバックグラウンド評価中です。"
-                                    " Core本体の結果には影響しません。"
+                                    " Cycle単位の提案と最終Core判断を下に表示します。"
                                 ).classes("text-xs text-indigo-800")
                         if advisor.get("situation"):
                             ui.label("状況整理: " + str(advisor["situation"])).classes(
@@ -3595,7 +3760,7 @@ def core_page():
                             )
                         if advisor.get("next_step"):
                             ui.label(
-                                "次手種別: " + str(advisor["next_step"])
+                                "CASPER提案（最終判断ではありません）: " + str(advisor["next_step"])
                             ).classes("text-sm font-medium text-indigo-900")
                         if advisor.get("reason"):
                             ui.label("提案理由: " + str(advisor["reason"])).classes(
@@ -3616,7 +3781,7 @@ def core_page():
                             value=bool(advisor.get("error")),
                         ).classes("w-full border border-indigo-100 bg-white"):
                             ui.label(
-                                "Shadow評価の入力・状態遷移・形式検査を確認するためのログです。"
+                                "Cycleごとの提案・Action / Result・最終Core判断を確認するログです。"
                                 " 推論過程は保存・表示しません。"
                             ).classes("text-xs text-grey-7")
 
@@ -4100,14 +4265,20 @@ def core_page():
 
         screen_log_panel()
 
+        if task_id:
+            try:
+                saved_trace = load_core_task_trace(UUID(task_id))
+                select_saved_task(saved_trace["task"])
+            except (ValueError, psycopg.Error) as exc:
+                ui.notify("Taskを開けません: " + str(exc), type="negative")
+
         with ui.card().classes(
             "w-full" + _block_visibility_class("core", "limits")
         ):
             ui.label("この縦断でまだ行わないこと").classes("font-bold")
             ui.label(
-                "Web調査、外部Tool実行、承認、結果検証による再計画は"
-                "次の拡張対象です。複数Taskの並行保持と、保存済みwaiting_external "
-                "Taskの手動選択・同一Task再開をこの画面で試験します。"
+                "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
+                "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
             ).classes("text-sm")
 
 
@@ -4210,6 +4381,7 @@ def settings_page():
                 value=_UI_PREFERENCES["finance"]["recent_limit"],
             ).classes("min-w-64")
 
+        core_list_controls = {}
         core_open_controls = {}
         core_visible_controls = {}
         with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
@@ -4229,6 +4401,13 @@ def settings_page():
                             "初期展開",
                             value=_UI_PREFERENCES["core"][key],
                         )
+
+            for key, label in (("open_limit", "進行中・確認待ち 初期表示件数"),
+                               ("completed_limit", "完了済み 初期表示件数")):
+                core_list_controls[key] = ui.select(
+                    options=list(CORE_TASK_PAGE_SIZE_OPTIONS), label=label,
+                    value=_UI_PREFERENCES["core"][key],
+                ).classes("min-w-64")
 
         ui.label(
             "保存後、別画面へ移動するかページを再読み込みすると表示/非表示が反映されます。"
@@ -4255,8 +4434,8 @@ def settings_page():
                     ),
                 },
                 "core": {
-                    key: bool(control.value)
-                    for key, control in core_open_controls.items()
+                    **{key: bool(control.value) for key, control in core_open_controls.items()},
+                    **{key: int(control.value) for key, control in core_list_controls.items()},
                 },
                 "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
                 "core_advisor_timeout": _UI_PREFERENCES.get("core_advisor_timeout", 60),
@@ -4296,6 +4475,8 @@ def settings_page():
             for key, control in core_visible_controls.items():
                 control.value = preferences["visibility"]["core"][key]
             for key, control in core_open_controls.items():
+                control.value = preferences["core"][key]
+            for key, control in core_list_controls.items():
                 control.value = preferences["core"][key]
             page_size_select.value = preferences["finance"]["recent_limit"]
 
@@ -5512,3 +5693,4 @@ def _recover_interrupted_core_advisors() -> int:
 if __name__ == "__main__":
     _recover_interrupted_core_advisors()
     ui.run(host="127.0.0.1", port=8093, reload=False, show=False, title="Local Secretary PKB")
+
