@@ -1588,6 +1588,53 @@ def load_open_core_tasks(limit: int = 20) -> list[dict]:
     return result
 
 
+def load_completed_core_tasks(limit: int = 8) -> list[dict]:
+    """Load recently completed daily Core tasks for read-only review."""
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("limit must be 1..50")
+    with connection() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """SELECT t.id, t.request, t.status, t.revision,
+                          t.created_at, t.updated_at, t.completed_at,
+                          t.checkpoint,
+                          count(DISTINCT a.id) AS action_count,
+                          count(DISTINCT r.id) AS result_count
+                   FROM secretary.tasks t
+                   LEFT JOIN secretary.actions a ON a.task_id=t.id
+                   LEFT JOIN secretary.results r ON r.action_id=a.id
+                   WHERE t.requested_by='local_user'
+                     AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
+                     AND t.status='completed'
+                   GROUP BY t.id
+                   ORDER BY COALESCE(t.completed_at, t.updated_at) DESC, t.id DESC
+                   LIMIT %s""",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    result = []
+    for row in rows:
+        checkpoint = row[7] or {}
+        result.append({
+            "id": str(row[0]),
+            "request": row[1],
+            "status": row[2],
+            "revision": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+            "completed_at": row[6],
+            "phase": checkpoint.get("phase"),
+            "selected_capability": checkpoint.get("selected_capability"),
+            "question": checkpoint.get("question"),
+            "effective_request": checkpoint.get("effective_request"),
+            "user_replies": list(checkpoint.get("user_replies") or []),
+            "comparison": checkpoint.get("comparison"),
+            "action_count": row[8],
+            "result_count": row[9],
+        })
+    return result
+
+
 def core_task_selection_result(item: dict) -> dict:
     """Convert one persisted Task summary into the same UI state as a live request."""
     task_id = str(item.get("id") or "").strip()
@@ -1602,8 +1649,14 @@ def core_task_selection_result(item: dict) -> dict:
         "phase": item.get("phase"),
         "selected_capability": item.get("selected_capability"),
         "question": item.get("question"),
-        "message": "保存済みTaskを選択しました。",
+        "message": (
+            "完了済みTaskを閲覧しています。"
+            if status == "completed"
+            else "保存済みTaskを選択しました。"
+        ),
         "effective_request": item.get("effective_request"),
+        "comparison": item.get("comparison"),
+        "read_only_history": status == "completed",
         "resumed_from_storage": True,
     }
 
@@ -1991,6 +2044,14 @@ def api_core_open_tasks():
         raise HTTPException(503, str(exc)) from exc
 
 
+@app.get("/api/core/tasks/completed")
+def api_core_completed_tasks():
+    try:
+        return {"items": load_completed_core_tasks(8)}
+    except (RuntimeError, ValueError, psycopg.Error) as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
 @app.get("/api/core/tasks/{task_id}/trace")
 def api_core_trace(task_id: UUID):
     try:
@@ -2295,6 +2356,46 @@ def core_page():
             trace_panel.refresh()
 
         @ui.refreshable
+        def completed_tasks_panel():
+            try:
+                rows = load_completed_core_tasks(8)
+            except Exception as exc:
+                with ui.card().classes("w-full border border-red-200 bg-red-50"):
+                    ui.label("完了済みTaskを取得できません: " + str(exc)).classes(
+                        "text-red-700"
+                    )
+                return
+
+            ui.separator()
+            ui.label("完了済み").classes("text-base font-bold")
+            ui.label(
+                "直近の完了Taskを閲覧専用で開けます。再開・再実行は行いません。"
+            ).classes("text-xs text-grey-7")
+            if not rows:
+                ui.label("完了済みTaskはありません。").classes("text-sm text-grey-7")
+                return
+            for item in rows:
+                with ui.card().classes("w-full p-2 gap-1 bg-green-50"):
+                    with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                        ui.badge("completed", color="green").classes("shrink-0")
+                        ui.label(item["request"]).classes(
+                            "font-medium text-sm grow overflow-hidden"
+                        )
+                    ui.label(
+                        f"rev={item['revision']} / {item.get('phase') or '-'} / "
+                        f"{item.get('selected_capability') or '-'}"
+                    ).classes("font-mono text-xs text-grey-6")
+                    ui.label(
+                        f"Action={item['action_count']} / Result={item['result_count']}"
+                    ).classes("text-xs text-grey-6")
+                    ui.button(
+                        "開く",
+                        icon="visibility",
+                        color="green",
+                        on_click=lambda item=item: select_saved_task(item),
+                    ).props("flat dense").classes("self-start")
+
+        @ui.refreshable
         def open_tasks_panel():
             try:
                 rows = load_open_core_tasks(20)
@@ -2393,6 +2494,7 @@ def core_page():
             with ui.column().classes("w-full gap-3"):
                 ui.label("Core Tasks").classes("text-lg font-bold")
                 open_tasks_panel()
+                completed_tasks_panel()
 
         with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
             ui.label("依頼").classes("text-lg font-bold")
@@ -2731,6 +2833,7 @@ def core_page():
                             core_result.refresh()
                             trace_panel.refresh()
                             open_tasks_panel.refresh()
+                            completed_tasks_panel.refresh()
                             screen_log_panel.refresh()
 
                     resume_button = ui.button(
@@ -2770,6 +2873,7 @@ def core_page():
                     resume_panel.refresh()
                     trace_panel.refresh()
                     open_tasks_panel.refresh()
+                    completed_tasks_panel.refresh()
                     screen_log_panel.refresh()
 
             run_button = ui.button(
