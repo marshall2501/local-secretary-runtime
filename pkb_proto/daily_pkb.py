@@ -762,6 +762,23 @@ def web_core_answer(result: dict) -> str:
     hits = result.get("hits") or []
     facts = result.get("fact_summary") or {}
     if facts.get("kind") == "driver_version":
+        if facts.get("status") == "primary_source_no_current_candidate":
+            primary = ", ".join(facts.get("primary_domains") or []) or "一次Source候補"
+            secondary = []
+            for group in facts.get("groups") or []:
+                for candidate in group.get("candidates") or []:
+                    if int(candidate.get("primary_source_count") or 0) == 0:
+                        secondary.append(
+                            f"{group.get('kind')}={candidate.get('value')}"
+                        )
+            secondary_text = " / ".join(secondary[:4])
+            return (
+                f"Web調査では一次Source候補（{primary}）を確認しましたが、"
+                "そこから現在版の番号を抽出できませんでした。"
+                + (f" 第三者候補: {secondary_text}。" if secondary_text else "")
+                + " 一次Sourceで確認できるまで最新値として確定しません。"
+            )
+
         groups = facts.get("groups") or []
         preferred_kind = facts.get("preferred_kind")
         preferred = next(
@@ -1119,6 +1136,7 @@ def _execute_core_read(capability: str, text: str) -> dict:
                         "evidence_rank": hit.get("evidence_rank"),
                         "quality_score": hit.get("quality_score"),
                         "authority_hint": hit.get("authority_hint"),
+                        "authority_level": hit.get("authority_level"),
                         "version_candidates": hit.get("version_candidates"),
                         "version_facts": hit.get("version_facts"),
                         "date_hints": hit.get("date_hints"),
@@ -2410,6 +2428,8 @@ def core_page():
                                 ui.label(
                                     "preferred_kind="
                                     + str(fact_summary.get("preferred_kind") or "-")
+                                    + " / primary_domains="
+                                    + ",".join(fact_summary.get("primary_domains") or [])
                                     + " / status="
                                     + str(fact_summary.get("status") or "-")
                                     + " / best="
@@ -2426,6 +2446,7 @@ def core_page():
                                             f"  {candidate.get('value')} / "
                                             f"sources={candidate.get('source_count', 0)} / "
                                             f"domains={candidate.get('domain_count', 0)} / "
+                                            f"primary={candidate.get('primary_source_count', 0)} / "
                                             f"date={candidate.get('latest_date') or '-'} / "
                                             f"context={candidate.get('best_context_score', 0)} / "
                                             f"best_quality={candidate.get('best_quality_score', 0)}"
@@ -2457,6 +2478,8 @@ def core_page():
                                     + str(hit.get("quality_score") or 0)
                                     + " / "
                                     + str(hit.get("authority_hint") or "-")
+                                    + " / authority="
+                                    + str(hit.get("authority_level") or "-")
                                 ).classes("font-mono text-xs text-grey-6")
                                 ui.label(
                                     "fetch=" + str(hit.get("fetch_status") or "unknown")
