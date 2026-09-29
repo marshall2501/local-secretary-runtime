@@ -2157,6 +2157,24 @@ def core_page():
                         "Task: " + result["task_id"]
                     ).classes("font-mono text-xs text-grey-6")
 
+                comparison = result.get("comparison") or {}
+                if comparison:
+                    with ui.card().classes("w-full border border-purple-200 bg-purple-50"):
+                        ui.label("PKB＋Web 比較").classes("font-bold text-purple-900")
+                        ui.label(
+                            "status="
+                            + str(comparison.get("status") or "-")
+                            + " / current="
+                            + str(comparison.get("current") or "-")
+                            + " / latest="
+                            + str(comparison.get("latest") or "-")
+                            + " / kind="
+                            + str(comparison.get("latest_kind") or "-")
+                        ).classes("font-mono text-xs")
+                        ui.label(
+                            comparison.get("message") or "比較結果はありません。"
+                        ).classes("text-sm")
+
                 web_result = result.get("web") or {}
                 if web_result:
                     with ui.expansion("根拠になったWeb調査", value=True).classes(
