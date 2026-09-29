@@ -50,6 +50,7 @@ class AdvisorResult:
     reason: str | None = None
     expected_result: str | None = None
     error: str | None = None
+    timeout_seconds: float | None = None
 
     def as_dict(self) -> dict:
         value = asdict(self)
@@ -161,7 +162,10 @@ def advise(
     model: str | None = None,
 ) -> AdvisorResult:
     if os.environ.get("LSA_CORE_ADVISOR_ENABLED", "1").strip().lower() in {"0", "false", "off", "no"}:
-        return AdvisorResult("disabled", "unavailable", error="advisor_disabled")
+        return AdvisorResult(
+            "disabled", "unavailable", model=model,
+            error="advisor_disabled", timeout_seconds=timeout,
+        )
 
     available = set(CAPABILITY_REGISTRY)
     context = {
@@ -180,8 +184,10 @@ def advise(
         },
     }
 
+    attempted_model = (model or "").strip() or None
     try:
         selected_model = choose_model(list_chat_models(), model)
+        attempted_model = selected_model
         payload = {
             "model": selected_model,
             "stream": False,
@@ -200,7 +206,10 @@ def advise(
         message = outer.get("message") if isinstance(outer, dict) else None
         raw = message.get("content") if isinstance(message, dict) else None
         if not isinstance(raw, str):
-            return AdvisorResult("invalid", "invalid", model=selected_model, error="missing_model_content")
+            return AdvisorResult(
+                "invalid", "invalid", model=selected_model,
+                error="missing_model_content", timeout_seconds=timeout,
+            )
         checked = inspect_output(raw, available, current_selection)
         return AdvisorResult(
             checked.status,
@@ -212,6 +221,13 @@ def advise(
             reason=checked.reason,
             expected_result=checked.expected_result,
             error=checked.error,
+            timeout_seconds=timeout,
         )
     except (OSError, HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        return AdvisorResult("unavailable", "unavailable", error=type(exc).__name__)
+        return AdvisorResult(
+            "unavailable",
+            "unavailable",
+            model=attempted_model,
+            error=type(exc).__name__,
+            timeout_seconds=timeout,
+        )
