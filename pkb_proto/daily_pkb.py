@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from .background_jobs import SerialBackgroundExecutor
 from .correction_service import correct_entity
 from .core_ooda import OODA_PHASES, derive_ooda
+from .core_observation import build_observation_pack
 from .core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
@@ -1184,7 +1185,11 @@ def _execute_core_read(capability: str, text: str) -> dict:
     raise ValueError("Unsupported Core read capability")
 
 
-def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
+def scope_core_request(
+    text: str,
+    entities: dict[str, dict],
+    observation_pack: dict | None = None,
+) -> dict:
     """Fail closed unless this first Core slice can safely scope a PKB read."""
     q = text.strip()
     if not q:
@@ -1227,12 +1232,15 @@ def scope_core_request(text: str, entities: dict[str, dict]) -> dict:
     if component_state and any(word in q for word in ("現在", "今の", "現行")):
         return {"status": "ready", "capability": "pkb_search", "domain": "pc"}
 
-    mentioned = [
-        row for name, row in sorted(
-            entities.items(), key=lambda item: len(item[0]), reverse=True
-        )
-        if name in q
-    ]
+    if observation_pack is not None:
+        mentioned = list(observation_pack.get("matched_entities") or [])
+    else:
+        mentioned = [
+            row for name, row in sorted(
+                entities.items(), key=lambda item: len(item[0]), reverse=True
+            )
+            if name in q
+        ]
     if mentioned and any(word in q for word in ("構成", "ドライバ", "サーボ", "履歴")):
         return {
             "status": "ready",
@@ -1279,6 +1287,16 @@ def core_answer(search_result: dict) -> str:
     return "PKBの記録では、" + " / ".join(parts) + "。"
 
 
+def _build_core_observation_pack(request: str, db, entities: dict[str, dict]) -> dict:
+    """Build the same bounded observation snapshot for MELCHIOR and CASPER."""
+    return build_observation_pack(
+        request,
+        entities,
+        detail_lookup=lambda entity_id: load_entity_detail(db, entity_id),
+        components_lookup=lambda entity_id: list_components(db, UUID(entity_id)),
+    )
+
+
 _CORE_ADVISOR_EXECUTOR = SerialBackgroundExecutor("core-advisor-shadow")
 
 
@@ -1287,6 +1305,7 @@ def _advisor_shadow_initial(
     timeout_seconds: float,
 ) -> dict:
     return {
+        "magi_member": "CASPER",
         "job_status": "queued",
         "status": "queued",
         "comparison": "pending",
@@ -1337,6 +1356,7 @@ def _run_core_advisor_shadow(
     request: str,
     current_selection: str | None,
     deterministic_status: str,
+    observation_pack: dict,
     model: str | None,
     timeout_seconds: float,
 ) -> None:
@@ -1366,6 +1386,7 @@ def _run_core_advisor_shadow(
             request,
             current_selection=current_selection,
             deterministic_status=deterministic_status,
+            observations=observation_pack,
             model=attempted_model,
             timeout=timeout_seconds,
         ).as_dict()
@@ -1411,6 +1432,7 @@ def _queue_core_advisor_shadow(
     request: str,
     current_selection: str | None,
     deterministic_status: str,
+    observation_pack: dict,
     model: str | None,
     timeout_seconds: float,
 ) -> None:
@@ -1420,6 +1442,7 @@ def _queue_core_advisor_shadow(
         request,
         current_selection,
         deterministic_status,
+        observation_pack,
         model,
         timeout_seconds,
     )
@@ -1441,7 +1464,8 @@ def run_core_request(
 
     with connection() as read_db:
         entities = _entity_map(read_db)
-    scoped = scope_core_request(request, entities)
+        observation_pack = _build_core_observation_pack(request, read_db, entities)
+    scoped = scope_core_request(request, entities, observation_pack)
     advisor_shadow = _advisor_shadow_initial(advisor_model, advisor_timeout)
 
     task_id = uuid4()
@@ -1459,6 +1483,12 @@ def run_core_request(
                 "selected_capability": scoped.get("capability"),
                 "question": scoped.get("question"),
                 "reason": scoped.get("reason"),
+                "observation_pack": observation_pack,
+                "magi_baseline": {
+                    "member": "MELCHIOR",
+                    "status": scoped["status"],
+                    "selected_capability": scoped.get("capability"),
+                },
                 "advisor_shadow": advisor_shadow,
             }
             with db.cursor() as cur:
@@ -1506,6 +1536,12 @@ def run_core_request(
                         "message": "追加情報が必要です。",
                         "question": scoped["question"],
                         "selected_capability": scoped.get("capability"),
+                        "observation_pack": observation_pack,
+                        "magi_baseline": {
+                            "member": "MELCHIOR",
+                            "status": scoped["status"],
+                            "selected_capability": scoped.get("capability"),
+                        },
                         "advisor_shadow": advisor_shadow,
                     }
                 else:
@@ -1625,6 +1661,12 @@ def run_core_request(
                         "result_count": total,
                         "comparison": comparison,
                         "question": question,
+                        "observation_pack": observation_pack,
+                        "magi_baseline": {
+                            "member": "MELCHIOR",
+                            "status": scoped["status"],
+                            "selected_capability": scoped.get("capability"),
+                        },
                         "advisor_shadow": advisor_shadow,
                     }
                     cur.execute(
@@ -1662,6 +1704,12 @@ def run_core_request(
                         "message": answer,
                         "question": question,
                         "selected_capability": scoped["capability"],
+                        "observation_pack": observation_pack,
+                        "magi_baseline": {
+                            "member": "MELCHIOR",
+                            "status": scoped["status"],
+                            "selected_capability": scoped.get("capability"),
+                        },
                         "capability_result": result,
                         "comparison": comparison,
                         "advisor_shadow": advisor_shadow,
@@ -1685,6 +1733,7 @@ def run_core_request(
         request,
         scoped.get("capability"),
         scoped["status"],
+        observation_pack,
         advisor_model,
         advisor_timeout,
     )
@@ -1931,6 +1980,8 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "selected_capability": checkpoint.get("selected_capability"),
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
+            "observation_pack": checkpoint.get("observation_pack"),
+            "magi_baseline": checkpoint.get("magi_baseline"),
             "advisor_shadow": checkpoint.get("advisor_shadow"),
             "result_count": checkpoint.get("result_count"),
         },
