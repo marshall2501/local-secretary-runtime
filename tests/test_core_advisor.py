@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from pkb_proto.core_advisor import advise, choose_model, inspect_output
+from pkb_proto.core_advisor import AdvisorResult, advise, choose_model, inspect_output
+from pkb_proto.daily_pkb import _run_core_advisor_shadow
 
 
 class CoreAdvisorTests(unittest.TestCase):
@@ -96,6 +97,73 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.comparison, "match")
         self.assertIsNone(result.proposed_action)
+
+    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
+    @patch("pkb_proto.daily_pkb.advise_core")
+    @patch("pkb_proto.daily_pkb.choose_advisor_model", return_value="gemma3:12b")
+    @patch("pkb_proto.daily_pkb.list_advisor_models", return_value=["gemma3:12b"])
+    def test_async_worker_records_running_then_completed(
+        self, _models, _choose, advise_mock, write_mock
+    ):
+        advise_mock.return_value = AdvisorResult(
+            "ok",
+            "match",
+            model="gemma3:12b",
+            situation="PKB lookup is sufficient.",
+            proposed_action="pkb_search",
+            reason="Use local PKB.",
+            expected_result="Current driver",
+            timeout_seconds=600,
+        )
+        from uuid import UUID
+        task_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        _run_core_advisor_shadow(
+            task_id,
+            "メインPCのGPUの現在のドライバーを調べて",
+            "pkb_search",
+            "ready",
+            "gemma3:12b",
+            600,
+        )
+        self.assertEqual(write_mock.call_count, 2)
+        running = write_mock.call_args_list[0].args[1]
+        final = write_mock.call_args_list[1].args[1]
+        self.assertEqual(running["job_status"], "running")
+        self.assertEqual(running["model"], "gemma3:12b")
+        self.assertEqual(final["job_status"], "completed")
+        self.assertEqual(final["comparison"], "match")
+        self.assertEqual(final["model"], "gemma3:12b")
+        self.assertEqual(final["timeout_seconds"], 600)
+        self.assertIsNotNone(final["elapsed_seconds"])
+
+    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
+    @patch("pkb_proto.daily_pkb.advise_core")
+    @patch("pkb_proto.daily_pkb.choose_advisor_model", return_value="gemma3:12b")
+    @patch("pkb_proto.daily_pkb.list_advisor_models", return_value=["gemma3:12b"])
+    def test_async_worker_preserves_timeout_metadata(
+        self, _models, _choose, advise_mock, write_mock
+    ):
+        advise_mock.return_value = AdvisorResult(
+            "unavailable",
+            "unavailable",
+            model="gemma3:12b",
+            error="TimeoutError",
+            timeout_seconds=900,
+        )
+        from uuid import UUID
+        _run_core_advisor_shadow(
+            UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            "test",
+            "pkb_search",
+            "ready",
+            "gemma3:12b",
+            900,
+        )
+        final = write_mock.call_args_list[-1].args[1]
+        self.assertEqual(final["job_status"], "timeout")
+        self.assertEqual(final["model"], "gemma3:12b")
+        self.assertEqual(final["timeout_seconds"], 900)
+        self.assertEqual(final["error"], "TimeoutError")
 
     @patch("pkb_proto.core_advisor.list_chat_models", return_value=["llama3.1:8b"])
     @patch("pkb_proto.core_advisor.urlopen", side_effect=URLError("offline"))
