@@ -1430,7 +1430,7 @@ def run_core_request(
     advisor_model: str | None = None,
     advisor_timeout: float = 60.0,
 ) -> dict:
-    """First daily Secretary Core slice: Task -> bounded PKB read -> Result."""
+    """Daily Secretary Core slice with asynchronous Shadow Advisor."""
     request = text.strip()
     if not request:
         return {
@@ -1445,73 +1445,70 @@ def run_core_request(
     advisor_shadow = _advisor_shadow_initial(advisor_model, advisor_timeout)
 
     task_id = uuid4()
-    queue_advisor = False
-    try:
-        with connection() as db:
-            with db.transaction():
-                domain = scoped.get("domain") or "general"
-                initial_status = "running" if scoped["status"] == "ready" else "waiting_external"
-                checkpoint = {
-                    "core_slice": "daily_read_only_v1",
-                    "phase": (
-                        "decide"
-                        if scoped["status"] == "ready"
-                        else "awaiting_clarification"
+    with connection() as db:
+        with db.transaction():
+            domain = scoped.get("domain") or "general"
+            initial_status = "running" if scoped["status"] == "ready" else "waiting_external"
+            checkpoint = {
+                "core_slice": "daily_read_only_v1",
+                "phase": (
+                    "decide"
+                    if scoped["status"] == "ready"
+                    else "awaiting_clarification"
+                ),
+                "selected_capability": scoped.get("capability"),
+                "question": scoped.get("question"),
+                "reason": scoped.get("reason"),
+                "advisor_shadow": advisor_shadow,
+            }
+            with db.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO secretary.tasks
+                       (id, request, requested_by, domain, completion_criteria,
+                        permission_scope, status, checkpoint)
+                       VALUES (%s, %s, 'local_user', %s, %s, %s, %s, %s)""",
+                    (
+                        task_id,
+                        request,
+                        domain,
+                        "Return bounded local evidence with provenance or ask for clarification.",
+                        Jsonb({
+                            "pkb_read": True,
+                            "finance_read": True,
+                            "web_research": True,
+                            "pkb_web_compare": True,
+                            "external_actions": False,
+                        }),
+                        initial_status,
+                        Jsonb(checkpoint),
                     ),
-                    "selected_capability": scoped.get("capability"),
-                    "question": scoped.get("question"),
-                    "reason": scoped.get("reason"),
-                    "advisor_shadow": advisor_shadow,
-                }
-                with db.cursor() as cur:
+                )
+
+                if scoped["status"] != "ready":
                     cur.execute(
-                        """INSERT INTO secretary.tasks
-                           (id, request, requested_by, domain, completion_criteria,
-                            permission_scope, status, checkpoint)
-                           VALUES (%s, %s, 'local_user', %s, %s, %s, %s, %s)""",
+                        """INSERT INTO secretary.audit_events
+                           (actor, event_type, task_id, object_type, object_id, details)
+                           VALUES ('daily_core', 'core.awaiting_clarification',
+                                   %s, 'task', %s, %s)""",
                         (
                             task_id,
-                            request,
-                            domain,
-                            "Return bounded local evidence with provenance or ask for clarification.",
+                            task_id,
                             Jsonb({
-                                "pkb_read": True,
-                                "finance_read": True,
-                                "web_research": True,
-                                "pkb_web_compare": True,
-                                "external_actions": False,
+                                "reason": scoped["reason"],
+                                "advisor_shadow": advisor_shadow,
                             }),
-                            initial_status,
-                            Jsonb(checkpoint),
                         ),
                     )
-
-                    if scoped["status"] != "ready":
-                        cur.execute(
-                            """INSERT INTO secretary.audit_events
-                               (actor, event_type, task_id, object_type, object_id, details)
-                               VALUES ('daily_core', 'core.awaiting_clarification',
-                                       %s, 'task', %s, %s)""",
-                            (
-                                task_id,
-                                task_id,
-                                Jsonb({
-                                    "reason": scoped["reason"],
-                                    "advisor_shadow": advisor_shadow,
-                                }),
-                            ),
-                        )
-                        queue_advisor = True
-                        queue_advisor = True
-                    return {
-                            "task_id": str(task_id),
-                            "status": "waiting_external",
-                            "phase": "awaiting_clarification",
-                            "message": "追加情報が必要です。",
-                            "question": scoped["question"],
-                            "advisor_shadow": advisor_shadow,
-                        }
-
+                    response = {
+                        "task_id": str(task_id),
+                        "status": "waiting_external",
+                        "phase": "awaiting_clarification",
+                        "message": "追加情報が必要です。",
+                        "question": scoped["question"],
+                        "selected_capability": scoped.get("capability"),
+                        "advisor_shadow": advisor_shadow,
+                    }
+                else:
                     # Read capabilities use their own bounded DB connections so the
                     # surrounding Task write transaction remains independent.
                     if scoped["capability"] == "pkb_web_compare":
@@ -1658,7 +1655,7 @@ def run_core_request(
                         ),
                     )
 
-                    return {
+                    response = {
                         "task_id": str(task_id),
                         "status": task_status,
                         "phase": phase,
@@ -1680,17 +1677,18 @@ def run_core_request(
                             else result if scoped["capability"] == "web_research" else None
                         ),
                     }
-    finally:
-        if queue_advisor:
-            _queue_core_advisor_shadow(
-                task_id,
-                request,
-                scoped.get("capability"),
-                scoped["status"],
-                advisor_model,
-                advisor_timeout,
-            )
 
+    # Queue only after the Task transaction commits. The Advisor can run for
+    # minutes without delaying or changing the deterministic Task outcome.
+    _queue_core_advisor_shadow(
+        task_id,
+        request,
+        scoped.get("capability"),
+        scoped["status"],
+        advisor_model,
+        advisor_timeout,
+    )
+    return response
 
 
 def _contextualize_core_reply(
