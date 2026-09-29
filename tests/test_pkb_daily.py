@@ -323,9 +323,29 @@ class DailyPKBParserTests(unittest.TestCase):
                 "domain": "pc",
                 "entity_type": "computer",
             },
-            "current": [],
-            "relations": [],
-            "events": [],
+            "current": [
+                {
+                    "id": UUID("66666666-6666-6666-6666-666666666666"),
+                    "predicate": "firmware",
+                    "value": "FW-1",
+                    "valid_from": __import__("datetime").datetime(2026, 9, 1, tzinfo=__import__("datetime").timezone.utc),
+                }
+            ],
+            "relations": [
+                {
+                    "id": UUID("77777777-7777-7777-7777-777777777777"),
+                    "predicate": "has_component",
+                    "valid_to": None,
+                    "valid_from": __import__("datetime").datetime(2026, 9, 1, tzinfo=__import__("datetime").timezone.utc),
+                }
+            ],
+            "events": [
+                {
+                    "id": UUID("88888888-8888-8888-8888-888888888888"),
+                    "predicate": "updated",
+                    "recorded_at": __import__("datetime").datetime(2026, 9, 2, tzinfo=__import__("datetime").timezone.utc),
+                }
+            ],
         }
         components_mock.return_value = [
             {
@@ -365,6 +385,10 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(result["result"]["probe_kind"], "entity_overview")
         self.assertIn("GPU1", result["answer"])
         self.assertIn("DRV-G3", result["answer"])
+        self.assertIsInstance(result["result"]["current"][0]["id"], str)
+        self.assertIsInstance(result["result"]["current"][0]["valid_from"], str)
+        self.assertIsInstance(result["result"]["relations"][0]["valid_from"], str)
+        self.assertIsInstance(result["result"]["events"][0]["recorded_at"], str)
         detail_mock.assert_called_once_with(db, ENTITIES["メインPC"]["id"])
         components_mock.assert_called_once()
 
