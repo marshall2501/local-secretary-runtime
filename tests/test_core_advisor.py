@@ -277,7 +277,7 @@ class CoreAdvisorTests(unittest.TestCase):
         ),
     )
     @patch(
-        "pkb_proto.daily_pkb._execute_core_read",
+        "pkb_proto.daily_pkb._execute_cooperative_local_probe",
         return_value={
             "capability": "pkb_search",
             "result": {
@@ -367,7 +367,14 @@ class CoreAdvisorTests(unittest.TestCase):
             "magi_observation_v2",
         )
         claim_mock.assert_called_once_with(task_id, "pkb_search")
-        execute_mock.assert_called_once_with("pkb_search", "メインPCについて調べて")
+        execute_mock.assert_called_once_with(
+            "pkb_search",
+            "メインPCについて調べて",
+            {
+                "version": "magi_observation_v1",
+                "matched_entities": [{"name": "メインPC"}],
+            },
+        )
         record_mock.assert_called_once()
         finalize_mock.assert_called_once()
         final_decision = finalize_mock.call_args.args[1]
