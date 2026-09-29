@@ -16,7 +16,8 @@ $file014 = Join-Path $root 'pkb_proto\sql\014_pkb_proto_component_state.sql'
 $file015 = Join-Path $root 'pkb_proto\sql\015_pkb_proto_component_normalization.sql'
 $file016 = Join-Path $root 'pkb_proto\sql\016_pkb_proto_finance.sql'
 $file017 = Join-Path $root 'pkb_proto\sql\017_pkb_proto_core_task_privileges.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017)) {
+$file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -276,7 +277,35 @@ if ($LASTEXITCODE -ne 0 -or ($verify017 | Out-String).Trim() -ne '1' -or ($coreT
     throw 'Secretary Core task privilege verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 017 (read-only Core task recording included).'
+$has018 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='018_pkb_proto_core_audit_read.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 018 schema version.' }
+if (($has018 | Out-String).Trim() -eq '0') {
+    $hash018 = (Get-FileHash -LiteralPath $file018 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql018 = [IO.File]::ReadAllText($file018).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash018)
+    $tmpName018 = 'pkb-core-audit-read-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp018 = Join-Path ([IO.Path]::GetTempPath()) $tmpName018
+    $remoteTmp018 = '/tmp/' + $tmpName018
+    try {
+        [IO.File]::WriteAllText($localTmp018, $sql018, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp018 ($id + ':' + $remoteTmp018) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 018 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp018
+        if ($LASTEXITCODE -ne 0) { throw '018 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp018) { Remove-Item -LiteralPath $localTmp018 }
+        & docker exec $id rm -f $remoteTmp018 | Out-Null
+    }
+} elseif (($has018 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 018 migration records.'
+}
+
+$verify018 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='018_pkb_proto_core_audit_read.sql';"
+$auditReadGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.audit_events','SELECT,INSERT') AND NOT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.approvals','INSERT,UPDATE,DELETE');"
+if ($LASTEXITCODE -ne 0 -or ($verify018 | Out-String).Trim() -ne '1' -or ($auditReadGrant | Out-String).Trim() -ne 't') {
+    throw 'Secretary Core audit read privilege verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 018 (Core audit trace read included).'
 
 
 
