@@ -1312,6 +1312,7 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
                 (trace_task.get("magi_baseline") or {}).get("status")
             ),
             "melchior_baseline": result.get("selected_capability"),
+            "casper_next_step": advisor.get("next_step"),
             "casper_proposal": advisor.get("proposed_action"),
             "comparison": advisor.get("comparison"),
         },
@@ -1324,6 +1325,7 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
             "situation": advisor.get("situation"),
             "reason": advisor.get("reason"),
             "missing_information": advisor.get("missing_information") or [],
+            "next_step": advisor.get("next_step"),
             "expected_result": advisor.get("expected_result"),
             "error": advisor.get("error"),
         },
@@ -1364,6 +1366,7 @@ def _advisor_shadow_initial(
         "elapsed_seconds": 0.0,
         "situation": None,
         "missing_information": [],
+        "next_step": None,
         "proposed_action": None,
         "reason": None,
         "expected_result": None,
@@ -1428,9 +1431,11 @@ def _run_core_advisor_shadow(
         ):
             return
 
+        melchior_next_step = "observe" if current_selection is not None else "clarify"
         result = advise_core(
             request,
             current_selection=current_selection,
+            melchior_next_step=melchior_next_step,
             task_state="received",
             observations=observation_pack,
             model=attempted_model,
@@ -2965,7 +2970,7 @@ def core_page():
                             "font-bold text-indigo-900"
                         )
                         ui.label(
-                            "実行には使用していません。現行Coreの選択と比較する観測用提案です。"
+                            "実行には使用していません。現行Coreと next step / capability を比較する観測用提案です。"
                         ).classes("text-xs text-grey-7")
                         ui.label(
                             "MELCHIOR baseline: "
@@ -3011,6 +3016,10 @@ def core_page():
                             ui.label("状況整理: " + str(advisor["situation"])).classes(
                                 "text-sm"
                             )
+                        if advisor.get("next_step"):
+                            ui.label(
+                                "次手種別: " + str(advisor["next_step"])
+                            ).classes("text-sm font-medium text-indigo-900")
                         if advisor.get("reason"):
                             ui.label("提案理由: " + str(advisor["reason"])).classes(
                                 "text-sm"
@@ -3124,7 +3133,7 @@ def core_page():
                                     "LLM返却値の形式検査（安全化済み）"
                                 ).classes("font-medium text-sm")
                                 ui.label(
-                                    "契約対象5フィールドだけを保存しています。"
+                                    "契約対象フィールドだけを保存しています。"
                                     " 追加キーは名前だけ記録し、値は保存しません。"
                                 ).classes("text-xs text-grey-7")
                                 ui.code(
