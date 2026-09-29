@@ -177,7 +177,6 @@ def advise(
             "web_research": True,
             "external_actions": False,
         },
-        "current_selection_for_shadow_comparison": current_selection,
     }
 
     try:
