@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from .correction_service import correct_entity
 from .core_ooda import OODA_PHASES, derive_ooda
+from .core_advisor import advise as advise_core
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -1254,11 +1255,20 @@ def run_core_request(text: str) -> dict:
             "message": "依頼を入力してください。",
         }
 
+    # Orient shadow evaluation is deliberately outside the Task write
+    # transaction so a slow/unavailable local model never holds DB locks.
+    with connection() as read_db:
+        entities = _entity_map(read_db)
+    scoped = scope_core_request(request, entities)
+    advisor_shadow = advise_core(
+        request,
+        current_selection=scoped.get("capability"),
+        deterministic_status=scoped["status"],
+    ).as_dict()
+
     task_id = uuid4()
     with connection() as db:
         with db.transaction():
-            entities = _entity_map(db)
-            scoped = scope_core_request(request, entities)
             domain = scoped.get("domain") or "general"
             initial_status = "running" if scoped["status"] == "ready" else "waiting_external"
             checkpoint = {
@@ -1271,6 +1281,7 @@ def run_core_request(text: str) -> dict:
                 "selected_capability": scoped.get("capability"),
                 "question": scoped.get("question"),
                 "reason": scoped.get("reason"),
+                "advisor_shadow": advisor_shadow,
             }
             with db.cursor() as cur:
                 cur.execute(
@@ -1301,7 +1312,14 @@ def run_core_request(text: str) -> dict:
                            (actor, event_type, task_id, object_type, object_id, details)
                            VALUES ('daily_core', 'core.awaiting_clarification',
                                    %s, 'task', %s, %s)""",
-                        (task_id, task_id, Jsonb({"reason": scoped["reason"]})),
+                        (
+                            task_id,
+                            task_id,
+                            Jsonb({
+                                "reason": scoped["reason"],
+                                "advisor_shadow": advisor_shadow,
+                            }),
+                        ),
                     )
                     return {
                         "task_id": str(task_id),
@@ -1309,6 +1327,7 @@ def run_core_request(text: str) -> dict:
                         "phase": "awaiting_clarification",
                         "message": "追加情報が必要です。",
                         "question": scoped["question"],
+                        "advisor_shadow": advisor_shadow,
                     }
 
                 # Read capabilities use their own bounded DB connections so the
@@ -1427,6 +1446,7 @@ def run_core_request(text: str) -> dict:
                     "result_count": total,
                     "comparison": comparison,
                     "question": question,
+                    "advisor_shadow": advisor_shadow,
                 }
                 cur.execute(
                     """UPDATE secretary.tasks
@@ -1451,6 +1471,7 @@ def run_core_request(text: str) -> dict:
                             "result_count": total,
                             "action_count": len(action_ids),
                             "comparison": comparison,
+                            "advisor_shadow": advisor_shadow,
                         }),
                     ),
                 )
@@ -1464,6 +1485,7 @@ def run_core_request(text: str) -> dict:
                     "selected_capability": scoped["capability"],
                     "capability_result": result,
                     "comparison": comparison,
+                    "advisor_shadow": advisor_shadow,
                     "search": (
                         plan_result["pkb"]
                         if scoped["capability"] == "pkb_web_compare"
@@ -1582,6 +1604,7 @@ def load_open_core_tasks(limit: int = 20) -> list[dict]:
             "question": checkpoint.get("question"),
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
+            "advisor_shadow": checkpoint.get("advisor_shadow"),
             "action_count": row[7],
             "result_count": row[8],
         })
@@ -1629,6 +1652,7 @@ def load_completed_core_tasks(limit: int = 8) -> list[dict]:
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
             "comparison": checkpoint.get("comparison"),
+            "advisor_shadow": checkpoint.get("advisor_shadow"),
             "action_count": row[8],
             "result_count": row[9],
         })
@@ -1656,6 +1680,7 @@ def core_task_selection_result(item: dict) -> dict:
         ),
         "effective_request": item.get("effective_request"),
         "comparison": item.get("comparison"),
+        "advisor_shadow": item.get("advisor_shadow"),
         "read_only_history": status == "completed",
         "resumed_from_storage": True,
     }
@@ -1705,6 +1730,7 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "selected_capability": checkpoint.get("selected_capability"),
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
+            "advisor_shadow": checkpoint.get("advisor_shadow"),
             "result_count": checkpoint.get("result_count"),
         },
         "actions": [
