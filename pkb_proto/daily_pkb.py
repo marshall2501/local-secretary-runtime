@@ -87,7 +87,7 @@ CORE_UI_DEFAULT_OPEN = {
 }
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
-CORE_TASK_PAGE_SIZE_OPTIONS = (5, 10, 20)
+CORE_TASK_PAGE_SIZE_OPTIONS = tuple(range(1, 11))
 CORE_TASK_LIST_DEFAULTS = {"open_limit": 5, "completed_limit": 5}
 CORE_FLOW_STEPS = (
     "User request", "Observation v1", "MELCHIOR + CASPER", "Synthesis",
@@ -3655,12 +3655,12 @@ def core_page(task_id: str = ""):
                             ).classes("text-xs text-grey-7")
 
         with task_drawer:
-            with ui.column().classes("w-full h-full gap-2 no-wrap"):
+            with ui.column().classes("w-full gap-2 no-wrap"):
                 ui.label("Core Tasks").classes("text-lg font-bold shrink-0")
                 ui.link("Task履歴を見る", "/core/history").classes("shrink-0")
-                with ui.column().classes("w-full flex-1 min-h-0 overflow-y-auto no-wrap"):
+                with ui.column().classes("w-full no-wrap"):
                     open_tasks_panel()
-                with ui.column().classes("w-full flex-1 min-h-0 overflow-y-auto no-wrap"):
+                with ui.column().classes("w-full no-wrap"):
                     completed_tasks_panel()
             ui.timer(1.0, sync_task_preferences)
 
@@ -4385,7 +4385,20 @@ def settings_page():
         core_open_controls = {}
         core_visible_controls = {}
         with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
-            ui.label("Secretary Core").classes("text-lg font-bold")
+            ui.label("Secretary Core — Task表示件数").classes("text-lg font-bold")
+            ui.label(
+                "各一覧の初期件数と「さらに読み込む」で追加する件数です。"
+                "保存するとサーバー再起動なしで反映されます。"
+            ).classes("text-sm text-grey-7")
+            for key, label in (("open_limit", "進行中・確認待ち 初期表示件数"),
+                               ("completed_limit", "完了済み 初期表示件数")):
+                core_list_controls[key] = ui.select(
+                    options=list(CORE_TASK_PAGE_SIZE_OPTIONS), label=label,
+                    value=_UI_PREFERENCES["core"][key],
+                ).classes("min-w-64")
+
+        with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
+            ui.label("Secretary Core — 検証・補足の表示").classes("text-lg font-bold")
             ui.label(
                 "主操作の依頼ブロックは常時表示。検証・補足ブロックだけ非表示にできます。"
             ).classes("text-sm text-grey-7")
@@ -4401,13 +4414,6 @@ def settings_page():
                             "初期展開",
                             value=_UI_PREFERENCES["core"][key],
                         )
-
-            for key, label in (("open_limit", "進行中・確認待ち 初期表示件数"),
-                               ("completed_limit", "完了済み 初期表示件数")):
-                core_list_controls[key] = ui.select(
-                    options=list(CORE_TASK_PAGE_SIZE_OPTIONS), label=label,
-                    value=_UI_PREFERENCES["core"][key],
-                ).classes("min-w-64")
 
         ui.label(
             "保存後、別画面へ移動するかページを再読み込みすると表示/非表示が反映されます。"

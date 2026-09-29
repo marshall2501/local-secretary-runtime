@@ -3,7 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import asyncio
 import inspect
 import unittest
@@ -18,20 +18,23 @@ class CoreGuiTests(TestCase):
     def test_preferences_roundtrip_validation_and_live_apply(self):
         old = deepcopy(daily._UI_PREFERENCES)
         try:
-            for value in (5, 10, 20):
+            for value in range(1, 11):
                 with TemporaryDirectory() as directory:
                     path = Path(directory) / 'prefs.json'
                     prefs = daily._default_ui_preferences()
-                    prefs['core'].update(open_limit=value, completed_limit=20)
+                    prefs['core'].update(open_limit=value, completed_limit=value)
                     daily.save_ui_preferences(prefs, path)
                     daily._apply_ui_preferences(daily.load_ui_preferences(path))
                     self.assertEqual(daily._UI_PREFERENCES['core']['open_limit'], value)
-                    self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], 20)
+                    self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], value)
                     self.assertEqual(set(daily._CORE_UI_OPEN), set(daily.CORE_UI_DEFAULT_OPEN))
-            for invalid in (True, '10', 0, -1, 50, None):
+            for invalid in (True, False, '4', '10', 4.0, 0, -1, 11, 20, 50, None):
                 prefs = daily._validate_ui_preferences({'core': {'open_limit': invalid, 'completed_limit': 10}})
                 self.assertEqual(prefs['core']['open_limit'], 5)
                 self.assertEqual(prefs['core']['completed_limit'], 10)
+                prefs = daily._validate_ui_preferences({'core': {'open_limit': 4, 'completed_limit': invalid}})
+                self.assertEqual(prefs['core']['open_limit'], 4)
+                self.assertEqual(prefs['core']['completed_limit'], 5)
         finally:
             daily._apply_ui_preferences(old)
 
@@ -204,10 +207,10 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('同じTaskを再開'))
             self.assertTrue(self.elements('fixture-104'))
             self.assertFalse(self.elements('fixture-105'))
-            # Independent scroll containers remain siblings with equal flex space.
+            # Lists use the drawer's normal scroll, with no independent scroll areas.
             sections = [e for e in self.client.elements.values()
-                        if 'overflow-y-auto' in e._classes and 'flex-1' in e._classes]
-            self.assertEqual(len(sections), 2)
+                        if 'overflow-y-auto' in e._classes]
+            self.assertEqual(len(sections), 0)
             self.assertTrue(self.elements('Task履歴を見る'))
 
     async def test_history_has_second_page_and_opens_task_by_link(self):
@@ -219,19 +222,76 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             await self.click('前へ')
             self.assertEqual(len(self.elements('Taskを開く')), 20)
 
+    async def test_four_rows_independent_growth_and_live_preference_update(self):
+        prefs = daily._default_ui_preferences()
+        prefs['core'].update(open_limit=4, completed_limit=4)
+        daily._apply_ui_preferences(prefs)
+        with self.client, patch.object(daily.ui, 'timer') as timers:
+            daily.core_page()
+            self.assertEqual(len(self.elements('開く')), 8)
+            await self.click('開く', 3)
+            await self.click('さらに読み込む', 0)
+            self.assertEqual(len(self.elements('開く')), 12)
+            self.assertTrue(self.elements('fixture-7'))
+            self.assertFalse(self.elements('fixture-104'))
+            # Refreshing the first section changes element insertion order;
+            # locate the completed section's callback by its closure.
+            for element in self.elements('さらに読み込む'):
+                listener = next(v.handler for v in element._event_listeners.values() if v.type == 'click')
+                callback = inspect.getclosurevars(listener).nonlocals['callback']
+                if 'completed_limit' in callback.__code__.co_consts:
+                    callback()
+                    break
+            else:
+                self.fail('Completed load-more callback missing')
+            for _ in range(4):
+                await asyncio.sleep(0)
+            self.assertEqual(len(self.elements('開く')), 16)
+            self.assertTrue(self.elements('fixture-107'))
+            self.assertFalse(self.elements('fixture-108'))
+            self.assertTrue(self.elements('同じTaskを再開'))
+            prefs['core'].update(open_limit=1, completed_limit=4)
+            daily._apply_ui_preferences(prefs)
+            sync = next(call.args[1] for call in timers.call_args_list
+                        if call.args[1].__name__ == 'sync_task_preferences')
+            sync()
+            for _ in range(4):
+                await asyncio.sleep(0)
+            self.assertEqual(len(self.elements('開く')), 9)
+            self.assertTrue(self.elements('同じTaskを再開'))
+            self.assertFalse(any('overflow-y-auto' in e._classes for e in self.client.elements.values()))
+
+    async def test_task_count_settings_are_separate_from_limits_toggle(self):
+        with self.client:
+            daily.settings_page()
+            def card_for(element):
+                while not isinstance(element, ui.card):
+                    element = element.parent_slot.parent
+                return element
+            counts = self.elements('Secretary Core — Task表示件数')[0]
+            limits = self.elements('この縦断でまだ行わないこと')[0]
+            self.assertIsNot(card_for(counts), card_for(limits))
+            for label in ('進行中・確認待ち 初期表示件数', '完了済み 初期表示件数'):
+                control = next(e for e in self.client.elements.values() if e._props.get('label') == label)
+                self.assertIs(card_for(control), card_for(counts))
+            limit_row = limits.parent_slot.parent
+            self.assertEqual(len([e for e in limit_row if isinstance(e, ui.switch)]), 1)
+            self.assertFalse(any(isinstance(e, ui.select) for e in limit_row))
+
     async def test_settings_controls_save_both_counts_without_restart(self):
         with self.client, TemporaryDirectory() as directory, patch.object(
             daily, '_preferences_path', return_value=Path(directory) / 'prefs.json'
         ):
             daily.settings_page()
-            labels = {'進行中・確認待ち 初期表示件数': 10, '完了済み 初期表示件数': 20}
+            labels = {'進行中・確認待ち 初期表示件数': 4, '完了済み 初期表示件数': 4}
             for label, value in labels.items():
                 control = next(e for e in self.client.elements.values() if e._props.get('label') == label)
+                self.assertEqual(control.options, list(range(1, 11)))
                 control.value = value
             await self.click('保存して反映')
-            self.assertEqual(daily._UI_PREFERENCES['core']['open_limit'], 10)
-            self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], 20)
-            self.assertEqual(daily.load_ui_preferences()['core']['completed_limit'], 20)
+            self.assertEqual(daily._UI_PREFERENCES['core']['open_limit'], 4)
+            self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], 4)
+            self.assertEqual(daily.load_ui_preferences()['core']['completed_limit'], 4)
 
     async def test_query_selection_and_final_decision_rendered_separately(self):
         self.done[0]['advisor_shadow'] = {
