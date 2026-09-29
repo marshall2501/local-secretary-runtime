@@ -66,6 +66,7 @@ class WebHit:
     excerpt: str | None
     quality_score: int
     authority_hint: str
+    authority_level: str
     version_candidates: list[str]
     version_facts: list[dict]
     date_hints: list[str]
@@ -290,7 +291,11 @@ def _extract_version_facts(text: str) -> list[dict]:
     return facts[:12]
 
 
-def _summarize_version_group(kind: str, by_version: dict[str, list[dict]]) -> dict:
+def _summarize_version_group(
+    kind: str,
+    by_version: dict[str, list[dict]],
+    primary_domains: set[str] | None = None,
+) -> dict:
     candidates = []
     for value, sources in by_version.items():
         domains = sorted({row["domain"] for row in sources if row["domain"]})
@@ -301,11 +306,19 @@ def _summarize_version_group(kind: str, by_version: dict[str, list[dict]]) -> di
                 if row.get("date_hint")
             }
         )
+        primary_domains = primary_domains or set()
+        primary_sources = [
+            row for row in sources if row.get("domain") in primary_domains
+        ]
         candidates.append({
             "value": value,
             "source_count": len(sources),
             "domain_count": len(domains),
             "domains": domains,
+            "primary_source_count": len(primary_sources),
+            "primary_domains": sorted({
+                row["domain"] for row in primary_sources if row.get("domain")
+            }),
             "best_quality_score": max(row["quality_score"] for row in sources),
             "best_context_score": max(int(row.get("context_score") or 0) for row in sources),
             "latest_date": dates[-1] if dates else None,
@@ -313,6 +326,7 @@ def _summarize_version_group(kind: str, by_version: dict[str, list[dict]]) -> di
         })
     candidates.sort(
         key=lambda row: (
+            row["primary_source_count"],
             row["latest_date"] or "",
             row["best_context_score"],
             row["domain_count"],
@@ -356,6 +370,12 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
     if intent != "latest_driver":
         return {"kind": "none", "status": "not_applicable"}
 
+    primary_domains = sorted({
+        hit.domain
+        for hit in hits
+        if hit.authority_level == "primary"
+    })
+
     current_by_kind: dict[str, dict[str, list[dict]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -376,13 +396,15 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
                 "domain": hit.domain,
                 "quality_score": hit.quality_score,
                 "authority_hint": hit.authority_hint,
+                "authority_level": hit.authority_level,
                 "evidence_rank": hit.evidence_rank,
                 "date_hint": fact.get("date_hint"),
                 "context_score": int(fact.get("context_score") or 0),
             })
 
+    primary_domain_set = set(primary_domains)
     groups = [
-        _summarize_version_group(kind, versions)
+        _summarize_version_group(kind, versions, primary_domain_set)
         for kind, versions in current_by_kind.items()
     ]
     priority = {
@@ -398,16 +420,26 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
     )
 
     historical_groups = [
-        _summarize_version_group(kind, versions)
+        _summarize_version_group(kind, versions, primary_domain_set)
         for kind, versions in historical_by_kind.items()
     ]
     historical_groups.sort(key=lambda row: priority.get(row["kind"], 99))
 
     preferred = groups[0] if groups else None
+    primary_current_candidates = [
+        candidate
+        for group in groups
+        for candidate in (group.get("candidates") or [])
+        if int(candidate.get("primary_source_count") or 0) > 0
+    ]
     if not preferred:
         overall_status = "no_version_candidate"
         best = None
         preferred_kind = None
+    elif primary_domains and not primary_current_candidates:
+        overall_status = "primary_source_no_current_candidate"
+        best = None
+        preferred_kind = preferred["kind"]
     else:
         overall_status = preferred["status"]
         best = preferred["best_candidate"]
@@ -418,6 +450,7 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
         "status": overall_status,
         "preferred_kind": preferred_kind,
         "best_candidate": best,
+        "primary_domains": primary_domains,
         "groups": groups,
         "historical_groups": historical_groups,
     }
@@ -483,6 +516,14 @@ def research_web(
         for evidence_rank, idx in enumerate(evidence_order, start=1)
     }
     fetch_indices = set(evidence_order[:max_fetches])
+    primary_domains = {
+        row["domain"]
+        for row in staged
+        if (
+            row["domain"]
+            and row["authority_hint"] == "primary_driver_source_candidate"
+        )
+    }
 
     hits: list[WebHit] = []
     for idx, row in enumerate(staged):
@@ -514,6 +555,9 @@ def research_web(
                 excerpt=excerpt,
                 quality_score=row["quality_score"],
                 authority_hint=row["authority_hint"],
+                authority_level=(
+                    "primary" if row["domain"] in primary_domains else "secondary"
+                ),
                 version_candidates=_extract_candidates(
                     evidence_text, _VERSION_PATTERNS
                 ),
