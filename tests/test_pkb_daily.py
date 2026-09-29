@@ -80,6 +80,7 @@ class DailyPKBParserTests(unittest.TestCase):
             "finance": {"details": True, "recent_limit": 100, "stored": 1},
             "core": {"trace": False, "screen_log": True},
             "core_advisor_model": "gemma4:12b",
+            "core_advisor_timeout": 180,
             "visibility": {
                 "pkb": {"limits": False, "write": "invalid"},
                 "core": {"trace": False},
@@ -98,6 +99,7 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertFalse(prefs["core"]["trace"])
         self.assertTrue(prefs["core"]["screen_log"])
         self.assertEqual(prefs["core_advisor_model"], "gemma4:12b")
+        self.assertEqual(prefs["core_advisor_timeout"], 180)
         self.assertFalse(prefs["visibility"]["pkb"]["limits"])
         self.assertEqual(
             prefs["visibility"]["pkb"]["write"],
@@ -116,6 +118,7 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["core"]["trace"] = False
             prefs["core"]["screen_log"] = False
             prefs["core_advisor_model"] = "gpt-oss:20b"
+            prefs["core_advisor_timeout"] = 120
             prefs["visibility"]["pkb"]["limits"] = False
             prefs["visibility"]["core"]["trace"] = False
             saved = save_ui_preferences(prefs, path)
@@ -128,6 +131,7 @@ class DailyPKBParserTests(unittest.TestCase):
             self.assertFalse(loaded["core"]["trace"])
             self.assertFalse(loaded["core"]["screen_log"])
             self.assertEqual(loaded["core_advisor_model"], "gpt-oss:20b")
+            self.assertEqual(loaded["core_advisor_timeout"], 120)
             self.assertFalse(loaded["visibility"]["pkb"]["limits"])
             self.assertFalse(loaded["visibility"]["core"]["trace"])
 
@@ -141,6 +145,7 @@ class DailyPKBParserTests(unittest.TestCase):
             loaded["finance"]["recent_limit"],
             FINANCE_PAGE_SIZE_DEFAULT,
         )
+        self.assertEqual(loaded["core_advisor_timeout"], 60)
 
     def test_pkb_ui_open_state_is_centralized_and_resettable_by_process_restart(self):
         original = dict(_PKB_UI_OPEN)
