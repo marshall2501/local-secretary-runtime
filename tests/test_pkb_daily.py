@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from uuid import UUID
 
@@ -21,6 +22,7 @@ from pkb_proto.daily_pkb import (
     _core_finance_filters,
     _compare_driver_values,
     _driver_web_query_from_detail,
+    _execute_cooperative_local_probe,
     _clarified_driver_web_target,
     core_answer,
     core_task_selection_result,
@@ -306,6 +308,65 @@ class DailyPKBParserTests(unittest.TestCase):
                 "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 "status": "mystery",
             })
+
+    @patch("pkb_proto.daily_pkb.list_components")
+    @patch("pkb_proto.daily_pkb.load_entity_detail")
+    @patch("pkb_proto.daily_pkb.connection")
+    def test_cooperative_pkb_probe_expands_known_pc_to_component_overview(
+        self, connection_mock, detail_mock, components_mock
+    ):
+        db = connection_mock.return_value.__enter__.return_value
+        detail_mock.return_value = {
+            "entity": {
+                "id": ENTITIES["メインPC"]["id"],
+                "name": "メインPC",
+                "domain": "pc",
+                "entity_type": "computer",
+            },
+            "current": [],
+            "relations": [],
+            "events": [],
+        }
+        components_mock.return_value = [
+            {
+                "component_id": UUID(ENTITIES["GPU1"]["id"]),
+                "component_name": "GPU1",
+                "component_type": "gpu",
+                "relation_role": "primary_gpu",
+                "current_driver": "DRV-G3",
+                "state_source_uri": "fixture://gpu",
+            },
+            {
+                "component_id": UUID(ENTITIES["NIC1"]["id"]),
+                "component_name": "NIC1",
+                "component_type": "network_adapter",
+                "relation_role": "wired_nic",
+                "current_driver": None,
+                "state_source_uri": None,
+            },
+        ]
+        result = _execute_cooperative_local_probe(
+            "pkb_search",
+            "メインPCについて調べて",
+            {
+                "matched_entities": [
+                    {
+                        "id": ENTITIES["メインPC"]["id"],
+                        "name": "メインPC",
+                        "domain": "pc",
+                        "entity_type": "computer",
+                    }
+                ]
+            },
+        )
+        self.assertEqual(result["operation"], "entity_overview")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["result"]["result_kind"], "components")
+        self.assertEqual(result["result"]["probe_kind"], "entity_overview")
+        self.assertIn("GPU1", result["answer"])
+        self.assertIn("DRV-G3", result["answer"])
+        detail_mock.assert_called_once_with(db, ENTITIES["メインPC"]["id"])
+        components_mock.assert_called_once()
 
     def test_core_scope_routes_current_vs_latest_driver_to_pkb_web_compare(self):
         result = scope_core_request(
