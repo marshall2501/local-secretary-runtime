@@ -222,12 +222,29 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(filters["end_date"], "2026-09-30")
         self.assertEqual(filters["row_mode"], "calculation_target")
 
+    def test_finance_core_answer_uses_requested_period_not_observed_span(self):
+        answer = finance_core_answer({
+            "total": 2,
+            "transaction_count": 2,
+            "requested_start_date": "2026-09-01",
+            "requested_end_date": "2026-09-30",
+            "data_start_date": "2026-09-03",
+            "data_end_date": "2026-09-28",
+            "income_total": 0,
+            "expense_total": 1234,
+            "net_total": -1234,
+        })
+        self.assertIn("2026-09-01〜2026-09-30", answer)
+        self.assertNotIn("2026-09-03〜2026-09-28", answer)
+
     def test_finance_core_answer_formats_deterministic_totals(self):
         answer = finance_core_answer({
             "total": 3,
             "transaction_count": 3,
-            "start_date": "2026-09-01",
-            "end_date": "2026-09-30",
+            "requested_start_date": "2026-09-01",
+            "requested_end_date": "2026-09-30",
+            "data_start_date": "2026-09-02",
+            "data_end_date": "2026-09-28",
             "income_total": 100000,
             "expense_total": 25000,
             "net_total": 75000,
