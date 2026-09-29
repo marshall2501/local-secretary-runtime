@@ -97,7 +97,7 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.comparison, "match")
         self.assertIsNone(result.proposed_action)
 
-    @patch("pkb_proto.core_advisor._chat_models", return_value=["llama3.1:8b"])
+    @patch("pkb_proto.core_advisor.list_chat_models", return_value=["llama3.1:8b"])
     @patch("pkb_proto.core_advisor.urlopen", side_effect=URLError("offline"))
     def test_provider_error_never_raises_into_core(self, _urlopen, _models):
         result = advise(
