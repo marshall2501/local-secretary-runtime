@@ -239,6 +239,37 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIn("Latest driver information.", answer)
         self.assertIn("Release Notes", answer)
 
+    def test_web_core_answer_does_not_overstate_conflicting_driver_candidates(self):
+        answer = web_core_answer({
+            "hits": [],
+            "fact_summary": {
+                "kind": "driver_version",
+                "status": "conflicting_candidates",
+                "best_candidate": "26.9.1",
+                "candidates": [
+                    {"value": "26.9.1"},
+                    {"value": "26.8.1"},
+                ],
+            },
+        })
+        self.assertIn("一致していません", answer)
+        self.assertIn("26.9.1", answer)
+        self.assertIn("26.8.1", answer)
+        self.assertIn("追加確認", answer)
+
+    def test_web_core_answer_marks_single_candidate_as_unconfirmed(self):
+        answer = web_core_answer({
+            "hits": [{"title": "AMD Drivers", "url": "https://amd.example"}],
+            "fact_summary": {
+                "kind": "driver_version",
+                "status": "single_candidate",
+                "best_candidate": "26.9.1",
+                "candidates": [{"value": "26.9.1", "source_count": 1}],
+            },
+        })
+        self.assertIn("26.9.1", answer)
+        self.assertIn("確定値とは扱いません", answer)
+
     def test_core_scope_routes_finance_request_to_finance_read(self):
         result = scope_core_request("2026年9月の支出を調べて", ENTITIES)
         self.assertEqual(result["status"], "ready")
