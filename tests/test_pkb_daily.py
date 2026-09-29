@@ -22,6 +22,7 @@ from pkb_proto.daily_pkb import (
     core_task_selection_result,
     finance_core_answer,
     load_ui_preferences,
+    web_core_answer,
     parse_component_write,
     parse_correction,
     parse_query,
@@ -209,6 +210,34 @@ class DailyPKBParserTests(unittest.TestCase):
                 "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 "status": "mystery",
             })
+
+    def test_core_scope_routes_explicit_web_request_to_web_research(self):
+        result = scope_core_request(
+            "RX 9070 XTの最新ドライバーをWebで調べて",
+            ENTITIES,
+        )
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["capability"], "web_research")
+        self.assertEqual(result["domain"], "research")
+
+    def test_web_core_answer_uses_search_titles_and_snippets(self):
+        answer = web_core_answer({
+            "hits": [
+                {
+                    "title": "AMD Drivers",
+                    "url": "https://example.com/amd",
+                    "snippet": "Latest driver information.",
+                },
+                {
+                    "title": "Release Notes",
+                    "url": "https://example.com/release",
+                    "snippet": "Release notes.",
+                },
+            ]
+        })
+        self.assertIn("AMD Drivers", answer)
+        self.assertIn("Latest driver information.", answer)
+        self.assertIn("Release Notes", answer)
 
     def test_core_scope_routes_finance_request_to_finance_read(self):
         result = scope_core_request("2026年9月の支出を調べて", ENTITIES)
