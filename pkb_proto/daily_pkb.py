@@ -69,6 +69,10 @@ FINANCE_UI_DEFAULT_OPEN = {
     "imports": False,
     "csv": False,
 }
+CORE_UI_DEFAULT_OPEN = {
+    "trace": True,
+    "screen_log": True,
+}
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
 
@@ -92,6 +96,7 @@ def _default_ui_preferences() -> dict:
             **FINANCE_UI_DEFAULT_OPEN,
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
         },
+        "core": dict(CORE_UI_DEFAULT_OPEN),
         "visibility": {
             section: dict(values)
             for section, values in UI_VISIBILITY_DEFAULT.items()
@@ -136,6 +141,13 @@ def _validate_ui_preferences(raw: object) -> dict:
         page_size = finance.get("recent_limit")
         if type(page_size) is int and page_size in FINANCE_PAGE_SIZE_OPTIONS:
             result["finance"]["recent_limit"] = page_size
+
+    core = raw.get("core")
+    if isinstance(core, dict):
+        for key in CORE_UI_DEFAULT_OPEN:
+            value = core.get(key)
+            if isinstance(value, bool):
+                result["core"][key] = value
 
     visibility = raw.get("visibility")
     if isinstance(visibility, dict):
@@ -183,6 +195,7 @@ _FINANCE_UI_OPEN = {
     key: _UI_PREFERENCES["finance"][key]
     for key in FINANCE_UI_DEFAULT_OPEN
 }
+_CORE_UI_OPEN = dict(_UI_PREFERENCES["core"])
 
 
 def _apply_ui_preferences(preferences: dict) -> None:
@@ -197,6 +210,8 @@ def _apply_ui_preferences(preferences: dict) -> None:
     _FINANCE_UI_OPEN.update(
         {key: validated["finance"][key] for key in FINANCE_UI_DEFAULT_OPEN}
     )
+    _CORE_UI_OPEN.clear()
+    _CORE_UI_OPEN.update(validated["core"])
 
 
 def _set_pkb_ui_open(key: str, value: bool) -> None:
@@ -215,6 +230,12 @@ def _set_finance_ui_open(key: str, value: bool) -> None:
     if key not in FINANCE_UI_DEFAULT_OPEN:
         raise KeyError("unknown finance accordion key")
     _FINANCE_UI_OPEN[key] = bool(value)
+
+
+def _set_core_ui_open(key: str, value: bool) -> None:
+    if key not in CORE_UI_DEFAULT_OPEN:
+        raise KeyError("unknown Core accordion key")
+    _CORE_UI_OPEN[key] = bool(value)
 
 
 def _block_visibility_class(section: str, key: str) -> str:
@@ -1486,6 +1507,11 @@ def features_page():
 def core_page():
     state = {"result": None, "busy": False, "resume_busy": False}
 
+    def remember_core_expansion(key: str):
+        def _remember(event):
+            _set_core_ui_open(key, event.value)
+        return _remember
+
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
         _portal_header(
             "Secretary Core",
@@ -1503,7 +1529,8 @@ def core_page():
             except Exception as exc:
                 with ui.expansion(
                     "Core画面 全体稼働ログ",
-                    value=False,
+                    value=_CORE_UI_OPEN["screen_log"],
+                    on_value_change=remember_core_expansion("screen_log"),
                 ).classes(
                     "w-full border border-red-200 bg-red-50"
                     + _block_visibility_class("core", "screen_log")
@@ -1515,7 +1542,8 @@ def core_page():
 
             with ui.expansion(
                 "Core画面 全体稼働ログ",
-                value=False,
+                value=_CORE_UI_OPEN["screen_log"],
+                on_value_change=remember_core_expansion("screen_log"),
             ).classes(
                 "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
                 + _block_visibility_class("core", "screen_log")
@@ -1628,7 +1656,11 @@ def core_page():
                 try:
                     trace = load_core_task_trace(UUID(task_id))
                 except Exception as exc:
-                    with ui.expansion("Task検証・稼働ログ", value=False).classes(
+                    with ui.expansion(
+                        "Task検証・稼働ログ",
+                        value=_CORE_UI_OPEN["trace"],
+                        on_value_change=remember_core_expansion("trace"),
+                    ).classes(
                         "w-full border border-red-200 bg-red-50"
                         + _block_visibility_class("core", "trace")
                     ):
@@ -1638,7 +1670,11 @@ def core_page():
                     return
 
                 task = trace["task"]
-                with ui.expansion("Task検証・稼働ログ", value=False).classes(
+                with ui.expansion(
+                    "Task検証・稼働ログ",
+                    value=_CORE_UI_OPEN["trace"],
+                    on_value_change=remember_core_expansion("trace"),
+                ).classes(
                     "w-full border-2 border-slate-300 bg-slate-50"
                     + _block_visibility_class("core", "trace")
                 ):
@@ -1887,6 +1923,7 @@ def settings_page():
                 value=_UI_PREFERENCES["finance"]["recent_limit"],
             ).classes("min-w-64")
 
+        core_open_controls = {}
         core_visible_controls = {}
         with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
             ui.label("Secretary Core").classes("text-lg font-bold")
@@ -1900,6 +1937,11 @@ def settings_page():
                         "表示",
                         value=_UI_PREFERENCES["visibility"]["core"][key],
                     )
+                    if key in CORE_UI_DEFAULT_OPEN:
+                        core_open_controls[key] = ui.switch(
+                            "初期展開",
+                            value=_UI_PREFERENCES["core"][key],
+                        )
 
         ui.label(
             "保存後、別画面へ移動するかページを再読み込みすると表示/非表示が反映されます。"
@@ -1924,6 +1966,10 @@ def settings_page():
                     "recent_limit": int(
                         page_size_select.value or FINANCE_PAGE_SIZE_DEFAULT
                     ),
+                },
+                "core": {
+                    key: bool(control.value)
+                    for key, control in core_open_controls.items()
                 },
                 "visibility": {
                     "pkb": {
@@ -1960,6 +2006,8 @@ def settings_page():
                 control.value = preferences["visibility"]["finance"][key]
             for key, control in core_visible_controls.items():
                 control.value = preferences["visibility"]["core"][key]
+            for key, control in core_open_controls.items():
+                control.value = preferences["core"][key]
             page_size_select.value = preferences["finance"]["recent_limit"]
 
         def save_and_apply():
