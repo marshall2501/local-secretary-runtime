@@ -1297,7 +1297,20 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
     return {
         "task_id": result.get("task_id") or trace_task.get("id"),
         "request": result.get("request") or trace_task.get("request"),
+        "core": {
+            "status": result.get("status") or trace_task.get("status"),
+            "phase": result.get("phase") or trace_task.get("phase"),
+            "question": result.get("question") or trace_task.get("question"),
+            "selected_capability": (
+                result.get("selected_capability")
+                if "selected_capability" in result
+                else trace_task.get("selected_capability")
+            ),
+        },
         "magi": {
+            "melchior_scope_status": (
+                (trace_task.get("magi_baseline") or {}).get("status")
+            ),
             "melchior_baseline": result.get("selected_capability"),
             "casper_proposal": advisor.get("proposed_action"),
             "comparison": advisor.get("comparison"),
@@ -2012,6 +2025,7 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "completed_at": task[7],
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
+            "question": checkpoint.get("question"),
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
             "observation_pack": checkpoint.get("observation_pack"),
