@@ -219,6 +219,20 @@ def _extract_version_facts(text: str) -> list[dict]:
             if key not in seen:
                 seen.add(key)
                 facts.append({"kind": kind, "value": value})
+
+    specific_values = {
+        fact["value"]
+        for fact in facts
+        if fact["kind"] in {"si_driver_version", "adrenalin_version"}
+    }
+    facts = [
+        fact
+        for fact in facts
+        if not (
+            fact["kind"] == "driver_version"
+            and fact["value"] in specific_values
+        )
+    ]
     return facts[:12]
 
 
