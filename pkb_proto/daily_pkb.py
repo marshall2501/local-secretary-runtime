@@ -1581,7 +1581,7 @@ def core_page():
 
     # NiceGUI drawers are top-level layout elements and must be created as
     # direct children of the page, not inside the central content column.
-    task_drawer = ui.left_drawer(value=True).classes("bg-orange-50 p-3").props(
+    task_drawer = ui.right_drawer(value=True).classes("bg-orange-50 p-3").props(
         "bordered width=300 breakpoint=700"
     )
 
