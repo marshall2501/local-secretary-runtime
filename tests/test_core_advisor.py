@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from pkb_proto.core_advisor import AdvisorResult, advise, choose_model, inspect_output
+from pkb_proto.core_advisor import AdvisorResult, advise, choose_model, diagnose_response, inspect_output
 from pkb_proto.daily_pkb import _run_core_advisor_shadow
 
 
@@ -56,6 +56,35 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.comparison, "mismatch")
         self.assertEqual(result.proposed_action, "web_research")
+
+    def test_response_diagnostic_keeps_only_contract_fields(self):
+        diagnostic = diagnose_response(
+            '{"situation":"ok","missing_information":[],"proposed_action":"pkb_search",'
+            '"reason":"use PKB","expected_result":null,"private_reasoning":"do not keep"}'
+        )
+        self.assertTrue(diagnostic["json_valid"])
+        self.assertEqual(
+            diagnostic["safe_response"]["expected_result"],
+            None,
+        )
+        self.assertEqual(
+            diagnostic["field_types"]["expected_result"],
+            "NoneType",
+        )
+        self.assertEqual(
+            diagnostic["unexpected_keys"],
+            ["private_reasoning"],
+        )
+        self.assertNotIn(
+            "private_reasoning",
+            diagnostic["safe_response"],
+        )
+
+    def test_response_diagnostic_does_not_store_non_json_prose(self):
+        diagnostic = diagnose_response("thinking aloud and then maybe JSON")
+        self.assertFalse(diagnostic["json_valid"])
+        self.assertIsNone(diagnostic["safe_response"])
+        self.assertEqual(diagnostic["raw_length"], 34)
 
     def test_invalid_json_is_fail_closed(self):
         result = inspect_output(
