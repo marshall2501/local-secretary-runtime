@@ -30,6 +30,11 @@ from .core_ooda import OODA_PHASES, derive_ooda
 from .core_observation import build_observation_pack
 from .core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
 from .core_synthesis import synthesize as synthesize_magi
+from .core_coordinator import (
+    can_auto_execute_ambiguous_probe,
+    decide_after_observation,
+    extend_observation_pack,
+)
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -1404,6 +1409,279 @@ def _write_core_advisor_shadow(task_id: UUID, shadow: dict, event_type: str) -> 
     return True
 
 
+def _claim_cooperative_probe(task_id: UUID, capability: str) -> bool:
+    """Atomically claim an untouched clarification Task for one bounded local probe."""
+    with connection() as db:
+        with db.transaction():
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT status, checkpoint
+                       FROM secretary.tasks
+                       WHERE id=%s
+                       FOR UPDATE""",
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                status, checkpoint = row[0], row[1] or {}
+                if status != "waiting_external":
+                    return False
+                if list(checkpoint.get("user_replies") or []):
+                    return False
+
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": "act",
+                    "selected_capability": capability,
+                    "question": None,
+                    "reason": "magi_cooperative_probe",
+                    "cooperative_cycle": 1,
+                }
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET status='running', checkpoint=%s
+                       WHERE id=%s""",
+                    (Jsonb(next_checkpoint), task_id),
+                )
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, object_type, object_id, details)
+                       VALUES ('daily_core', 'core.magi.probe_claimed',
+                               %s, 'task', %s, %s)""",
+                    (
+                        task_id,
+                        task_id,
+                        Jsonb({"capability": capability, "cycle": 1}),
+                    ),
+                )
+    return True
+
+
+def _record_cooperative_probe(
+    task_id: UUID,
+    request: str,
+    execution: dict,
+    observation_pack: dict,
+) -> tuple[UUID, UUID]:
+    """Persist one cooperative read-only Action/Result and move Task back to Orient."""
+    execution_result = execution["result"]
+    execution_total = int(execution.get("total") or 0)
+    with connection() as db:
+        with db.transaction():
+            with db.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO secretary.sources
+                       (source_type, uri, citation, retrieved_at,
+                        confidentiality, metadata)
+                       VALUES ('tool', %s, %s, now(), 'private', %s)
+                       RETURNING id""",
+                    (
+                        f"tool://daily-core/{execution['source_slug']}/{task_id}/magi-1",
+                        execution["citation"],
+                        Jsonb({
+                            "task_id": str(task_id),
+                            "capability": execution["capability"],
+                            "query": request,
+                            "result_count": execution_total,
+                            "magi_cooperative": True,
+                            "cycle": 1,
+                            **(execution.get("source_metadata") or {}),
+                        }),
+                    ),
+                )
+                source_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO secretary.actions
+                       (task_id, actor, tool, operation, parameters, risk,
+                        authorization_basis, status, idempotency_key,
+                        reversible, started_at, finished_at)
+                       VALUES (%s, 'daily_core', %s, %s, %s,
+                               'read_only', 'magi_local_pkb_read',
+                               'succeeded', %s, true, now(), now())
+                       RETURNING id""",
+                    (
+                        task_id,
+                        execution["tool"],
+                        execution["operation"],
+                        Jsonb({
+                            "query": request,
+                            "bounded": True,
+                            "magi_cooperative": True,
+                            "cycle": 1,
+                        }),
+                        f"daily-core:{task_id}:magi:{execution['source_slug']}:1",
+                    ),
+                )
+                action_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """INSERT INTO secretary.results
+                       (action_id, source_id, outcome, summary, evidence,
+                        verified_by, verified_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, now())
+                       RETURNING id""",
+                    (
+                        action_id,
+                        source_id,
+                        "success" if execution_total > 0 else "inconclusive",
+                        execution["answer"],
+                        Jsonb({
+                            "result_kind": execution_result.get("result_kind"),
+                            "total": execution_total,
+                            "data": execution_result,
+                            "magi_cooperative": True,
+                            "cycle": 1,
+                        }),
+                        execution["verified_by"],
+                    ),
+                )
+                result_id = cur.fetchone()[0]
+
+                cur.execute(
+                    """SELECT checkpoint
+                       FROM secretary.tasks
+                       WHERE id=%s
+                       FOR UPDATE""",
+                    (task_id,),
+                )
+                checkpoint = (cur.fetchone() or [{}])[0] or {}
+                action_ids = list(checkpoint.get("action_ids") or [])
+                result_ids = list(checkpoint.get("result_ids") or [])
+                action_ids.append(str(action_id))
+                result_ids.append(str(result_id))
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": "orient",
+                    "selected_capability": execution["capability"],
+                    "action_id": str(action_id),
+                    "result_id": str(result_id),
+                    "action_ids": action_ids,
+                    "result_ids": result_ids,
+                    "result_count": execution_total,
+                    "observation_pack": observation_pack,
+                    "cooperative_result": execution_result,
+                    "cooperative_cycle": 2,
+                }
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET checkpoint=%s
+                       WHERE id=%s""",
+                    (Jsonb(next_checkpoint), task_id),
+                )
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, action_id,
+                        object_type, object_id, details)
+                       VALUES ('daily_core', 'core.magi.probe_observed',
+                               %s, %s, 'task', %s, %s)""",
+                    (
+                        task_id,
+                        action_id,
+                        task_id,
+                        Jsonb({
+                            "capability": execution["capability"],
+                            "result_count": execution_total,
+                            "cycle": 1,
+                        }),
+                    ),
+                )
+    return action_id, result_id
+
+
+def _finalize_cooperative_probe(
+    task_id: UUID,
+    final_decision: dict,
+    final_observation_pack: dict,
+    execution: dict,
+) -> None:
+    next_step = final_decision["next_step"]
+    task_status = "completed" if next_step == "respond" else "waiting_external"
+    phase = "completed" if next_step == "respond" else "awaiting_clarification"
+    with connection() as db:
+        with db.transaction():
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT checkpoint
+                       FROM secretary.tasks
+                       WHERE id=%s
+                       FOR UPDATE""",
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return
+                checkpoint = row[0] or {}
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": phase,
+                    "selected_capability": execution["capability"],
+                    "question": final_decision.get("question"),
+                    "message": final_decision.get("message"),
+                    "reason": final_decision.get("reason"),
+                    "observation_pack": final_observation_pack,
+                    "cooperative_result": execution.get("result"),
+                    "cooperative_cycle": 2,
+                }
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET status=%s,
+                           checkpoint=%s,
+                           completed_at=CASE WHEN %s='completed' THEN now() ELSE NULL END
+                       WHERE id=%s""",
+                    (task_status, Jsonb(next_checkpoint), task_status, task_id),
+                )
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, object_type, object_id, details)
+                       VALUES ('daily_core', %s, %s, 'task', %s, %s)""",
+                    (
+                        "core.magi.responded"
+                        if next_step == "respond"
+                        else "core.magi.clarify_after_probe",
+                        task_id,
+                        task_id,
+                        Jsonb({
+                            "next_step": next_step,
+                            "capability": execution["capability"],
+                            "reason": final_decision.get("reason"),
+                            "cycle": 2,
+                        }),
+                    ),
+                )
+
+
+def _fail_cooperative_probe(task_id: UUID, error: str) -> None:
+    with connection() as db:
+        with db.transaction():
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT checkpoint
+                       FROM secretary.tasks
+                       WHERE id=%s
+                       FOR UPDATE""",
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return
+                checkpoint = row[0] or {}
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": "failed",
+                    "question": None,
+                    "reason": "magi_cooperative_probe_failed",
+                    "cooperative_error": error,
+                }
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET status='failed', checkpoint=%s
+                       WHERE id=%s""",
+                    (Jsonb(next_checkpoint), task_id),
+                )
+
+
 def _run_core_advisor_shadow(
     task_id: UUID,
     request: str,
@@ -1412,15 +1690,15 @@ def _run_core_advisor_shadow(
     model: str | None,
     timeout_seconds: float,
 ) -> None:
-    """Background cooperative MAGI proposal; never changes Task status/capability."""
+    """Run cooperative MAGI in background; only bounded ambiguous PKB probes may execute."""
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     attempted_model = model
+    claimed_probe = False
     try:
         try:
             attempted_model = choose_advisor_model(list_advisor_models(), model)
         except Exception:
-            # Let advise_core produce the bounded error record; keep requested model.
             attempted_model = model
 
         running = _advisor_shadow_initial(attempted_model, timeout_seconds)
@@ -1428,6 +1706,9 @@ def _run_core_advisor_shadow(
             "job_status": "running",
             "status": "running",
             "started_at": started_at.isoformat(),
+            "cooperative_mode": "bounded_execution_v0",
+            "cycle": 1,
+            "cycles": [],
         })
         if not _write_core_advisor_shadow(
             task_id, running, "core.advisor.running"
@@ -1440,7 +1721,7 @@ def _run_core_advisor_shadow(
             if melchior.get("status") == "ready" and current_selection is not None
             else "clarify"
         )
-        result = advise_core(
+        first_result = advise_core(
             request,
             current_selection=current_selection,
             melchior_next_step=melchior_next_step,
@@ -1449,17 +1730,9 @@ def _run_core_advisor_shadow(
             model=attempted_model,
             timeout=timeout_seconds,
         ).as_dict()
-        elapsed = round(time.perf_counter() - started_perf, 3)
-        error = result.get("error")
-        if error == "TimeoutError":
-            job_status = "timeout"
-        elif result.get("status") == "unavailable":
-            job_status = "error"
-        else:
-            job_status = "completed"
-        synthesis = synthesize_magi(
+        first_synthesis = synthesize_magi(
             melchior,
-            result,
+            first_result,
             permissions={
                 "pkb_read": True,
                 "finance_read": True,
@@ -1467,19 +1740,186 @@ def _run_core_advisor_shadow(
                 "external_actions": False,
             },
         ).as_dict()
+        first_cycle = {
+            "cycle": 1,
+            "casper": {
+                "status": first_result.get("status"),
+                "next_step": first_result.get("next_step"),
+                "proposed_action": first_result.get("proposed_action"),
+                "reason": first_result.get("reason"),
+                "missing_information": first_result.get("missing_information") or [],
+            },
+            "synthesis": first_synthesis,
+        }
+
+        if can_auto_execute_ambiguous_probe(melchior, first_synthesis):
+            intermediate = {
+                **first_result,
+                "job_status": "running",
+                "started_at": started_at.isoformat(),
+                "finished_at": None,
+                "elapsed_seconds": round(time.perf_counter() - started_perf, 3),
+                "synthesis": first_synthesis,
+                "cooperative_mode": "bounded_execution_v0",
+                "cycle": 1,
+                "cycles": [first_cycle],
+                "cooperative_execution": {
+                    "status": "claiming",
+                    "capability": first_synthesis.get("selected_capability"),
+                },
+            }
+            _write_core_advisor_shadow(
+                task_id, intermediate, "core.magi.synthesis_ready"
+            )
+
+            capability = str(first_synthesis["selected_capability"])
+            claimed_probe = _claim_cooperative_probe(task_id, capability)
+            if not claimed_probe:
+                final = {
+                    **first_result,
+                    "job_status": "completed",
+                    "started_at": started_at.isoformat(),
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "elapsed_seconds": round(time.perf_counter() - started_perf, 3),
+                    "synthesis": first_synthesis,
+                    "cooperative_mode": "bounded_execution_v0",
+                    "cycle": 1,
+                    "cycles": [first_cycle],
+                    "cooperative_execution": {
+                        "status": "skipped_task_changed",
+                        "capability": capability,
+                    },
+                }
+                _write_core_advisor_shadow(
+                    task_id, final, "core.advisor.completed"
+                )
+                return
+
+            execution = _execute_core_read(capability, request)
+            second_observation = extend_observation_pack(
+                observation_pack,
+                execution,
+                cycle=1,
+            )
+            action_id, result_id = _record_cooperative_probe(
+                task_id,
+                request,
+                execution,
+                second_observation,
+            )
+
+            observed = {
+                **intermediate,
+                "cycle": 2,
+                "cooperative_execution": {
+                    "status": "observed",
+                    "capability": capability,
+                    "result_count": int(execution.get("total") or 0),
+                    "action_id": str(action_id),
+                    "result_id": str(result_id),
+                },
+            }
+            _write_core_advisor_shadow(
+                task_id, observed, "core.magi.probe_observed"
+            )
+
+            second_result = advise_core(
+                request,
+                current_selection=current_selection,
+                melchior_next_step=melchior_next_step,
+                task_state="observed",
+                observations=second_observation,
+                model=attempted_model,
+                timeout=timeout_seconds,
+            ).as_dict()
+            second_synthesis = synthesize_magi(
+                melchior,
+                second_result,
+                permissions={
+                    "pkb_read": True,
+                    "finance_read": True,
+                    "web_research": True,
+                    "external_actions": False,
+                },
+            ).as_dict()
+            second_cycle = {
+                "cycle": 2,
+                "casper": {
+                    "status": second_result.get("status"),
+                    "next_step": second_result.get("next_step"),
+                    "proposed_action": second_result.get("proposed_action"),
+                    "reason": second_result.get("reason"),
+                    "missing_information": second_result.get("missing_information") or [],
+                },
+                "synthesis": second_synthesis,
+            }
+            final_decision = decide_after_observation(
+                second_synthesis,
+                execution=execution,
+                executed_capabilities=(capability,),
+            )
+            _finalize_cooperative_probe(
+                task_id,
+                final_decision,
+                second_observation,
+                execution,
+            )
+            final = {
+                **second_result,
+                "job_status": "completed",
+                "started_at": started_at.isoformat(),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "elapsed_seconds": round(time.perf_counter() - started_perf, 3),
+                "synthesis": second_synthesis,
+                "cooperative_mode": "bounded_execution_v0",
+                "cycle": 2,
+                "cycles": [first_cycle, second_cycle],
+                "cooperative_execution": {
+                    "status": "completed",
+                    "capability": capability,
+                    "result_count": int(execution.get("total") or 0),
+                    "action_id": str(action_id),
+                    "result_id": str(result_id),
+                    "final_next_step": final_decision.get("next_step"),
+                    "final_reason": final_decision.get("reason"),
+                },
+                "observation_pack_after_action": second_observation,
+            }
+            _write_core_advisor_shadow(
+                task_id, final, "core.advisor.completed"
+            )
+            return
+
+        elapsed = round(time.perf_counter() - started_perf, 3)
+        error = first_result.get("error")
+        if error == "TimeoutError":
+            job_status = "timeout"
+        elif first_result.get("status") == "unavailable":
+            job_status = "error"
+        else:
+            job_status = "completed"
         final = {
-            **result,
+            **first_result,
             "job_status": job_status,
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": elapsed,
-            "synthesis": synthesis,
+            "synthesis": first_synthesis,
+            "cooperative_mode": "bounded_execution_v0",
+            "cycle": 1,
+            "cycles": [first_cycle],
+            "cooperative_execution": {"status": "not_executed"},
         }
         _write_core_advisor_shadow(
             task_id, final, f"core.advisor.{job_status}"
         )
     except Exception as exc:
         elapsed = round(time.perf_counter() - started_perf, 3)
+        if claimed_probe:
+            try:
+                _fail_cooperative_probe(task_id, type(exc).__name__)
+            except Exception:
+                pass
         failed = {
             **_advisor_shadow_initial(attempted_model, timeout_seconds),
             "job_status": "error",
@@ -1490,6 +1930,7 @@ def _run_core_advisor_shadow(
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": elapsed,
             "error": type(exc).__name__,
+            "cooperative_mode": "bounded_execution_v0",
         }
         try:
             _write_core_advisor_shadow(task_id, failed, "core.advisor.error")
@@ -2055,6 +2496,9 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "observation_pack": checkpoint.get("observation_pack"),
             "magi_baseline": checkpoint.get("magi_baseline"),
             "advisor_shadow": checkpoint.get("advisor_shadow"),
+            "message": checkpoint.get("message"),
+            "cooperative_result": checkpoint.get("cooperative_result"),
+            "cooperative_cycle": checkpoint.get("cooperative_cycle"),
             "result_count": checkpoint.get("result_count"),
         },
         "actions": [
@@ -2681,6 +3125,15 @@ def core_page():
                 load_core_task_trace, UUID(task_id)
             )
             state["trace_error"] = None
+            trace_task = (state["trace"] or {}).get("task") or {}
+            for key in ("status", "phase", "selected_capability", "question"):
+                if key in trace_task:
+                    result[key] = trace_task.get(key)
+            if trace_task.get("message"):
+                result["message"] = trace_task.get("message")
+            cooperative_result = trace_task.get("cooperative_result")
+            if cooperative_result and trace_task.get("selected_capability") == "pkb_search":
+                result["search"] = cooperative_result
         except Exception as exc:
             state["trace_error"] = str(exc)
             return
@@ -2989,14 +3442,15 @@ def core_page():
                     with ui.card().classes(
                         "w-full border border-indigo-200 bg-indigo-50"
                     ):
-                        ui.label("MAGI v0 · Cooperative Synthesis (Shadow)").classes(
+                        ui.label("MAGI v0 · Cooperative Synthesis").classes(
                             "font-bold text-indigo-900"
                         )
                         ui.label(
                             "MELCHIORのGuardとCASPERの前進案をCoreが統合します。"
-                            "現在は統合結果を観測するShadow段階で、実行能力はまだ変更しません。"
+                            "曖昧依頼では、Synthesisが選んだ限定的なPKB readだけを自動実行できます。"
                         ).classes("text-xs text-grey-7")
                         synthesis = advisor.get("synthesis") or {}
+                        cooperative_execution = advisor.get("cooperative_execution") or {}
                         ui.label(
                             "MELCHIOR: "
                             + str(result.get("selected_capability") or "clarify")
@@ -3018,6 +3472,15 @@ def core_page():
                                 "Scope adjustment: "
                                 + str(synthesis["scope_adjustment"])
                             ).classes("font-mono text-xs text-indigo-800")
+                        if cooperative_execution:
+                            ui.label(
+                                "Cooperative execution: "
+                                + str(cooperative_execution.get("status") or "-")
+                                + " / capability="
+                                + str(cooperative_execution.get("capability") or "-")
+                                + " / final="
+                                + str(cooperative_execution.get("final_next_step") or "-")
+                            ).classes("font-mono text-xs text-green-800")
                         job_status = str(
                             advisor.get("job_status") or advisor.get("status") or "-"
                         )
