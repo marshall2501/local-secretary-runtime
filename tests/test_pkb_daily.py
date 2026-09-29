@@ -79,6 +79,7 @@ class DailyPKBParserTests(unittest.TestCase):
             "entity": {"history": True, "events": "invalid"},
             "finance": {"details": True, "recent_limit": 100, "stored": 1},
             "core": {"trace": False, "screen_log": True},
+            "core_advisor_model": "gemma4:12b",
             "visibility": {
                 "pkb": {"limits": False, "write": "invalid"},
                 "core": {"trace": False},
@@ -96,6 +97,7 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(prefs["finance"]["recent_limit"], 100)
         self.assertFalse(prefs["core"]["trace"])
         self.assertTrue(prefs["core"]["screen_log"])
+        self.assertEqual(prefs["core_advisor_model"], "gemma4:12b")
         self.assertFalse(prefs["visibility"]["pkb"]["limits"])
         self.assertEqual(
             prefs["visibility"]["pkb"]["write"],
@@ -113,6 +115,7 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["finance"]["recent_limit"] = 50
             prefs["core"]["trace"] = False
             prefs["core"]["screen_log"] = False
+            prefs["core_advisor_model"] = "gpt-oss:20b"
             prefs["visibility"]["pkb"]["limits"] = False
             prefs["visibility"]["core"]["trace"] = False
             saved = save_ui_preferences(prefs, path)
@@ -124,6 +127,7 @@ class DailyPKBParserTests(unittest.TestCase):
             self.assertEqual(loaded["finance"]["recent_limit"], 50)
             self.assertFalse(loaded["core"]["trace"])
             self.assertFalse(loaded["core"]["screen_log"])
+            self.assertEqual(loaded["core_advisor_model"], "gpt-oss:20b")
             self.assertFalse(loaded["visibility"]["pkb"]["limits"])
             self.assertFalse(loaded["visibility"]["core"]["trace"])
 
