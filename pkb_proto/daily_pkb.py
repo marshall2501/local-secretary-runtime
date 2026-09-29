@@ -1287,6 +1287,40 @@ def core_answer(search_result: dict) -> str:
     return "PKBの記録では、" + " / ".join(parts) + "。"
 
 
+def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
+    """Build one copy-friendly Advisor log payload from the current UI state."""
+    trace_task = trace.get("task") or {}
+    observation_pack = (
+        trace_task.get("observation_pack")
+        or result.get("observation_pack")
+    )
+    return {
+        "task_id": result.get("task_id") or trace_task.get("id"),
+        "request": result.get("request") or trace_task.get("request"),
+        "magi": {
+            "melchior_baseline": result.get("selected_capability"),
+            "casper_proposal": advisor.get("proposed_action"),
+            "comparison": advisor.get("comparison"),
+        },
+        "advisor": {
+            "model": advisor.get("model"),
+            "timeout_seconds": advisor.get("timeout_seconds"),
+            "job_status": advisor.get("job_status"),
+            "status": advisor.get("status"),
+            "elapsed_seconds": advisor.get("elapsed_seconds"),
+            "situation": advisor.get("situation"),
+            "reason": advisor.get("reason"),
+            "missing_information": advisor.get("missing_information") or [],
+            "expected_result": advisor.get("expected_result"),
+            "error": advisor.get("error"),
+        },
+        "state_transitions": list(trace.get("advisor_events") or []),
+        "observation_pack": observation_pack,
+        "request_context": advisor.get("request_context"),
+        "response_diagnostic": advisor.get("response_diagnostic"),
+    }
+
+
 def _build_core_observation_pack(request: str, db, entities: dict[str, dict]) -> dict:
     """Build the same bounded observation snapshot for MELCHIOR and CASPER."""
     return build_observation_pack(
@@ -2990,8 +3024,29 @@ def core_page():
                                 " 推論過程は保存・表示しません。"
                             ).classes("text-xs text-grey-7")
 
-                            lifecycle = []
                             trace = state.get("trace") or {}
+                            export_text = json.dumps(
+                                _advisor_log_export(result, advisor, trace),
+                                ensure_ascii=False,
+                                indent=2,
+                                default=str,
+                            )
+
+                            def copy_advisor_log(text: str = export_text) -> None:
+                                ui.run_javascript(
+                                    'navigator.clipboard.writeText('
+                                    + json.dumps(text, ensure_ascii=False)
+                                    + ')'
+                                )
+                                ui.notify("Advisor稼働ログをコピーしました", type="positive")
+
+                            ui.button(
+                                "ログをコピー",
+                                icon="content_copy",
+                                on_click=copy_advisor_log,
+                            ).props("outline dense").classes("self-start")
+
+                            lifecycle = []
                             for event in trace.get("advisor_events") or []:
                                 lifecycle.append(
                                     str(event.get("occurred_at") or "")
