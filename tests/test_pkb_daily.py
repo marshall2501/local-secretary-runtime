@@ -13,6 +13,7 @@ from pkb_proto.daily_pkb import (
     PKB_UI_DEFAULT_OPEN,
     UI_VISIBILITY_DEFAULT,
     _PKB_UI_OPEN,
+    _advisor_log_export,
     _default_ui_preferences,
     _set_pkb_ui_open,
     _validate_ui_preferences,
@@ -73,6 +74,44 @@ ENTITIES = {
 
 
 class DailyPKBParserTests(unittest.TestCase):
+    def test_advisor_log_export_contains_copyable_magi_context(self):
+        payload = _advisor_log_export(
+            {
+                "task_id": "task-1",
+                "selected_capability": "pkb_search",
+                "observation_pack": {"version": "magi_observation_v1"},
+            },
+            {
+                "model": "gemma3:12b",
+                "timeout_seconds": 900,
+                "job_status": "completed",
+                "status": "ok",
+                "elapsed_seconds": 66.2,
+                "proposed_action": "pkb_search",
+                "comparison": "match",
+                "missing_information": [],
+                "request_context": {"magi_member": "CASPER"},
+                "response_diagnostic": {"json_valid": True},
+            },
+            {
+                "advisor_events": [
+                    {"event_type": "core.advisor.running", "occurred_at": "t1"},
+                    {"event_type": "core.advisor.completed", "occurred_at": "t2"},
+                ],
+                "task": {"request": "メインPCのGPUの現在のドライバーを調べて"},
+            },
+        )
+        self.assertEqual(payload["task_id"], "task-1")
+        self.assertEqual(payload["magi"]["melchior_baseline"], "pkb_search")
+        self.assertEqual(payload["magi"]["casper_proposal"], "pkb_search")
+        self.assertEqual(payload["magi"]["comparison"], "match")
+        self.assertEqual(payload["advisor"]["model"], "gemma3:12b")
+        self.assertEqual(len(payload["state_transitions"]), 2)
+        self.assertEqual(
+            payload["observation_pack"]["version"],
+            "magi_observation_v1",
+        )
+
     def test_ui_preferences_validate_and_fall_back_per_field(self):
         prefs = _validate_ui_preferences({
             "pkb": {"write": False, "search": "invalid"},
