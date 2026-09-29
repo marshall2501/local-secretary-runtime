@@ -78,6 +78,9 @@ class DailyPKBParserTests(unittest.TestCase):
         payload = _advisor_log_export(
             {
                 "task_id": "task-1",
+                "status": "completed",
+                "phase": "completed",
+                "question": None,
                 "selected_capability": "pkb_search",
                 "observation_pack": {"version": "magi_observation_v1"},
             },
@@ -98,13 +101,24 @@ class DailyPKBParserTests(unittest.TestCase):
                     {"event_type": "core.advisor.running", "occurred_at": "t1"},
                     {"event_type": "core.advisor.completed", "occurred_at": "t2"},
                 ],
-                "task": {"request": "メインPCのGPUの現在のドライバーを調べて"},
+                "task": {
+                    "request": "メインPCのGPUの現在のドライバーを調べて",
+                    "magi_baseline": {
+                        "member": "MELCHIOR",
+                        "status": "ready",
+                        "selected_capability": "pkb_search",
+                    },
+                },
             },
         )
         self.assertEqual(payload["task_id"], "task-1")
         self.assertEqual(payload["magi"]["melchior_baseline"], "pkb_search")
         self.assertEqual(payload["magi"]["casper_proposal"], "pkb_search")
         self.assertEqual(payload["magi"]["comparison"], "match")
+        self.assertEqual(payload["magi"]["melchior_scope_status"], "ready")
+        self.assertEqual(payload["core"]["status"], "completed")
+        self.assertEqual(payload["core"]["phase"], "completed")
+        self.assertIsNone(payload["core"]["question"])
         self.assertEqual(payload["advisor"]["model"], "gemma3:12b")
         self.assertEqual(len(payload["state_transitions"]), 2)
         self.assertEqual(
