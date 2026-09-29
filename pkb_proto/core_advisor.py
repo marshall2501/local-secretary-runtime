@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED_MODELS = ("llama3.1:8b", "qwen3.5:9b")
-ADVISOR_FIELDS = ("situation", "missing_information", "proposed_action", "reason", "expected_result")
+ADVISOR_FIELDS = ("situation", "missing_information", "next_step", "proposed_action", "reason", "expected_result")
 
 CAPABILITY_REGISTRY = {
     "pkb_search": {
@@ -47,6 +47,7 @@ class AdvisorResult:
     model: str | None = None
     situation: str | None = None
     missing_information: tuple[str, ...] = ()
+    next_step: str | None = None
     proposed_action: str | None = None
     reason: str | None = None
     expected_result: str | None = None
@@ -94,18 +95,21 @@ def _messages(context: dict) -> list[dict[str, str]]:
     system = (
         "You are CASPER, the Orient advisor for a local personal secretary system. "
         "You only propose; you never execute tools and never change Task state. "
-        "Choose proposed_action only from available_capabilities, or null if more "
-        "information is required. Return one JSON object with exactly these keys: "
-        "situation, missing_information, proposed_action, reason, expected_result. "
-        "missing_information must be an array of short strings. All other text fields "
-        "must be short strings, except proposed_action may be null. Do not invent "
-        "capabilities. Prefer the minimum capability that can satisfy the stated goal. "
+        "Return one JSON object with exactly these keys: situation, missing_information, "
+        "next_step, proposed_action, reason, expected_result. next_step must be one of "
+        "observe, respond, clarify. Use observe when another read-only capability should gather "
+        "evidence; then proposed_action must be exactly one name from available_capabilities. "
+        "Use respond when the observation_pack already contains enough evidence to answer; "
+        "then proposed_action must be null. Use clarify only when progress is blocked by "
+        "information that must come from the user; then proposed_action must be null and "
+        "missing_information must contain the blocking items. For observe or respond, "
+        "missing_information must be empty. Do not list optional preferences such as output "
+        "format or category unless they truly block progress. Do not invent capabilities. "
         "The observation_pack contains facts already observed from local read-only systems. "
         "Treat those facts as available evidence; do not ask how to access information that "
-        "is already present there. If PKB evidence in the observation_pack can satisfy the "
-        "goal, propose pkb_search. If current local state and current public information must "
-        "be compared, propose "
-        "pkb_web_compare rather than separate unsupported free-form steps."
+        "is already present there. Prefer the minimum next step that can advance the stated goal. "
+        "If current local state and current public information must be compared and more evidence "
+        "is needed, observe with pkb_web_compare rather than separate unsupported free-form steps."
     )
     return [
         {"role": "system", "content": system},
@@ -153,7 +157,12 @@ def diagnose_response(raw: str) -> dict:
     return diagnostic
 
 
-def inspect_output(raw: object, available: set[str], current_selection: str | None) -> AdvisorResult:
+def inspect_output(
+    raw: object,
+    available: set[str],
+    current_selection: str | None,
+    melchior_next_step: str,
+) -> AdvisorResult:
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -165,6 +174,7 @@ def inspect_output(raw: object, available: set[str], current_selection: str | No
 
     situation = raw["situation"]
     missing = raw["missing_information"]
+    next_step = raw["next_step"]
     proposed = raw["proposed_action"]
     reason = raw["reason"]
     expected_result = raw["expected_result"]
@@ -173,23 +183,37 @@ def inspect_output(raw: object, available: set[str], current_selection: str | No
         return AdvisorResult("invalid", "invalid", error="invalid_situation")
     if not isinstance(missing, list) or not all(isinstance(x, str) for x in missing):
         return AdvisorResult("invalid", "invalid", error="invalid_missing_information")
+    if next_step not in {"observe", "respond", "clarify"}:
+        return AdvisorResult("invalid", "invalid", error="invalid_next_step")
     if proposed is not None and (not isinstance(proposed, str) or proposed not in available):
         return AdvisorResult("invalid", "invalid", error="unknown_capability")
+    if next_step == "observe" and proposed is None:
+        return AdvisorResult("invalid", "invalid", error="observe_requires_capability")
+    if next_step in {"respond", "clarify"} and proposed is not None:
+        return AdvisorResult("invalid", "invalid", error="non_observe_capability_not_allowed")
+    normalized_missing = tuple(x.strip() for x in missing if x.strip())
+    if next_step == "clarify" and not normalized_missing:
+        return AdvisorResult("invalid", "invalid", error="clarify_requires_missing_information")
+    if next_step in {"observe", "respond"} and normalized_missing:
+        return AdvisorResult("invalid", "invalid", error="non_clarify_missing_information")
     if not isinstance(reason, str) or not reason.strip():
         return AdvisorResult("invalid", "invalid", error="invalid_reason")
     if not isinstance(expected_result, str) or not expected_result.strip():
         return AdvisorResult("invalid", "invalid", error="invalid_expected_result")
 
-    if proposed is None:
-        comparison = "match" if current_selection is None else "no_proposal"
-    else:
-        comparison = "match" if proposed == current_selection else "mismatch"
+    comparison = "mismatch"
+    if next_step == melchior_next_step:
+        if next_step == "observe":
+            comparison = "match" if proposed == current_selection else "mismatch"
+        else:
+            comparison = "match"
 
     return AdvisorResult(
         "ok",
         comparison,
         situation=situation.strip(),
-        missing_information=tuple(x.strip() for x in missing if x.strip()),
+        missing_information=normalized_missing,
+        next_step=next_step,
         proposed_action=proposed,
         reason=reason.strip(),
         expected_result=expected_result.strip(),
@@ -200,6 +224,7 @@ def advise(
     request_text: str,
     *,
     current_selection: str | None,
+    melchior_next_step: str,
     task_state: str = "received",
     observations: object | None = None,
     permissions: dict[str, bool] | None = None,
@@ -258,13 +283,19 @@ def advise(
                 request_context=context,
             )
         response_diagnostic = diagnose_response(raw)
-        checked = inspect_output(raw, available, current_selection)
+        checked = inspect_output(
+            raw,
+            available,
+            current_selection,
+            melchior_next_step,
+        )
         return AdvisorResult(
             checked.status,
             checked.comparison,
             model=selected_model,
             situation=checked.situation,
             missing_information=checked.missing_information,
+            next_step=checked.next_step,
             proposed_action=checked.proposed_action,
             reason=checked.reason,
             expected_result=checked.expected_result,
