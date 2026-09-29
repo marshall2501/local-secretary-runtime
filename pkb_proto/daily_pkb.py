@@ -29,6 +29,7 @@ from .correction_service import correct_entity
 from .core_ooda import OODA_PHASES, derive_ooda
 from .core_observation import build_observation_pack
 from .core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
+from .core_synthesis import synthesize as synthesize_magi
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -1314,6 +1315,7 @@ def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
             "melchior_baseline": result.get("selected_capability"),
             "casper_next_step": advisor.get("next_step"),
             "casper_proposal": advisor.get("proposed_action"),
+            "synthesis": advisor.get("synthesis"),
             "comparison": advisor.get("comparison"),
         },
         "advisor": {
@@ -1358,6 +1360,7 @@ def _advisor_shadow_initial(
         "job_status": "queued",
         "status": "queued",
         "comparison": "pending",
+        "synthesis": None,
         "model": model,
         "timeout_seconds": timeout_seconds,
         "queued_at": datetime.now(timezone.utc).isoformat(),
@@ -1404,12 +1407,12 @@ def _write_core_advisor_shadow(task_id: UUID, shadow: dict, event_type: str) -> 
 def _run_core_advisor_shadow(
     task_id: UUID,
     request: str,
-    current_selection: str | None,
+    melchior: dict,
     observation_pack: dict,
     model: str | None,
     timeout_seconds: float,
 ) -> None:
-    """Background Shadow Advisor; never changes Task status/capability."""
+    """Background cooperative MAGI proposal; never changes Task status/capability."""
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     attempted_model = model
@@ -1431,7 +1434,12 @@ def _run_core_advisor_shadow(
         ):
             return
 
-        melchior_next_step = "observe" if current_selection is not None else "clarify"
+        current_selection = melchior.get("selected_capability")
+        melchior_next_step = (
+            "observe"
+            if melchior.get("status") == "ready" and current_selection is not None
+            else "clarify"
+        )
         result = advise_core(
             request,
             current_selection=current_selection,
@@ -1449,12 +1457,23 @@ def _run_core_advisor_shadow(
             job_status = "error"
         else:
             job_status = "completed"
+        synthesis = synthesize_magi(
+            melchior,
+            result,
+            permissions={
+                "pkb_read": True,
+                "finance_read": True,
+                "web_research": True,
+                "external_actions": False,
+            },
+        ).as_dict()
         final = {
             **result,
             "job_status": job_status,
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": elapsed,
+            "synthesis": synthesis,
         }
         _write_core_advisor_shadow(
             task_id, final, f"core.advisor.{job_status}"
@@ -1481,7 +1500,7 @@ def _run_core_advisor_shadow(
 def _queue_core_advisor_shadow(
     task_id: UUID,
     request: str,
-    current_selection: str | None,
+    melchior: dict,
     observation_pack: dict,
     model: str | None,
     timeout_seconds: float,
@@ -1490,7 +1509,7 @@ def _queue_core_advisor_shadow(
         _run_core_advisor_shadow,
         task_id,
         request,
-        current_selection,
+        melchior,
         observation_pack,
         model,
         timeout_seconds,
@@ -1780,7 +1799,11 @@ def run_core_request(
     _queue_core_advisor_shadow(
         task_id,
         request,
-        scoped.get("capability"),
+        {
+            "member": "MELCHIOR",
+            "status": scoped["status"],
+            "selected_capability": scoped.get("capability"),
+        },
         observation_pack,
         advisor_model,
         advisor_timeout,
@@ -2966,20 +2989,35 @@ def core_page():
                     with ui.card().classes(
                         "w-full border border-indigo-200 bg-indigo-50"
                     ):
-                        ui.label("MAGI v0 · CASPER Shadow Advisor").classes(
+                        ui.label("MAGI v0 · Cooperative Synthesis (Shadow)").classes(
                             "font-bold text-indigo-900"
                         )
                         ui.label(
-                            "実行には使用していません。現行Coreと next step / capability を比較する観測用提案です。"
+                            "MELCHIORのGuardとCASPERの前進案をCoreが統合します。"
+                            "現在は統合結果を観測するShadow段階で、実行能力はまだ変更しません。"
                         ).classes("text-xs text-grey-7")
+                        synthesis = advisor.get("synthesis") or {}
                         ui.label(
-                            "MELCHIOR baseline: "
-                            + str(result.get("selected_capability") or "-")
-                            + " / CASPER proposal: "
+                            "MELCHIOR: "
+                            + str(result.get("selected_capability") or "clarify")
+                            + " / CASPER: "
+                            + str(advisor.get("next_step") or "-")
+                            + "+"
                             + str(advisor.get("proposed_action") or "-")
-                            + " / comparison="
-                            + str(advisor.get("comparison") or "-")
+                            + " / SYNTHESIS: "
+                            + str(synthesis.get("next_step") or "-")
+                            + "+"
+                            + str(synthesis.get("selected_capability") or "-")
                         ).classes("font-mono text-xs")
+                        if synthesis.get("reason"):
+                            ui.label(
+                                "統合理由: " + str(synthesis["reason"])
+                            ).classes("text-sm text-indigo-900")
+                        if synthesis.get("scope_adjustment"):
+                            ui.label(
+                                "Scope adjustment: "
+                                + str(synthesis["scope_adjustment"])
+                            ).classes("font-mono text-xs text-indigo-800")
                         job_status = str(
                             advisor.get("job_status") or advisor.get("status") or "-"
                         )
