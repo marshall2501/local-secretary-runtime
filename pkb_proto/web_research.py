@@ -182,8 +182,56 @@ def _extract_candidates(text: str, patterns: tuple[re.Pattern[str], ...]) -> lis
     return seen[:8]
 
 
+def _normalize_date_hint(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = (
+        value.replace("年", "-")
+        .replace("月", "-")
+        .replace("日", "")
+        .replace("/", "-")
+    )
+    parts = normalized.split("-")
+    if len(parts) != 3:
+        return None
+    try:
+        year, month, day = (int(part) for part in parts)
+    except ValueError:
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _nearest_date_hint(text: str, center: int, radius: int = 180) -> str | None:
+    start = max(0, center - radius)
+    end = min(len(text), center + radius)
+    window = text[start:end]
+    dated: list[tuple[int, str]] = []
+    for pattern in _DATE_PATTERNS:
+        for match in pattern.finditer(window):
+            absolute = start + match.start(1)
+            normalized = _normalize_date_hint(match.group(1))
+            if normalized:
+                dated.append((abs(absolute - center), normalized))
+    if not dated:
+        return None
+    dated.sort(key=lambda item: (item[0], item[1]))
+    return dated[0][1]
+
+
+def _context_score(text: str, start: int, end: int, radius: int = 180) -> int:
+    window = text[max(0, start - radius):min(len(text), end + radius)].lower()
+    score = 0
+    for word in ("latest", "current", "recommended", "recommended driver", "最新", "推奨"):
+        if word in window:
+            score += 2
+    for word in ("previous", "older", "legacy", "旧版", "過去版"):
+        if word in window:
+            score -= 4
+    return score
+
+
 def _extract_version_facts(text: str) -> list[dict]:
-    """Extract version values together with their local semantic label."""
+    """Extract version values with semantic label plus nearby date/context."""
     patterns = (
         (
             "si_driver_version",
@@ -216,9 +264,15 @@ def _extract_version_facts(text: str) -> list[dict]:
         for match in pattern.finditer(text):
             value = match.group(1).strip()
             key = (kind, value)
-            if key not in seen:
-                seen.add(key)
-                facts.append({"kind": kind, "value": value})
+            if key in seen:
+                continue
+            seen.add(key)
+            facts.append({
+                "kind": kind,
+                "value": value,
+                "date_hint": _nearest_date_hint(text, match.start(1)),
+                "context_score": _context_score(text, match.start(), match.end()),
+            })
 
     specific_values = {
         fact["value"]
@@ -240,16 +294,27 @@ def _summarize_version_group(kind: str, by_version: dict[str, list[dict]]) -> di
     candidates = []
     for value, sources in by_version.items():
         domains = sorted({row["domain"] for row in sources if row["domain"]})
+        dates = sorted(
+            {
+                row["date_hint"]
+                for row in sources
+                if row.get("date_hint")
+            }
+        )
         candidates.append({
             "value": value,
             "source_count": len(sources),
             "domain_count": len(domains),
             "domains": domains,
             "best_quality_score": max(row["quality_score"] for row in sources),
+            "best_context_score": max(int(row.get("context_score") or 0) for row in sources),
+            "latest_date": dates[-1] if dates else None,
             "sources": sorted(sources, key=lambda row: row["evidence_rank"]),
         })
     candidates.sort(
         key=lambda row: (
+            row["latest_date"] or "",
+            row["best_context_score"],
             row["domain_count"],
             row["source_count"],
             row["best_quality_score"],
@@ -261,6 +326,14 @@ def _summarize_version_group(kind: str, by_version: dict[str, list[dict]]) -> di
         best = None
     elif len(candidates) == 1:
         status = "single_candidate"
+        best = candidates[0]["value"]
+    elif (
+        candidates[0].get("latest_date")
+        and candidates[1].get("latest_date")
+        and candidates[0]["latest_date"] > candidates[1]["latest_date"]
+        and candidates[0]["best_quality_score"] >= candidates[1]["best_quality_score"]
+    ):
+        status = "latest_by_date"
         best = candidates[0]["value"]
     elif candidates[0]["source_count"] >= 2 and (
         candidates[0]["source_count"] > candidates[1]["source_count"]
@@ -304,6 +377,8 @@ def _fact_summary(intent: str, hits: list[WebHit]) -> dict:
                 "quality_score": hit.quality_score,
                 "authority_hint": hit.authority_hint,
                 "evidence_rank": hit.evidence_rank,
+                "date_hint": fact.get("date_hint"),
+                "context_score": int(fact.get("context_score") or 0),
             })
 
     groups = [
