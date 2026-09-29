@@ -1579,6 +1579,12 @@ def features_page():
 def core_page():
     state = {"result": None, "busy": False, "resume_busy": False}
 
+    # NiceGUI drawers are top-level layout elements and must be created as
+    # direct children of the page, not inside the central content column.
+    task_drawer = ui.left_drawer(value=True).classes("bg-orange-50 p-3").props(
+        "bordered width=300 breakpoint=700"
+    )
+
     def remember_core_expansion(key: str):
         def _remember(event):
             _set_core_ui_open(key, event.value)
@@ -1695,9 +1701,7 @@ def core_page():
                                 f"updated={item['updated_at']}"
                             ).classes("text-xs text-grey-7")
 
-        with ui.left_drawer(value=True).classes("bg-orange-50 p-3").props(
-            "bordered width=300 breakpoint=700"
-        ):
+        with task_drawer:
             with ui.column().classes("w-full gap-3"):
                 ui.label("Core Tasks").classes("text-lg font-bold")
                 open_tasks_panel()
