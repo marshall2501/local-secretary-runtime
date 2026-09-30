@@ -195,6 +195,34 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(4):
             await asyncio.sleep(0)
 
+    async def test_protocol_slots_and_legacy_flow_layout(self):
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=['qwen3.5:9b', 'gemma3:12b']
+        ), patch.object(daily, 'choose_magi_model', return_value='qwen3.5:9b'):
+            daily.core_page()
+            self.assertTrue(self.elements('MAGI member configuration'))
+            self.assertTrue(self.elements('MELCHIOR'))
+            self.assertTrue(self.elements('BALTHASAR'))
+            self.assertTrue(self.elements('CASPER'))
+            controls = {
+                label: next(e for e in self.client.elements.values()
+                            if e._props.get('label') == label)
+                for label in ('MELCHIOR / model', 'BALTHASAR / model', 'CASPER / model')
+            }
+            self.assertEqual(controls['MELCHIOR / model'].value, 'qwen3.5:9b')
+            self.assertNotIn('disable', controls['MELCHIOR / model']._props)
+            for label in ('BALTHASAR / model', 'CASPER / model'):
+                self.assertIsNone(controls[label].value)
+                self.assertIn('disable', controls[label]._props)
+            self.assertTrue(self.elements('MELCHIORへ分析依頼'))
+            old_flow = next(e for e in self.client.elements.values()
+                            if isinstance(e, ui.expansion)
+                            and e._props.get('label') == '旧MAGI v0 処理フロー（回帰用）')
+            self.assertFalse(old_flow.value)
+            limits = self.elements('この縦断でまだ行わないこと')[0]
+            elements = list(self.client.elements.values())
+            self.assertGreater(elements.index(old_flow), elements.index(limits))
+
     async def test_two_initial_windows_load_more_keeps_selection_and_other_section(self):
         with self.client:
             daily.core_page()

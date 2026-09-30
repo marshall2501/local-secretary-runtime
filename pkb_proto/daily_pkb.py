@@ -3654,17 +3654,37 @@ def core_page(task_id: str = ""):
                 label="ユーザー原文",
                 value="メインPCのGPUの種類は？",
             ).classes("w-full")
-            with ui.row().classes("w-full items-end gap-2 flex-wrap"):
-                protocol_model_select = ui.select(
-                    options=installed_magi_models,
-                    value=default_magi_model,
-                    label="MELCHIOR slot / Ollama model",
-                ).classes("min-w-72")
-                protocol_timeout_select = ui.select(
-                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
-                    value=int(state.get("advisor_timeout") or 60),
-                    label="Timeout (秒)",
-                ).classes("min-w-40")
+            ui.label("MAGI member configuration").classes("font-medium text-indigo-900")
+            ui.label(
+                "3つのmemberと実モデルは独立です。現在のCycle 1試験で実行するのは"
+                "MELCHIORのみ。無効な2枠のモデルはロードしません。"
+            ).classes("text-xs text-grey-7")
+            with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
+                with ui.card().classes("min-w-64 grow border border-indigo-300 bg-white"):
+                    ui.label("MELCHIOR").classes("font-bold")
+                    ui.switch("有効（Cycle 1）", value=True).disable()
+                    ui.label("Provider: Ollama").classes("text-xs text-grey-7")
+                    protocol_model_select = ui.select(
+                        options=installed_magi_models,
+                        value=default_magi_model,
+                        label="MELCHIOR / model",
+                    ).classes("w-full")
+                for inactive_member in ("BALTHASAR", "CASPER"):
+                    with ui.card().classes("min-w-64 grow border border-grey-300 bg-white"):
+                        ui.label(inactive_member).classes("font-bold")
+                        ui.switch("無効（multi-member未実装）", value=False).disable()
+                        ui.label("Provider: Ollama（予定）").classes("text-xs text-grey-7")
+                        inactive_model_select = ui.select(
+                            options=installed_magi_models,
+                            value=None,
+                            label=f"{inactive_member} / model",
+                        ).classes("w-full")
+                        inactive_model_select.disable()
+            protocol_timeout_select = ui.select(
+                options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                value=int(state.get("advisor_timeout") or 60),
+                label="Timeout (秒)［MELCHIORのみ］",
+            ).classes("min-w-40")
 
             @ui.refreshable
             def protocol_result_panel():
@@ -3859,19 +3879,6 @@ def core_page(task_id: str = ""):
             "PKB・家計・明示的なWeb調査を読み取り専用で扱います。"
             "曖昧依頼からの自動実行は限定PKB readのみです。"
         ).classes("text-sm text-orange-700")
-
-        with ui.expansion("Coreの処理フロー", icon="account_tree").classes("w-full border"):
-            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
-                for index, step in enumerate(CORE_FLOW_STEPS):
-                    if index:
-                        ui.label("→").props("aria-hidden=true")
-                    ui.label(step).classes("border rounded p-2 text-sm")
-            ui.label(
-                "曖昧依頼の協調経路です。Cycle 1で安全なPKB readを行い、"
-                "結果をObservation v2へ戻してCycle 2で再検討します。"
-                "Synthesisは中間提案。Coordinatorが反復・最大2 cycle・外部への拡張を制限し、最終判断を保存します。"
-                "明示的な能力指定と追加回答による再開は既存経路で処理します。"
-            ).classes("text-sm")
 
         def select_saved_task(item: dict):
             if state["busy"] or state["resume_busy"]:
@@ -4661,6 +4668,28 @@ def core_page(task_id: str = ""):
             ui.label(
                 "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
                 "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
+            ).classes("text-sm")
+
+        # The legacy MAGI v0 flow is regression context, not the current v1 path.
+        with ui.expansion(
+            "旧MAGI v0 処理フロー（回帰用）",
+            value=False,
+            icon="account_tree",
+        ).classes("w-full border"):
+            ui.label(
+                "Protocol v1とは独立した過去の協調経路です。"
+                "現在のRITSUKO→MAGI通信試験の処理順ではありません。"
+            ).classes("text-xs text-grey-7")
+            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+                for index, step in enumerate(CORE_FLOW_STEPS):
+                    if index:
+                        ui.label("→").props("aria-hidden=true")
+                    ui.label(step).classes("border rounded p-2 text-sm")
+            ui.label(
+                "曖昧依頼の旧協調経路です。Cycle 1で限定PKB readを行い、"
+                "結果をObservation v2へ戻してCycle 2で再検討します。"
+                "Synthesisは中間提案。Coordinatorが反復・最大2 cycle・外部への拡張を制限します。"
+                "明示的な能力指定と追加回答による再開も現行回帰経路側です。"
             ).classes("text-sm")
 
 
