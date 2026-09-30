@@ -268,7 +268,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 while not isinstance(element, ui.card):
                     element = element.parent_slot.parent
                 return element
-            counts = self.elements('Secretary Core — Task表示件数')[0]
+            counts = self.elements('RITSUKO — Task表示件数')[0]
             limits = self.elements('この縦断でまだ行わないこと')[0]
             self.assertIsNot(card_for(counts), card_for(limits))
             for label in ('進行中・確認待ち 初期表示件数', '完了済み 初期表示件数'):
