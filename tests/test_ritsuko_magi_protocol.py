@@ -7,7 +7,7 @@ import unittest
 
 from pkb_proto.magi_client import call_member, choose_model
 from pkb_proto.magi_dialogue import (
-    CATEGORIES, start_dialogue, continue_with_observation, validate_turn,
+    CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation, validate_turn,
 )
 
 from pkb_proto.ritsuko_magi_protocol import (
@@ -169,7 +169,7 @@ class GuidedDialogueTests(unittest.TestCase):
                 [{"source":source,"what":what,"reason":"回答の根拠が必要"}]
                 if state=="NEED_INFORMATION" else []
             ),
-            "question_for_user":None,
+            "question_for_user":("対象をもう少し具体的に教えてください" if state=="NEED_CLARIFICATION" else None),
             "answer_candidate":("観測された候補" if state=="READY" else None),
             "action_candidate":None,
         }
@@ -184,8 +184,10 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertIn("大まかな分類だけ",seen[0]["question_from_ritsuko"])
         self.assertNotIn("次の1手",seen[0]["question_from_ritsuko"])
         self.assertEqual(seen[1]["stage"], "analyze")
+        self.assertEqual(seen[1]["question_purpose"], "identify_missing_information")
+        self.assertEqual(seen[1]["prompt_version"], PROMPT_VERSION)
         self.assertEqual(seen[1]["task_context"]["classification"]["category"],"INFORMATION")
-        self.assertIn("本人固有",seen[1]["question_from_ritsuko"])
+        self.assertIn("必要最小限",seen[1]["question_from_ritsuko"])
         self.assertEqual(session["status"], "waiting_information")
         self.assertEqual(session["next_step"], "review_information_requests")
         self.assertEqual(session["pending_requests"][0]["source"],"pkb")
@@ -212,8 +214,9 @@ class GuidedDialogueTests(unittest.TestCase):
         caller,seen=self.scripted(self.classification(),proposed_plan,corrected)
         session=start_dialogue("私の機器情報は？",model="gemma3:12b",caller=caller)
         self.assertEqual([x["stage"] for x in seen],
-                         ["classify","analyze","review_ready"])
-        self.assertIn("実際の回答",seen[2]["question_from_ritsuko"])
+                         ["classify","analyze","analyze"])
+        self.assertEqual(seen[2]["question_purpose"],"review_or_repair")
+        self.assertIn("実回答か作業予定か",seen[2]["question_from_ritsuko"])
         self.assertEqual(seen[2]["task_context"]["previous_detail"]["state"],"READY")
         self.assertEqual(session["status"],"waiting_information")
         self.assertEqual(session["pending_requests"][0]["source"],"pkb")
@@ -241,12 +244,27 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertIn("information_requests:unexpected_for_ready",
                       validate_turn("analyze",ready))
 
-    def test_unclear_classification_stops_and_does_not_immediately_guess_tools(self):
-        caller,seen=self.scripted(self.classification("UNCLEAR"))
-        session=start_dialogue("あれ",model="gemma3:12b",caller=caller)
+    def test_unclear_classification_first_tries_disambiguation_sources(self):
+        caller,seen=self.scripted(
+            self.classification("UNCLEAR"),
+            self.detail(state="NEED_INFORMATION",source="task_history",what="直前に参照していたTask"),
+        )
+        session=start_dialogue("あれどうなった？",model="gemma3:12b",caller=caller)
+        self.assertEqual(session["status"],"waiting_information")
+        self.assertEqual(session["pending_requests"][0]["source"],"task_history")
+        self.assertEqual(seen[1]["question_purpose"],"understand_or_disambiguate")
+        self.assertIn("すぐ本人へ質問せず",seen[1]["question_from_ritsuko"])
+        self.assertEqual(len(seen),2)
+
+    def test_unclear_can_still_stop_for_real_user_clarification(self):
+        caller,seen=self.scripted(
+            self.classification("UNCLEAR"),
+            self.detail(state="NEED_CLARIFICATION"),
+        )
+        session=start_dialogue("それお願い",model="gemma3:12b",caller=caller)
         self.assertEqual(session["status"],"waiting_user")
-        self.assertEqual(session["next_step"],"classification_clarification")
-        self.assertEqual(len(seen),1)
+        self.assertEqual(session["next_step"],"consider_user_question")
+        self.assertEqual(seen[1]["question_purpose"],"understand_or_disambiguate")
 
     def test_same_task_can_continue_after_manual_observation(self):
         caller,seen=self.scripted(
@@ -263,10 +281,40 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(again["task_id"],first["task_id"])
         self.assertEqual(len(again["turns"]),3)
         self.assertEqual(seen[-1]["turn"],3)
+        self.assertEqual(seen[-1]["question_purpose"],"evaluate_observation")
+        self.assertEqual(seen[-1]["prompt_version"],PROMPT_VERSION)
+        self.assertIn("新しく追加されたObservation",seen[-1]["question_from_ritsuko"])
         self.assertEqual(seen[-1]["observations"][0]["verified"],False)
         self.assertEqual(len(again["observations"]),1)
         self.assertFalse(again["tool_read_executed"])
 
+    def test_action_category_selects_action_question_purpose(self):
+        proposal=self.detail(state="ACTION_PROPOSAL")
+        proposal["action_candidate"]="設定変更を提案する"
+        caller,seen=self.scripted(self.classification("ACTION"),proposal)
+        session=start_dialogue("設定を変更して",model="gemma3:12b",caller=caller)
+        self.assertEqual(seen[1]["question_purpose"],"formulate_action")
+        self.assertEqual(session["status"],"proposal_ready")
+
+    def test_repeated_request_after_observation_gets_one_repair_turn(self):
+        initial=self.detail(source="pkb",what="本人の構成")
+        repeated=self.detail(source="pkb",what="本人の構成")
+        repaired=self.detail(state="READY")
+        caller,seen=self.scripted(self.classification(),initial,repeated,repaired)
+        first=start_dialogue("私の構成は？",model="gemma3:12b",caller=caller)
+        again=continue_with_observation(first,"架空の構成情報",caller=caller)
+        self.assertEqual([x["question_purpose"] for x in seen],[
+            "classify","identify_missing_information","evaluate_observation","review_or_repair"
+        ])
+        self.assertEqual(again["status"],"candidate_ready")
+        self.assertEqual(len(again["turns"]),4)
+
+    def test_session_records_prompt_version_and_previous_question_purpose(self):
+        caller,seen=self.scripted(self.classification(),self.detail(source="web"))
+        session=start_dialogue("最新情報は？",model="gemma3:12b",caller=caller)
+        self.assertEqual(session["prompt_version"],PROMPT_VERSION)
+        self.assertEqual(session["last_question_purpose"],"identify_missing_information")
+        self.assertEqual(seen[1]["task_context"]["previous_turns"][0]["question_purpose"],"classify")
     def test_invalid_schema_stops_without_a_followup(self):
         caller,seen=self.scripted({"category":"INFORMATION"})
         session=start_dialogue("メインPCについて",model="gemma3:12b",caller=caller)

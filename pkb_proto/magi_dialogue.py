@@ -29,6 +29,15 @@ SOURCES = (
     "external_service", "pc_observation", "user",
 )
 MAX_TURNS = 4
+PROMPT_VERSION = "d19-state-driven-v1"
+QUESTION_PURPOSES = (
+    "understand_or_disambiguate",
+    "identify_missing_information",
+    "evaluate_observation",
+    "formulate_answer",
+    "formulate_action",
+    "review_or_repair",
+)
 
 SYSTEM = """あなたはPersonal Local Secretary AIのMAGI分析メンバーです。
 ユーザー原文の意味を理解し、各回にRITSUKOから指定された「1つの問い」だけを分析してください。
@@ -60,50 +69,43 @@ UNCLEAR=依頼の目的そのものが理解できない
 「購入したスマホは機種Aになった」→KNOWLEDGE
 調査、回答、情報源の選択、実行案はこの回で生成せず分類結果だけを返してください。"""
 
-CATEGORY_QUESTIONS = {
-    "INFORMATION": "求められた質問への実際の答えを、現時点の既知情報だけで書けるか判断してください。書けない場合はREADYを選ばず、本人固有情報ならPKBやtask_history、最新公開情報ならWebなどから取得すべき最小の事実をNEED_INFORMATIONで要求してください。利用可能な情報源の存在自体は取得済みの証拠ではありません。",
-    "PROBLEM": "症状から現時点で分かることを整理し、必要な履歴・観測・調査を要求してください。根拠なしに原因を確定しないでください。",
-    "INVESTIGATION": "調査や比較の目的を踏まえ、必要な根拠・比較対象・時点を考え、情報要求または調査方針を提示してください。",
-    "ACTION": "ユーザーが求める実行内容を特定し、必要な前提・影響・許可を整理してRITSUKOに実行候補を返してください。自分では実行しないでください。",
-    "KNOWLEDGE": "ユーザーが伝えた新事実・訂正を候補として要約し、既存情報の照合が必要なら要求してください。採否や書込みを確定しないでください。",
-    "PLANNING": "計画の目的を整理し、利用可能な情報だけで案を提示できるか、追加条件・情報が必要か判断してください。",
-    "MONITORING": "監視・通知の対象、条件、時期を整理し、必要な情報や外部権限があればRITSUKOへ提示してください。監視を開始したとは言わないでください。",
-    "CONVERSATION": "ユーザーの発話を踏まえ、現在の文脈で応答可能か、不足している文脈があるか考えてください。",
-}
-
-FOLLOWUP_QUESTION = """分類結果と最新のObservationを踏まえ、今回の依頼を進めるための「次の1手」を分析してください。
-分類は参考であり誤っていれば内容から考え直してよいですが、直接Toolを使わないでください。
-まず、与えられた原文・Task Context・Observationだけでユーザーへの実際の回答を示せるか判断してください。
+DETAIL_RULES = """現在のEnvelopeにあるユーザー原文、分類、Task Context、Observationだけを根拠に分析してください。
+初回分類は方向付けであり、後続の証拠と矛盾する場合は内容から考え直して構いません。
 「情報源を使える」ことは「その情報を取得済み」ではありません。
-取得すれば答えられそうという将来の見通しや検索手順は、回答候補ではありません。
-必要な情報があるならREADYを選ばず、NEED_INFORMATIONとし、
-source と what と reason をinformation_requestsへ具体的に記載してください。
-request_id等の制御IDを生成する必要はありません（RITSUKOが採番します）。
-本人固有の事実はPKB・task_history、最新公開情報はWeb等、利用可能な候補を判断してください。
-調べられそうなことを未確認のままユーザーへの質問へ変えないでください。
-情報源から取得できない重要な曖昧さだけ、ユーザーへの質問を提案してください。
-追加Observationが与えられた場合は必ずそれを考慮し、前回と同じ情報要求を無根拠に繰り返さないでください。
-stateは今の状況に最も近い1つを選択してください。
-READY=すでに持っている十分な情報だけで、ユーザーが求めた答えをanswer_candidateに直接書ける（検索・取得・実行の予定だけでは不可）
-NEED_INFORMATION=情報源への読取・新しい観測が必要。information_requestsに取得先・取得すべき事実を返し、answer_candidateはnull
-NEED_CLARIFICATION=本人に聞かなければ進められない
+取得すれば答えられそうという将来の見通しや検索手順は、ユーザーへの回答ではありません。
+必要な情報があるならNEED_INFORMATIONとし、source / what / reasonを具体的に返してください。
+request_id等の管理IDはRITSUKOが採番するので生成しないでください。
+調べられる情報を未確認のままユーザーへの質問へ変えないでください。
+ユーザーへの質問は、利用可能な情報源では解けないblockingな曖昧さ・不足に限定してください。
+追加Observationがある場合は必ず内容を検討し、前回と同じ情報要求を理由なく繰り返さないでください。
+stateは現在の状況に最も近い1つを選択してください。
+READY=現在与えられた根拠だけで、ユーザーが求めた答えそのものをanswer_candidateへ書ける
+NEED_INFORMATION=情報源の読取・新しい観測が必要。information_requestsへ取得先と最小事実を返す
+NEED_CLARIFICATION=情報源では解決できず本人に聞かなければ進められない
 KNOWLEDGE_CANDIDATE=新情報・訂正を記録候補として検討可能
-ACTION_PROPOSAL=権限・安全検査が必要な実行案を提案
+ACTION_PROPOSAL=権限・安全検査が必要な実行候補を提案
 UNABLE=現状では対応できない
-READYやACTION_PROPOSALでも、成功・完了・実行済みと宣言してはいけません。
-判断例（入力語との機械的一致ではなく情報の状態で判定する）：
-「私の車の色は？」で本人の車の色が未提示→NEED_INFORMATION: pkbへ現在の車の色を要求。
-「商品の本日時点の価格は？」で現在価格の観測がない→NEED_INFORMATION: web等へ現在価格を要求。
-「CPUとは？」で一般的な説明を既知情報で直接答えられる→READY: 実際の説明文をanswer_candidateへ。
-回答を作れるのは情報源で調べた後、という条件付きの状況ならREADYにしてはいけません。"""
+READYやACTION_PROPOSALでも、成功・完了・実行済みと宣言してはいけません。"""
 
-READY_REVIEW_QUESTION = """前回のあなたの分析はREADYでした。RITSUKOは新しいObservationをまだ取得していません。
-前回のanswer_candidateがユーザーの質問に対する実際の回答になっているか、厳密に再点検してください。
-「検索します」「確認します」「調べれば分かります」等の今後の作業計画は回答ではありません。
-現在与えられた証拠または一般的に説明できる既知事実で、ユーザーに直接答えられる場合だけREADYを維持し、答えそのものをanswer_candidateに返してください。
-回答に未取得の事実が必要ならNEED_INFORMATIONに訂正し、必要な情報と取得先をinformation_requestsに返してください。
-情報源へのアクセスはあなた自身では行わず、RITSUKOに要求してください。
-すでに記録された分類結果や前回の分析結果は参考ですが、誤りなら訂正してください。"""
+PURPOSE_INSTRUCTIONS = {
+    "understand_or_disambiguate": """依頼の意味・対象・要求結果を解決できるかを検討してください。
+参照語や省略があっても、Task履歴・PKB等の利用可能な情報源で解決できそうなら、すぐ本人へ質問せずNEED_INFORMATIONでその情報を要求してください。
+情報源でも解決できない重要な曖昧さだけNEED_CLARIFICATIONにしてください。""",
+    "identify_missing_information": """依頼を進めるために、今の証拠だけで十分かを判断してください。
+十分なら目的に応じてREADY / KNOWLEDGE_CANDIDATE / ACTION_PROPOSAL等を返してください。
+不足なら、本人固有情報・最新公開情報・Task履歴などの性質を考えて、必要最小限の事実と取得元をNEED_INFORMATIONで要求してください。""",
+    "evaluate_observation": """新しく追加されたObservationを前回の不足情報と照合してください。
+不足が解消したなら、現在の根拠から回答候補・記録候補・Action候補へ進んでください。
+まだ不足する場合だけNEED_INFORMATIONを返し、前回と同じ要求を繰り返すなら、今回のObservationの何が不足しているためかを明確にしてください。""",
+    "formulate_answer": """現在の根拠だけでユーザーへ直接答えられるかを判断してください。
+答えられるなら検索予定ではなく答えそのものをREADYのanswer_candidateへ返してください。
+答えに未取得の事実が必要ならNEED_INFORMATIONへ切り替えてください。""",
+    "formulate_action": """依頼された操作・監視・処理について、実行候補と前提・影響・必要権限を整理してください。
+自分では実行せず、情報や対象が不足するなら先にNEED_INFORMATIONまたはNEED_CLARIFICATIONを選んでください。""",
+    "review_or_repair": """直前のMAGI返答に矛盾または無進展の疑いがあります。現在のTask ContextとObservationから再点検してください。
+検索・確認・実行の予定をREADYの回答とみなさず、Observation後に同一情報要求を無根拠に繰り返さないでください。
+必要ならstateと要求内容を訂正し、進めない場合はその理由を具体化してください。""",
+}
 
 _CLASSIFICATION_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -232,21 +234,60 @@ def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) ->
                 "errors": [type(exc).__name__],
                 "diagnostic": {"error": type(exc).__name__}}
 
-def _send(session: dict, stage: str, prompt: str, caller, *, timeout: float) -> dict | None:
+def _compose_question(session: dict, purpose: str, *, issue: str | None = None) -> str:
+    if purpose not in QUESTION_PURPOSES:
+        raise ValueError("unknown_question_purpose")
+    classification = session.get("classification") or {}
+    parts = [
+        DETAIL_RULES,
+        f"question_purpose={purpose}",
+        PURPOSE_INSTRUCTIONS[purpose],
+        "初回分類カテゴリ=" + str(classification.get("category") or "unknown"),
+        "初回理解=" + str(classification.get("understood_request") or "未設定"),
+    ]
+    if issue:
+        parts.append("RITSUKOが再点検を求める理由=" + issue)
+    return "\n".join(parts)
+
+def _select_question_purpose(session: dict) -> str:
+    """Choose only the kind of judgment; MAGI still performs semantic analysis."""
+    detail = session.get("detail") or {}
+    if detail.get("state") == "NEED_INFORMATION" and session.get("observations"):
+        return "evaluate_observation"
+    if detail.get("state") == "READY":
+        return "review_or_repair"
+    category = (session.get("classification") or {}).get("category")
+    if category == "UNCLEAR":
+        return "understand_or_disambiguate"
+    if category in {"ACTION", "MONITORING"}:
+        return "formulate_action"
+    if category == "CONVERSATION":
+        return "formulate_answer"
+    return "identify_missing_information"
+
+def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller, *, timeout: float) -> dict | None:
     if len(session["turns"]) >= MAX_TURNS:
         session.update(status="stopped", next_step="max_turns_reached")
         return None
     envelope = {
-        "protocol_variant": "classification_guided_experiment",
+        "protocol_variant": "state_driven_question_experiment",
+        "prompt_version": session["prompt_version"],
         "task_id": session["task_id"], "turn": len(session["turns"]) + 1,
-        "magi_member": "MELCHIOR", "stage": stage, "question_from_ritsuko": prompt,
+        "magi_member": "MELCHIOR", "stage": stage,
+        "question_purpose": question_purpose,
+        "question_from_ritsuko": prompt,
         "user_input": {"raw": session["user_raw"]},
         "resource_catalog": default_resource_catalog(),
         "task_context": {
             "classification": deepcopy(session.get("classification")),
             "previous_detail": deepcopy(session.get("detail")),
+            "pending_information_requests": deepcopy(session.get("pending_requests") or []),
             "previous_turns": [
-                {"stage": turn["stage"], "response": deepcopy(turn.get("response"))}
+                {
+                    "stage": turn["stage"],
+                    "question_purpose": turn.get("question_purpose"),
+                    "response": deepcopy(turn.get("response")),
+                }
                 for turn in session["turns"]
             ],
         },
@@ -261,47 +302,64 @@ def _send(session: dict, stage: str, prompt: str, caller, *, timeout: float) -> 
         "unavailable" if result.get("status") == "unavailable" else "invalid"
     )
     session["turns"].append({
-        "stage": stage, "request_envelope": envelope, "status": status,
+        "stage": stage, "question_purpose": question_purpose,
+        "request_envelope": envelope, "status": status,
         "response": deepcopy(response), "errors": errors,
         "diagnostic": deepcopy(result.get("diagnostic") or {}),
     })
+    session["last_question_purpose"] = question_purpose
     if status != "ok":
         session.update(status="stopped", next_step="magi_" + status)
         return None
     return response
 
-def _followup(session: dict, caller, *, timeout: float) -> dict:
-    category = session["classification"]["category"]
-    prompt = (FOLLOWUP_QUESTION + "\nカテゴリ:" + category + "\n"
-              + CATEGORY_QUESTIONS[category])
-    response = _send(session, "analyze", prompt, caller, timeout=timeout)
-    if response is None:
-        return session
+def _request_signatures(items: list[dict]) -> list[str]:
+    return [
+        json.dumps({"source": item["source"], "what": item["what"].strip()},
+                   sort_keys=True, ensure_ascii=False)
+        for item in items
+    ]
+
+def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purpose: str) -> dict:
     session["detail"] = deepcopy(response)
     state = response["state"]
-    # With no new observation, a READY claim may be a plan instead of an answer.
-    # Ask MAGI to audit its own candidate; do not hard-code domain keywords.
-    if state == "READY" and not session["observations"]:
-        reviewed = _send(session, "review_ready", READY_REVIEW_QUESTION, caller, timeout=timeout)
+
+    if state == "READY" and not session["observations"] and purpose != "review_or_repair":
+        prompt = _compose_question(
+            session, "review_or_repair",
+            issue="新しいObservationがないのにREADYとなったため、answer_candidateが実回答か作業予定かを再確認する",
+        )
+        reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout)
         if reviewed is None:
             return session
-        session["detail"] = deepcopy(reviewed)
-        response = reviewed
-        state = reviewed["state"]
+        return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair")
+
     if state == "NEED_INFORMATION":
         requests = response["information_requests"]
-        signatures = [json.dumps({"source": item["source"], "what": item["what"].strip()},
-                                 sort_keys=True, ensure_ascii=False) for item in requests]
-        if session["observations"] and all(x in session["previous_request_signatures"] for x in signatures):
+        signatures = _request_signatures(requests)
+        repeated = bool(session["observations"]) and bool(signatures) and all(
+            signature in session["previous_request_signatures"] for signature in signatures
+        )
+        if repeated:
+            if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+                prompt = _compose_question(
+                    session, "review_or_repair",
+                    issue="Observation追加後も前回と同じ情報要求が返った。Observation不足の具体点を示すか、別の次手へ修正する",
+                )
+                reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout)
+                if reviewed is None:
+                    return session
+                return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair")
             session.update(status="stopped", next_step="repeated_request_without_progress")
-        else:
-            session["previous_request_signatures"].extend(signatures)
-            # Assign IDs only in RITSUKO, never in MAGI.
-            session["pending_requests"] = [
-                {"request_id": f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}",
-                 **deepcopy(item)} for i, item in enumerate(requests, 1)
-            ]
-            session.update(status="waiting_information", next_step="review_information_requests")
+            return session
+        for signature in signatures:
+            if signature not in session["previous_request_signatures"]:
+                session["previous_request_signatures"].append(signature)
+        session["pending_requests"] = [
+            {"request_id": f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}",
+             **deepcopy(item)} for i, item in enumerate(requests, 1)
+        ]
+        session.update(status="waiting_information", next_step="review_information_requests")
     elif state == "NEED_CLARIFICATION":
         session.update(status="waiting_user", next_step="consider_user_question")
     elif state in {"ACTION_PROPOSAL", "KNOWLEDGE_CANDIDATE"}:
@@ -312,26 +370,35 @@ def _followup(session: dict, caller, *, timeout: float) -> dict:
         session.update(status="stopped", next_step="unable")
     return session
 
+def _advance(session: dict, caller, *, timeout: float) -> dict:
+    purpose = _select_question_purpose(session)
+    prompt = _compose_question(session, purpose)
+    response = _send(session, "analyze", purpose, prompt, caller, timeout=timeout)
+    if response is None:
+        return session
+    return _apply_detail(session, response, caller, timeout=timeout, purpose=purpose)
+
 def start_dialogue(user_raw: str, *, model: str, timeout: float = 900.0,
                    caller=call_guided_member) -> dict:
     session = {
         "task_id": str(uuid4()), "user_raw": user_raw.strip(), "model": model,
+        "prompt_version": PROMPT_VERSION,
         "status": "running", "next_step": "classify",
         "classification": None, "detail": None,
         "observations": [], "pending_requests": [], "previous_request_signatures": [],
+        "last_question_purpose": None,
         "turns": [], "legacy_router_used": False, "tool_read_executed": False,
     }
     if not session["user_raw"] or not model:
         session.update(status="stopped", next_step="invalid_input")
         return session
-    classification = _send(session, "classify", CLASSIFY_QUESTION, caller, timeout=timeout)
+    classification = _send(
+        session, "classify", "classify", CLASSIFY_QUESTION, caller, timeout=timeout
+    )
     if classification is None:
         return session
     session["classification"] = deepcopy(classification)
-    if classification["category"] == "UNCLEAR":
-        session.update(status="waiting_user", next_step="classification_clarification")
-        return session
-    return _followup(session, caller, timeout=timeout)
+    return _advance(session, caller, timeout=timeout)
 
 def continue_with_observation(session: dict, observation_text: str, *,
                               timeout: float = 900.0, caller=call_guided_member) -> dict:
@@ -351,7 +418,8 @@ def continue_with_observation(session: dict, observation_text: str, *,
     })
     updated["pending_requests"] = []
     updated["status"] = "running"
-    return _followup(updated, caller, timeout=timeout)
+    updated["next_step"] = "evaluate_observation"
+    return _advance(updated, caller, timeout=timeout)
 
 def export_dialogue(session: dict) -> dict:
     """No model Thinking text and no Ollama raw response bytes."""

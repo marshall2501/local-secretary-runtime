@@ -3668,8 +3668,8 @@ def core_page(task_id: str = ""):
                 "text-lg font-bold text-teal-900"
             )
             ui.label(
-                "RITSUKOが分類を聞き、返答カテゴリを使って次の質問を選びます。"
-                "不足情報が出たら止まり、取得後の再分析へ続けます。"
+                "RITSUKOが分類を入口に、Task状態・前回返答・Observationから"
+                "次の質問目的を選び、問いを組み立て直します。"
             ).classes("text-sm")
             ui.label(
                 "隔離試験：MAGI実行はMELCHIOR 1つのみ。PKB/Webの実読取、"
@@ -3716,6 +3716,10 @@ def core_page(task_id: str = ""):
                     "対話結果を一括コピー", icon="content_copy",
                     on_click=lambda value=session_text: copy_protocol_json(value, "対話結果"),
                 ).props("outline dense")
+                ui.label(
+                    "Prompt: " + str(session.get("prompt_version") or "-")
+                    + " / 最終Question Purpose: " + str(session.get("last_question_purpose") or "-")
+                ).classes("font-mono text-xs text-grey-7")
                 if session.get("classification"):
                     ui.label(
                         "分類: " + session["classification"]["category"]
@@ -3727,11 +3731,11 @@ def core_page(task_id: str = ""):
                         "次の分析: " + detail["state"] + " / " + detail["reason"]
                     ).classes("font-medium")
                 for turn in session["turns"]:
+                    purpose = turn.get("question_purpose") or turn["request_envelope"].get("question_purpose")
                     with ui.expansion(
                         f"Turn {turn['request_envelope']['turn']}: "
                         + ("大まかな分類" if turn["stage"] == "classify" else
-                           "回答候補の再点検" if turn["stage"] == "review_ready" else
-                           "次の問い・再分析"),
+                           f"{purpose or 'analysis'} / 再分析"),
                         value=turn is session["turns"][-1],
                     ).classes("w-full border"):
                         ui.label(f"status={turn['status']} / errors={turn['errors']}").classes(
