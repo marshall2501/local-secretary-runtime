@@ -154,11 +154,14 @@ class GuidedDialogueTests(unittest.TestCase):
 
     def classification(self, category="INFORMATION", multiple=False):
         return {
-            "category":category, "secondary_category":None,
-            "understood_request":"ユーザーが必要な情報を知りたい",
-            "reason":"質問の目的を分類", "confidence":"high",
+            "category":category,
+            "understood_request":(
+                "何かの状態確認を求めているが参照対象を特定できない"
+                if category=="UNCLEAR" else "ユーザーが必要な情報を知りたい"
+            ),
+            "reason":"ユーザーが求める最終結果を基準に分類",
+            "confidence":"high",
             "multiple_requests":multiple,
-            "clarification_question":("何についてですか？" if category=="UNCLEAR" else None),
         }
 
     def detail(self, *, state="NEED_INFORMATION", source="pkb", what="本人の構成"):
@@ -182,8 +185,11 @@ class GuidedDialogueTests(unittest.TestCase):
         session=start_dialogue("メインPCのGPUの種類は？",model="gemma3:12b",caller=caller)
         self.assertEqual(len(seen), 2)
         self.assertEqual(seen[0]["stage"], "classify")
-        self.assertIn("大まかな分類だけ",seen[0]["question_from_ritsuko"])
-        self.assertNotIn("次の1手",seen[0]["question_from_ritsuko"])
+        self.assertIn("後続判断の入口",seen[0]["question_from_ritsuko"])
+        self.assertIn("ユーザーが求めている結果",seen[0]["question_from_ritsuko"])
+        self.assertNotIn("resource_catalog",seen[0])
+        self.assertNotIn("task_context",seen[0])
+        self.assertNotIn("observations",seen[0])
         self.assertEqual(seen[1]["stage"], "analyze")
         self.assertEqual(seen[1]["question_purpose"], "identify_missing_information")
         self.assertEqual(seen[1]["prompt_version"], PROMPT_VERSION)
@@ -333,13 +339,13 @@ class GuidedDialogueTests(unittest.TestCase):
         candidate["information_requests"]=[{"source":"pkb","what":"追加属性","reason":"補足"}]
         self.assertIn("information_requests:unexpected_for_knowledge_candidate",validate_turn("analyze",candidate))
 
-    def test_v2_prompt_has_freshness_and_user_last_resort_rules(self):
+    def test_v3_prompt_has_freshness_and_user_last_resort_rules(self):
         caller,seen=self.scripted(self.classification(),self.detail(source="web",what="公式の最新公開情報"))
         start_dialogue("最新ドライバーは？",model="gemma3:12b",caller=caller)
         prompt=seen[1]["question_from_ritsuko"]
         self.assertIn("fresh external source",prompt)
         self.assertIn("source=userは通常のread sourceではありません",prompt)
-        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v2")
+        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v3")
 
     def test_user_source_is_reviewed_once_before_waiting_on_user(self):
         first=self.detail(source="user",what="症状の詳細")
@@ -377,6 +383,29 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(s3["status"],"stopped")
         self.assertEqual(s3["next_step"],"max_turns_reached_with_pending_information")
         self.assertTrue(s3["pending_requests"])
+    def test_classify_contract_has_only_current_fields_and_unclear_needs_no_user_question(self):
+        c=self.classification("UNCLEAR")
+        self.assertEqual(validate_turn("classify",c),[])
+        old=dict(c)
+        old["clarification_question"]="何についてですか？"
+        self.assertIn("response:field_mismatch",validate_turn("classify",old))
+        old=dict(c)
+        old["secondary_category"]=None
+        self.assertIn("response:field_mismatch",validate_turn("classify",old))
+
+    def test_multiple_requests_are_detected_but_not_auto_split_or_executed(self):
+        caller,seen=self.scripted(self.classification(multiple=True))
+        session=start_dialogue("GPUを調べて。あと家計も見て。",model="gemma3:12b",caller=caller)
+        self.assertEqual(len(seen),1)
+        self.assertEqual(session["status"],"stopped")
+        self.assertEqual(session["next_step"],"multiple_requests_detected")
+
+    def test_system_distinguishes_available_sources_from_observations(self):
+        from pkb_proto.magi_dialogue import SYSTEM
+        self.assertIn("利用可能であることは、その内容を取得済みという意味ではありません",SYSTEM)
+        self.assertIn("Observation",SYSTEM)
+        self.assertIn("今回指定された判断だけ",SYSTEM)
+
     def test_invalid_schema_stops_without_a_followup(self):
         caller,seen=self.scripted({"category":"INFORMATION"})
         session=start_dialogue("メインPCについて",model="gemma3:12b",caller=caller)
