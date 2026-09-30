@@ -29,7 +29,7 @@ SOURCES = (
     "external_service", "pc_observation", "user",
 )
 MAX_TURNS = 4
-PROMPT_VERSION = "d19-state-driven-v2"
+PROMPT_VERSION = "d19-state-driven-v3"
 QUESTION_PURPOSES = (
     "understand_or_disambiguate",
     "identify_missing_information",
@@ -40,39 +40,50 @@ QUESTION_PURPOSES = (
     "review_or_repair",
 )
 
-SYSTEM = """あなたはPersonal Local Secretary AIのMAGI分析メンバーです。
-ユーザー原文の意味を理解し、各回にRITSUKOから指定された「1つの問い」だけを分析してください。
-RITSUKOがTask、次の問い、情報取得、権限、実行、終了を管理します。
-MAGI自身はTool、PKB、Web、外部操作を実行しません。
-情報を知らないことと依頼の意味が分からないことを混同しないでください。
-PKB全件やWebの最新情報は提示されていません。根拠のない事実を補完しないでください。
-JSON Schemaに厳密に従い、JSONだけを返してください。"""
+PREREQUISITE_KNOWLEDGE = """前提知識：
+このシステムは、現在の依頼と取得済み情報で判断し、必要な事実が不足する場合は情報を取得し、その結果をObservationとして後続の判断へ渡しながら処理を進めます。
+Resource Catalogは今回利用可能な情報源・能力とアクセス条件を示します。利用可能であることは、その内容を取得済みという意味ではありません。
+Observationは、今回までに実際に取得・受理され、判断材料として提示された事実・結果です。
+PKBはユーザー本人について蓄積されたPersonal Knowledge Base、Task Historyは過去・進行中Taskの状態や結果、Webは公開情報、Filesは利用可能な文書・ファイルを確認する情報源です。
+Userは必要事項を本人へ確認する場合の情報源です。
+「利用可能」「要求済み」「取得済み」「検証済み」「実行済み」は別の状態です。"""
 
-CLASSIFY_QUESTION = """最初の仕事はユーザー原文の大まかな分類だけです。
-ユーザーの実際の目的を1～2文で表し、主カテゴリと必要なら副カテゴリを選んでください。
-PC、健康、家計等の話題ではなく「何を頼まれているか」で分類してください。
-カテゴリ：
-INFORMATION=既知の事実・特定情報を知りたい質問
-PROBLEM=症状・不具合・問題の相談
-INVESTIGATION=原因調査・比較・根拠付き分析
-ACTION=操作・処理の実行依頼
-KNOWLEDGE=本人の新情報や明示訂正の提示
-PLANNING=方針・計画・選択肢の検討
-MONITORING=継続監視・通知・リマインダー
-CONVERSATION=会話・一般的な説明や相談
-UNCLEAR=依頼の目的そのものが理解できない
-情報や調査結果をまだ知らないだけならUNCLEARではありません。
-複数の独立依頼があればmultiple_requests=trueとし、要約に記載してください。
-例（固定キーワードで分類しない）：
-「私の車の車種は？」→INFORMATION（本人データはまだ知らない）
-「PCが頻繁に止まる」→PROBLEM
-「今月と先月の支出を比較して」→INVESTIGATION
-「購入したスマホは機種Aになった」→KNOWLEDGE
-調査、回答、情報源の選択、実行案はこの回で生成せず分類結果だけを返してください。"""
+COMMON_INSTRUCTIONS = """共通指示：
+現在与えられている入力を使い、今回指定された判断だけを行ってください。
+今回要求された判断の範囲を超えて、別の目的へ処理を広げないでください。
+取得済み情報と未取得情報を区別し、与えられていない事実を既知の事実として推測で補完しないでください。
+指定されたJSON Schema、許可値、必須項目に厳密に従い、JSONだけを返してください。"""
 
-DETAIL_RULES = """現在のEnvelopeにあるユーザー原文、分類、Task Context、Observationだけを根拠に分析してください。
-初回分類は方向付けであり、後続の証拠と矛盾する場合は内容から考え直して構いません。
-「情報源を使える」ことは「その情報を取得済み」ではありません。
+SYSTEM = PREREQUISITE_KNOWLEDGE + "\n\n" + COMMON_INSTRUCTIONS
+
+CLASSIFY_QUESTION = """今回の目的は、ユーザーが最終的に何を求めているかを大まかに理解・分類し、後続判断の入口を作ることです。
+話題の分野ではなく、ユーザーが求めている結果を基準に主カテゴリを1つ選んでください。
+understood_requestには、ユーザーが最終的に求めている結果が分かる短い理解を書いてください。
+
+カテゴリ判断基準：
+INFORMATION=既存の事実・値・状態・公開情報などを知ることが主目的
+PROBLEM=困りごと・異常・症状などを解決・改善することが主目的
+INVESTIGATION=原因・理由・関係・差異などを調査・分析することが主目的
+ACTION=何かを実際に実行・変更することが主目的
+KNOWLEDGE=ユーザー自身について新しい事実・訂正等をシステムへ伝えることが主目的
+PLANNING=今後の方法・順序・方針・選択肢などを計画することが主目的
+MONITORING=将来も継続して確認し、変化や条件成立を追跡することが主目的
+CONVERSATION=上記の具体的Taskには該当せず、会話・一般的説明・意見交換等が主目的
+UNCLEAR=情報不足ではなく、ユーザーが何を求めているのか自体を十分特定できない
+
+境界例（固定キーワードで分類しない）：
+「GPUの最新ドライバーは？」→INFORMATION
+「なぜゲーム中に固まる？」→INVESTIGATION
+「ゲーム中に固まって困っている。直したい」→PROBLEM
+「ドライバーを更新して」→ACTION
+「スマホをPixel 10に替えた」→KNOWLEDGE
+
+答えるための情報や調査結果をまだ知らないだけならUNCLEARにしないでください。
+独立した依頼が複数含まれる場合だけmultiple_requests=trueにしてください。この回では依頼の分割や実行は行いません。
+この段階では、情報源の選択、不足情報の詳細分析、調査手順、回答生成、Action生成、記憶候補生成を行わないでください。
+reasonは分類理由を短く返し、confidenceは理解・分類の確信度をhigh / medium / lowで返してください。"""
+
+DETAIL_RULES = """初回分類は方向付けであり、後続の証拠と矛盾する場合は内容から考え直して構いません。
 取得すれば答えられそうという将来の見通しや検索手順は、ユーザーへの回答ではありません。
 必要な情報があるならNEED_INFORMATIONとし、source / what / reasonを具体的に返してください。
 request_id等の管理IDはRITSUKOが採番するので生成しないでください。
@@ -122,16 +133,13 @@ source=userを提案している場合は既存情報源で代替できないblo
 
 _CLASSIFICATION_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["category", "secondary_category", "understood_request", "reason",
-                 "confidence", "multiple_requests", "clarification_question"],
+    "required": ["category", "understood_request", "reason", "confidence", "multiple_requests"],
     "properties": {
         "category": {"type": "string", "enum": list(CATEGORIES)},
-        "secondary_category": {"type": ["string", "null"], "enum": list(CATEGORIES) + [None]},
-        "understood_request": {"type": "string"},
-        "reason": {"type": "string"},
+        "understood_request": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "multiple_requests": {"type": "boolean"},
-        "clarification_question": {"type": ["string", "null"]},
     },
 }
 _DETAIL_SCHEMA = {
@@ -180,10 +188,10 @@ def validate_turn(stage: str, output: object) -> list[str]:
         if "enum" in spec and value not in spec["enum"]:
             errors.append(key + ":invalid_enum")
     if stage == "classify":
-        if output.get("category") != "UNCLEAR" and not str(output.get("understood_request") or "").strip():
+        if not str(output.get("understood_request") or "").strip():
             errors.append("understood_request:required")
-        if output.get("category") == "UNCLEAR" and not str(output.get("clarification_question") or "").strip():
-            errors.append("clarification_question:required")
+        if not str(output.get("reason") or "").strip():
+            errors.append("reason:required")
     else:
         if not str(output.get("reason") or "").strip():
             errors.append("reason:required")
@@ -301,22 +309,25 @@ def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller,
         "question_purpose": question_purpose,
         "question_from_ritsuko": prompt,
         "user_input": {"raw": session["user_raw"]},
-        "resource_catalog": default_resource_catalog(),
-        "task_context": {
-            "classification": deepcopy(session.get("classification")),
-            "previous_detail": deepcopy(session.get("detail")),
-            "pending_information_requests": deepcopy(session.get("pending_requests") or []),
-            "previous_turns": [
-                {
-                    "stage": turn["stage"],
-                    "question_purpose": turn.get("question_purpose"),
-                    "response": deepcopy(turn.get("response")),
-                }
-                for turn in session["turns"]
-            ],
-        },
-        "observations": deepcopy(session["observations"]),
     }
+    if stage != "classify":
+        envelope.update({
+            "resource_catalog": default_resource_catalog(),
+            "task_context": {
+                "classification": deepcopy(session.get("classification")),
+                "previous_detail": deepcopy(session.get("detail")),
+                "pending_information_requests": deepcopy(session.get("pending_requests") or []),
+                "previous_turns": [
+                    {
+                        "stage": turn["stage"],
+                        "question_purpose": turn.get("question_purpose"),
+                        "response": deepcopy(turn.get("response")),
+                    }
+                    for turn in session["turns"]
+                ],
+            },
+            "observations": deepcopy(session["observations"]),
+        })
     result = caller(envelope, model=session["model"], timeout=timeout)
     response = result.get("response")
     errors = list(result.get("errors") or [])
@@ -443,6 +454,9 @@ def start_dialogue(user_raw: str, *, model: str, timeout: float = 900.0,
     if classification is None:
         return session
     session["classification"] = deepcopy(classification)
+    if classification["multiple_requests"]:
+        session.update(status="stopped", next_step="multiple_requests_detected")
+        return session
     return _advance(session, caller, timeout=timeout)
 
 def continue_with_observation(session: dict, observation_text: str, *,
