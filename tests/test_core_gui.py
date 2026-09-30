@@ -214,14 +214,31 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             for label in ('BALTHASAR / model', 'CASPER / model'):
                 self.assertIsNone(controls[label].value)
                 self.assertIn('disable', controls[label]._props)
-            self.assertTrue(self.elements('MELCHIORへ分析依頼'))
+            protocol_button = self.elements('MELCHIORへ分析依頼')[0]
+            legacy = next(e for e in self.client.elements.values()
+                          if isinstance(e, ui.expansion)
+                          and e._props.get('label') == '旧MAGI v0・現行経路（回帰用）')
+            self.assertFalse(legacy.value)
+            def within_legacy(element):
+                while element is not None:
+                    if element is legacy:
+                        return True
+                    parent_slot = getattr(element, 'parent_slot', None)
+                    element = parent_slot.parent if parent_slot else None
+                return False
+            legacy_model = next(e for e in self.client.elements.values()
+                                if e._props.get('label') == 'Legacy CASPER Advisor Model')
+            self.assertTrue(within_legacy(legacy_model))
+            self.assertTrue(within_legacy(self.elements('OODA')[0]))
+            self.assertTrue(within_legacy(self.elements('この縦断でまだ行わないこと')[0]))
             old_flow = next(e for e in self.client.elements.values()
                             if isinstance(e, ui.expansion)
                             and e._props.get('label') == '旧MAGI v0 処理フロー（回帰用）')
+            self.assertTrue(within_legacy(old_flow))
             self.assertFalse(old_flow.value)
-            limits = self.elements('この縦断でまだ行わないこと')[0]
             elements = list(self.client.elements.values())
-            self.assertGreater(elements.index(old_flow), elements.index(limits))
+            self.assertGreater(elements.index(legacy), elements.index(protocol_button))
+            self.assertTrue(self.elements('既存Task（旧経路）'))
 
     async def test_protocol_invalid_json_shows_diagnostics_and_copy_controls(self):
         probe = {

@@ -3794,932 +3794,941 @@ def core_page(task_id: str = ""):
             protocol_result_panel()
 
         ui.separator()
-        ui.label("現行経路（回帰用・Protocol v1とは独立）").classes(
-            "font-bold text-grey-8"
-        )
+        with ui.expansion(
+            "旧MAGI v0・現行経路（回帰用）",
+            value=False,
+            icon="history",
+        ).classes("w-full border"):
+            ui.label(
+                "旧経路のAdvisor設定・OODA・Task操作・フロー図です。"
+                "Protocol v1のCycle 1試験とは独立しています。"
+            ).classes("text-sm text-grey-7")
 
-        try:
-            installed_advisor_models = list_advisor_models()
-        except Exception:
-            installed_advisor_models = []
-
-        saved_advisor_model = state.get("advisor_model")
-        if saved_advisor_model not in installed_advisor_models:
             try:
-                saved_advisor_model = choose_advisor_model(installed_advisor_models)
+                installed_advisor_models = list_advisor_models()
             except Exception:
-                saved_advisor_model = None
-            state["advisor_model"] = saved_advisor_model
+                installed_advisor_models = []
 
-        with ui.row().classes("w-full items-end gap-2 flex-wrap"):
-            advisor_model_select = ui.select(
-                options=installed_advisor_models,
-                value=saved_advisor_model,
-                label="Legacy CASPER Advisor Model",
-            ).classes("min-w-64")
-            advisor_timeout_select = ui.select(
-                options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
-                value=int(state.get("advisor_timeout") or 60),
-                label="Advisor Timeout (秒)",
-            ).classes("min-w-40")
-            ui.label(
-                "旧MAGI v0のCASPER Advisor用。Protocol v1 MELCHIORとは別設定です。"
-            ).classes("text-xs text-grey-7")
-
-            def save_advisor_model():
-                selected = str(advisor_model_select.value or "").strip() or None
-                if selected and selected not in advisor_model_select.options:
-                    ui.notify("インストール済みモデルを選択してください", type="negative")
-                    return
-                timeout_seconds = int(advisor_timeout_select.value or 60)
-                if timeout_seconds not in CORE_ADVISOR_TIMEOUT_OPTIONS:
-                    ui.notify("Timeoutは一覧から選択してください", type="negative")
-                    return
-                saved_model, saved_timeout = _save_core_advisor_settings(
-                    selected, timeout_seconds
-                )
-                state["advisor_model"] = saved_model
-                state["advisor_timeout"] = saved_timeout
-                ui.notify(
-                    "Advisor設定を保存しました: "
-                    + str(state["advisor_model"] or "自動")
-                    + f" / {state['advisor_timeout']}秒",
-                    type="positive",
-                )
-
-            def refresh_advisor_models():
+            saved_advisor_model = state.get("advisor_model")
+            if saved_advisor_model not in installed_advisor_models:
                 try:
-                    available = list_advisor_models()
-                except Exception as exc:
-                    ui.notify("Ollamaモデル一覧を取得できません: " + str(exc)[:180], type="negative")
-                    return
-                previous = advisor_model_select.value
-                advisor_model_select.options = available
-                if previous in available:
-                    advisor_model_select.value = previous
-                else:
+                    saved_advisor_model = choose_advisor_model(installed_advisor_models)
+                except Exception:
+                    saved_advisor_model = None
+                state["advisor_model"] = saved_advisor_model
+
+            with ui.row().classes("w-full items-end gap-2 flex-wrap"):
+                advisor_model_select = ui.select(
+                    options=installed_advisor_models,
+                    value=saved_advisor_model,
+                    label="Legacy CASPER Advisor Model",
+                ).classes("min-w-64")
+                advisor_timeout_select = ui.select(
+                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                    value=int(state.get("advisor_timeout") or 60),
+                    label="Advisor Timeout (秒)",
+                ).classes("min-w-40")
+                ui.label(
+                    "旧MAGI v0のCASPER Advisor用。Protocol v1 MELCHIORとは別設定です。"
+                ).classes("text-xs text-grey-7")
+
+                def save_advisor_model():
+                    selected = str(advisor_model_select.value or "").strip() or None
+                    if selected and selected not in advisor_model_select.options:
+                        ui.notify("インストール済みモデルを選択してください", type="negative")
+                        return
+                    timeout_seconds = int(advisor_timeout_select.value or 60)
+                    if timeout_seconds not in CORE_ADVISOR_TIMEOUT_OPTIONS:
+                        ui.notify("Timeoutは一覧から選択してください", type="negative")
+                        return
+                    saved_model, saved_timeout = _save_core_advisor_settings(
+                        selected, timeout_seconds
+                    )
+                    state["advisor_model"] = saved_model
+                    state["advisor_timeout"] = saved_timeout
+                    ui.notify(
+                        "Advisor設定を保存しました: "
+                        + str(state["advisor_model"] or "自動")
+                        + f" / {state['advisor_timeout']}秒",
+                        type="positive",
+                    )
+
+                def refresh_advisor_models():
                     try:
-                        advisor_model_select.value = choose_advisor_model(available)
-                    except Exception:
-                        advisor_model_select.value = None
-                advisor_model_select.update()
-                ui.notify(f"Chat model {len(available)}件を取得しました", type="positive")
+                        available = list_advisor_models()
+                    except Exception as exc:
+                        ui.notify("Ollamaモデル一覧を取得できません: " + str(exc)[:180], type="negative")
+                        return
+                    previous = advisor_model_select.value
+                    advisor_model_select.options = available
+                    if previous in available:
+                        advisor_model_select.value = previous
+                    else:
+                        try:
+                            advisor_model_select.value = choose_advisor_model(available)
+                        except Exception:
+                            advisor_model_select.value = None
+                    advisor_model_select.update()
+                    ui.notify(f"Chat model {len(available)}件を取得しました", type="positive")
 
-            ui.button(
-                "保存",
-                icon="save",
-                color="indigo",
-                on_click=save_advisor_model,
-            ).props("dense")
-            ui.button(
-                "モデル一覧更新",
-                icon="refresh",
-                on_click=refresh_advisor_models,
-            ).props("flat dense")
+                ui.button(
+                    "保存",
+                    icon="save",
+                    color="indigo",
+                    on_click=save_advisor_model,
+                ).props("dense")
+                ui.button(
+                    "モデル一覧更新",
+                    icon="refresh",
+                    on_click=refresh_advisor_models,
+                ).props("flat dense")
 
-        @ui.refreshable
-        def ooda_bar():
-            display = current_ooda()
-            with ui.column().classes("w-full gap-1").props('role=status aria-live=polite'):
-                with ui.row().classes("w-full items-center gap-2 flex-wrap"):
-                    ui.label("OODA").classes("font-bold")
-                    for index, (key, name, note) in enumerate(OODA_PHASES):
-                        if index:
-                            ui.label("→").classes("text-grey-6").props('aria-hidden=true')
-                        active = display.phase == key and not display.terminal
-                        label = f"{name}（{note}）" + (" · 現在" if active else "")
-                        badge = ui.badge(label, color="blue" if active else "grey-3",
-                                         text_color="white" if active else "grey-8")
-                        if active:
-                            badge.classes("font-bold").props('aria-current=step')
-                if display.terminal:
-                    ui.label(f"最終状態: {display.terminal}（OODA外）").classes("font-bold")
-                elif display.phase is None:
-                    ui.label(display.reason).classes("text-sm text-grey-7")
-                ui.label("既存状態からの表示用推定（途中段階のライブ配信ではありません）").classes(
-                    "text-xs text-grey-6"
-                )
-
-        ooda_bar()
-        ui.label("最小縦断: 依頼 → Task → 能力選択 → 読取 → Result / 追加質問").classes(
-            "text-sm text-grey-7"
-        )
-        ui.label(
-            "PKB・家計・明示的なWeb調査を読み取り専用で扱います。"
-            "曖昧依頼からの自動実行は限定PKB readのみです。"
-        ).classes("text-sm text-orange-700")
-
-        def select_saved_task(item: dict):
-            if state["busy"] or state["resume_busy"]:
-                return
-            state["result"] = core_task_selection_result(item)
-            load_current_trace()
-            ooda_bar.refresh()
-            core_result.refresh()
-            resume_panel.refresh()
-            trace_panel.refresh()
-
-        @ui.refreshable
-        def completed_tasks_panel():
-            try:
-                rows, has_more = load_core_task_window(load_completed_core_tasks, list_limits["completed_limit"])
-            except Exception as exc:
-                with ui.card().classes("w-full border border-red-200 bg-red-50"):
-                    ui.label("完了済みTaskを取得できません: " + str(exc)).classes(
-                        "text-red-700"
+            @ui.refreshable
+            def ooda_bar():
+                display = current_ooda()
+                with ui.column().classes("w-full gap-1").props('role=status aria-live=polite'):
+                    with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+                        ui.label("OODA").classes("font-bold")
+                        for index, (key, name, note) in enumerate(OODA_PHASES):
+                            if index:
+                                ui.label("→").classes("text-grey-6").props('aria-hidden=true')
+                            active = display.phase == key and not display.terminal
+                            label = f"{name}（{note}）" + (" · 現在" if active else "")
+                            badge = ui.badge(label, color="blue" if active else "grey-3",
+                                             text_color="white" if active else "grey-8")
+                            if active:
+                                badge.classes("font-bold").props('aria-current=step')
+                    if display.terminal:
+                        ui.label(f"最終状態: {display.terminal}（OODA外）").classes("font-bold")
+                    elif display.phase is None:
+                        ui.label(display.reason).classes("text-sm text-grey-7")
+                    ui.label("既存状態からの表示用推定（途中段階のライブ配信ではありません）").classes(
+                        "text-xs text-grey-6"
                     )
-                return
 
-            ui.separator()
-            ui.label("完了済み").classes("text-base font-bold")
+            ooda_bar()
+            ui.label("最小縦断: 依頼 → Task → 能力選択 → 読取 → Result / 追加質問").classes(
+                "text-sm text-grey-7"
+            )
             ui.label(
-                "直近の完了Taskを閲覧専用で開けます。再開・再実行は行いません。"
-            ).classes("text-xs text-grey-7")
-            if not rows:
-                ui.label("完了済みTaskはありません。").classes("text-sm text-grey-7")
-                return
-            for item in rows:
-                with ui.card().classes("w-full p-2 gap-1 bg-green-50"):
-                    with ui.row().classes("w-full items-center gap-2 no-wrap"):
-                        ui.badge("completed", color="green").classes("shrink-0")
-                        ui.label(item["request"]).classes(
-                            "font-medium text-sm grow overflow-hidden"
+                "PKB・家計・明示的なWeb調査を読み取り専用で扱います。"
+                "曖昧依頼からの自動実行は限定PKB readのみです。"
+            ).classes("text-sm text-orange-700")
+
+            def select_saved_task(item: dict):
+                if state["busy"] or state["resume_busy"]:
+                    return
+                state["result"] = core_task_selection_result(item)
+                load_current_trace()
+                ooda_bar.refresh()
+                core_result.refresh()
+                resume_panel.refresh()
+                trace_panel.refresh()
+
+            @ui.refreshable
+            def completed_tasks_panel():
+                try:
+                    rows, has_more = load_core_task_window(load_completed_core_tasks, list_limits["completed_limit"])
+                except Exception as exc:
+                    with ui.card().classes("w-full border border-red-200 bg-red-50"):
+                        ui.label("完了済みTaskを取得できません: " + str(exc)).classes(
+                            "text-red-700"
                         )
-                    ui.label(
-                        f"rev={item['revision']} / {item.get('phase') or '-'} / "
-                        f"{item.get('selected_capability') or '-'}"
-                    ).classes("font-mono text-xs text-grey-6")
-                    ui.label(
-                        f"Action={item['action_count']} / Result={item['result_count']}"
-                    ).classes("text-xs text-grey-6")
-                    ui.button(
-                        "開く",
-                        icon="visibility",
-                        color="green",
-                        on_click=lambda item=item: select_saved_task(item),
-                    ).props("flat dense").classes("self-start")
+                    return
 
-            if has_more:
-                ui.button("さらに読み込む", on_click=lambda: more_tasks("completed_limit", completed_tasks_panel)).props("flat dense")
+                ui.separator()
+                ui.label("完了済み").classes("text-base font-bold")
+                ui.label(
+                    "直近の完了Taskを閲覧専用で開けます。再開・再実行は行いません。"
+                ).classes("text-xs text-grey-7")
+                if not rows:
+                    ui.label("完了済みTaskはありません。").classes("text-sm text-grey-7")
+                    return
+                for item in rows:
+                    with ui.card().classes("w-full p-2 gap-1 bg-green-50"):
+                        with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                            ui.badge("completed", color="green").classes("shrink-0")
+                            ui.label(item["request"]).classes(
+                                "font-medium text-sm grow overflow-hidden"
+                            )
+                        ui.label(
+                            f"rev={item['revision']} / {item.get('phase') or '-'} / "
+                            f"{item.get('selected_capability') or '-'}"
+                        ).classes("font-mono text-xs text-grey-6")
+                        ui.label(
+                            f"Action={item['action_count']} / Result={item['result_count']}"
+                        ).classes("text-xs text-grey-6")
+                        ui.button(
+                            "開く",
+                            icon="visibility",
+                            color="green",
+                            on_click=lambda item=item: select_saved_task(item),
+                        ).props("flat dense").classes("self-start")
 
-        @ui.refreshable
-        def open_tasks_panel():
-            try:
-                rows, has_more = load_core_task_window(load_open_core_tasks, list_limits["open_limit"])
-            except Exception as exc:
-                with ui.card().classes("w-full border border-red-200 bg-red-50"):
-                    ui.label("未完了Taskを取得できません: " + str(exc)).classes(
-                        "text-red-700"
-                    )
-                return
+                if has_more:
+                    ui.button("さらに読み込む", on_click=lambda: more_tasks("completed_limit", completed_tasks_panel)).props("flat dense")
 
-            ui.label("進行中・確認待ち").classes("text-base font-bold")
-            ui.label(
-                "未完了Taskを選ぶと中央に開きます。F5・サーバー再起動後もDBから復元します。"
-            ).classes("text-xs text-grey-7")
-            if not rows:
-                ui.label("未完了Taskはありません。").classes("text-sm text-grey-7")
-                return
-            for item in rows:
-                status_color = {
-                    "waiting_external": "orange",
-                    "running": "blue",
-                }.get(item["status"], "grey")
-                with ui.card().classes("w-full p-2 gap-1"):
-                    with ui.row().classes("w-full items-center gap-2 no-wrap"):
-                        ui.badge(item["status"], color=status_color).classes("shrink-0")
-                        ui.label(item["request"]).classes(
-                            "font-medium text-sm grow overflow-hidden"
+            @ui.refreshable
+            def open_tasks_panel():
+                try:
+                    rows, has_more = load_core_task_window(load_open_core_tasks, list_limits["open_limit"])
+                except Exception as exc:
+                    with ui.card().classes("w-full border border-red-200 bg-red-50"):
+                        ui.label("未完了Taskを取得できません: " + str(exc)).classes(
+                            "text-red-700"
                         )
-                    ui.label(
-                        f"rev={item['revision']} / {item.get('phase') or '-'}"
-                    ).classes("font-mono text-xs text-grey-6")
-                    ui.button(
-                        "開く",
-                        icon="open_in_new",
-                        color="orange",
-                        on_click=lambda item=item: select_saved_task(item),
-                    ).props("flat dense").classes("self-start")
+                    return
 
-            if has_more:
-                ui.button("さらに読み込む", on_click=lambda: more_tasks("open_limit", open_tasks_panel)).props("flat dense")
+                ui.label("進行中・確認待ち").classes("text-base font-bold")
+                ui.label(
+                    "未完了Taskを選ぶと中央に開きます。F5・サーバー再起動後もDBから復元します。"
+                ).classes("text-xs text-grey-7")
+                if not rows:
+                    ui.label("未完了Taskはありません。").classes("text-sm text-grey-7")
+                    return
+                for item in rows:
+                    status_color = {
+                        "waiting_external": "orange",
+                        "running": "blue",
+                    }.get(item["status"], "grey")
+                    with ui.card().classes("w-full p-2 gap-1"):
+                        with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                            ui.badge(item["status"], color=status_color).classes("shrink-0")
+                            ui.label(item["request"]).classes(
+                                "font-medium text-sm grow overflow-hidden"
+                            )
+                        ui.label(
+                            f"rev={item['revision']} / {item.get('phase') or '-'}"
+                        ).classes("font-mono text-xs text-grey-6")
+                        ui.button(
+                            "開く",
+                            icon="open_in_new",
+                            color="orange",
+                            on_click=lambda item=item: select_saved_task(item),
+                        ).props("flat dense").classes("self-start")
 
-        def sync_task_preferences():
-            changed = False
-            for key in list_defaults:
-                value = _UI_PREFERENCES["core"][key]
-                if value != list_defaults[key]:
-                    list_defaults[key] = value
-                    list_limits[key] = value
-                    changed = True
-            if changed:
-                open_tasks_panel.refresh()
-                completed_tasks_panel.refresh()
+                if has_more:
+                    ui.button("さらに読み込む", on_click=lambda: more_tasks("open_limit", open_tasks_panel)).props("flat dense")
 
-        @ui.refreshable
-        def screen_log_panel():
-            try:
-                rows = load_recent_core_tasks(10)
-            except Exception as exc:
+            def sync_task_preferences():
+                changed = False
+                for key in list_defaults:
+                    value = _UI_PREFERENCES["core"][key]
+                    if value != list_defaults[key]:
+                        list_defaults[key] = value
+                        list_limits[key] = value
+                        changed = True
+                if changed:
+                    open_tasks_panel.refresh()
+                    completed_tasks_panel.refresh()
+
+            @ui.refreshable
+            def screen_log_panel():
+                try:
+                    rows = load_recent_core_tasks(10)
+                except Exception as exc:
+                    with ui.expansion(
+                        "Core画面 全体稼働ログ",
+                        value=_CORE_UI_OPEN["screen_log"],
+                        on_value_change=remember_core_expansion("screen_log"),
+                    ).classes(
+                        "w-full border border-red-200 bg-red-50"
+                        + _block_visibility_class("core", "screen_log")
+                    ):
+                        ui.label("最近のTaskを取得できません: " + str(exc)).classes(
+                            "text-red-700"
+                        )
+                    return
+
                 with ui.expansion(
                     "Core画面 全体稼働ログ",
                     value=_CORE_UI_OPEN["screen_log"],
                     on_value_change=remember_core_expansion("screen_log"),
                 ).classes(
-                    "w-full border border-red-200 bg-red-50"
+                    "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
                     + _block_visibility_class("core", "screen_log")
                 ):
-                    ui.label("最近のTaskを取得できません: " + str(exc)).classes(
-                        "text-red-700"
-                    )
-                return
+                    ui.label(
+                        "この画面で扱った直近のCore Taskを横断表示します。"
+                        " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
+                    ).classes("text-sm text-grey-7")
+                    if not rows:
+                        ui.label("Core Taskはまだありません。")
+                        return
+                    for item in rows:
+                        with ui.row().classes(
+                            "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
+                        ):
+                            status_color = {
+                                "completed": "green",
+                                "waiting_external": "orange",
+                                "running": "blue",
+                                "failed": "red",
+                            }.get(item["status"], "grey")
+                            ui.badge(item["status"], color=status_color)
+                            with ui.column().classes("grow gap-0"):
+                                ui.label(item["request"]).classes("font-medium")
+                                ui.label(
+                                    f"Task {item['id']} / revision={item['revision']} / "
+                                    f"phase={item.get('phase') or '-'} / "
+                                    f"capability={item.get('selected_capability') or '-'}"
+                                ).classes("font-mono text-xs text-grey-7")
+                                ui.label(
+                                    f"Action={item['action_count']} / Result={item['result_count']} / "
+                                    f"updated={item['updated_at']}"
+                                ).classes("text-xs text-grey-7")
 
-            with ui.expansion(
-                "Core画面 全体稼働ログ",
-                value=_CORE_UI_OPEN["screen_log"],
-                on_value_change=remember_core_expansion("screen_log"),
-            ).classes(
-                "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
-                + _block_visibility_class("core", "screen_log")
-            ):
+            with task_drawer:
+                with ui.column().classes("w-full gap-2 no-wrap"):
+                    ui.label("既存Task（旧経路）").classes("text-lg font-bold shrink-0")
+                    ui.label(
+                        "Protocol v1 Cycle 1試験の結果はここには保存されません。"
+                    ).classes("text-xs text-grey-7")
+                    ui.link("Task履歴を見る", "/core/history").classes("shrink-0")
+                    with ui.column().classes("w-full no-wrap"):
+                        open_tasks_panel()
+                    with ui.column().classes("w-full no-wrap"):
+                        completed_tasks_panel()
+                ui.timer(1.0, sync_task_preferences)
+
+            with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
+                ui.label("依頼").classes("text-lg font-bold")
                 ui.label(
-                    "この画面で扱った直近のCore Taskを横断表示します。"
-                    " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
-                ).classes("text-sm text-grey-7")
-                if not rows:
-                    ui.label("Core Taskはまだありません。")
-                    return
-                for item in rows:
-                    with ui.row().classes(
-                        "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
-                    ):
-                        status_color = {
-                            "completed": "green",
-                            "waiting_external": "orange",
-                            "running": "blue",
-                            "failed": "red",
-                        }.get(item["status"], "grey")
-                        ui.badge(item["status"], color=status_color)
-                        with ui.column().classes("grow gap-0"):
-                            ui.label(item["request"]).classes("font-medium")
+                    "例: メインPCのGPUの現在のドライバーを調べて / "
+                    "メインPCの構成を確認して / GPU1のドライバー更新履歴を見て"
+                ).classes("text-sm")
+                request_input = ui.textarea(
+                    label="Secretary Coreへ依頼",
+                    placeholder="対象と確認したい内容を自然言語で入力",
+                ).classes("w-full")
+
+                @ui.refreshable
+                def core_result():
+                    result = state["result"]
+                    if result or state["busy"] or state["resume_busy"]:
+                        display = current_ooda()
+                        suffix = "（完了直前の表示用段階）" if display.terminal == "completed" else ""
+                        ui.label(f"OODA: {display.label}{suffix}").classes("font-medium")
+                        ui.label("理由: " + display.reason).classes("text-sm")
+                    advisor = current_advisor_shadow()
+                    if advisor:
+                        with ui.card().classes(
+                            "w-full border border-indigo-200 bg-indigo-50"
+                        ):
+                            ui.label("MAGI v0 · Cooperative Synthesis").classes(
+                                "font-bold text-indigo-900"
+                            )
                             ui.label(
-                                f"Task {item['id']} / revision={item['revision']} / "
-                                f"phase={item.get('phase') or '-'} / "
-                                f"capability={item.get('selected_capability') or '-'}"
-                            ).classes("font-mono text-xs text-grey-7")
-                            ui.label(
-                                f"Action={item['action_count']} / Result={item['result_count']} / "
-                                f"updated={item['updated_at']}"
+                                "MELCHIORのGuardとCASPERの前進案をCoreが統合します。"
+                                "曖昧依頼では、Synthesisが選んだ限定的なPKB readだけを自動実行できます。"
                             ).classes("text-xs text-grey-7")
-
-        with task_drawer:
-            with ui.column().classes("w-full gap-2 no-wrap"):
-                ui.label("Core Tasks").classes("text-lg font-bold shrink-0")
-                ui.link("Task履歴を見る", "/core/history").classes("shrink-0")
-                with ui.column().classes("w-full no-wrap"):
-                    open_tasks_panel()
-                with ui.column().classes("w-full no-wrap"):
-                    completed_tasks_panel()
-            ui.timer(1.0, sync_task_preferences)
-
-        with ui.card().classes("w-full border-2 border-blue-grey-300 bg-blue-grey-1"):
-            ui.label("依頼").classes("text-lg font-bold")
-            ui.label(
-                "例: メインPCのGPUの現在のドライバーを調べて / "
-                "メインPCの構成を確認して / GPU1のドライバー更新履歴を見て"
-            ).classes("text-sm")
-            request_input = ui.textarea(
-                label="Secretary Coreへ依頼",
-                placeholder="対象と確認したい内容を自然言語で入力",
-            ).classes("w-full")
-
-            @ui.refreshable
-            def core_result():
-                result = state["result"]
-                if result or state["busy"] or state["resume_busy"]:
-                    display = current_ooda()
-                    suffix = "（完了直前の表示用段階）" if display.terminal == "completed" else ""
-                    ui.label(f"OODA: {display.label}{suffix}").classes("font-medium")
-                    ui.label("理由: " + display.reason).classes("text-sm")
-                advisor = current_advisor_shadow()
-                if advisor:
-                    with ui.card().classes(
-                        "w-full border border-indigo-200 bg-indigo-50"
-                    ):
-                        ui.label("MAGI v0 · Cooperative Synthesis").classes(
-                            "font-bold text-indigo-900"
-                        )
-                        ui.label(
-                            "MELCHIORのGuardとCASPERの前進案をCoreが統合します。"
-                            "曖昧依頼では、Synthesisが選んだ限定的なPKB readだけを自動実行できます。"
-                        ).classes("text-xs text-grey-7")
-                        presentation = core_magi_presentation(result or {}, advisor, state.get("trace") or {})
-                        for cycle in presentation["cycles"]:
-                            with ui.card().classes("w-full bg-white gap-1"):
-                                ui.label(f"Cycle {cycle['cycle']}").classes("font-bold")
-                                for key, label in (("melchior", "MELCHIOR"), ("casper", "CASPER"),
-                                                   ("synthesis", "Synthesis（中間提案）"),
-                                                   ("action", "Action"), ("result", "Result")):
-                                    if cycle.get(key) is not None:
-                                        note = "（初回Guardを再利用）" if key == "melchior" and cycle.get("melchior_reused") else ""
-                                        ui.label(label + note).classes("font-medium text-sm")
-                                        entry = cycle[key]
-                                        if key == "result":
-                                            summary = f"result_count={entry.get('result_count', '-')} / {entry.get('answer') or entry.get('result_id') or '-'}"
-                                        else:
-                                            summary = " / ".join(str(entry[field]) for field in
-                                                ("status", "next_step", "proposed_action", "selected_capability", "capability", "reason")
-                                                if entry.get(field) is not None) or "未記録"
-                                        ui.label(summary).classes("text-sm break-words")
-                                with ui.expansion("Cycle詳細").classes("w-full"):
-                                    ui.code(json.dumps(cycle, ensure_ascii=False, indent=2, default=str), language="json").classes("w-full text-xs")
-                        with ui.card().classes("w-full border-2 border-green-600 bg-green-50"):
-                            ui.label("FINAL CORE DECISION").classes("font-bold")
-                            final = presentation["final_core_decision"]
-                            for key in ("next_step", "reason", "task_status"):
-                                ui.label(f"{key} = {final.get(key) if final and final.get(key) is not None else '未記録'}").classes("font-mono text-sm")
-                            if not final:
-                                ui.label("最終判断は未記録です。Synthesisからは補完しません。").classes("text-xs")
-                        job_status = str(
-                            advisor.get("job_status") or advisor.get("status") or "-"
-                        )
-                        elapsed = advisor.get("elapsed_seconds")
-                        if job_status in {"queued", "running"} and advisor.get("started_at"):
-                            try:
-                                started = datetime.fromisoformat(str(advisor["started_at"]))
-                                elapsed = max(
-                                    0.0,
-                                    (datetime.now(timezone.utc) - started).total_seconds(),
-                                )
-                            except ValueError:
-                                pass
-                        ui.label(
-                            "model="
-                            + str(advisor.get("model") or "-")
-                            + " / timeout="
-                            + str(advisor.get("timeout_seconds") or "-")
-                            + "s / job="
-                            + job_status
-                            + " / status="
-                            + str(advisor.get("status") or "-")
-                            + " / elapsed="
-                            + (f"{float(elapsed):.1f}s" if elapsed is not None else "-")
-                        ).classes("font-mono text-xs text-grey-7")
-                        if job_status in {"queued", "running"}:
-                            with ui.row().classes("items-center gap-2"):
-                                ui.spinner(size="sm", color="indigo")
-                                ui.label(
-                                    "Advisorはバックグラウンド評価中です。"
-                                    " Cycle単位の提案と最終Core判断を下に表示します。"
-                                ).classes("text-xs text-indigo-800")
-                        if advisor.get("situation"):
-                            ui.label("状況整理: " + str(advisor["situation"])).classes(
-                                "text-sm"
+                            presentation = core_magi_presentation(result or {}, advisor, state.get("trace") or {})
+                            for cycle in presentation["cycles"]:
+                                with ui.card().classes("w-full bg-white gap-1"):
+                                    ui.label(f"Cycle {cycle['cycle']}").classes("font-bold")
+                                    for key, label in (("melchior", "MELCHIOR"), ("casper", "CASPER"),
+                                                       ("synthesis", "Synthesis（中間提案）"),
+                                                       ("action", "Action"), ("result", "Result")):
+                                        if cycle.get(key) is not None:
+                                            note = "（初回Guardを再利用）" if key == "melchior" and cycle.get("melchior_reused") else ""
+                                            ui.label(label + note).classes("font-medium text-sm")
+                                            entry = cycle[key]
+                                            if key == "result":
+                                                summary = f"result_count={entry.get('result_count', '-')} / {entry.get('answer') or entry.get('result_id') or '-'}"
+                                            else:
+                                                summary = " / ".join(str(entry[field]) for field in
+                                                    ("status", "next_step", "proposed_action", "selected_capability", "capability", "reason")
+                                                    if entry.get(field) is not None) or "未記録"
+                                            ui.label(summary).classes("text-sm break-words")
+                                    with ui.expansion("Cycle詳細").classes("w-full"):
+                                        ui.code(json.dumps(cycle, ensure_ascii=False, indent=2, default=str), language="json").classes("w-full text-xs")
+                            with ui.card().classes("w-full border-2 border-green-600 bg-green-50"):
+                                ui.label("FINAL CORE DECISION").classes("font-bold")
+                                final = presentation["final_core_decision"]
+                                for key in ("next_step", "reason", "task_status"):
+                                    ui.label(f"{key} = {final.get(key) if final and final.get(key) is not None else '未記録'}").classes("font-mono text-sm")
+                                if not final:
+                                    ui.label("最終判断は未記録です。Synthesisからは補完しません。").classes("text-xs")
+                            job_status = str(
+                                advisor.get("job_status") or advisor.get("status") or "-"
                             )
-                        if advisor.get("next_step"):
+                            elapsed = advisor.get("elapsed_seconds")
+                            if job_status in {"queued", "running"} and advisor.get("started_at"):
+                                try:
+                                    started = datetime.fromisoformat(str(advisor["started_at"]))
+                                    elapsed = max(
+                                        0.0,
+                                        (datetime.now(timezone.utc) - started).total_seconds(),
+                                    )
+                                except ValueError:
+                                    pass
                             ui.label(
-                                "CASPER提案（最終判断ではありません）: " + str(advisor["next_step"])
-                            ).classes("text-sm font-medium text-indigo-900")
-                        if advisor.get("reason"):
-                            ui.label("提案理由: " + str(advisor["reason"])).classes(
-                                "text-sm"
-                            )
-                        missing = advisor.get("missing_information") or []
-                        if missing:
-                            ui.label(
-                                "不足情報: " + " / ".join(str(x) for x in missing)
-                            ).classes("text-xs text-orange-800")
-                        if advisor.get("error"):
-                            ui.label(
-                                "Advisor error: " + str(advisor["error"])
-                            ).classes("text-xs text-red-700")
-
-                        with ui.expansion(
-                            "Advisor 稼働ログ",
-                            value=bool(advisor.get("error")),
-                        ).classes("w-full border border-indigo-100 bg-white"):
-                            ui.label(
-                                "Cycleごとの提案・Action / Result・最終Core判断を確認するログです。"
-                                " 推論過程は保存・表示しません。"
-                            ).classes("text-xs text-grey-7")
-
-                            trace = state.get("trace") or {}
-                            export_text = json.dumps(
-                                _advisor_log_export(result, advisor, trace),
-                                ensure_ascii=False,
-                                indent=2,
-                                default=str,
-                            )
-
-                            def copy_advisor_log(text: str = export_text) -> None:
-                                ui.run_javascript(
-                                    'navigator.clipboard.writeText('
-                                    + json.dumps(text, ensure_ascii=False)
-                                    + ')'
-                                )
-                                ui.notify("Advisor稼働ログをコピーしました", type="positive")
-
-                            ui.button(
-                                "ログをコピー",
-                                icon="content_copy",
-                                on_click=copy_advisor_log,
-                            ).props("outline dense").classes("self-start")
-
-                            lifecycle = []
-                            for event in trace.get("advisor_events") or []:
-                                lifecycle.append(
-                                    str(event.get("occurred_at") or "")
-                                    + "  "
-                                    + str(event.get("event_type") or "")
-                                )
-                            if lifecycle:
-                                ui.label("状態遷移").classes("font-medium text-sm")
-                                for line in lifecycle:
-                                    ui.label(line).classes("font-mono text-xs")
-                            else:
-                                ui.label(
-                                    "状態遷移: DB監査イベントはまだありません。"
-                                ).classes("text-xs text-grey-6")
-
-                            ui.label("検査結果").classes("font-medium text-sm")
-                            ui.label(
-                                "job="
-                                + str(advisor.get("job_status") or "-")
+                                "model="
+                                + str(advisor.get("model") or "-")
+                                + " / timeout="
+                                + str(advisor.get("timeout_seconds") or "-")
+                                + "s / job="
+                                + job_status
                                 + " / status="
                                 + str(advisor.get("status") or "-")
-                                + " / comparison="
-                                + str(advisor.get("comparison") or "-")
-                                + " / error="
-                                + str(advisor.get("error") or "-")
-                            ).classes("font-mono text-xs")
-
-                            trace_task = (state.get("trace") or {}).get("task") or {}
-                            observation_pack = (
-                                trace_task.get("observation_pack")
-                                or result.get("observation_pack")
-                            )
-                            if observation_pack:
-                                ui.label("MELCHIOR / CASPER 共通 Observation Pack").classes(
-                                    "font-medium text-sm"
+                                + " / elapsed="
+                                + (f"{float(elapsed):.1f}s" if elapsed is not None else "-")
+                            ).classes("font-mono text-xs text-grey-7")
+                            if job_status in {"queued", "running"}:
+                                with ui.row().classes("items-center gap-2"):
+                                    ui.spinner(size="sm", color="indigo")
+                                    ui.label(
+                                        "Advisorはバックグラウンド評価中です。"
+                                        " Cycle単位の提案と最終Core判断を下に表示します。"
+                                    ).classes("text-xs text-indigo-800")
+                            if advisor.get("situation"):
+                                ui.label("状況整理: " + str(advisor["situation"])).classes(
+                                    "text-sm"
                                 )
-                                ui.code(
-                                    json.dumps(
-                                        observation_pack,
-                                        ensure_ascii=False,
-                                        indent=2,
-                                        default=str,
-                                    ),
-                                    language="json",
-                                ).classes("w-full text-xs")
-
-                            request_context = advisor.get("request_context")
-                            if request_context:
-                                ui.label("Ollamaへ渡した判断コンテキスト").classes(
-                                    "font-medium text-sm"
+                            if advisor.get("next_step"):
+                                ui.label(
+                                    "CASPER提案（最終判断ではありません）: " + str(advisor["next_step"])
+                                ).classes("text-sm font-medium text-indigo-900")
+                            if advisor.get("reason"):
+                                ui.label("提案理由: " + str(advisor["reason"])).classes(
+                                    "text-sm"
                                 )
-                                ui.code(
-                                    json.dumps(
-                                        request_context,
-                                        ensure_ascii=False,
-                                        indent=2,
-                                        default=str,
-                                    ),
-                                    language="json",
-                                ).classes("w-full text-xs")
+                            missing = advisor.get("missing_information") or []
+                            if missing:
+                                ui.label(
+                                    "不足情報: " + " / ".join(str(x) for x in missing)
+                                ).classes("text-xs text-orange-800")
+                            if advisor.get("error"):
+                                ui.label(
+                                    "Advisor error: " + str(advisor["error"])
+                                ).classes("text-xs text-red-700")
 
-                            response_diagnostic = advisor.get("response_diagnostic")
-                            if response_diagnostic:
+                            with ui.expansion(
+                                "Advisor 稼働ログ",
+                                value=bool(advisor.get("error")),
+                            ).classes("w-full border border-indigo-100 bg-white"):
                                 ui.label(
-                                    "LLM返却値の形式検査（安全化済み）"
-                                ).classes("font-medium text-sm")
-                                ui.label(
-                                    "契約対象フィールドだけを保存しています。"
-                                    " 追加キーは名前だけ記録し、値は保存しません。"
+                                    "Cycleごとの提案・Action / Result・最終Core判断を確認するログです。"
+                                    " 推論過程は保存・表示しません。"
                                 ).classes("text-xs text-grey-7")
-                                ui.code(
-                                    json.dumps(
-                                        response_diagnostic,
-                                        ensure_ascii=False,
-                                        indent=2,
-                                        default=str,
-                                    ),
-                                    language="json",
-                                ).classes("w-full text-xs")
 
-                if state["busy"]:
-                    with ui.row().classes("items-center gap-2"):
-                        ui.spinner(size="sm", color="blue-grey")
-                        ui.label("Taskを作成してPKBを確認しています…")
-                    return
-                if not result:
-                    ui.label("まだ依頼していません。")
-                    return
+                                trace = state.get("trace") or {}
+                                export_text = json.dumps(
+                                    _advisor_log_export(result, advisor, trace),
+                                    ensure_ascii=False,
+                                    indent=2,
+                                    default=str,
+                                )
 
-                status = result.get("status", "")
-                color = {
-                    "completed": "green",
-                    "waiting_external": "orange",
-                    "rejected": "red",
-                }.get(status, "grey")
-                ui.badge(status or "result", color=color)
-                if result.get("selected_capability"):
-                    ui.label(
-                        "選択した能力: " + result["selected_capability"]
-                    ).classes("text-sm text-blue-grey-800")
-                if result.get("message"):
-                    ui.label(result["message"]).classes("text-base")
-                if result.get("question"):
-                    with ui.card().classes(
-                        "w-full border-2 border-orange-300 bg-orange-50"
-                    ):
-                        ui.label("追加確認").classes("font-bold text-orange-900")
-                        ui.label(result["question"])
-                if result.get("task_id"):
-                    ui.label(
-                        "Task: " + result["task_id"]
-                    ).classes("font-mono text-xs text-grey-6")
+                                def copy_advisor_log(text: str = export_text) -> None:
+                                    ui.run_javascript(
+                                        'navigator.clipboard.writeText('
+                                        + json.dumps(text, ensure_ascii=False)
+                                        + ')'
+                                    )
+                                    ui.notify("Advisor稼働ログをコピーしました", type="positive")
 
-                comparison = result.get("comparison") or {}
-                if comparison:
-                    with ui.card().classes("w-full border border-purple-200 bg-purple-50"):
-                        ui.label("PKB＋Web 比較").classes("font-bold text-purple-900")
-                        ui.label(
-                            "status="
-                            + str(comparison.get("status") or "-")
-                            + " / current="
-                            + str(comparison.get("current") or "-")
-                            + " / latest="
-                            + str(comparison.get("latest") or "-")
-                            + " / kind="
-                            + str(comparison.get("latest_kind") or "-")
-                        ).classes("font-mono text-xs")
-                        if comparison.get("web_query"):
-                            ui.label(
-                                "Web検索語: " + str(comparison.get("web_query"))
-                            ).classes("text-xs text-grey-7")
-                        ui.label(
-                            comparison.get("message") or "比較結果はありません。"
-                        ).classes("text-sm")
+                                ui.button(
+                                    "ログをコピー",
+                                    icon="content_copy",
+                                    on_click=copy_advisor_log,
+                                ).props("outline dense").classes("self-start")
 
-                web_result = result.get("web") or {}
-                if web_result:
-                    with ui.expansion("根拠になったWeb調査", value=True).classes(
-                        "w-full border border-cyan-200 bg-white"
-                    ):
-                        ui.label(
-                            f"Provider: {web_result.get('provider') or '-'} / "
-                            f"Query: {web_result.get('query') or '-'}"
-                        ).classes("text-xs text-grey-7")
-                        fact_summary = web_result.get("fact_summary") or {}
-                        if fact_summary.get("kind") == "driver_version":
-                            with ui.card().classes("w-full border border-indigo-200 bg-indigo-50"):
-                                ui.label("抽出した事実候補").classes("font-bold text-indigo-900")
+                                lifecycle = []
+                                for event in trace.get("advisor_events") or []:
+                                    lifecycle.append(
+                                        str(event.get("occurred_at") or "")
+                                        + "  "
+                                        + str(event.get("event_type") or "")
+                                    )
+                                if lifecycle:
+                                    ui.label("状態遷移").classes("font-medium text-sm")
+                                    for line in lifecycle:
+                                        ui.label(line).classes("font-mono text-xs")
+                                else:
+                                    ui.label(
+                                        "状態遷移: DB監査イベントはまだありません。"
+                                    ).classes("text-xs text-grey-6")
+
+                                ui.label("検査結果").classes("font-medium text-sm")
                                 ui.label(
-                                    "preferred_kind="
-                                    + str(fact_summary.get("preferred_kind") or "-")
-                                    + " / primary_domains="
-                                    + ",".join(fact_summary.get("primary_domains") or [])
+                                    "job="
+                                    + str(advisor.get("job_status") or "-")
                                     + " / status="
-                                    + str(fact_summary.get("status") or "-")
-                                    + " / best="
-                                    + str(fact_summary.get("best_candidate") or "-")
+                                    + str(advisor.get("status") or "-")
+                                    + " / comparison="
+                                    + str(advisor.get("comparison") or "-")
+                                    + " / error="
+                                    + str(advisor.get("error") or "-")
                                 ).classes("font-mono text-xs")
-                                for group in (fact_summary.get("groups") or [])[:5]:
+
+                                trace_task = (state.get("trace") or {}).get("task") or {}
+                                observation_pack = (
+                                    trace_task.get("observation_pack")
+                                    or result.get("observation_pack")
+                                )
+                                if observation_pack:
+                                    ui.label("MELCHIOR / CASPER 共通 Observation Pack").classes(
+                                        "font-medium text-sm"
+                                    )
+                                    ui.code(
+                                        json.dumps(
+                                            observation_pack,
+                                            ensure_ascii=False,
+                                            indent=2,
+                                            default=str,
+                                        ),
+                                        language="json",
+                                    ).classes("w-full text-xs")
+
+                                request_context = advisor.get("request_context")
+                                if request_context:
+                                    ui.label("Ollamaへ渡した判断コンテキスト").classes(
+                                        "font-medium text-sm"
+                                    )
+                                    ui.code(
+                                        json.dumps(
+                                            request_context,
+                                            ensure_ascii=False,
+                                            indent=2,
+                                            default=str,
+                                        ),
+                                        language="json",
+                                    ).classes("w-full text-xs")
+
+                                response_diagnostic = advisor.get("response_diagnostic")
+                                if response_diagnostic:
                                     ui.label(
-                                        f"{group.get('kind')} / "
-                                        f"status={group.get('status')} / "
-                                        f"best={group.get('best_candidate')}"
-                                    ).classes("font-medium text-xs text-indigo-900")
-                                    for candidate in (group.get("candidates") or [])[:5]:
-                                        ui.label(
-                                            f"  {candidate.get('value')} / "
-                                            f"sources={candidate.get('source_count', 0)} / "
-                                            f"domains={candidate.get('domain_count', 0)} / "
-                                            f"primary={candidate.get('primary_source_count', 0)} / "
-                                            f"date={candidate.get('latest_date') or '-'} / "
-                                            f"context={candidate.get('best_context_score', 0)} / "
-                                            f"best_quality={candidate.get('best_quality_score', 0)}"
-                                        ).classes("text-xs")
-                                historical = fact_summary.get("historical_groups") or []
-                                if historical:
-                                    ui.label("過去版候補").classes("font-bold text-xs text-grey-7")
-                                    for group in historical[:5]:
-                                        ui.label(
-                                            f"{group.get('kind')} / best={group.get('best_candidate')}"
-                                        ).classes("text-xs text-grey-7")
-                        for hit in (web_result.get("hits") or [])[:5]:
-                            with ui.card().classes("w-full p-2 gap-1"):
-                                ui.label(
-                                    f"{hit.get('rank')}. {hit.get('title') or hit.get('url') or '検索結果'}"
-                                ).classes("font-medium text-sm")
-                                if hit.get("url"):
-                                    ui.link(
-                                        hit["url"],
-                                        hit["url"],
-                                        new_tab=True,
-                                    ).classes("text-xs")
-                                if hit.get("snippet"):
-                                    ui.label(hit["snippet"]).classes("text-xs text-grey-8")
-                                ui.label(
-                                    "evidence_rank="
-                                    + str(hit.get("evidence_rank") or "-")
-                                    + " / quality="
-                                    + str(hit.get("quality_score") or 0)
-                                    + " / "
-                                    + str(hit.get("authority_hint") or "-")
-                                    + " / authority="
-                                    + str(hit.get("authority_level") or "-")
-                                ).classes("font-mono text-xs text-grey-6")
-                                ui.label(
-                                    "fetch=" + str(hit.get("fetch_status") or "unknown")
-                                ).classes("font-mono text-xs text-grey-6")
-                                if hit.get("version_facts"):
+                                        "LLM返却値の形式検査（安全化済み）"
+                                    ).classes("font-medium text-sm")
                                     ui.label(
-                                        "version候補: "
-                                        + ", ".join(
-                                            f"{fact.get('kind')}={fact.get('value')}"
-                                            + (
-                                                f"@{fact.get('date_hint')}"
-                                                if fact.get("date_hint")
-                                                else ""
-                                            )
-                                            for fact in (hit.get("version_facts") or [])
-                                        )
-                                    ).classes("text-xs text-indigo-8")
-                                elif hit.get("version_candidates"):
-                                    ui.label(
-                                        "version候補: "
-                                        + ", ".join(hit.get("version_candidates") or [])
-                                    ).classes("text-xs text-indigo-8")
-                                if hit.get("date_hints"):
-                                    ui.label(
-                                        "日付候補: " + ", ".join(hit.get("date_hints") or [])
+                                        "契約対象フィールドだけを保存しています。"
+                                        " 追加キーは名前だけ記録し、値は保存しません。"
                                     ).classes("text-xs text-grey-7")
+                                    ui.code(
+                                        json.dumps(
+                                            response_diagnostic,
+                                            ensure_ascii=False,
+                                            indent=2,
+                                            default=str,
+                                        ),
+                                        language="json",
+                                    ).classes("w-full text-xs")
 
-                finance_result = result.get("finance") or {}
-                if finance_result:
-                    with ui.expansion("根拠になった家計集計", value=True).classes(
-                        "w-full border border-teal-200 bg-white"
-                    ):
-                        ui.label(
-                            f"検索期間: {finance_result.get('requested_start_date') or '-'}"
-                            f" 〜 {finance_result.get('requested_end_date') or '-'}"
-                        ).classes("text-sm")
-                        ui.label(
-                            f"明細存在期間: {finance_result.get('data_start_date') or '-'}"
-                            f" 〜 {finance_result.get('data_end_date') or '-'}"
-                        ).classes("text-xs text-grey-7")
-                        ui.label(
-                            f"明細 {finance_result.get('transaction_count', 0)}件 / "
-                            f"収入 ¥{int(finance_result.get('income_total') or 0):,} / "
-                            f"支出 ¥{int(finance_result.get('expense_total') or 0):,} / "
-                            f"収支 ¥{int(finance_result.get('net_total') or 0):,}"
-                        ).classes("text-sm")
+                    if state["busy"]:
+                        with ui.row().classes("items-center gap-2"):
+                            ui.spinner(size="sm", color="blue-grey")
+                            ui.label("Taskを作成してPKBを確認しています…")
+                        return
+                    if not result:
+                        ui.label("まだ依頼していません。")
+                        return
 
-                search_result = result.get("search") or {}
-                rows = search_result.get("items") or []
-                if rows:
-                    with ui.expansion("根拠になったPKB記録", value=True).classes(
-                        "w-full border border-blue-grey-200 bg-white"
-                    ):
-                        if search_result.get("result_kind") == "components":
-                            for row in rows:
+                    status = result.get("status", "")
+                    color = {
+                        "completed": "green",
+                        "waiting_external": "orange",
+                        "rejected": "red",
+                    }.get(status, "grey")
+                    ui.badge(status or "result", color=color)
+                    if result.get("selected_capability"):
+                        ui.label(
+                            "選択した能力: " + result["selected_capability"]
+                        ).classes("text-sm text-blue-grey-800")
+                    if result.get("message"):
+                        ui.label(result["message"]).classes("text-base")
+                    if result.get("question"):
+                        with ui.card().classes(
+                            "w-full border-2 border-orange-300 bg-orange-50"
+                        ):
+                            ui.label("追加確認").classes("font-bold text-orange-900")
+                            ui.label(result["question"])
+                    if result.get("task_id"):
+                        ui.label(
+                            "Task: " + result["task_id"]
+                        ).classes("font-mono text-xs text-grey-6")
+
+                    comparison = result.get("comparison") or {}
+                    if comparison:
+                        with ui.card().classes("w-full border border-purple-200 bg-purple-50"):
+                            ui.label("PKB＋Web 比較").classes("font-bold text-purple-900")
+                            ui.label(
+                                "status="
+                                + str(comparison.get("status") or "-")
+                                + " / current="
+                                + str(comparison.get("current") or "-")
+                                + " / latest="
+                                + str(comparison.get("latest") or "-")
+                                + " / kind="
+                                + str(comparison.get("latest_kind") or "-")
+                            ).classes("font-mono text-xs")
+                            if comparison.get("web_query"):
                                 ui.label(
-                                    f"{row.get('component_name')} / "
-                                    f"role={row.get('relation_role')} / "
-                                    f"current_driver={row.get('current_driver')} / "
-                                    f"Source={row.get('state_source_uri')}"
-                                ).classes("text-sm")
-                        else:
-                            for row in rows:
-                                ui.label(
-                                    f"{row.get('entity_name')} / "
-                                    f"{row.get('predicate')}={row.get('value')} / "
-                                    f"Source={row.get('source_uri')}"
-                                ).classes("text-sm")
+                                    "Web検索語: " + str(comparison.get("web_query"))
+                                ).classes("text-xs text-grey-7")
+                            ui.label(
+                                comparison.get("message") or "比較結果はありません。"
+                            ).classes("text-sm")
 
-            @ui.refreshable
-            def trace_panel():
-                result = state["result"] or {}
-                task_id = result.get("task_id")
-                if not task_id:
-                    return
-                trace = state["trace"]
-                if not trace:
+                    web_result = result.get("web") or {}
+                    if web_result:
+                        with ui.expansion("根拠になったWeb調査", value=True).classes(
+                            "w-full border border-cyan-200 bg-white"
+                        ):
+                            ui.label(
+                                f"Provider: {web_result.get('provider') or '-'} / "
+                                f"Query: {web_result.get('query') or '-'}"
+                            ).classes("text-xs text-grey-7")
+                            fact_summary = web_result.get("fact_summary") or {}
+                            if fact_summary.get("kind") == "driver_version":
+                                with ui.card().classes("w-full border border-indigo-200 bg-indigo-50"):
+                                    ui.label("抽出した事実候補").classes("font-bold text-indigo-900")
+                                    ui.label(
+                                        "preferred_kind="
+                                        + str(fact_summary.get("preferred_kind") or "-")
+                                        + " / primary_domains="
+                                        + ",".join(fact_summary.get("primary_domains") or [])
+                                        + " / status="
+                                        + str(fact_summary.get("status") or "-")
+                                        + " / best="
+                                        + str(fact_summary.get("best_candidate") or "-")
+                                    ).classes("font-mono text-xs")
+                                    for group in (fact_summary.get("groups") or [])[:5]:
+                                        ui.label(
+                                            f"{group.get('kind')} / "
+                                            f"status={group.get('status')} / "
+                                            f"best={group.get('best_candidate')}"
+                                        ).classes("font-medium text-xs text-indigo-900")
+                                        for candidate in (group.get("candidates") or [])[:5]:
+                                            ui.label(
+                                                f"  {candidate.get('value')} / "
+                                                f"sources={candidate.get('source_count', 0)} / "
+                                                f"domains={candidate.get('domain_count', 0)} / "
+                                                f"primary={candidate.get('primary_source_count', 0)} / "
+                                                f"date={candidate.get('latest_date') or '-'} / "
+                                                f"context={candidate.get('best_context_score', 0)} / "
+                                                f"best_quality={candidate.get('best_quality_score', 0)}"
+                                            ).classes("text-xs")
+                                    historical = fact_summary.get("historical_groups") or []
+                                    if historical:
+                                        ui.label("過去版候補").classes("font-bold text-xs text-grey-7")
+                                        for group in historical[:5]:
+                                            ui.label(
+                                                f"{group.get('kind')} / best={group.get('best_candidate')}"
+                                            ).classes("text-xs text-grey-7")
+                            for hit in (web_result.get("hits") or [])[:5]:
+                                with ui.card().classes("w-full p-2 gap-1"):
+                                    ui.label(
+                                        f"{hit.get('rank')}. {hit.get('title') or hit.get('url') or '検索結果'}"
+                                    ).classes("font-medium text-sm")
+                                    if hit.get("url"):
+                                        ui.link(
+                                            hit["url"],
+                                            hit["url"],
+                                            new_tab=True,
+                                        ).classes("text-xs")
+                                    if hit.get("snippet"):
+                                        ui.label(hit["snippet"]).classes("text-xs text-grey-8")
+                                    ui.label(
+                                        "evidence_rank="
+                                        + str(hit.get("evidence_rank") or "-")
+                                        + " / quality="
+                                        + str(hit.get("quality_score") or 0)
+                                        + " / "
+                                        + str(hit.get("authority_hint") or "-")
+                                        + " / authority="
+                                        + str(hit.get("authority_level") or "-")
+                                    ).classes("font-mono text-xs text-grey-6")
+                                    ui.label(
+                                        "fetch=" + str(hit.get("fetch_status") or "unknown")
+                                    ).classes("font-mono text-xs text-grey-6")
+                                    if hit.get("version_facts"):
+                                        ui.label(
+                                            "version候補: "
+                                            + ", ".join(
+                                                f"{fact.get('kind')}={fact.get('value')}"
+                                                + (
+                                                    f"@{fact.get('date_hint')}"
+                                                    if fact.get("date_hint")
+                                                    else ""
+                                                )
+                                                for fact in (hit.get("version_facts") or [])
+                                            )
+                                        ).classes("text-xs text-indigo-8")
+                                    elif hit.get("version_candidates"):
+                                        ui.label(
+                                            "version候補: "
+                                            + ", ".join(hit.get("version_candidates") or [])
+                                        ).classes("text-xs text-indigo-8")
+                                    if hit.get("date_hints"):
+                                        ui.label(
+                                            "日付候補: " + ", ".join(hit.get("date_hints") or [])
+                                        ).classes("text-xs text-grey-7")
+
+                    finance_result = result.get("finance") or {}
+                    if finance_result:
+                        with ui.expansion("根拠になった家計集計", value=True).classes(
+                            "w-full border border-teal-200 bg-white"
+                        ):
+                            ui.label(
+                                f"検索期間: {finance_result.get('requested_start_date') or '-'}"
+                                f" 〜 {finance_result.get('requested_end_date') or '-'}"
+                            ).classes("text-sm")
+                            ui.label(
+                                f"明細存在期間: {finance_result.get('data_start_date') or '-'}"
+                                f" 〜 {finance_result.get('data_end_date') or '-'}"
+                            ).classes("text-xs text-grey-7")
+                            ui.label(
+                                f"明細 {finance_result.get('transaction_count', 0)}件 / "
+                                f"収入 ¥{int(finance_result.get('income_total') or 0):,} / "
+                                f"支出 ¥{int(finance_result.get('expense_total') or 0):,} / "
+                                f"収支 ¥{int(finance_result.get('net_total') or 0):,}"
+                            ).classes("text-sm")
+
+                    search_result = result.get("search") or {}
+                    rows = search_result.get("items") or []
+                    if rows:
+                        with ui.expansion("根拠になったPKB記録", value=True).classes(
+                            "w-full border border-blue-grey-200 bg-white"
+                        ):
+                            if search_result.get("result_kind") == "components":
+                                for row in rows:
+                                    ui.label(
+                                        f"{row.get('component_name')} / "
+                                        f"role={row.get('relation_role')} / "
+                                        f"current_driver={row.get('current_driver')} / "
+                                        f"Source={row.get('state_source_uri')}"
+                                    ).classes("text-sm")
+                            else:
+                                for row in rows:
+                                    ui.label(
+                                        f"{row.get('entity_name')} / "
+                                        f"{row.get('predicate')}={row.get('value')} / "
+                                        f"Source={row.get('source_uri')}"
+                                    ).classes("text-sm")
+
+                @ui.refreshable
+                def trace_panel():
+                    result = state["result"] or {}
+                    task_id = result.get("task_id")
+                    if not task_id:
+                        return
+                    trace = state["trace"]
+                    if not trace:
+                        with ui.expansion(
+                            "Task検証・稼働ログ",
+                            value=_CORE_UI_OPEN["trace"],
+                            on_value_change=remember_core_expansion("trace"),
+                        ).classes(
+                            "w-full border border-red-200 bg-red-50"
+                            + _block_visibility_class("core", "trace")
+                        ):
+                            ui.label("Traceを取得できません: " + str(state["trace_error"] or "未取得")).classes(
+                                "text-red-700"
+                            )
+                        return
+
+                    task = trace["task"]
                     with ui.expansion(
                         "Task検証・稼働ログ",
                         value=_CORE_UI_OPEN["trace"],
                         on_value_change=remember_core_expansion("trace"),
                     ).classes(
-                        "w-full border border-red-200 bg-red-50"
+                        "w-full border-2 border-slate-300 bg-slate-50"
                         + _block_visibility_class("core", "trace")
                     ):
-                        ui.label("Traceを取得できません: " + str(state["trace_error"] or "未取得")).classes(
-                            "text-red-700"
-                        )
-                    return
-
-                task = trace["task"]
-                with ui.expansion(
-                    "Task検証・稼働ログ",
-                    value=_CORE_UI_OPEN["trace"],
-                    on_value_change=remember_core_expansion("trace"),
-                ).classes(
-                    "w-full border-2 border-slate-300 bg-slate-50"
-                    + _block_visibility_class("core", "trace")
-                ):
-                    ui.label(
-                        "この依頼Taskに属するDB上のAction / Result / Sourceを表示します。"
-                    ).classes("text-sm text-grey-7")
-                    with ui.grid(columns=2).classes("w-full gap-2"):
-                        ui.label("Task ID")
-                        ui.label(task["id"]).classes("font-mono text-xs")
-                        ui.label("Status / Revision")
-                        ui.label(f"{task['status']} / {task['revision']}")
-                        ui.label("Phase")
-                        ui.label(str(task.get("phase") or "-"))
-                        ui.label("能力")
-                        ui.label(str(task.get("selected_capability") or "-"))
-                        ui.label("元依頼")
-                        ui.label(task["request"])
-                        if task.get("effective_request"):
-                            ui.label("実効依頼")
-                            ui.label(task["effective_request"])
-                        if task.get("user_replies"):
-                            ui.label("追加回答")
-                            ui.label(" / ".join(task["user_replies"]))
-                        ui.label("更新時刻")
-                        ui.label(str(task["updated_at"]))
-
-                    actions = trace["actions"]
-                    ui.separator()
-                    ui.label(f"Action / Result: {len(actions)}件").classes("font-bold")
-                    if not actions:
                         ui.label(
-                            "まだActionはありません。追加確認待ちTaskでは正常です。"
-                        ).classes("text-sm")
-                    for index, item in enumerate(actions, start=1):
-                        with ui.card().classes("w-full bg-white"):
+                            "この依頼Taskに属するDB上のAction / Result / Sourceを表示します。"
+                        ).classes("text-sm text-grey-7")
+                        with ui.grid(columns=2).classes("w-full gap-2"):
+                            ui.label("Task ID")
+                            ui.label(task["id"]).classes("font-mono text-xs")
+                            ui.label("Status / Revision")
+                            ui.label(f"{task['status']} / {task['revision']}")
+                            ui.label("Phase")
+                            ui.label(str(task.get("phase") or "-"))
+                            ui.label("能力")
+                            ui.label(str(task.get("selected_capability") or "-"))
+                            ui.label("元依頼")
+                            ui.label(task["request"])
+                            if task.get("effective_request"):
+                                ui.label("実効依頼")
+                                ui.label(task["effective_request"])
+                            if task.get("user_replies"):
+                                ui.label("追加回答")
+                                ui.label(" / ".join(task["user_replies"]))
+                            ui.label("更新時刻")
+                            ui.label(str(task["updated_at"]))
+
+                        actions = trace["actions"]
+                        ui.separator()
+                        ui.label(f"Action / Result: {len(actions)}件").classes("font-bold")
+                        if not actions:
                             ui.label(
-                                f"{index}. {item['tool']}.{item['operation']} "
-                                f"[{item['risk']}] → {item['action_status']}"
-                            ).classes("font-medium")
-                            if item.get("outcome"):
+                                "まだActionはありません。追加確認待ちTaskでは正常です。"
+                            ).classes("text-sm")
+                        for index, item in enumerate(actions, start=1):
+                            with ui.card().classes("w-full bg-white"):
                                 ui.label(
-                                    f"Result: {item['outcome']} / "
-                                    f"{item.get('summary') or ''}"
-                                ).classes("text-sm")
-                            if item.get("source_uri"):
-                                ui.label(
-                                    "Source: " + item["source_uri"]
-                                ).classes("font-mono text-xs text-grey-7")
-                            if item.get("verified_by"):
-                                ui.label(
-                                    "Verified: "
-                                    + str(item["verified_by"])
-                                    + " / "
-                                    + str(item.get("verified_at") or "")
-                                ).classes("text-xs text-grey-7")
+                                    f"{index}. {item['tool']}.{item['operation']} "
+                                    f"[{item['risk']}] → {item['action_status']}"
+                                ).classes("font-medium")
+                                if item.get("outcome"):
+                                    ui.label(
+                                        f"Result: {item['outcome']} / "
+                                        f"{item.get('summary') or ''}"
+                                    ).classes("text-sm")
+                                if item.get("source_uri"):
+                                    ui.label(
+                                        "Source: " + item["source_uri"]
+                                    ).classes("font-mono text-xs text-grey-7")
+                                if item.get("verified_by"):
+                                    ui.label(
+                                        "Verified: "
+                                        + str(item["verified_by"])
+                                        + " / "
+                                        + str(item.get("verified_at") or "")
+                                    ).classes("text-xs text-grey-7")
 
-            @ui.refreshable
-            def resume_panel():
-                result = state["result"] or {}
-                if result.get("status") != "waiting_external" or not result.get("task_id"):
-                    return
+                @ui.refreshable
+                def resume_panel():
+                    result = state["result"] or {}
+                    if result.get("status") != "waiting_external" or not result.get("task_id"):
+                        return
 
-                with ui.card().classes(
-                    "w-full border-2 border-orange-300 bg-orange-50"
-                ):
-                    ui.label("このTaskへ追加回答").classes(
-                        "font-bold text-orange-900"
-                    )
-                    ui.label(
-                        "新しいTaskは作らず、上のTask IDをそのまま再開します。"
-                    ).classes("text-sm")
-                    reply_input = ui.textarea(
-                        label="追加回答",
-                        placeholder="例: GPUの現在のドライバーを調べて",
-                    ).classes("w-full")
+                    with ui.card().classes(
+                        "w-full border-2 border-orange-300 bg-orange-50"
+                    ):
+                        ui.label("このTaskへ追加回答").classes(
+                            "font-bold text-orange-900"
+                        )
+                        ui.label(
+                            "新しいTaskは作らず、上のTask IDをそのまま再開します。"
+                        ).classes("text-sm")
+                        reply_input = ui.textarea(
+                            label="追加回答",
+                            placeholder="例: GPUの現在のドライバーを調べて",
+                        ).classes("w-full")
 
-                    async def submit_resume():
-                        if state["busy"] or state["resume_busy"]:
-                            return
-                        state["resume_busy"] = True
-                        resume_button.disable()
-                        ooda_bar.refresh()
-                        core_result.refresh()
-                        try:
-                            state["result"] = await run.io_bound(
-                                resume_core_task,
-                                UUID(result["task_id"]),
-                                reply_input.value or "",
-                            )
-                        except Exception as exc:
-                            ui.notify(str(exc)[:240], type="negative")
-                        finally:
-                            state["resume_busy"] = False
-                            load_current_trace()
+                        async def submit_resume():
+                            if state["busy"] or state["resume_busy"]:
+                                return
+                            state["resume_busy"] = True
+                            resume_button.disable()
                             ooda_bar.refresh()
-                            resume_panel.refresh()
                             core_result.refresh()
-                            trace_panel.refresh()
-                            open_tasks_panel.refresh()
-                            completed_tasks_panel.refresh()
-                            screen_log_panel.refresh()
+                            try:
+                                state["result"] = await run.io_bound(
+                                    resume_core_task,
+                                    UUID(result["task_id"]),
+                                    reply_input.value or "",
+                                )
+                            except Exception as exc:
+                                ui.notify(str(exc)[:240], type="negative")
+                            finally:
+                                state["resume_busy"] = False
+                                load_current_trace()
+                                ooda_bar.refresh()
+                                resume_panel.refresh()
+                                core_result.refresh()
+                                trace_panel.refresh()
+                                open_tasks_panel.refresh()
+                                completed_tasks_panel.refresh()
+                                screen_log_panel.refresh()
 
-                    resume_button = ui.button(
-                        "同じTaskを再開",
-                        icon="resume",
-                        color="orange",
-                        on_click=submit_resume,
-                    )
+                        resume_button = ui.button(
+                            "同じTaskを再開",
+                            icon="resume",
+                            color="orange",
+                            on_click=submit_resume,
+                        )
 
-            async def submit_core():
-                if state["busy"] or state["resume_busy"]:
-                    return
-                state["busy"] = True
-                state["result"] = None
-                state["trace"] = None
-                run_button.disable()
-                ooda_bar.refresh()
-                core_result.refresh()
-                resume_panel.refresh()
-                trace_panel.refresh()
-                try:
-                    state["result"] = await run.io_bound(
-                        run_core_request,
-                        request_input.value or "",
-                        state.get("advisor_model"),
-                        float(state.get("advisor_timeout") or 60),
-                    )
-                except Exception as exc:
-                    state["result"] = {
-                        "status": "error",
-                        "phase": "failed",
-                        "message": str(exc),
-                    }
-                finally:
-                    state["busy"] = False
-                    run_button.enable()
-                    load_current_trace()
+                async def submit_core():
+                    if state["busy"] or state["resume_busy"]:
+                        return
+                    state["busy"] = True
+                    state["result"] = None
+                    state["trace"] = None
+                    run_button.disable()
                     ooda_bar.refresh()
                     core_result.refresh()
                     resume_panel.refresh()
                     trace_panel.refresh()
-                    open_tasks_panel.refresh()
-                    completed_tasks_panel.refresh()
-                    screen_log_panel.refresh()
+                    try:
+                        state["result"] = await run.io_bound(
+                            run_core_request,
+                            request_input.value or "",
+                            state.get("advisor_model"),
+                            float(state.get("advisor_timeout") or 60),
+                        )
+                    except Exception as exc:
+                        state["result"] = {
+                            "status": "error",
+                            "phase": "failed",
+                            "message": str(exc),
+                        }
+                    finally:
+                        state["busy"] = False
+                        run_button.enable()
+                        load_current_trace()
+                        ooda_bar.refresh()
+                        core_result.refresh()
+                        resume_panel.refresh()
+                        trace_panel.refresh()
+                        open_tasks_panel.refresh()
+                        completed_tasks_panel.refresh()
+                        screen_log_panel.refresh()
 
-            run_button = ui.button(
-                "依頼する",
-                icon="play_arrow",
-                color="blue-grey",
-                on_click=submit_core,
-            )
-            core_result()
-            resume_panel()
-            trace_panel()
-            ui.timer(2.0, poll_advisor_shadow)
+                run_button = ui.button(
+                    "依頼する",
+                    icon="play_arrow",
+                    color="blue-grey",
+                    on_click=submit_core,
+                )
+                core_result()
+                resume_panel()
+                trace_panel()
+                ui.timer(2.0, poll_advisor_shadow)
 
-        screen_log_panel()
+            screen_log_panel()
 
-        if task_id:
-            try:
-                saved_trace = load_core_task_trace(UUID(task_id))
-                select_saved_task(saved_trace["task"])
-            except (ValueError, psycopg.Error) as exc:
-                ui.notify("Taskを開けません: " + str(exc), type="negative")
+            if task_id:
+                try:
+                    saved_trace = load_core_task_trace(UUID(task_id))
+                    select_saved_task(saved_trace["task"])
+                except (ValueError, psycopg.Error) as exc:
+                    ui.notify("Taskを開けません: " + str(exc), type="negative")
 
-        with ui.card().classes(
-            "w-full" + _block_visibility_class("core", "limits")
-        ):
-            ui.label("この縦断でまだ行わないこと").classes("font-bold")
-            ui.label(
-                "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
-                "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
-            ).classes("text-sm")
+            with ui.card().classes(
+                "w-full" + _block_visibility_class("core", "limits")
+            ):
+                ui.label("この縦断でまだ行わないこと").classes("font-bold")
+                ui.label(
+                    "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
+                    "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
+                ).classes("text-sm")
 
-        # The legacy MAGI v0 flow is regression context, not the current v1 path.
-        with ui.expansion(
-            "旧MAGI v0 処理フロー（回帰用）",
-            value=False,
-            icon="account_tree",
-        ).classes("w-full border"):
-            ui.label(
-                "Protocol v1とは独立した過去の協調経路です。"
-                "現在のRITSUKO→MAGI通信試験の処理順ではありません。"
-            ).classes("text-xs text-grey-7")
-            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
-                for index, step in enumerate(CORE_FLOW_STEPS):
-                    if index:
-                        ui.label("→").props("aria-hidden=true")
-                    ui.label(step).classes("border rounded p-2 text-sm")
-            ui.label(
-                "曖昧依頼の旧協調経路です。Cycle 1で限定PKB readを行い、"
-                "結果をObservation v2へ戻してCycle 2で再検討します。"
-                "Synthesisは中間提案。Coordinatorが反復・最大2 cycle・外部への拡張を制限します。"
-                "明示的な能力指定と追加回答による再開も現行回帰経路側です。"
-            ).classes("text-sm")
+            # The legacy MAGI v0 flow is regression context, not the current v1 path.
+            with ui.expansion(
+                "旧MAGI v0 処理フロー（回帰用）",
+                value=False,
+                icon="account_tree",
+            ).classes("w-full border"):
+                ui.label(
+                    "Protocol v1とは独立した過去の協調経路です。"
+                    "現在のRITSUKO→MAGI通信試験の処理順ではありません。"
+                ).classes("text-xs text-grey-7")
+                with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+                    for index, step in enumerate(CORE_FLOW_STEPS):
+                        if index:
+                            ui.label("→").props("aria-hidden=true")
+                        ui.label(step).classes("border rounded p-2 text-sm")
+                ui.label(
+                    "曖昧依頼の旧協調経路です。Cycle 1で限定PKB readを行い、"
+                    "結果をObservation v2へ戻してCycle 2で再検討します。"
+                    "Synthesisは中間提案。Coordinatorが反復・最大2 cycle・外部への拡張を制限します。"
+                    "明示的な能力指定と追加回答による再開も現行回帰経路側です。"
+                ).classes("text-sm")
 
 
 @ui.page("/settings")
