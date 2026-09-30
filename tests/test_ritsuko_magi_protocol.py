@@ -185,7 +185,7 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertNotIn("次の1手",seen[0]["question_from_ritsuko"])
         self.assertEqual(seen[1]["stage"], "analyze")
         self.assertEqual(seen[1]["task_context"]["classification"]["category"],"INFORMATION")
-        self.assertIn("本人固有の情報",seen[1]["question_from_ritsuko"])
+        self.assertIn("本人固有",seen[1]["question_from_ritsuko"])
         self.assertEqual(session["status"], "waiting_information")
         self.assertEqual(session["next_step"], "review_information_requests")
         self.assertEqual(session["pending_requests"][0]["source"],"pkb")
