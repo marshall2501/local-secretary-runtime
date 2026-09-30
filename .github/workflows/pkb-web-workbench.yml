@@ -5,6 +5,7 @@ on:
     paths:
       - "pkb_proto/web_workbench*.py"
       - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/memory*.py"
       - "pkb_proto/core_ooda.py"
       - "pkb_proto/core_advisor.py"
       - "pkb_proto/core_capabilities.py"
@@ -58,6 +59,7 @@ on:
     paths:
       - "pkb_proto/web_workbench*.py"
       - "pkb_proto/daily_pkb.py"
+      - "pkb_proto/memory*.py"
       - "pkb_proto/core_ooda.py"
       - "pkb_proto/core_advisor.py"
       - "pkb_proto/core_capabilities.py"
@@ -156,3 +158,4 @@ jobs:
           fi
           curl --silent --show-error --fail http://127.0.0.1:8092/api/workbench/runs -o /tmp/runs.json
           python -c "import json; assert json.load(open('/tmp/runs.json')) == []"
+
