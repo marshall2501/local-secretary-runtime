@@ -15,6 +15,34 @@ SourceKind = Literal["user_statement", "file", "web", "tool", "service"]
 Intent = Literal["assertion", "correction"]
 
 
+def memory_write_decision(intake, candidate, grounded):
+    """v1 policy: model assertions never confer permission or factual status."""
+    from .memory_extractor import literal_supported
+    from .memory_registry import EFFECT_RULES
+    if grounded['validation'] == 'invalid':
+        return 'ignore', grounded['reason']
+    if candidate['retention_hint'] == 'task_only':
+        return 'task_context_only', 'not_durable'
+    if candidate['operation_hint'] != 'assert':
+        return 'pending', 'correction_target_requires_review'
+    if intake.source_kind != 'user_statement' or candidate['basis'] != 'explicit_user_statement':
+        return 'pending', 'non_user_or_inferred_requires_review'
+    if intake.confidentiality == 'restricted':
+        return 'pending', 'high_impact_or_restricted'
+    if grounded['reason'] != 'resolved':
+        return 'pending', grounded['reason']
+    if not grounded['predicate'] or not literal_supported(candidate, intake):
+        return 'pending', 'unsupported_or_uncertain_statement'
+    if candidate['modality'] not in {'asserted', 'intended'} or candidate['polarity'] != 'positive':
+        return 'pending', 'uncertain_or_negative'
+    if candidate['semantic_kind_hint'] in {'state', 'relation'}:
+        return 'pending', 'direct_state_or_relation_requires_review'
+    rule = EFFECT_RULES.get(grounded['predicate'])
+    if rule and (grounded['entity_type'] not in rule.entity_types or not candidate['object']['raw']):
+        return 'pending', 'missing_value_or_incompatible_entity'
+    return 'auto_commit', 'explicit_supported_statement'
+
+
 class Route(str, Enum):
     AUTO_CANDIDATE = "auto_candidate"
     REVIEW = "review"

@@ -2992,8 +2992,36 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                 }
 
 
+from .memory_contracts import MemoryIntake
+from .memory_intake import write_intake
+
+
+def register_memory_intake(intake: MemoryIntake) -> dict:
+    with connection() as db:
+        with db.cursor() as cur:
+            cur.execute("SELECT to_regclass('secretary.pkb_memory_intakes')")
+            if cur.fetchone()[0] is None:
+                raise ValueError('Memory Intake用の隔離DB migration 019が未適用です。')
+        return write_intake(db, intake)
+
+
 class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+
+
+@app.post('/api/pkb/intakes/issue')
+def api_issue_intake(params: TextInput):
+    return asdict(MemoryIntake.issue(params.text))
+
+
+@app.post('/api/pkb/intakes')
+def api_write_intake(params: MemoryIntake):
+    try:
+        return register_memory_intake(params)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (RuntimeError, psycopg.Error) as exc:
+        raise HTTPException(503, 'Memory Intakeの保存に失敗しました。同じ入力のまま再試行できます。') from exc
 
 
 class PendingDecisionInput(BaseModel):
@@ -5372,6 +5400,48 @@ def pkb_page():
         ui.label(
             "現在は架空データ専用の隔離DB secretary_pkb_proto_20260927。運用DB・実データには接続しません。"
         ).classes("text-sm text-orange-700")
+
+        with ui.expansion('自然言語でまとめて記録（Memory Intake v1）', value=True).classes('w-full'):
+            ui.label('例: サブPCのWindows11を26H2に上げた。 明確な対応文は自動記録し、曖昧な部分は保留します。予定から現在状態は更新しません。').classes('text-sm')
+            intake_text = ui.textarea(label='記録する内容').classes('w-full')
+            memory_state = {'envelope': None, 'busy': False, 'result': None}
+
+            @ui.refreshable
+            def memory_result():
+                result = memory_state['result']
+                if result:
+                    ui.label(result.get('message') or ('再送済みの結果です。' if result.get('status') == 'replayed' else '処理結果'))
+                    labels = {'auto_commit': '記録済み', 'pending': '確認・補足待ち',
+                              'task_context_only': '一時的な内容', 'ignore': '記録対象外'}
+                    for candidate in result.get('candidates', []):
+                        ui.label(labels[candidate['decision']] + ': ' + candidate['audit']['draft']['evidence']['quote'])
+                    if result.get('status') in {'committed', 'replayed'} and not result.get('candidates'):
+                        ui.label('記憶として保存する内容はありません。')
+
+            async def do_memory_write():
+                if memory_state['busy']:
+                    return
+                text = intake_text.value or ''
+                if not text.strip():
+                    ui.notify('記録する内容を入力してください。')
+                    return
+                envelope = memory_state['envelope']
+                if envelope is None or envelope.raw_text != text:
+                    envelope = MemoryIntake.issue(text)
+                    memory_state['envelope'] = envelope
+                memory_state['busy'] = True
+                memory_button.disable()
+                try:
+                    memory_state['result'] = await run.io_bound(register_memory_intake, envelope)
+                except Exception:
+                    memory_state['result'] = {'message': '保存できませんでした。隔離DBのmigration 019適用と接続を確認してください。同じ内容で再試行できます。'}
+                finally:
+                    memory_state['busy'] = False
+                    memory_button.enable()
+                    memory_result.refresh()
+                    pending_panel.refresh()
+            memory_button = ui.button('まとめて記録する', on_click=do_memory_write)
+            memory_result()
 
         with ui.expansion(
             "記録",

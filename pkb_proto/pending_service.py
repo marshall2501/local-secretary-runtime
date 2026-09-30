@@ -18,6 +18,26 @@ SUPPORTED_ACCEPT_ACTIONS = {
 BLOCKED_ACCEPT_TEXT = ("かもしれない", "未確認", "不明", "ではなく", "訂正", "らしい")
 
 
+def enqueue_candidate(cur, *, input_id, candidate_id, raw_text, source_id, reason, grounded, draft):
+    """Reuse Pending storage within the caller's input-wide transaction.
+
+    The memory_intake reason namespace intentionally prevents legacy one-claim
+    promotion. Clarification is a new intake; reviewers may mark this needs_edit.
+    """
+    import json
+    cur.execute(
+        """INSERT INTO secretary.pkb_pending_intake
+           (input_id,raw_text,reason,entity_id,predicate,proposed_value,memory_context)
+           VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (input_id + ':' + candidate_id, raw_text, 'memory_intake:' + reason,
+         grounded.get('entity_id'), grounded.get('predicate'),
+         json.dumps(grounded.get('value'), ensure_ascii=False),
+         Jsonb(dict(input_id=input_id, candidate_id=candidate_id, source_id=str(source_id),
+                    draft=draft, grounding=grounded))),
+    )
+    return str(cur.fetchone()[0])
+
+
 @dataclass(frozen=True)
 class PendingResult:
     status: str

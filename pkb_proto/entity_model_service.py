@@ -10,6 +10,7 @@ from datetime import datetime
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
+from .memory_registry import EFFECT_RULES
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -17,10 +18,12 @@ WRITER = "secretary_pkb_proto_writer_20260927"
 EVENT_PREDICATES = {
     "driver_updated",
     "servo_updated",
+    "os_release_changed",
 }
 STATE_PREDICATES = {
     "current_driver",
     "current_servo",
+    "current_os_release",
     "installed",
 }
 ATTRIBUTE_PREDICATES = {
@@ -36,10 +39,7 @@ RELATION_PREDICATES = {
     "uses_account",
 }
 
-EVENT_TO_STATE = {
-    "driver_updated": "current_driver",
-    "servo_updated": "current_servo",
-}
+EVENT_TO_STATE = {key: rule.state_predicate for key, rule in EFFECT_RULES.items()}
 STATEFUL_ENTITY_TYPES = {
     "gpu",
     "network_adapter",
@@ -148,7 +148,7 @@ def advance_state_for_event(
     entity_id: UUID,
     source_id: UUID,
     event_predicate: str,
-    value: str,
+    value: str | dict,
     evidence: str,
     valid_from: datetime,
     recorded_at: datetime,
@@ -158,9 +158,11 @@ def advance_state_for_event(
     State succession closes the previous validity interval. It does not retract
     or supersede the historical Event that caused the state change.
     """
-    state_predicate = EVENT_TO_STATE.get(event_predicate)
-    if state_predicate is None:
+    rule = EFFECT_RULES.get(event_predicate)
+    if rule is None:
         return None
+    state_predicate = rule.state_predicate
+    value = rule.select(value)
 
     cur.execute(
         """SELECT entity_type FROM secretary.entities
@@ -168,7 +170,7 @@ def advance_state_for_event(
         (entity_id,),
     )
     row = cur.fetchone()
-    if row is None or row[0] not in STATEFUL_ENTITY_TYPES:
+    if row is None or row[0] not in rule.entity_types:
         return None
 
     cur.execute(
