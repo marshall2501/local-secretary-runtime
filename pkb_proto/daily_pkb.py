@@ -1425,6 +1425,34 @@ def core_magi_presentation(result: dict, advisor: dict, trace: dict) -> dict:
     return {"cycles": cycles, "final_core_decision": final}
 
 
+def _memory_intake_log_export(envelope, result: dict | None) -> dict:
+    """Build a copy-friendly Memory Intake trace without model reasoning."""
+    response = result or {}
+    candidates = []
+    for item in response.get("candidates") or []:
+        audit = item.get("audit") or {}
+        candidates.append({
+            "candidate_id": item.get("candidate_id"),
+            "decision": item.get("decision"),
+            "status": item.get("status"),
+            "reason": item.get("reason"),
+            "claim_id": item.get("claim_id"),
+            "derived_claim_ids": list(item.get("derived_claim_ids") or []),
+            "pending_id": item.get("pending_id"),
+            "draft": audit.get("draft"),
+            "grounding": audit.get("grounding"),
+        })
+    return {
+        "input": asdict(envelope) if envelope is not None else None,
+        "write_result": {
+            "status": response.get("status"),
+            "source_id": response.get("source_id"),
+            "message": response.get("message"),
+        },
+        "candidates": candidates,
+    }
+
+
 def _advisor_log_export(result: dict, advisor: dict, trace: dict) -> dict:
     """Build one copy-friendly Advisor log payload from the current UI state."""
     trace_task = trace.get("task") or {}
@@ -5417,6 +5445,37 @@ def pkb_page():
                         ui.label(labels[candidate['decision']] + ': ' + candidate['audit']['draft']['evidence']['quote'])
                     if result.get('status') in {'committed', 'replayed'} and not result.get('candidates'):
                         ui.label('記憶として保存する内容はありません。')
+
+                    envelope = memory_state['envelope']
+                    if envelope is not None:
+                        with ui.expansion('Memory Intake 稼働ログ', value=False).classes(
+                            'w-full border border-blue-100 bg-white mt-2'
+                        ):
+                            ui.label(
+                                'Extractor候補、Grounding、WriteDecision、Claim / derived State / PendingのIDを表示します。'
+                                ' モデルの推論過程は保存・表示しません。'
+                            ).classes('text-xs text-grey-7')
+                            export_text = json.dumps(
+                                _memory_intake_log_export(envelope, result),
+                                ensure_ascii=False,
+                                indent=2,
+                                default=str,
+                            )
+
+                            def copy_memory_intake_log(text: str = export_text) -> None:
+                                ui.run_javascript(
+                                    'navigator.clipboard.writeText('
+                                    + json.dumps(text, ensure_ascii=False)
+                                    + ')'
+                                )
+                                ui.notify('Memory Intake稼働ログをコピーしました', type='positive')
+
+                            ui.button(
+                                'ログをコピー',
+                                icon='content_copy',
+                                on_click=copy_memory_intake_log,
+                            ).props('outline dense').classes('self-start')
+                            ui.code(export_text, language='json').classes('w-full text-xs')
 
             async def do_memory_write():
                 if memory_state['busy']:
