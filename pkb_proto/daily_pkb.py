@@ -3729,7 +3729,9 @@ def core_page(task_id: str = ""):
                 for turn in session["turns"]:
                     with ui.expansion(
                         f"Turn {turn['request_envelope']['turn']}: "
-                        + ("大まかな分類" if turn["stage"] == "classify" else "次の問い・再分析"),
+                        + ("大まかな分類" if turn["stage"] == "classify" else
+                           "回答候補の再点検" if turn["stage"] == "review_ready" else
+                           "次の問い・再分析"),
                         value=turn is session["turns"][-1],
                     ).classes("w-full border"):
                         ui.label(f"status={turn['status']} / errors={turn['errors']}").classes(

@@ -61,7 +61,7 @@ UNCLEAR=依頼の目的そのものが理解できない
 調査、回答、情報源の選択、実行案はこの回で生成せず分類結果だけを返してください。"""
 
 CATEGORY_QUESTIONS = {
-    "INFORMATION": "求められた情報に回答できるか確認し、必要なら情報源と取得すべき最小の事実を要求してください。本人固有の情報と最新公開情報を区別してください。",
+    "INFORMATION": "求められた質問への実際の答えを、現時点の既知情報だけで書けるか判断してください。書けない場合はREADYを選ばず、本人固有情報ならPKBやtask_history、最新公開情報ならWebなどから取得すべき最小の事実をNEED_INFORMATIONで要求してください。利用可能な情報源の存在自体は取得済みの証拠ではありません。",
     "PROBLEM": "症状から現時点で分かることを整理し、必要な履歴・観測・調査を要求してください。根拠なしに原因を確定しないでください。",
     "INVESTIGATION": "調査や比較の目的を踏まえ、必要な根拠・比較対象・時点を考え、情報要求または調査方針を提示してください。",
     "ACTION": "ユーザーが求める実行内容を特定し、必要な前提・影響・許可を整理してRITSUKOに実行候補を返してください。自分では実行しないでください。",
@@ -73,20 +73,37 @@ CATEGORY_QUESTIONS = {
 
 FOLLOWUP_QUESTION = """分類結果と最新のObservationを踏まえ、今回の依頼を進めるための「次の1手」を分析してください。
 分類は参考であり誤っていれば内容から考え直してよいですが、直接Toolを使わないでください。
-必要な情報があれば source と what と reason をinformation_requestsへ具体的に記載してください。
+まず、与えられた原文・Task Context・Observationだけでユーザーへの実際の回答を示せるか判断してください。
+「情報源を使える」ことは「その情報を取得済み」ではありません。
+取得すれば答えられそうという将来の見通しや検索手順は、回答候補ではありません。
+必要な情報があるならREADYを選ばず、NEED_INFORMATIONとし、
+source と what と reason をinformation_requestsへ具体的に記載してください。
 request_id等の制御IDを生成する必要はありません（RITSUKOが採番します）。
 本人固有の事実はPKB・task_history、最新公開情報はWeb等、利用可能な候補を判断してください。
 調べられそうなことを未確認のままユーザーへの質問へ変えないでください。
 情報源から取得できない重要な曖昧さだけ、ユーザーへの質問を提案してください。
 追加Observationが与えられた場合は必ずそれを考慮し、前回と同じ情報要求を無根拠に繰り返さないでください。
 stateは今の状況に最も近い1つを選択してください。
-READY=提示された情報で回答案を作れる
-NEED_INFORMATION=RITSUKOによる情報取得が必要
+READY=すでに持っている十分な情報だけで、ユーザーが求めた答えをanswer_candidateに直接書ける（検索・取得・実行の予定だけでは不可）
+NEED_INFORMATION=情報源への読取・新しい観測が必要。information_requestsに取得先・取得すべき事実を返し、answer_candidateはnull
 NEED_CLARIFICATION=本人に聞かなければ進められない
 KNOWLEDGE_CANDIDATE=新情報・訂正を記録候補として検討可能
 ACTION_PROPOSAL=権限・安全検査が必要な実行案を提案
 UNABLE=現状では対応できない
-READYやACTION_PROPOSALでも、成功・完了・実行済みと宣言してはいけません。"""
+READYやACTION_PROPOSALでも、成功・完了・実行済みと宣言してはいけません。
+判断例（入力語との機械的一致ではなく情報の状態で判定する）：
+「私の車の色は？」で本人の車の色が未提示→NEED_INFORMATION: pkbへ現在の車の色を要求。
+「商品の本日時点の価格は？」で現在価格の観測がない→NEED_INFORMATION: web等へ現在価格を要求。
+「CPUとは？」で一般的な説明を既知情報で直接答えられる→READY: 実際の説明文をanswer_candidateへ。
+回答を作れるのは情報源で調べた後、という条件付きの状況ならREADYにしてはいけません。"""
+
+READY_REVIEW_QUESTION = """前回のあなたの分析はREADYでした。RITSUKOは新しいObservationをまだ取得していません。
+前回のanswer_candidateがユーザーの質問に対する実際の回答になっているか、厳密に再点検してください。
+「検索します」「確認します」「調べれば分かります」等の今後の作業計画は回答ではありません。
+現在与えられた証拠または一般的に説明できる既知事実で、ユーザーに直接答えられる場合だけREADYを維持し、答えそのものをanswer_candidateに返してください。
+回答に未取得の事実が必要ならNEED_INFORMATIONに訂正し、必要な情報と取得先をinformation_requestsに返してください。
+情報源へのアクセスはあなた自身では行わず、RITSUKOに要求してください。
+すでに記録された分類結果や前回の分析結果は参考ですが、誤りなら訂正してください。"""
 
 _CLASSIFICATION_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -165,6 +182,11 @@ def validate_turn(stage: str, output: object) -> list[str]:
                     errors.append(f"information_requests[{i}]:invalid_values")
         if output.get("state") == "NEED_INFORMATION" and not items:
             errors.append("information_requests:required")
+        if output.get("state") == "READY":
+            if not isinstance(output.get("answer_candidate"), str) or not output["answer_candidate"].strip():
+                errors.append("answer_candidate:required_for_ready")
+            if items:
+                errors.append("information_requests:unexpected_for_ready")
         if output.get("state") == "NEED_CLARIFICATION" and not str(output.get("question_for_user") or "").strip():
             errors.append("question_for_user:required")
     return errors
@@ -257,6 +279,15 @@ def _followup(session: dict, caller, *, timeout: float) -> dict:
         return session
     session["detail"] = deepcopy(response)
     state = response["state"]
+    # With no new observation, a READY claim may be a plan instead of an answer.
+    # Ask MAGI to audit its own candidate; do not hard-code domain keywords.
+    if state == "READY" and not session["observations"]:
+        reviewed = _send(session, "review_ready", READY_REVIEW_QUESTION, caller, timeout=timeout)
+        if reviewed is None:
+            return session
+        session["detail"] = deepcopy(reviewed)
+        response = reviewed
+        state = reviewed["state"]
     if state == "NEED_INFORMATION":
         requests = response["information_requests"]
         signatures = [json.dumps({"source": item["source"], "what": item["what"].strip()},

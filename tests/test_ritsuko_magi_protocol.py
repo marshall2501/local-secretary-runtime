@@ -204,6 +204,43 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(session["pending_requests"][0]["source"],"web")
         self.assertEqual(seen[1]["task_context"]["classification"]["category"],"INFORMATION")
 
+
+    def test_conditional_ready_without_observation_gets_an_llm_followup(self):
+        proposed_plan=self.detail(state="READY")
+        proposed_plan["answer_candidate"]="記録を確認すれば回答できます。"
+        corrected=self.detail(state="NEED_INFORMATION",source="pkb",what="本人の現在の機器構成")
+        caller,seen=self.scripted(self.classification(),proposed_plan,corrected)
+        session=start_dialogue("私の機器情報は？",model="gemma3:12b",caller=caller)
+        self.assertEqual([x["stage"] for x in seen],
+                         ["classify","analyze","review_ready"])
+        self.assertIn("実際の回答",seen[2]["question_from_ritsuko"])
+        self.assertEqual(seen[2]["task_context"]["previous_detail"]["state"],"READY")
+        self.assertEqual(session["status"],"waiting_information")
+        self.assertEqual(session["pending_requests"][0]["source"],"pkb")
+        self.assertEqual(session["detail"]["state"],"NEED_INFORMATION")
+        self.assertEqual(len(session["turns"]),3)
+
+    def test_direct_answer_ready_is_reviewed_when_no_observation(self):
+        ready=self.detail(state="READY")
+        ready["answer_candidate"]="これは一般的な説明です。"
+        caller,seen=self.scripted(self.classification(),ready,ready)
+        session=start_dialogue("一般的な知識を説明して",model="gemma3:12b",caller=caller)
+        self.assertEqual(session["status"],"candidate_ready")
+        self.assertEqual(session["next_step"],"review_answer_candidate")
+        self.assertEqual(len(seen),3)
+
+    def test_ready_requires_actual_answer_field_and_no_pending_requests(self):
+        ready=self.detail(state="READY")
+        ready["answer_candidate"]=None
+        self.assertIn("answer_candidate:required_for_ready",
+                      validate_turn("analyze",ready))
+        ready["answer_candidate"]="答えそのもの"
+        ready["information_requests"]=[{
+            "source":"pkb","what":"未取得情報","reason":"まだ必要"
+        }]
+        self.assertIn("information_requests:unexpected_for_ready",
+                      validate_turn("analyze",ready))
+
     def test_unclear_classification_stops_and_does_not_immediately_guess_tools(self):
         caller,seen=self.scripted(self.classification("UNCLEAR"))
         session=start_dialogue("あれ",model="gemma3:12b",caller=caller)
