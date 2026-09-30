@@ -67,13 +67,13 @@ PKB_UI_DEFAULT_OPEN = {
     "limits": False,
 }
 
-PKB_TAB_ORDER = ("record", "search", "supplement")
+PKB_TAB_ORDER = ("record", "search")
 PKB_TAB_LABELS = {
     "record": "記録・訂正",
     "search": "検索・Entity",
-    "supplement": "補足",
 }
 PKB_TAB_DEFAULT = "record"
+PKB_DRAWER_PAGE_SIZE = 4
 
 # Legacy Entity accordion defaults.
 # Kept only so existing ui_preferences.json can be migrated safely.
@@ -4512,9 +4512,8 @@ def settings_page():
         "correction": "訂正",
         "search": "検索・履歴",
         "entities": "Entity一覧",
-        "pending": "確認待ちDrawer（Pending Claims）",
-        "reviewed": "処理済みの確認待ち",
-        "limits": "この最小実装の制限",
+        "pending": "確認待ち（Drawer）",
+        "reviewed": "処理済みの確認待ち（Drawer）",
     }
     finance_labels = {
         "filter": "家計フィルタ・検索",
@@ -4538,8 +4537,9 @@ def settings_page():
         )
         ui.label(
             "「表示」はブロック自体の表示/非表示を設定します。"
-            "PKBの確認待ちは右Drawerの表示/初期表示、それ以外の"
-            "アコーディオンは初期展開を設定します。"
+            "PKBの確認待ち・処理済みは右Drawerに表示し、"
+            "Drawer自体の初期表示は確認待ち側で設定します。"
+            "その他のアコーディオンは初期展開を設定します。"
         ).classes("text-sm text-grey-7")
         ui.label(
             "保存先はローカルの data/ui_preferences.json（Git管理外）。"
@@ -4557,10 +4557,13 @@ def settings_page():
                         "表示",
                         value=_UI_PREFERENCES["visibility"]["pkb"][key],
                     )
-                    pkb_open_controls[key] = ui.switch(
-                        "初期表示" if key == "pending" else "初期展開",
-                        value=_UI_PREFERENCES["pkb"][key],
-                    )
+                    if key != "reviewed":
+                        pkb_open_controls[key] = ui.switch(
+                            "Drawer初期表示"
+                            if key == "pending"
+                            else "初期展開",
+                            value=_UI_PREFERENCES["pkb"][key],
+                        )
 
         entity_visible_controls = {}
         with ui.card().classes(
@@ -4651,11 +4654,14 @@ def settings_page():
         ).classes("text-sm text-grey-7")
 
         def collect_preferences() -> dict:
+            pkb_preferences = dict(_UI_PREFERENCES["pkb"])
+            pkb_preferences.update({
+                key: bool(control.value)
+                for key, control in pkb_open_controls.items()
+            })
+
             return {
-                "pkb": {
-                    key: bool(control.value)
-                    for key, control in pkb_open_controls.items()
-                },
+                "pkb": pkb_preferences,
                 "entity": {
                     "default_tab": (
                         entity_default_tab_select.value
@@ -5700,12 +5706,26 @@ def entity_page(entity_id: str):
 
 @ui.page("/pkb")
 def pkb_page():
-    state = {"write": None, "write_busy": False, "correction": None, "search": None}
+    state = {
+        "write": None,
+        "write_busy": False,
+        "correction": None,
+        "search": None,
+    }
+    drawer_limits = {
+        "pending": PKB_DRAWER_PAGE_SIZE,
+        "reviewed": PKB_DRAWER_PAGE_SIZE,
+    }
 
     def remember_expansion(key: str):
         def _remember(event):
             _set_pkb_ui_open(key, event.value)
         return _remember
+
+    def more_drawer_rows(key: str, panel) -> None:
+        drawer_limits[key] += PKB_DRAWER_PAGE_SIZE
+        panel.refresh()
+
     @ui.refreshable
     def pending_panel():
         try:
@@ -5721,7 +5741,6 @@ def pkb_page():
             "text-lg font-bold text-purple-900"
         )
         ui.label("Pending Claims").classes("text-xs text-grey-7")
-        ui.separator()
 
         if not rows:
             ui.label("確認待ちはありません。").classes("text-sm text-grey-7")
@@ -5754,7 +5773,8 @@ def pkb_page():
             except Exception as exc:
                 ui.notify(str(exc)[:240], type="negative")
 
-        for row in rows:
+        visible_rows = rows[: drawer_limits["pending"]]
+        for row in visible_rows:
             pending_id = str(row["id"])
             when = (
                 row["recorded_at"].isoformat()
@@ -5764,7 +5784,9 @@ def pkb_page():
             with ui.card().classes(
                 "w-full p-2 gap-1 border border-purple-200 bg-white"
             ):
-                ui.label(row["raw_text"]).classes("font-medium text-sm")
+                ui.label(row["raw_text"]).classes(
+                    "w-full font-medium text-sm break-words"
+                )
                 ui.label("保留理由: " + row["reason"]).classes(
                     "w-full text-xs text-purple-900 break-all"
                 )
@@ -5773,7 +5795,7 @@ def pkb_page():
                     meta += " / " + row["entity_name"]
                 if row.get("interpreter_model"):
                     meta += " / 解釈: " + row["interpreter_model"]
-                ui.label(meta).classes("text-xs text-grey-6")
+                ui.label(meta).classes("w-full text-xs text-grey-6 break-all")
                 with ui.row().classes("w-full gap-1 flex-wrap"):
                     if acceptance_eligible(row):
                         ui.button(
@@ -5796,15 +5818,105 @@ def pkb_page():
                         color="red",
                     ).props("outline dense")
 
+        if len(rows) > drawer_limits["pending"]:
+            remaining = len(rows) - drawer_limits["pending"]
+            ui.button(
+                f"さらに読み込む（残り{remaining}件）",
+                on_click=lambda: more_drawer_rows(
+                    "pending", pending_panel
+                ),
+            ).props("flat dense").classes("self-start")
+
+    @ui.refreshable
+    def reviewed_panel():
+        try:
+            with connection() as db:
+                rows = list_reviewed(db)
+        except Exception as exc:
+            ui.label("処理履歴を取得できません: " + str(exc)).classes(
+                "text-red-600"
+            )
+            return
+
+        ui.label(f"処理済み {len(rows)}件").classes(
+            "text-base font-bold text-grey-8"
+        )
+
+        if not rows:
+            ui.label("処理済みの項目はまだありません。").classes(
+                "text-sm text-grey-7"
+            )
+            return
+
+        visible_rows = rows[: drawer_limits["reviewed"]]
+        for row in visible_rows:
+            status = row["review_status"]
+            label = (
+                "承認"
+                if status == "accepted"
+                else "要修正"
+                if status == "needs_edit"
+                else "却下"
+                if status == "rejected"
+                else status
+            )
+            when = (
+                row["reviewed_at"].isoformat()
+                if isinstance(row.get("reviewed_at"), datetime)
+                else str(row.get("reviewed_at") or "")
+            )
+            with ui.card().classes(
+                "w-full p-2 gap-1 border border-grey-300 bg-white"
+            ):
+                with ui.row().classes("w-full items-start gap-2 no-wrap"):
+                    ui.badge(
+                        label,
+                        color=(
+                            "green"
+                            if status == "accepted"
+                            else "orange"
+                            if status == "needs_edit"
+                            else "red"
+                            if status == "rejected"
+                            else "grey"
+                        ),
+                    ).classes("shrink-0")
+                    ui.label(row["raw_text"]).classes(
+                        "grow font-medium text-sm break-words"
+                    )
+                ui.label("理由: " + row["reason"]).classes(
+                    "w-full text-xs text-grey-7 break-all"
+                )
+                ui.label("処理時点: " + when).classes(
+                    "w-full text-xs text-grey-6 break-all"
+                )
+
+        if len(rows) > drawer_limits["reviewed"]:
+            remaining = len(rows) - drawer_limits["reviewed"]
+            ui.button(
+                f"さらに読み込む（残り{remaining}件）",
+                on_click=lambda: more_drawer_rows(
+                    "reviewed", reviewed_panel
+                ),
+            ).props("flat dense").classes("self-start")
+
+    pending_visible = _UI_PREFERENCES["visibility"]["pkb"]["pending"]
+    reviewed_visible = _UI_PREFERENCES["visibility"]["pkb"]["reviewed"]
     pending_drawer = None
-    if _UI_PREFERENCES["visibility"]["pkb"]["pending"]:
+    if pending_visible or reviewed_visible:
         pending_drawer = ui.right_drawer(
             value=_PKB_UI_OPEN["pending"]
         ).classes("bg-purple-50 p-3").props(
             "bordered width=340 breakpoint=700"
         )
         with pending_drawer:
-            pending_panel()
+            with ui.column().classes("w-full gap-3 no-wrap"):
+                if pending_visible:
+                    pending_panel()
+                if pending_visible and reviewed_visible:
+                    ui.separator()
+                if reviewed_visible:
+                    reviewed_panel()
 
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         _portal_header(
@@ -5974,8 +6086,6 @@ def pkb_page():
                         pending_panel.refresh()
                     ui.button("訂正する", on_click=do_correct, color="orange")
                     correction_result()
-
-
             with ui.tab_panel(tab_refs["search"]).classes("p-0 pt-3"):
                 with ui.expansion(
                     "検索・履歴",
@@ -6065,47 +6175,6 @@ def pkb_page():
                                 ui.button("詳細", icon="open_in_new").props(
                                     f"flat href=/entity/{row['id']} tag=a"
                                 )
-
-
-            with ui.tab_panel(tab_refs["supplement"]).classes("p-0 pt-3"):
-                @ui.refreshable
-                def reviewed_panel():
-                    with ui.expansion(
-                        "処理済みの確認待ち",
-                        value=_PKB_UI_OPEN["reviewed"],
-                        on_value_change=remember_expansion("reviewed"),
-                    ).classes(_block_visibility_class("pkb", "reviewed")):
-                        try:
-                            with connection() as db:
-                                rows = list_reviewed(db)
-                        except Exception as exc:
-                            ui.label("処理履歴を取得できません: " + str(exc)).classes("text-red-600")
-                            return
-                        if not rows:
-                            ui.label("処理済みの項目はまだありません。")
-                            return
-                        for row in rows:
-                            status = row["review_status"]
-                            label = "承認" if status == "accepted" else "要修正" if status == "needs_edit" else "却下" if status == "rejected" else status
-                            when = row["reviewed_at"].isoformat() if isinstance(row.get("reviewed_at"), datetime) else str(row.get("reviewed_at") or "")
-                            with ui.row().classes("w-full items-center gap-3 border-b py-2"):
-                                ui.badge(label, color="green" if status == "accepted" else "orange" if status == "needs_edit" else "red" if status == "rejected" else "grey")
-                                with ui.column().classes("grow gap-1"):
-                                    ui.label(row["raw_text"]).classes("font-medium")
-                                    ui.label("理由: " + row["reason"]).classes("text-sm")
-                                    ui.label("処理時点: " + when).classes("text-xs text-gray-600")
-                reviewed_panel()
-
-
-                with ui.expansion(
-                    "この最小実装の制限",
-                    value=_PKB_UI_OPEN["limits"],
-                    on_value_change=remember_expansion("limits"),
-                ).classes(_block_visibility_class("pkb", "limits")):
-                    ui.label("限定文型は決定的に処理し、それ以外はローカルLLMで単一の構造化候補化を試みます。")
-                    ui.label("LLM由来候補・曖昧入力・未知Entity・複数候補はPendingへ回し、勝手に正式Claimへ登録しません。")
-                    ui.label("LLM解釈は現在driver_updated / servo_updatedの単一候補だけ。実データ、金融・給与・税務・Googleカレンダー連携は未実装です。")
-
 
 
 def _recover_interrupted_core_advisors() -> int:
