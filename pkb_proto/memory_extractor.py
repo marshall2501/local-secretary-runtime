@@ -33,15 +33,17 @@ def extract(intake):
         match = OS.search(quote) or DRIVER.search(quote) or SERVO.search(quote)
         if match:
             subject = match['subject']
-            time_raw = '昨日' if subject.startswith('昨日') else None
-            if time_raw:
+            prefix = quote[:match.start()].strip()
+            time_raw = '昨日' if subject.startswith('昨日') or prefix in {'昨日、', '昨日'} else None
+            if subject.startswith('昨日'):
                 subject = subject[2:].lstrip('、 ')
             concept = 'os.upgrade' if 'release' in match.groupdict() else ('driver.update' if match.re is DRIVER else 'servo.replace')
             value = match.groupdict().get('release') or match.groupdict().get('value') or ''
             plan = match.groupdict().get('verb') == 'する予定'
             item = draft(str(len(result)+1), text, start, sentence.end(), subject, concept, value,
                          'plan' if plan else 'fact', 'intended' if plan else 'asserted', time_raw)
-            if any(marker in quote for marker in UNSAFE) or match.end() < len(quote.rstrip('。')) and match.groupdict().get('verb') != 'してから':
+            if (prefix not in {'', '昨日、', '昨日'} or any(marker in quote for marker in UNSAFE)
+                    or match.end() < len(quote.rstrip('。')) and match.groupdict().get('verb') != 'してから'):
                 item['modality'] = 'possible'
             result.append(item)
             if match.groupdict().get('verb') == 'してから':

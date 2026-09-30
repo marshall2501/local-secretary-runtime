@@ -51,6 +51,13 @@ class MemoryIntakeTests(unittest.TestCase):
         self.assertEqual(gs[0]['time']['resolved'], '2026-09-29T00:00:00+09:00')
         self.assertEqual(gs[0]['time']['precision'], 'day')
 
+    def test_time_prefix_not_discarded(self):
+        i,cs,gs = self.prepare('昨日、サブPCを26H2に上げた。')
+        self.assertEqual(gs[0]['time']['resolved'],'2026-09-29T00:00:00+09:00')
+        self.assertEqual(memory_write_decision(i,cs[0],gs[0])[0],'auto_commit')
+        i,cs,gs = self.prepare('明日、サブPCを26H2に上げた。')
+        self.assertEqual(memory_write_decision(i,cs[0],gs[0])[0],'pending')
+
     def test_retired_and_unresolved(self):
         self.assertEqual(resolve_entity('old',[dict(names={'old'},retired=True)])[0],'invalid')
         self.assertEqual(resolve_entity('unknown',CATALOG)[0],'unresolved')
