@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from io import BytesIO
+import json
+from unittest.mock import patch
 import unittest
+
+from pkb_proto.magi_client import call_member, choose_model
 
 from pkb_proto.ritsuko_magi_protocol import (
     ALLOWED_VALUES,
@@ -46,6 +51,28 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
                 "answer_candidate":None,"action_candidate":None,"question_for_user":None,
             },
         }
+
+    def test_preferred_model_uses_gemma_when_installed(self):
+        installed=['qwen3.5:9b', 'gemma3:12b', 'llama3.1:8b']
+        self.assertEqual(choose_model(installed), 'gemma3:12b')
+        self.assertEqual(choose_model(installed, requested='qwen3.5:9b'), 'qwen3.5:9b')
+
+    def test_invalid_json_diagnostic_excludes_thinking_content(self):
+        outer = {
+            'message': {'content': '', 'thinking': 'private model reasoning'},
+            'done_reason': 'length', 'eval_count': 1800,
+        }
+        with patch('pkb_proto.magi_client.urlopen',
+                   return_value=BytesIO(json.dumps(outer).encode('utf-8'))):
+            result=call_member(self.request(), member_name='MELCHIOR',
+                               model='qwen3.5:9b')
+        self.assertEqual(result['status'], 'invalid')
+        self.assertEqual(result['validation_errors'], ['invalid_json'])
+        self.assertEqual(result['diagnostic']['raw_length'], 0)
+        self.assertEqual(result['diagnostic']['thinking_length'], len('private model reasoning'))
+        self.assertEqual(result['diagnostic']['done_reason'], 'length')
+        self.assertEqual(result['diagnostic']['eval_count'], 1800)
+        self.assertNotIn('private model reasoning', json.dumps(result))
 
     def test_ritsuko_builds_full_cycle1_envelope(self):
         request=self.request()

@@ -223,6 +223,35 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             elements = list(self.client.elements.values())
             self.assertGreater(elements.index(old_flow), elements.index(limits))
 
+    async def test_protocol_invalid_json_shows_diagnostics_and_copy_controls(self):
+        probe = {
+            'status': 'invalid',
+            'assignment': {'member': 'MELCHIOR', 'provider': 'ollama', 'model': 'qwen3.5:9b'},
+            'response': None,
+            'request_envelope': {'protocol_version': '1.0', 'user_input': {'raw': 'test'}},
+            'validation_errors': ['invalid_json'],
+            'diagnostic': {'raw_length': 0, 'thinking_length': 131,
+                           'done_reason': 'length', 'eval_count': 1800},
+            'legacy_router_used': False,
+            'pkb_read_executed': False,
+        }
+        async def fake_bound(*args, **kwargs):
+            return probe
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=['qwen3.5:9b']
+        ), patch.object(daily, 'choose_magi_model', return_value='qwen3.5:9b'), \
+             patch.object(daily.run, 'io_bound', side_effect=fake_bound):
+            daily.core_page()
+            await self.click('MELCHIORへ分析依頼')
+            self.assertTrue(self.elements('Envelopeをコピー'))
+            self.assertTrue(self.elements('診断情報をコピー'))
+            self.assertTrue(self.elements('LLM応答診断（返答本文・Thinking本文は非表示）'))
+            self.assertFalse(self.elements('analysis_resultをコピー'))
+            self.assertTrue(any(
+                '"done_reason": "length"' in getattr(e, 'content', '')
+                for e in self.client.elements.values()
+            ))
+
     async def test_two_initial_windows_load_more_keeps_selection_and_other_section(self):
         with self.client:
             daily.core_page()

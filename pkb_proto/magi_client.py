@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from .ritsuko_magi_protocol import MAGI_RESPONSE_SCHEMA, SYSTEM_INSTRUCTION, validate_analysis_result
 
 OLLAMA = "http://127.0.0.1:11434"
-PREFERRED_MODELS = ("qwen3.5:9b", "gemma3:12b", "llama3.1:8b")
+PREFERRED_MODELS = ("gemma3:12b", "llama3.1:8b", "qwen3.5:9b")
 
 def list_chat_models(timeout: float = 3.0) -> list[str]:
     req=Request(OLLAMA + "/api/tags",method="GET")
@@ -66,23 +66,29 @@ def call_member(request_envelope: dict, *, member_name: str, model: str, timeout
             outer=json.load(resp)
         message=outer.get("message") if isinstance(outer,dict) else None
         raw=message.get("content") if isinstance(message,dict) else None
+        # Metadata only: never store or expose the model's Thinking text.
+        thinking=message.get("thinking") if isinstance(message,dict) else None
+        diagnostic={
+            "raw_length":len(raw) if isinstance(raw,str) else 0,
+            "thinking_length":len(thinking) if isinstance(thinking,str) else 0,
+            "done_reason":outer.get("done_reason") if isinstance(outer,dict) else None,
+            "eval_count":outer.get("eval_count") if isinstance(outer,dict) else None,
+        }
         if not isinstance(raw,str):
             return {"status":"invalid","assignment":assignment,"request_envelope":request_envelope,
                     "response":None,"validation_errors":["missing_model_content"],
-                    "diagnostic":{"raw_length":0}}
+                    "diagnostic":diagnostic}
         try:
             parsed=json.loads(raw)
         except (TypeError,ValueError):
             return {"status":"invalid","assignment":assignment,"request_envelope":request_envelope,
                     "response":None,"validation_errors":["invalid_json"],
-                    "diagnostic":{"raw_length":len(raw)}}
+                    "diagnostic":diagnostic}
         errors=validate_analysis_result(parsed,request_envelope)
         return {"status":"ok" if not errors else "invalid","assignment":assignment,
                 "request_envelope":request_envelope,"response":parsed,
                 "validation_errors":errors,
-                "diagnostic":{"raw_length":len(raw),
-                              "done_reason":outer.get("done_reason") if isinstance(outer,dict) else None,
-                              "eval_count":outer.get("eval_count") if isinstance(outer,dict) else None}}
+                "diagnostic":diagnostic}
     except (OSError,HTTPError,URLError,TimeoutError,ValueError,json.JSONDecodeError) as exc:
         return {"status":"unavailable","assignment":assignment,"request_envelope":request_envelope,
                 "response":None,"validation_errors":[type(exc).__name__],

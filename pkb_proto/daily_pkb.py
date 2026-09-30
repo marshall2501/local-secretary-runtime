@@ -3686,6 +3686,13 @@ def core_page(task_id: str = ""):
                 label="Timeout (秒)［MELCHIORのみ］",
             ).classes("min-w-40")
 
+            def copy_protocol_json(text: str, label: str) -> None:
+                ui.run_javascript(
+                    "navigator.clipboard.writeText("
+                    + json.dumps(text, ensure_ascii=False) + ")"
+                )
+                ui.notify(label + "をコピーしました", type="positive")
+
             @ui.refreshable
             def protocol_result_panel():
                 result=state.get("protocol_result")
@@ -3715,19 +3722,41 @@ def core_page(task_id: str = ""):
                 errors=result.get("validation_errors") or []
                 if errors:
                     ui.label("Schema / 通信エラー: " + " | ".join(errors)).classes("text-red-700")
+                diagnostic=result.get("diagnostic") or {}
+                if diagnostic:
+                    ui.label("LLM応答診断（返答本文・Thinking本文は非表示）").classes(
+                        "font-bold text-sm"
+                    )
+                    diagnostic_text=json.dumps({
+                        "status":status,
+                        "assignment":assignment,
+                        "validation_errors":errors,
+                        "diagnostic":diagnostic,
+                    },ensure_ascii=False,indent=2)
+                    ui.button(
+                        "診断情報をコピー",icon="content_copy",
+                        on_click=lambda value=diagnostic_text: copy_protocol_json(value,"診断情報"),
+                    ).props("outline dense")
+                    ui.code(diagnostic_text,language="json").classes("w-full")
                 if result.get("response") is not None:
                     ui.label("MAGI analysis_result").classes("font-bold")
-                    ui.code(
-                        json.dumps(result["response"],ensure_ascii=False,indent=2),
-                        language="json",
-                    ).classes("w-full")
+                    response_text=json.dumps(result["response"],ensure_ascii=False,indent=2)
+                    ui.button(
+                        "analysis_resultをコピー",icon="content_copy",
+                        on_click=lambda value=response_text: copy_protocol_json(value,"analysis_result"),
+                    ).props("outline dense")
+                    ui.code(response_text,language="json").classes("w-full")
                 with ui.expansion("RITSUKOが作成した依頼Envelope",icon="data_object").classes(
                     "w-full border"
                 ):
-                    ui.code(
-                        json.dumps(result.get("request_envelope") or {},ensure_ascii=False,indent=2),
-                        language="json",
-                    ).classes("w-full")
+                    envelope_text=json.dumps(
+                        result.get("request_envelope") or {},ensure_ascii=False,indent=2
+                    )
+                    ui.button(
+                        "Envelopeをコピー",icon="content_copy",
+                        on_click=lambda value=envelope_text: copy_protocol_json(value,"Envelope"),
+                    ).props("outline dense")
+                    ui.code(envelope_text,language="json").classes("w-full")
 
             async def submit_protocol_v1():
                 if state.get("protocol_busy"):
