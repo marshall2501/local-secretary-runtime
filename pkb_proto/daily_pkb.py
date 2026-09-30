@@ -5766,7 +5766,7 @@ def pkb_page():
             ):
                 ui.label(row["raw_text"]).classes("font-medium text-sm")
                 ui.label("保留理由: " + row["reason"]).classes(
-                    "text-xs text-purple-900"
+                    "w-full text-xs text-purple-900 break-all"
                 )
                 meta = when
                 if row.get("entity_name"):
