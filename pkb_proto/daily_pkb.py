@@ -41,6 +41,7 @@ from .magi_client import (
     choose_model as choose_magi_model,
     list_chat_models as list_magi_models,
 )
+from .magi_dialogue import start_dialogue, continue_with_observation, export_dialogue
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -3558,7 +3559,8 @@ def core_page(task_id: str = ""):
              "trace": None, "trace_error": None,
              "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
              "advisor_timeout": int(_UI_PREFERENCES.get("core_advisor_timeout") or 60),
-             "protocol_result": None, "protocol_busy": False}
+             "protocol_result": None, "protocol_busy": False,
+             "guided_session": None, "guided_busy": False}
 
     list_limits = {key: _UI_PREFERENCES["core"][key] for key in CORE_TASK_LIST_DEFAULTS}
     list_defaults = dict(list_limits)
@@ -3654,166 +3656,337 @@ def core_page(task_id: str = ""):
         except Exception:
             default_magi_model = None
 
-        with ui.card().classes("w-full border-2 border-indigo-300 bg-indigo-50"):
-            ui.label("RITSUKO → MAGI Protocol v1 / Cycle 1 試験").classes(
-                "text-lg font-bold text-indigo-900"
+        def copy_protocol_json(text: str, label: str) -> None:
+            ui.run_javascript(
+                "navigator.clipboard.writeText("
+                + json.dumps(text, ensure_ascii=False) + ")"
+            )
+            ui.notify(label + "をコピーしました", type="positive")
+
+        with ui.card().classes("w-full border-2 border-teal-300 bg-teal-50"):
+            ui.label("RITSUKO ⇄ MAGI 分類から対話を回す試験").classes(
+                "text-lg font-bold text-teal-900"
             )
             ui.label(
-                "RITSUKOが依頼Envelopeを作成 → MELCHIOR slotのLLMへ送信 → "
-                "RITSUKOがanalysis_resultを受信・Schema検証します。"
+                "RITSUKOが分類を聞き、返答カテゴリを使って次の質問を選びます。"
+                "不足情報が出たら止まり、取得後の再分析へ続けます。"
             ).classes("text-sm")
             ui.label(
-                "旧deterministic routerへのfallback、PKB/Web read、Task DB更新は行いません。"
+                "隔離試験：MAGI実行はMELCHIOR 1つのみ。PKB/Webの実読取、"
+                "Task DB更新、外部操作は行いません。"
             ).classes("text-xs text-orange-800")
-            protocol_input = ui.textarea(
-                label="ユーザー原文",
+            guided_input = ui.textarea(
+                label="ユーザー原文（分類から開始）",
                 value="メインPCのGPUの種類は？",
             ).classes("w-full")
-            ui.label("MAGI member configuration").classes("font-medium text-indigo-900")
-            ui.label(
-                "3つのmemberと実モデルは独立です。現在のCycle 1試験で実行するのは"
-                "MELCHIORのみ。無効な2枠のモデルはロードしません。"
-            ).classes("text-xs text-grey-7")
-            with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
-                with ui.card().classes("min-w-64 grow border border-indigo-300 bg-white"):
-                    ui.label("MELCHIOR").classes("font-bold")
-                    ui.switch("有効（Cycle 1）", value=True).disable()
-                    ui.label("Provider: Ollama").classes("text-xs text-grey-7")
-                    protocol_model_select = ui.select(
-                        options=installed_magi_models,
-                        value=default_magi_model,
-                        label="MELCHIOR / model",
-                    ).classes("w-full")
-                for inactive_member in ("BALTHASAR", "CASPER"):
-                    with ui.card().classes("min-w-64 grow border border-grey-300 bg-white"):
-                        ui.label(inactive_member).classes("font-bold")
-                        ui.switch("無効（multi-member未実装）", value=False).disable()
-                        ui.label("Provider: Ollama（予定）").classes("text-xs text-grey-7")
-                        inactive_model_select = ui.select(
-                            options=installed_magi_models,
-                            value=None,
-                            label=f"{inactive_member} / model",
-                        ).classes("w-full")
-                        inactive_model_select.disable()
-            protocol_timeout_select = ui.select(
-                options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
-                value=int(state.get("advisor_timeout") or 60),
-                label="Timeout (秒)［MELCHIORのみ］",
-            ).classes("min-w-40")
-
-            def copy_protocol_json(text: str, label: str) -> None:
-                ui.run_javascript(
-                    "navigator.clipboard.writeText("
-                    + json.dumps(text, ensure_ascii=False) + ")"
-                )
-                ui.notify(label + "をコピーしました", type="positive")
+            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+                guided_model = ui.select(
+                    options=installed_magi_models, value=default_magi_model,
+                    label="MELCHIOR / Ollama model（有効）",
+                ).classes("min-w-64")
+                for member in ("BALTHASAR", "CASPER"):
+                    inactive = ui.select(
+                        options=installed_magi_models, value=None,
+                        label=f"{member} / model（無効）",
+                    ).classes("min-w-48")
+                    inactive.disable()
+                guided_timeout = ui.select(
+                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                    value=int(state.get("advisor_timeout") or 900),
+                    label="各回Timeout（秒）",
+                ).classes("min-w-36")
 
             @ui.refreshable
-            def protocol_result_panel():
-                result=state.get("protocol_result")
-                if state.get("protocol_busy"):
-                    ui.label("RITSUKOがMAGI依頼を実行中...").classes(
-                        "text-indigo-800 font-bold"
-                    )
+            def guided_result_panel():
+                session = state.get("guided_session")
+                if state["guided_busy"]:
+                    ui.label("RITSUKO ⇄ MAGI 対話中...").classes("font-bold text-teal-900")
                     return
-                if not result:
-                    ui.label("まだ実行していません。Cycle 1のLLM応答だけを観測します。").classes(
+                if session is None:
+                    ui.label("初回はLLMに分類だけを聞き、回答に合わせて次の問いを送ります。").classes(
                         "text-sm text-grey-7"
                     )
                     return
-                status=result.get("status")
-                color="green" if status=="ok" else ("orange" if status=="invalid" else "red")
-                ui.badge("Protocol v1: " + str(status), color=color)
-                export_text=json.dumps(
-                    protocol_probe_export(result),ensure_ascii=False,indent=2,default=str
-                )
+                ui.label(
+                    f"Task（試験用）: {session['task_id']} / status={session['status']}"
+                    f" / RITSUKO next={session['next_step']}"
+                ).classes("font-mono text-xs")
+                session_text = json.dumps(export_dialogue(session), ensure_ascii=False, indent=2)
                 ui.button(
-                    "試験結果を一括コピー",icon="content_copy",
-                    on_click=lambda value=export_text: copy_protocol_json(value,"試験結果"),
-                ).props("outline dense").classes("self-start")
-                assignment=result.get("assignment") or {}
-                ui.label(
-                    "member=" + str(assignment.get("member") or "-")
-                    + " / provider=" + str(assignment.get("provider") or "-")
-                    + " / model=" + str(assignment.get("model") or "-")
-                ).classes("font-mono text-sm")
-                ui.label(
-                    "legacy_router_used=" + str(result.get("legacy_router_used"))
-                    + " / pkb_read_executed=" + str(result.get("pkb_read_executed"))
-                ).classes("font-mono text-xs text-grey-7")
-                errors=result.get("validation_errors") or []
-                if errors:
-                    ui.label("Schema / 通信エラー: " + " | ".join(errors)).classes("text-red-700")
-                diagnostic=result.get("diagnostic") or {}
-                if diagnostic:
-                    ui.label("LLM応答診断（返答本文・Thinking本文は非表示）").classes(
-                        "font-bold text-sm"
-                    )
-                    diagnostic_text=json.dumps({
-                        "status":status,
-                        "assignment":assignment,
-                        "validation_errors":errors,
-                        "diagnostic":diagnostic,
-                    },ensure_ascii=False,indent=2)
-                    ui.button(
-                        "診断情報をコピー",icon="content_copy",
-                        on_click=lambda value=diagnostic_text: copy_protocol_json(value,"診断情報"),
-                    ).props("outline dense")
-                    ui.code(diagnostic_text,language="json").classes("w-full")
-                if result.get("response") is not None:
-                    ui.label("MAGI analysis_result").classes("font-bold")
-                    response_text=json.dumps(result["response"],ensure_ascii=False,indent=2)
-                    ui.button(
-                        "analysis_resultをコピー",icon="content_copy",
-                        on_click=lambda value=response_text: copy_protocol_json(value,"analysis_result"),
-                    ).props("outline dense")
-                    ui.code(response_text,language="json").classes("w-full")
-                with ui.expansion("RITSUKOが作成した依頼Envelope",icon="data_object").classes(
-                    "w-full border"
-                ):
-                    envelope_text=json.dumps(
-                        result.get("request_envelope") or {},ensure_ascii=False,indent=2
-                    )
-                    ui.button(
-                        "Envelopeをコピー",icon="content_copy",
-                        on_click=lambda value=envelope_text: copy_protocol_json(value,"Envelope"),
-                    ).props("outline dense")
-                    ui.code(envelope_text,language="json").classes("w-full")
+                    "対話結果を一括コピー", icon="content_copy",
+                    on_click=lambda value=session_text: copy_protocol_json(value, "対話結果"),
+                ).props("outline dense")
+                if session.get("classification"):
+                    ui.label(
+                        "分類: " + session["classification"]["category"]
+                        + " / 理解: " + session["classification"]["understood_request"]
+                    ).classes("font-bold")
+                if session.get("detail"):
+                    detail = session["detail"]
+                    ui.label(
+                        "次の分析: " + detail["state"] + " / " + detail["reason"]
+                    ).classes("font-medium")
+                for turn in session["turns"]:
+                    with ui.expansion(
+                        f"Turn {turn['request_envelope']['turn']}: "
+                        + ("大まかな分類" if turn["stage"] == "classify" else "次の問い・再分析"),
+                        value=turn is session["turns"][-1],
+                    ).classes("w-full border"):
+                        ui.label(f"status={turn['status']} / errors={turn['errors']}").classes(
+                            "font-mono text-xs"
+                        )
+                        ui.label("MAGI返答").classes("font-bold text-sm")
+                        ui.code(
+                            json.dumps(turn["response"], ensure_ascii=False, indent=2)
+                            if turn["response"] is not None else "null",
+                            language="json",
+                        ).classes("w-full")
+                        ui.label("RITSUKOからの質問・Envelope").classes("font-bold text-sm")
+                        ui.code(
+                            json.dumps(turn["request_envelope"], ensure_ascii=False, indent=2),
+                            language="json",
+                        ).classes("w-full")
+                        ui.label("通信診断").classes("font-bold text-sm")
+                        ui.code(
+                            json.dumps(turn["diagnostic"], ensure_ascii=False, indent=2),
+                            language="json",
+                        ).classes("w-full")
+                if session["status"] == "waiting_information":
+                    ui.label(
+                        "RITSUKOが検討すべき情報要求（まだ実読取していません）"
+                    ).classes("font-bold text-orange-900")
+                    ui.code(json.dumps(
+                        session["pending_requests"], ensure_ascii=False, indent=2
+                    ), language="json").classes("w-full")
+                    observation_input = ui.textarea(
+                        label="試験用Observation（手入力。実PKB/Web取得ではない）",
+                        placeholder="開発検証用に架空の取得結果を入力",
+                    ).classes("w-full")
 
-            async def submit_protocol_v1():
-                if state.get("protocol_busy"):
+                    async def continue_guided():
+                        if state["guided_busy"]:
+                            return
+                        if not str(observation_input.value or "").strip():
+                            ui.notify("試験用Observationを入力してください", type="warning")
+                            return
+                        state["guided_busy"] = True
+                        guided_button.disable()
+                        guided_result_panel.refresh()
+                        try:
+                            state["guided_session"] = await run.io_bound(
+                                continue_with_observation, session,
+                                observation_input.value, timeout=float(guided_timeout.value or 900),
+                            )
+                        except Exception as exc:
+                            ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
+                        finally:
+                            state["guided_busy"] = False
+                            guided_button.enable()
+                            guided_result_panel.refresh()
+
+                    ui.button(
+                        "Observationを渡して対話継続（試験）",
+                        icon="refresh", on_click=continue_guided,
+                    ).props("outline")
+                elif session["status"] == "waiting_user":
+                    ui.label("RITSUKOが本人への確認を検討する状態です。").classes(
+                        "text-orange-900"
+                    )
+                    question = (session.get("detail") or {}).get("question_for_user") or (
+                        (session.get("classification") or {}).get("clarification_question")
+                    )
+                    if question:
+                        ui.label("質問候補: " + question).classes("text-sm")
+
+            async def start_guided():
+                if state["guided_busy"]:
                     return
-                selected_model=str(protocol_model_select.value or "").strip()
-                if not selected_model:
-                    ui.notify("Ollama chat modelを選択してください",type="negative")
+                model = str(guided_model.value or "").strip()
+                if not model or not str(guided_input.value or "").strip():
+                    ui.notify("入力文とLLMモデルを指定してください", type="warning")
                     return
-                state["protocol_busy"]=True
-                state["protocol_result"]=None
-                protocol_run_button.disable()
-                protocol_result_panel.refresh()
+                state["guided_busy"] = True
+                state["guided_session"] = None
+                guided_button.disable()
+                guided_result_panel.refresh()
                 try:
-                    state["protocol_result"]=await run.io_bound(
-                        run_ritsuko_magi_cycle1_probe,
-                        protocol_input.value or "",
-                        model=selected_model,
-                        timeout=float(protocol_timeout_select.value or 60),
+                    state["guided_session"] = await run.io_bound(
+                        start_dialogue, guided_input.value, model=model,
+                        timeout=float(guided_timeout.value or 900),
                     )
                 except Exception as exc:
-                    state["protocol_result"]={
-                        "status":"error","response":None,
-                        "validation_errors":[type(exc).__name__ + ": " + str(exc)[:200]],
-                        "legacy_router_used":False,"pkb_read_executed":False,
-                    }
+                    ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
                 finally:
-                    state["protocol_busy"]=False
-                    protocol_run_button.enable()
-                    protocol_result_panel.refresh()
+                    state["guided_busy"] = False
+                    guided_button.enable()
+                    guided_result_panel.refresh()
 
-            protocol_run_button=ui.button(
-                "MELCHIORへ分析依頼",icon="psychology",color="indigo",
-                on_click=submit_protocol_v1,
+            guided_button = ui.button(
+                "分類から対話を開始", icon="play_arrow",
+                color="teal", on_click=start_guided,
             )
-            protocol_result_panel()
+            guided_result_panel()
+
+        with ui.expansion(
+            "旧 Protocol v1 全項目一括分析（比較用）",
+            value=False, icon="history",
+        ).classes("w-full border"):
+            ui.label(
+                "前の通信方式は比較用に保存。今回の分類対話には使いません。"
+            ).classes("text-xs text-grey-7")
+            with ui.card().classes("w-full border-2 border-indigo-300 bg-indigo-50"):
+                ui.label("RITSUKO → MAGI Protocol v1 / Cycle 1 試験").classes(
+                    "text-lg font-bold text-indigo-900"
+                )
+                ui.label(
+                    "RITSUKOが依頼Envelopeを作成 → MELCHIOR slotのLLMへ送信 → "
+                    "RITSUKOがanalysis_resultを受信・Schema検証します。"
+                ).classes("text-sm")
+                ui.label(
+                    "旧deterministic routerへのfallback、PKB/Web read、Task DB更新は行いません。"
+                ).classes("text-xs text-orange-800")
+                protocol_input = ui.textarea(
+                    label="ユーザー原文",
+                    value="メインPCのGPUの種類は？",
+                ).classes("w-full")
+                ui.label("MAGI member configuration").classes("font-medium text-indigo-900")
+                ui.label(
+                    "3つのmemberと実モデルは独立です。現在のCycle 1試験で実行するのは"
+                    "MELCHIORのみ。無効な2枠のモデルはロードしません。"
+                ).classes("text-xs text-grey-7")
+                with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
+                    with ui.card().classes("min-w-64 grow border border-indigo-300 bg-white"):
+                        ui.label("MELCHIOR").classes("font-bold")
+                        ui.switch("有効（Cycle 1）", value=True).disable()
+                        ui.label("Provider: Ollama").classes("text-xs text-grey-7")
+                        protocol_model_select = ui.select(
+                            options=installed_magi_models,
+                            value=default_magi_model,
+                            label="MELCHIOR / model",
+                        ).classes("w-full")
+                    for inactive_member in ("BALTHASAR", "CASPER"):
+                        with ui.card().classes("min-w-64 grow border border-grey-300 bg-white"):
+                            ui.label(inactive_member).classes("font-bold")
+                            ui.switch("無効（multi-member未実装）", value=False).disable()
+                            ui.label("Provider: Ollama（予定）").classes("text-xs text-grey-7")
+                            inactive_model_select = ui.select(
+                                options=installed_magi_models,
+                                value=None,
+                                label=f"{inactive_member} / model",
+                            ).classes("w-full")
+                            inactive_model_select.disable()
+                protocol_timeout_select = ui.select(
+                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                    value=int(state.get("advisor_timeout") or 60),
+                    label="Timeout (秒)［MELCHIORのみ］",
+                ).classes("min-w-40")
+
+                @ui.refreshable
+                def protocol_result_panel():
+                    result=state.get("protocol_result")
+                    if state.get("protocol_busy"):
+                        ui.label("RITSUKOがMAGI依頼を実行中...").classes(
+                            "text-indigo-800 font-bold"
+                        )
+                        return
+                    if not result:
+                        ui.label("まだ実行していません。Cycle 1のLLM応答だけを観測します。").classes(
+                            "text-sm text-grey-7"
+                        )
+                        return
+                    status=result.get("status")
+                    color="green" if status=="ok" else ("orange" if status=="invalid" else "red")
+                    ui.badge("Protocol v1: " + str(status), color=color)
+                    export_text=json.dumps(
+                        protocol_probe_export(result),ensure_ascii=False,indent=2,default=str
+                    )
+                    ui.button(
+                        "試験結果を一括コピー",icon="content_copy",
+                        on_click=lambda value=export_text: copy_protocol_json(value,"試験結果"),
+                    ).props("outline dense").classes("self-start")
+                    assignment=result.get("assignment") or {}
+                    ui.label(
+                        "member=" + str(assignment.get("member") or "-")
+                        + " / provider=" + str(assignment.get("provider") or "-")
+                        + " / model=" + str(assignment.get("model") or "-")
+                    ).classes("font-mono text-sm")
+                    ui.label(
+                        "legacy_router_used=" + str(result.get("legacy_router_used"))
+                        + " / pkb_read_executed=" + str(result.get("pkb_read_executed"))
+                    ).classes("font-mono text-xs text-grey-7")
+                    errors=result.get("validation_errors") or []
+                    if errors:
+                        ui.label("Schema / 通信エラー: " + " | ".join(errors)).classes("text-red-700")
+                    diagnostic=result.get("diagnostic") or {}
+                    if diagnostic:
+                        ui.label("LLM応答診断（返答本文・Thinking本文は非表示）").classes(
+                            "font-bold text-sm"
+                        )
+                        diagnostic_text=json.dumps({
+                            "status":status,
+                            "assignment":assignment,
+                            "validation_errors":errors,
+                            "diagnostic":diagnostic,
+                        },ensure_ascii=False,indent=2)
+                        ui.button(
+                            "診断情報をコピー",icon="content_copy",
+                            on_click=lambda value=diagnostic_text: copy_protocol_json(value,"診断情報"),
+                        ).props("outline dense")
+                        ui.code(diagnostic_text,language="json").classes("w-full")
+                    if result.get("response") is not None:
+                        ui.label("MAGI analysis_result").classes("font-bold")
+                        response_text=json.dumps(result["response"],ensure_ascii=False,indent=2)
+                        ui.button(
+                            "analysis_resultをコピー",icon="content_copy",
+                            on_click=lambda value=response_text: copy_protocol_json(value,"analysis_result"),
+                        ).props("outline dense")
+                        ui.code(response_text,language="json").classes("w-full")
+                    with ui.expansion("RITSUKOが作成した依頼Envelope",icon="data_object").classes(
+                        "w-full border"
+                    ):
+                        envelope_text=json.dumps(
+                            result.get("request_envelope") or {},ensure_ascii=False,indent=2
+                        )
+                        ui.button(
+                            "Envelopeをコピー",icon="content_copy",
+                            on_click=lambda value=envelope_text: copy_protocol_json(value,"Envelope"),
+                        ).props("outline dense")
+                        ui.code(envelope_text,language="json").classes("w-full")
+
+                async def submit_protocol_v1():
+                    if state.get("protocol_busy"):
+                        return
+                    selected_model=str(protocol_model_select.value or "").strip()
+                    if not selected_model:
+                        ui.notify("Ollama chat modelを選択してください",type="negative")
+                        return
+                    state["protocol_busy"]=True
+                    state["protocol_result"]=None
+                    protocol_run_button.disable()
+                    protocol_result_panel.refresh()
+                    try:
+                        state["protocol_result"]=await run.io_bound(
+                            run_ritsuko_magi_cycle1_probe,
+                            protocol_input.value or "",
+                            model=selected_model,
+                            timeout=float(protocol_timeout_select.value or 60),
+                        )
+                    except Exception as exc:
+                        state["protocol_result"]={
+                            "status":"error","response":None,
+                            "validation_errors":[type(exc).__name__ + ": " + str(exc)[:200]],
+                            "legacy_router_used":False,"pkb_read_executed":False,
+                        }
+                    finally:
+                        state["protocol_busy"]=False
+                        protocol_run_button.enable()
+                        protocol_result_panel.refresh()
+
+                protocol_run_button=ui.button(
+                    "MELCHIORへ分析依頼",icon="psychology",color="indigo",
+                    on_click=submit_protocol_v1,
+                )
+                protocol_result_panel()
 
         ui.separator()
         with ui.expansion(

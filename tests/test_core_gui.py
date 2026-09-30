@@ -196,6 +196,47 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(4):
             await asyncio.sleep(0)
 
+    async def test_guided_dialogue_ui_and_comparison_are_separated(self):
+        fixture = {
+            'task_id': 'fixture-guided-task', 'user_raw': '車の車種は？',
+            'model': 'gemma3:12b', 'status': 'waiting_information',
+            'next_step': 'review_information_requests',
+            'classification': {
+                'category': 'INFORMATION', 'understood_request': '車種を知りたい',
+            },
+            'detail': {
+                'state': 'NEED_INFORMATION', 'reason': '本人の車種情報がない',
+            },
+            'pending_requests': [
+                {'request_id': 'REQ-test-02-01', 'source': 'pkb',
+                 'what': '本人の車の車種', 'reason': '回答に必要'},
+            ],
+            'observations': [], 'previous_request_signatures': [],
+            'legacy_router_used': False, 'tool_read_executed': False,
+            'turns': [{
+                'stage': 'classify',
+                'request_envelope': {'turn': 1},
+                'status': 'ok', 'response': {'category': 'INFORMATION'},
+                'errors': [], 'diagnostic': {},
+            }],
+        }
+        async def fake_bound(fn, *args, **kwargs):
+            return fixture
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=['gemma3:12b']
+        ), patch.object(daily, 'choose_magi_model', return_value='gemma3:12b'), \
+             patch.object(daily.run, 'io_bound', side_effect=fake_bound):
+            daily.core_page()
+            old = next(e for e in self.client.elements.values()
+                       if isinstance(e, ui.expansion)
+                       and e._props.get('label') == '旧 Protocol v1 全項目一括分析（比較用）')
+            self.assertFalse(old.value)
+            self.assertTrue(self.elements('分類から対話を開始'))
+            await self.click('分類から対話を開始')
+            self.assertTrue(self.elements('対話結果を一括コピー'))
+            self.assertTrue(self.elements('Observationを渡して対話継続（試験）'))
+            self.assertTrue(self.elements('RITSUKOが検討すべき情報要求（まだ実読取していません）'))
+
     async def test_protocol_slots_and_legacy_flow_layout(self):
         with self.client, patch.object(
             daily, 'list_magi_models', return_value=['qwen3.5:9b', 'gemma3:12b']
