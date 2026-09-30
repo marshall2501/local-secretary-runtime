@@ -1,0 +1,31 @@
+name: Line ending integrity
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify-line-endings:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reject non-normalized text blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad="$(
+            git ls-files --eol |
+            awk '$3 ~ /^attr\/text/ && ($1 == "i/crlf" || $1 == "i/mixed") { print }'
+          )"
+
+          if [ -n "$bad" ]; then
+            echo "Tracked text blobs are not normalized to LF in the Git index:"
+            echo "$bad"
+            echo
+            echo "Fix locally with: git add --renormalize ."
+            exit 1
+          fi
+
+          echo "Line ending integrity check passed."
