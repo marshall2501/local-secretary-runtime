@@ -15,6 +15,7 @@ from pkb_proto.daily_pkb import (
     UI_VISIBILITY_DEFAULT,
     _PKB_UI_OPEN,
     _advisor_log_export,
+    _memory_intake_log_export,
     _default_ui_preferences,
     _set_pkb_ui_open,
     _validate_ui_preferences,
@@ -37,6 +38,7 @@ from pkb_proto.daily_pkb import (
     scope_core_request,
 )
 from pkb_proto.daily_interpreter import inspect_output
+from pkb_proto.memory_contracts import MemoryIntake
 from pkb_proto.entity_model_service import classify_predicate
 from pkb_proto.pending_service import acceptance_eligible
 
@@ -129,6 +131,43 @@ class DailyPKBParserTests(unittest.TestCase):
             payload["observation_pack"]["version"],
             "magi_observation_v1",
         )
+
+    def test_memory_intake_log_export_contains_grounding_and_write_ids(self):
+        envelope = MemoryIntake.issue('サブPCのWindows11を26H2に上げた。')
+        payload = _memory_intake_log_export(
+            envelope,
+            {
+                'status': 'committed',
+                'source_id': 'source-1',
+                'candidates': [
+                    {
+                        'candidate_id': '1',
+                        'decision': 'auto_commit',
+                        'status': 'valid',
+                        'reason': 'explicit_supported_statement',
+                        'claim_id': 'claim-1',
+                        'derived_claim_ids': ['state-1'],
+                        'pending_id': None,
+                        'audit': {
+                            'draft': {'predicate': {'concept_hint': 'os.upgrade'}},
+                            'grounding': {
+                                'entity_id': 'entity-1',
+                                'predicate': 'os_release_changed',
+                            },
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(payload['input']['raw_text'], 'サブPCのWindows11を26H2に上げた。')
+        self.assertEqual(payload['write_result']['status'], 'committed')
+        self.assertEqual(payload['write_result']['source_id'], 'source-1')
+        candidate = payload['candidates'][0]
+        self.assertEqual(candidate['decision'], 'auto_commit')
+        self.assertEqual(candidate['claim_id'], 'claim-1')
+        self.assertEqual(candidate['derived_claim_ids'], ['state-1'])
+        self.assertEqual(candidate['grounding']['predicate'], 'os_release_changed')
+        self.assertNotIn('reasoning', payload)
 
     def test_ui_preferences_validate_and_fall_back_per_field(self):
         prefs = _validate_ui_preferences({
