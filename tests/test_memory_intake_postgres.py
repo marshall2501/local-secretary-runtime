@@ -84,6 +84,31 @@ class MemoryPostgresTests(unittest.TestCase):
             write_intake(self.db,replace(i,raw_text='変更'),extractor=lambda _:self.fail('re-extracted'))
         self.assertEqual(self.counts(),after)
 
+    def test_new_input_id_same_implicit_event_is_deduplicated(self):
+        first=self.intake('サブPCのWindows11を26H2に上げた。')
+        original=write_intake(self.db,first)
+        before=self.counts()
+        second=self.intake('サブPCのWindows11を26H2に上げた。',1)
+        repeated=write_intake(self.db,second)
+        candidate=repeated['candidates'][0]
+        self.assertEqual(candidate['decision'],'ignore')
+        self.assertEqual(candidate['reason'],'duplicate_existing_event')
+        self.assertEqual(candidate['duplicate_of_claim_id'],original['candidates'][0]['claim_id'])
+        self.assertEqual(tuple(a-b for a,b in zip(self.counts(),before)),(1,0,0,1,1))
+        self.assertEqual(self.db.execute("SELECT count(*) FROM secretary.claims WHERE predicate='os_release_changed'").fetchone()[0],1)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM secretary.claims WHERE predicate='current_os_release'").fetchone()[0],1)
+
+    def test_same_target_can_be_recorded_again_after_state_changed(self):
+        first=write_intake(self.db,self.intake('サブPCを26H2に上げた。'))
+        self.assertEqual(first['candidates'][0]['decision'],'auto_commit')
+        changed=write_intake(self.db,self.intake('サブPCを27H1に上げた。',1))
+        self.assertEqual(changed['candidates'][0]['decision'],'auto_commit')
+        repeated=write_intake(self.db,self.intake('サブPCを26H2に上げた。',2))
+        self.assertEqual(repeated['candidates'][0]['decision'],'auto_commit')
+        self.assertIsNone(repeated['candidates'][0]['duplicate_of_claim_id'])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM secretary.claims WHERE predicate='os_release_changed'").fetchone()[0],3)
+        self.assertEqual(self.db.execute("SELECT value FROM secretary.claims WHERE predicate='current_os_release' AND valid_to IS NULL").fetchone()[0],'26H2')
+
     def test_ambiguous_pending_and_replay(self):
         i=self.intake('PCを26H2に上げた。')
         result=write_intake(self.db,i)

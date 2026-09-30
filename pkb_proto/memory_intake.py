@@ -49,13 +49,73 @@ def write_intake(db, intake, *, extractor=extract):
                 continue
             key = (g['entity_id'], rule.state_predicate)
             when = datetime.fromisoformat(g['time']['resolved'])
-            cur.execute("SELECT valid_from FROM secretary.claims WHERE entity_id=%s AND predicate=%s AND semantic_kind='state' AND valid_to IS NULL AND retracted_at IS NULL FOR UPDATE", key)
+            target_state = rule.select(g['value'])
+            cur.execute(
+                """SELECT id,value,valid_from
+                   FROM secretary.claims
+                   WHERE entity_id=%s AND predicate=%s
+                     AND semantic_kind='state' AND valid_to IS NULL
+                     AND retracted_at IS NULL
+                   FOR UPDATE""",
+                key,
+            )
             row = cur.fetchone()
-            prior = prospective.get(key, row[0] if row else None)
-            if prior is not None and prior >= when:
+            current_value = row[1] if row else None
+            current_time = row[2] if row else None
+
+            # A new input_id is not by itself evidence that the same state-changing
+            # event happened again. If the user gives no explicit occurrence time,
+            # the current State already equals this event's Effect, and an identical
+            # Event already exists, treat it as a re-report rather than creating
+            # another Event/State pair. Explicitly-timed reports are never collapsed
+            # by this rule.
+            if c['time']['raw'] is None and row is not None and current_value == target_state:
+                cur.execute(
+                    """SELECT id
+                       FROM secretary.claims
+                       WHERE entity_id=%s AND predicate=%s
+                         AND semantic_kind='event' AND value=%s
+                         AND retracted_at IS NULL
+                       ORDER BY valid_from DESC, recorded_at DESC
+                       LIMIT 1""",
+                    (g['entity_id'], g['predicate'], Jsonb(g['value'])),
+                )
+                duplicate = cur.fetchone()
+                if duplicate is not None:
+                    g['dedupe'] = {
+                        'kind': 'existing_effect_event',
+                        'claim_id': str(duplicate[0]),
+                    }
+                    item[2:] = ['ignore', 'duplicate_existing_event']
+                    continue
+
+            prior = prospective.get(key)
+            if prior is not None:
+                if (
+                    c['time']['raw'] is None
+                    and prior['state_value'] == target_state
+                    and prior['predicate'] == g['predicate']
+                    and prior['event_value'] == g['value']
+                ):
+                    g['dedupe'] = {
+                        'kind': 'same_intake_effect_event',
+                        'claim_id': None,
+                    }
+                    item[2:] = ['ignore', 'duplicate_existing_event']
+                    continue
+                prior_time = prior['when']
+            else:
+                prior_time = current_time
+
+            if prior_time is not None and prior_time >= when:
                 item[2:] = ['pending', 'state_time_not_monotonic']
             else:
-                prospective[key] = when
+                prospective[key] = {
+                    'when': when,
+                    'state_value': target_state,
+                    'predicate': g['predicate'],
+                    'event_value': g['value'],
+                }
         recorded = datetime.fromisoformat(intake.recorded_at)
         cur.execute('''INSERT INTO secretary.sources
           (source_type,uri,citation,retrieved_at,recorded_at,confidentiality,metadata)
@@ -69,7 +129,8 @@ def write_intake(db, intake, *, extractor=extract):
         results = []
         for c, g, decision, reason in prepared:
             result = dict(candidate_id=c['candidate_id'], decision=decision, status=g['validation'],
-                          reason=reason, claim_id=None, pending_id=None, derived_claim_ids=[])
+                          reason=reason, claim_id=None, pending_id=None, derived_claim_ids=[],
+                          duplicate_of_claim_id=(g.get('dedupe') or {}).get('claim_id'))
             if decision == 'auto_commit':
                 factual = c['content_class'] in {'fact', 'observation'} and c['modality'] == 'asserted'
                 semantic = classify_predicate(g['predicate']) if factual else None

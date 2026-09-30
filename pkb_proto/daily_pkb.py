@@ -5958,7 +5958,11 @@ def pkb_page():
                             labels = {'auto_commit': '記録済み', 'pending': '確認・補足待ち',
                                       'task_context_only': '一時的な内容', 'ignore': '記録対象外'}
                             for candidate in result.get('candidates', []):
-                                ui.label(labels[candidate['decision']] + ': ' + candidate['audit']['draft']['evidence']['quote'])
+                                if candidate.get('reason') == 'duplicate_existing_event':
+                                    prefix = '既存記録と同一のため追加なし'
+                                else:
+                                    prefix = labels[candidate['decision']]
+                                ui.label(prefix + ': ' + candidate['audit']['draft']['evidence']['quote'])
                             if result.get('status') in {'committed', 'replayed'} and not result.get('candidates'):
                                 ui.label('記憶として保存する内容はありません。')
 
