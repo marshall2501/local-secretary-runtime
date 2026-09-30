@@ -1,5 +1,6 @@
 """Isolated acceptance checks; synthetic tasks only, no live DB or models."""
 from copy import deepcopy
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -262,6 +263,18 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             await self.click('MELCHIORへ分析依頼')
             self.assertTrue(self.elements('Envelopeをコピー'))
             self.assertTrue(self.elements('診断情報をコピー'))
+            self.assertTrue(self.elements('試験結果を一括コピー'))
+            with patch.object(daily.ui, 'run_javascript') as js:
+                await self.click('試験結果を一括コピー')
+            javascript = js.call_args.args[0]
+            copied_json = javascript.split('navigator.clipboard.writeText(', 1)[1].rsplit(')', 1)[0]
+            exported = json.loads(json.loads(copied_json))
+            self.assertEqual(exported['status'], 'invalid')
+            self.assertEqual(exported['diagnostic'], probe['diagnostic'])
+            self.assertEqual(exported['validation_errors'], ['invalid_json'])
+            self.assertEqual(exported['request_envelope'], probe['request_envelope'])
+            self.assertIsNone(exported['analysis_result'])
+            self.assertFalse(exported['legacy_router_used'])
             self.assertTrue(self.elements('LLM応答診断（返答本文・Thinking本文は非表示）'))
             self.assertFalse(self.elements('analysis_resultをコピー'))
             self.assertTrue(any(

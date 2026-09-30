@@ -2313,6 +2313,21 @@ def _queue_core_advisor_shadow(
     )
 
 
+def protocol_probe_export(result: dict) -> dict:
+    """One copyable result for the isolated Cycle 1 probe (no Thinking text)."""
+    return {
+        "protocol_path": result.get("protocol_path"),
+        "status": result.get("status"),
+        "assignment": result.get("assignment"),
+        "validation_errors": result.get("validation_errors") or [],
+        "diagnostic": result.get("diagnostic") or {},
+        "analysis_result": result.get("response"),
+        "request_envelope": result.get("request_envelope"),
+        "legacy_router_used": result.get("legacy_router_used"),
+        "pkb_read_executed": result.get("pkb_read_executed"),
+    }
+
+
 def run_ritsuko_magi_cycle1_probe(
     text: str,
     *,
@@ -3709,6 +3724,13 @@ def core_page(task_id: str = ""):
                 status=result.get("status")
                 color="green" if status=="ok" else ("orange" if status=="invalid" else "red")
                 ui.badge("Protocol v1: " + str(status), color=color)
+                export_text=json.dumps(
+                    protocol_probe_export(result),ensure_ascii=False,indent=2,default=str
+                )
+                ui.button(
+                    "試験結果を一括コピー",icon="content_copy",
+                    on_click=lambda value=export_text: copy_protocol_json(value,"試験結果"),
+                ).props("outline dense").classes("self-start")
                 assignment=result.get("assignment") or {}
                 ui.label(
                     "member=" + str(assignment.get("member") or "-")

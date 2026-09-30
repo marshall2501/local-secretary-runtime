@@ -119,6 +119,20 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
         errors=validate_analysis_result(response,self.request())
         self.assertTrue(any("request_id:duplicate" in error for error in errors))
 
+    def test_request_id_schema_and_generic_source_guidance(self):
+        from pkb_proto.ritsuko_magi_protocol import (
+            MAGI_RESPONSE_SCHEMA, SYSTEM_INSTRUCTION,
+        )
+        request_item_schema = MAGI_RESPONSE_SCHEMA["properties"]["analysis"][
+            "properties"]["information_requests"]["items"]
+        self.assertEqual(request_item_schema["properties"]["request_id"]["minLength"], 1)
+        self.assertIn("likely_information_sources", SYSTEM_INSTRUCTION)
+        self.assertIn("request_id", SYSTEM_INSTRUCTION)
+        response=self.valid_response()
+        response["analysis"]["information_requests"][0]["request_id"]="  "
+        self.assertIn("$.analysis.information_requests[0].request_id:invalid",
+                      validate_analysis_result(response,self.request()))
+
     def test_resource_catalog_is_ritsuko_mediated(self):
         catalog=default_resource_catalog()
         self.assertEqual(catalog["pkb"]["access"],"read_only_via_ritsuko")

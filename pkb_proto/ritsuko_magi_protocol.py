@@ -48,8 +48,16 @@ Task状態変更、Tool実行、PKB/Web読取、完了判定を自分で実行�
 必ず、意図、対象、要求結果、入力理解度、情報十分性、不足情報、
 候補情報源、知識候補、曖昧箇所、解釈不能箇所、次の提案を評価してください。
 不足する事実を推測で補完してはいけません。
+ユーザーが指す対象や求める結果を理解できることと、その対象の属性・
+現状・履歴をまだ知らないことを区別してください。
 情報が不足している場合は、何が必要か、どこから得られそうか、
 なぜ必要かをinformation_requestsで具体化してください。
+情報源を要求する場合はlikely_information_sourcesにも同じ候補を挙げ、
+各information_requestに空でない一意のrequest_id（REQ-001等）を付けてください。
+利用可能な情報源から取得できそうな情報は先にRITSUKOへ要求してください。
+ユーザーへの質問は、情報源で取得できず回答に必要な確認がある場合に提案してください。
+「最新」などの相対的な表現は、まず調査時点での情報取得を検討し、
+情報源を確認する前にユーザーへ定義の確認を求める必要があるか吟味してください。
 
 PKBはユーザー本人の対象、属性、関係、現在状態、過去状態、出来事、
 履歴、情報源を保持するPersonal Knowledge Baseです。
@@ -189,7 +197,7 @@ MAGI_RESPONSE_SCHEMA = {
                     "type":"object","additionalProperties":False,
                     "required":["request_id","source_preferences","request","requested_facts","reason","blocking"],
                     "properties":{
-                        "request_id":{"type":"string"},
+                        "request_id":{"type":"string","minLength":1},
                         "source_preferences":{"type":"array","items":{"type":"string","enum":list(INFORMATION_SOURCES)}},
                         "request":{"type":"string"},
                         "requested_facts":{"type":"array","items":{"type":"string"}},
@@ -349,7 +357,7 @@ def validate_analysis_result(response: object, request_envelope: dict) -> list[s
                 errors.append(path + ":object_required")
                 continue
             request_id=item.get("request_id")
-            if not isinstance(request_id,str) or not request_id:
+            if not isinstance(request_id,str) or not request_id.strip():
                 errors.append(path + ".request_id:invalid")
             elif request_id in seen:
                 errors.append(path + ".request_id:duplicate")
