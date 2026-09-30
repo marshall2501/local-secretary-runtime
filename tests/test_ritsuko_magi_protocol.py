@@ -6,6 +6,9 @@ from unittest.mock import patch
 import unittest
 
 from pkb_proto.magi_client import call_member, choose_model
+from pkb_proto.magi_dialogue import (
+    CATEGORIES, start_dialogue, continue_with_observation, validate_turn,
+)
 
 from pkb_proto.ritsuko_magi_protocol import (
     ALLOWED_VALUES,
@@ -138,6 +141,112 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
         self.assertEqual(catalog["pkb"]["access"],"read_only_via_ritsuko")
         self.assertEqual(catalog["web"]["access"],"read_only_via_ritsuko")
         self.assertEqual(catalog["user"]["access"],"ask_user")
+
+class GuidedDialogueTests(unittest.TestCase):
+    def scripted(self, *responses):
+        answers=list(responses)
+        seen=[]
+        def call(envelope, *, model, timeout):
+            seen.append(envelope)
+            return {"status":"ok", "response":answers.pop(0),
+                    "errors":[], "diagnostic":{"eval_count":10}}
+        return call, seen
+
+    def classification(self, category="INFORMATION", multiple=False):
+        return {
+            "category":category, "secondary_category":None,
+            "understood_request":"ユーザーが必要な情報を知りたい",
+            "reason":"質問の目的を分類", "confidence":"high",
+            "multiple_requests":multiple,
+            "clarification_question":("何についてですか？" if category=="UNCLEAR" else None),
+        }
+
+    def detail(self, *, state="NEED_INFORMATION", source="pkb", what="本人の構成"):
+        return {
+            "understood_request":"求める情報を調べる",
+            "state":state,"reason":"取得済みの情報では回答できない",
+            "information_requests":(
+                [{"source":source,"what":what,"reason":"回答の根拠が必要"}]
+                if state=="NEED_INFORMATION" else []
+            ),
+            "question_for_user":None,
+            "answer_candidate":("観測された候補" if state=="READY" else None),
+            "action_candidate":None,
+        }
+
+    def test_classification_drives_a_followup_question_and_core_owns_ids(self):
+        caller, seen=self.scripted(
+            self.classification(), self.detail(source="pkb",what="本人のメインPC GPU")
+        )
+        session=start_dialogue("メインPCのGPUの種類は？",model="gemma3:12b",caller=caller)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[0]["stage"], "classify")
+        self.assertIn("大まかな分類だけ",seen[0]["question_from_ritsuko"])
+        self.assertNotIn("次の1手",seen[0]["question_from_ritsuko"])
+        self.assertEqual(seen[1]["stage"], "analyze")
+        self.assertEqual(seen[1]["task_context"]["classification"]["category"],"INFORMATION")
+        self.assertIn("本人固有の情報",seen[1]["question_from_ritsuko"])
+        self.assertEqual(session["status"], "waiting_information")
+        self.assertEqual(session["next_step"], "review_information_requests")
+        self.assertEqual(session["pending_requests"][0]["source"],"pkb")
+        self.assertTrue(session["pending_requests"][0]["request_id"].startswith("REQ-"))
+        self.assertNotIn("request_id",session["detail"]["information_requests"][0])
+        self.assertFalse(session["tool_read_executed"])
+        self.assertFalse(session["legacy_router_used"])
+
+    def test_same_category_can_ask_for_web_without_ritsuko_source_router(self):
+        caller,seen=self.scripted(
+            self.classification(),
+            self.detail(source="web",what="公式の新しい公開情報"),
+        )
+        session=start_dialogue("新製品の最新情報は？",model="gemma3:12b",caller=caller)
+        self.assertEqual([t["stage"] for t in session["turns"]],["classify","analyze"])
+        self.assertEqual(session["pending_requests"][0]["source"],"web")
+        self.assertEqual(seen[1]["task_context"]["classification"]["category"],"INFORMATION")
+
+    def test_unclear_classification_stops_and_does_not_immediately_guess_tools(self):
+        caller,seen=self.scripted(self.classification("UNCLEAR"))
+        session=start_dialogue("あれ",model="gemma3:12b",caller=caller)
+        self.assertEqual(session["status"],"waiting_user")
+        self.assertEqual(session["next_step"],"classification_clarification")
+        self.assertEqual(len(seen),1)
+
+    def test_same_task_can_continue_after_manual_observation(self):
+        caller,seen=self.scripted(
+            self.classification(), self.detail(source="pkb"),
+            self.detail(state="READY"),
+        )
+        first=start_dialogue("私の構成は？",model="gemma3:12b",caller=caller)
+        again=continue_with_observation(
+            first,"架空の試験観測",caller=caller,
+        )
+        self.assertEqual(first["status"],"waiting_information")
+        self.assertEqual(again["status"],"candidate_ready")
+        self.assertEqual(again["next_step"],"review_answer_candidate")
+        self.assertEqual(again["task_id"],first["task_id"])
+        self.assertEqual(len(again["turns"]),3)
+        self.assertEqual(seen[-1]["turn"],3)
+        self.assertEqual(seen[-1]["observations"][0]["verified"],False)
+        self.assertEqual(len(again["observations"]),1)
+        self.assertFalse(again["tool_read_executed"])
+
+    def test_invalid_schema_stops_without_a_followup(self):
+        caller,seen=self.scripted({"category":"INFORMATION"})
+        session=start_dialogue("メインPCについて",model="gemma3:12b",caller=caller)
+        self.assertEqual(session["status"],"stopped")
+        self.assertEqual(session["next_step"],"magi_invalid")
+        self.assertEqual(len(seen),1)
+        self.assertIn("response:field_mismatch",session["turns"][0]["errors"])
+
+    def test_schema_category_types_and_missing_information_require_requests(self):
+        self.assertIn("KNOWLEDGE",CATEGORIES)
+        c=self.classification()
+        c["multiple_requests"]="false"
+        self.assertIn("multiple_requests:invalid_type",validate_turn("classify",c))
+        self.assertIn("information_requests:required",validate_turn(
+            "analyze",self.detail(state="NEED_INFORMATION") |
+            {"information_requests":[]},
+        ))
 
 if __name__ == "__main__":
     unittest.main()
