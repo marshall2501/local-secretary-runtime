@@ -35,6 +35,12 @@ from .core_coordinator import (
     decide_after_observation,
     extend_observation_pack,
 )
+from .ritsuko_magi_protocol import build_request_envelope, default_resource_catalog
+from .magi_client import (
+    call_member as call_magi_member,
+    choose_model as choose_magi_model,
+    list_chat_models as list_magi_models,
+)
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -2307,6 +2313,39 @@ def _queue_core_advisor_shadow(
     )
 
 
+def run_ritsuko_magi_cycle1_probe(
+    text: str,
+    *,
+    model: str,
+    timeout: float = 60.0,
+) -> dict:
+    """One isolated Protocol v1 cycle owned end-to-end by RITSUKO."""
+    request=text.strip()
+    if not request:
+        return {"status":"rejected","validation_errors":["empty_user_input"],"response":None}
+    envelope=build_request_envelope(
+        task_id=str(uuid4()),
+        cycle=1,
+        member_name="MELCHIOR",
+        user_raw=request,
+        task_context={
+            "status":"received","goal":None,"previous_user_messages":[],
+            "previous_actions":[],"previous_results":[],
+        },
+        resource_catalog=default_resource_catalog(),
+        observations=[],
+    )
+    result=call_magi_member(
+        envelope,member_name="MELCHIOR",model=model,timeout=timeout,
+    )
+    return {
+        **result,
+        "protocol_path":"ritsuko_magi_v1_cycle1",
+        "legacy_router_used":False,
+        "pkb_read_executed":False,
+    }
+
+
 def run_core_request(
     text: str,
     advisor_model: str | None = None,
@@ -3344,7 +3383,7 @@ _FEATURES = [
     ("家計・資産", "試験中", "orange", "/finance", "保存済み家計のSQL集計・明細・Import履歴とMoneyForward CSV取込"),
     ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
     ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
-    ("Secretary Core", "試験中", "blue-grey", "/core", "依頼をTask化し、最小のPKB読取能力を選択・記録"),
+    ("RITSUKO", "試験中", "blue-grey", "/core", "Secretary Core / Orchestrator。Task・MAGI通信・最終判断を管理"),
     ("開発Workbench", "利用可能", "green", "http://127.0.0.1:8092/", "LLM/PKB/Coreの開発検証用。日常GUIとは分離"),
 ]
 
@@ -3354,7 +3393,7 @@ def _nav():
         ui.button("TOP", icon="home").props("flat href=/ tag=a")
         ui.button("機能一覧", icon="apps").props("flat href=/features tag=a")
         ui.button("PKB", icon="account_tree").props("flat href=/pkb tag=a")
-        ui.button("Core", icon="hub").props("flat href=/core tag=a")
+        ui.button("RITSUKO", icon="hub").props("flat href=/core tag=a")
         ui.button("家計・資産", icon="account_balance_wallet").props("flat href=/finance tag=a")
         ui.button("設定", icon="settings").props("flat href=/settings tag=a")
 
@@ -3428,10 +3467,10 @@ def top_page():
                 ui.badge("未実装", color="grey")
                 ui.label("Google Calendar閲覧・検索を予定").classes("text-sm")
             with ui.card().classes("w-72 border-2 border-blue-grey-300 bg-blue-grey-1"):
-                ui.label("Secretary Core").classes("text-lg font-bold")
+                ui.label("RITSUKO").classes("text-lg font-bold")
                 ui.badge("試験中", color="blue-grey")
-                ui.label("依頼をTask化し、PKBの読取能力を選んで結果を記録").classes("text-sm")
-                ui.button("Coreを開く", icon="arrow_forward", color="blue-grey").props(
+                ui.label("Secretary Core / Orchestrator。MAGIへ依頼し最終判断を管理").classes("text-sm")
+                ui.button("RITSUKOを開く", icon="arrow_forward", color="blue-grey").props(
                     "href=/core tag=a"
                 )
 
@@ -3468,7 +3507,7 @@ def core_history_page():
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-3"):
         _nav()
         ui.label("Task履歴").classes("text-2xl font-bold")
-        ui.link("Secretary Coreへ戻る", "/core")
+        ui.link("RITSUKOへ戻る", "/core")
         ui.label("失敗を含む全状態のTaskを更新日時の新しい順で表示します。")
 
         def move_page(delta):
@@ -3503,7 +3542,8 @@ def core_page(task_id: str = ""):
     state = {"result": None, "busy": False, "resume_busy": False,
              "trace": None, "trace_error": None,
              "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
-             "advisor_timeout": int(_UI_PREFERENCES.get("core_advisor_timeout") or 60)}
+             "advisor_timeout": int(_UI_PREFERENCES.get("core_advisor_timeout") or 60),
+             "protocol_result": None, "protocol_busy": False}
 
     list_limits = {key: _UI_PREFERENCES["core"][key] for key in CORE_TASK_LIST_DEFAULTS}
     list_defaults = dict(list_limits)
@@ -3588,7 +3628,126 @@ def core_page(task_id: str = ""):
 
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
         _nav()
-        ui.label("Secretary Core").classes("text-2xl font-bold")
+        ui.label("RITSUKO — Secretary Core / Orchestrator").classes("text-2xl font-bold")
+
+        try:
+            installed_magi_models = list_magi_models()
+        except Exception:
+            installed_magi_models = []
+        try:
+            default_magi_model = choose_magi_model(installed_magi_models)
+        except Exception:
+            default_magi_model = None
+
+        with ui.card().classes("w-full border-2 border-indigo-300 bg-indigo-50"):
+            ui.label("RITSUKO → MAGI Protocol v1 / Cycle 1 試験").classes(
+                "text-lg font-bold text-indigo-900"
+            )
+            ui.label(
+                "RITSUKOが依頼Envelopeを作成 → MELCHIOR slotのLLMへ送信 → "
+                "RITSUKOがanalysis_resultを受信・Schema検証します。"
+            ).classes("text-sm")
+            ui.label(
+                "旧deterministic routerへのfallback、PKB/Web read、Task DB更新は行いません。"
+            ).classes("text-xs text-orange-800")
+            protocol_input = ui.textarea(
+                label="ユーザー原文",
+                value="メインPCのGPUの種類は？",
+            ).classes("w-full")
+            with ui.row().classes("w-full items-end gap-2 flex-wrap"):
+                protocol_model_select = ui.select(
+                    options=installed_magi_models,
+                    value=default_magi_model,
+                    label="MELCHIOR slot / Ollama model",
+                ).classes("min-w-72")
+                protocol_timeout_select = ui.select(
+                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                    value=int(state.get("advisor_timeout") or 60),
+                    label="Timeout (秒)",
+                ).classes("min-w-40")
+
+            @ui.refreshable
+            def protocol_result_panel():
+                result=state.get("protocol_result")
+                if state.get("protocol_busy"):
+                    ui.label("RITSUKOがMAGI依頼を実行中...").classes(
+                        "text-indigo-800 font-bold"
+                    )
+                    return
+                if not result:
+                    ui.label("まだ実行していません。Cycle 1のLLM応答だけを観測します。").classes(
+                        "text-sm text-grey-7"
+                    )
+                    return
+                status=result.get("status")
+                color="green" if status=="ok" else ("orange" if status=="invalid" else "red")
+                ui.badge("Protocol v1: " + str(status), color=color)
+                assignment=result.get("assignment") or {}
+                ui.label(
+                    "member=" + str(assignment.get("member") or "-")
+                    + " / provider=" + str(assignment.get("provider") or "-")
+                    + " / model=" + str(assignment.get("model") or "-")
+                ).classes("font-mono text-sm")
+                ui.label(
+                    "legacy_router_used=" + str(result.get("legacy_router_used"))
+                    + " / pkb_read_executed=" + str(result.get("pkb_read_executed"))
+                ).classes("font-mono text-xs text-grey-7")
+                errors=result.get("validation_errors") or []
+                if errors:
+                    ui.label("Schema / 通信エラー: " + " | ".join(errors)).classes("text-red-700")
+                if result.get("response") is not None:
+                    ui.label("MAGI analysis_result").classes("font-bold")
+                    ui.code(
+                        json.dumps(result["response"],ensure_ascii=False,indent=2),
+                        language="json",
+                    ).classes("w-full")
+                with ui.expansion("RITSUKOが作成した依頼Envelope",icon="data_object").classes(
+                    "w-full border"
+                ):
+                    ui.code(
+                        json.dumps(result.get("request_envelope") or {},ensure_ascii=False,indent=2),
+                        language="json",
+                    ).classes("w-full")
+
+            async def submit_protocol_v1():
+                if state.get("protocol_busy"):
+                    return
+                selected_model=str(protocol_model_select.value or "").strip()
+                if not selected_model:
+                    ui.notify("Ollama chat modelを選択してください",type="negative")
+                    return
+                state["protocol_busy"]=True
+                state["protocol_result"]=None
+                protocol_run_button.disable()
+                protocol_result_panel.refresh()
+                try:
+                    state["protocol_result"]=await run.io_bound(
+                        run_ritsuko_magi_cycle1_probe,
+                        protocol_input.value or "",
+                        model=selected_model,
+                        timeout=float(protocol_timeout_select.value or 60),
+                    )
+                except Exception as exc:
+                    state["protocol_result"]={
+                        "status":"error","response":None,
+                        "validation_errors":[type(exc).__name__ + ": " + str(exc)[:200]],
+                        "legacy_router_used":False,"pkb_read_executed":False,
+                    }
+                finally:
+                    state["protocol_busy"]=False
+                    protocol_run_button.enable()
+                    protocol_result_panel.refresh()
+
+            protocol_run_button=ui.button(
+                "MELCHIORへ分析依頼",icon="psychology",color="indigo",
+                on_click=submit_protocol_v1,
+            )
+            protocol_result_panel()
+
+        ui.separator()
+        ui.label("現行経路（回帰用・Protocol v1とは独立）").classes(
+            "font-bold text-grey-8"
+        )
 
         try:
             installed_advisor_models = list_advisor_models()
@@ -3607,7 +3766,7 @@ def core_page(task_id: str = ""):
             advisor_model_select = ui.select(
                 options=installed_advisor_models,
                 value=saved_advisor_model,
-                label="Advisor Model",
+                label="Legacy CASPER Advisor Model",
             ).classes("min-w-64")
             advisor_timeout_select = ui.select(
                 options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
@@ -3615,7 +3774,7 @@ def core_page(task_id: str = ""):
                 label="Advisor Timeout (秒)",
             ).classes("min-w-40")
             ui.label(
-                "CASPER用。変更は次の新規Taskから反映します。"
+                "旧MAGI v0のCASPER Advisor用。Protocol v1 MELCHIORとは別設定です。"
             ).classes("text-xs text-grey-7")
 
             def save_advisor_model():
@@ -4618,7 +4777,7 @@ def settings_page():
         core_open_controls = {}
         core_visible_controls = {}
         with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
-            ui.label("Secretary Core — Task表示件数").classes("text-lg font-bold")
+            ui.label("RITSUKO — Task表示件数").classes("text-lg font-bold")
             ui.label(
                 "各一覧の初期件数と「さらに読み込む」で追加する件数です。"
                 "保存するとサーバー再起動なしで反映されます。"
@@ -4631,7 +4790,7 @@ def settings_page():
                 ).classes("min-w-64")
 
         with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
-            ui.label("Secretary Core — 検証・補足の表示").classes("text-lg font-bold")
+            ui.label("RITSUKO — 検証・補足の表示").classes("text-lg font-bold")
             ui.label(
                 "主操作の依頼ブロックは常時表示。検証・補足ブロックだけ非表示にできます。"
             ).classes("text-sm text-grey-7")
