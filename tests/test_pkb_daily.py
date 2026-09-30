@@ -9,6 +9,9 @@ from uuid import UUID
 from pkb_proto.daily_pkb import (
     CORE_UI_DEFAULT_OPEN,
     ENTITY_UI_DEFAULT_OPEN,
+    ENTITY_TAB_DEFAULT,
+    ENTITY_TAB_DEFAULT_VISIBLE,
+    ENTITY_TAB_ORDER,
     FINANCE_PAGE_SIZE_DEFAULT,
     FINANCE_UI_DEFAULT_OPEN,
     PKB_UI_DEFAULT_OPEN,
@@ -17,6 +20,8 @@ from pkb_proto.daily_pkb import (
     _advisor_log_export,
     _memory_intake_log_export,
     _default_ui_preferences,
+    _entity_source_rows,
+    _entity_tab_config,
     _set_pkb_ui_open,
     _validate_ui_preferences,
     _contextualize_core_reply,
@@ -172,77 +177,346 @@ class DailyPKBParserTests(unittest.TestCase):
     def test_ui_preferences_validate_and_fall_back_per_field(self):
         prefs = _validate_ui_preferences({
             "pkb": {"write": False, "search": "invalid"},
-            "entity": {"history": True, "events": "invalid"},
+            "entity": {"default_tab": "invalid"},
             "finance": {"details": True, "recent_limit": 100, "stored": 1},
             "core": {"trace": False, "screen_log": True},
             "core_advisor_model": "gemma4:12b",
             "core_advisor_timeout": 180,
             "visibility": {
                 "pkb": {"limits": False, "write": "invalid"},
+                "entity": {
+                    "overview": True,
+                    "history": "invalid",
+                    "relations": False,
+                    "sources": True,
+                },
                 "core": {"trace": False},
             },
         })
+
         self.assertFalse(prefs["pkb"]["write"])
-        self.assertEqual(prefs["pkb"]["search"], PKB_UI_DEFAULT_OPEN["search"])
-        self.assertTrue(prefs["entity"]["history"])
         self.assertEqual(
-            prefs["entity"]["events"],
-            ENTITY_UI_DEFAULT_OPEN["events"],
+            prefs["pkb"]["search"],
+            PKB_UI_DEFAULT_OPEN["search"],
         )
+
+        self.assertEqual(
+            prefs["entity"]["default_tab"],
+            ENTITY_TAB_DEFAULT,
+        )
+        self.assertTrue(
+            prefs["visibility"]["entity"]["overview"]
+        )
+        self.assertEqual(
+            prefs["visibility"]["entity"]["history"],
+            ENTITY_TAB_DEFAULT_VISIBLE["history"],
+        )
+        self.assertFalse(
+            prefs["visibility"]["entity"]["relations"]
+        )
+        self.assertTrue(
+            prefs["visibility"]["entity"]["sources"]
+        )
+
         self.assertTrue(prefs["finance"]["details"])
-        self.assertEqual(prefs["finance"]["stored"], FINANCE_UI_DEFAULT_OPEN["stored"])
+        self.assertEqual(
+            prefs["finance"]["stored"],
+            FINANCE_UI_DEFAULT_OPEN["stored"],
+        )
         self.assertEqual(prefs["finance"]["recent_limit"], 100)
+
         self.assertFalse(prefs["core"]["trace"])
         self.assertTrue(prefs["core"]["screen_log"])
-        self.assertEqual(prefs["core_advisor_model"], "gemma4:12b")
-        self.assertEqual(prefs["core_advisor_timeout"], 180)
-        self.assertFalse(prefs["visibility"]["pkb"]["limits"])
+        self.assertEqual(
+            prefs["core_advisor_model"],
+            "gemma4:12b",
+        )
+        self.assertEqual(
+            prefs["core_advisor_timeout"],
+            180,
+        )
+
+        self.assertFalse(
+            prefs["visibility"]["pkb"]["limits"]
+        )
         self.assertEqual(
             prefs["visibility"]["pkb"]["write"],
             UI_VISIBILITY_DEFAULT["pkb"]["write"],
         )
-        self.assertFalse(prefs["visibility"]["core"]["trace"])
+        self.assertFalse(
+            prefs["visibility"]["core"]["trace"]
+        )
 
     def test_ui_preferences_round_trip_json_outside_pkb(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ui_preferences.json"
+
             prefs = _default_ui_preferences()
             prefs["pkb"]["entities"] = True
-            prefs["entity"]["history"] = True
+
+            prefs["entity"]["default_tab"] = "history"
+            prefs["visibility"]["entity"]["sources"] = False
+
             prefs["finance"]["details"] = True
             prefs["finance"]["recent_limit"] = 50
+
             prefs["core"]["trace"] = False
             prefs["core"]["screen_log"] = False
             prefs["core_advisor_model"] = "gpt-oss:20b"
             prefs["core_advisor_timeout"] = 120
+
             prefs["visibility"]["pkb"]["limits"] = False
             prefs["visibility"]["core"]["trace"] = False
+
             saved = save_ui_preferences(prefs, path)
             loaded = load_ui_preferences(path)
+
             self.assertEqual(loaded, saved)
-            self.assertTrue(loaded["pkb"]["entities"])
-            self.assertTrue(loaded["entity"]["history"])
-            self.assertTrue(loaded["finance"]["details"])
-            self.assertEqual(loaded["finance"]["recent_limit"], 50)
-            self.assertFalse(loaded["core"]["trace"])
-            self.assertFalse(loaded["core"]["screen_log"])
-            self.assertEqual(loaded["core_advisor_model"], "gpt-oss:20b")
-            self.assertEqual(loaded["core_advisor_timeout"], 120)
-            self.assertFalse(loaded["visibility"]["pkb"]["limits"])
-            self.assertFalse(loaded["visibility"]["core"]["trace"])
+
+            self.assertTrue(
+                loaded["pkb"]["entities"]
+            )
+
+            self.assertEqual(
+                loaded["entity"]["default_tab"],
+                "history",
+            )
+            self.assertFalse(
+                loaded["visibility"]["entity"]["sources"]
+            )
+
+            self.assertTrue(
+                loaded["finance"]["details"]
+            )
+            self.assertEqual(
+                loaded["finance"]["recent_limit"],
+                50,
+            )
+
+            self.assertFalse(
+                loaded["core"]["trace"]
+            )
+            self.assertFalse(
+                loaded["core"]["screen_log"]
+            )
+            self.assertEqual(
+                loaded["core_advisor_model"],
+                "gpt-oss:20b",
+            )
+            self.assertEqual(
+                loaded["core_advisor_timeout"],
+                120,
+            )
+            self.assertFalse(
+                loaded["visibility"]["pkb"]["limits"]
+            )
+            self.assertFalse(
+                loaded["visibility"]["core"]["trace"]
+            )
 
     def test_ui_preferences_missing_file_uses_builtin_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
-            loaded = load_ui_preferences(Path(directory) / "missing.json")
-        self.assertEqual(loaded["pkb"], PKB_UI_DEFAULT_OPEN)
-        self.assertEqual(loaded["core"], {**CORE_UI_DEFAULT_OPEN, "open_limit": 5, "completed_limit": 5})
-        self.assertEqual(loaded["visibility"], UI_VISIBILITY_DEFAULT)
+            loaded = load_ui_preferences(
+                Path(directory) / "missing.json"
+            )
+
+        self.assertEqual(
+            loaded["pkb"],
+            PKB_UI_DEFAULT_OPEN,
+        )
+
+        self.assertEqual(
+            loaded["entity"],
+            {"default_tab": ENTITY_TAB_DEFAULT},
+        )
+        self.assertEqual(
+            loaded["visibility"]["entity"],
+            ENTITY_TAB_DEFAULT_VISIBLE,
+        )
+
+        self.assertEqual(
+            loaded["core"],
+            {
+                **CORE_UI_DEFAULT_OPEN,
+                "open_limit": 5,
+                "completed_limit": 5,
+            },
+        )
+        self.assertEqual(
+            loaded["visibility"],
+            UI_VISIBILITY_DEFAULT,
+        )
         self.assertEqual(
             loaded["finance"]["recent_limit"],
             FINANCE_PAGE_SIZE_DEFAULT,
         )
-        self.assertEqual(loaded["core_advisor_timeout"], 60)
+        self.assertEqual(
+            loaded["core_advisor_timeout"],
+            60,
+        )
 
+    def test_legacy_entity_preferences_migrate_to_tabs(self):
+        prefs = _validate_ui_preferences({
+            "entity": {
+                "current": False,
+                "relations": True,
+                "events": False,
+                "history": True,
+            },
+            "visibility": {
+                "entity": {
+                    "current": False,
+                    "relations": True,
+                    "events": False,
+                    "history": True,
+                },
+            },
+        })
+
+        self.assertEqual(
+            prefs["entity"]["default_tab"],
+            "history",
+        )
+        self.assertFalse(
+            prefs["visibility"]["entity"]["overview"]
+        )
+        self.assertTrue(
+            prefs["visibility"]["entity"]["history"]
+        )
+        self.assertTrue(
+            prefs["visibility"]["entity"]["relations"]
+        )
+        self.assertTrue(
+            prefs["visibility"]["entity"]["sources"]
+        )
+
+    def test_entity_preferences_prevent_all_tabs_hidden(self):
+        prefs = _validate_ui_preferences({
+            "entity": {
+                "default_tab": "sources",
+            },
+            "visibility": {
+                "entity": {
+                    "overview": False,
+                    "history": False,
+                    "relations": False,
+                    "sources": False,
+                },
+            },
+        })
+
+        self.assertTrue(
+            prefs["visibility"]["entity"]["overview"]
+        )
+        self.assertEqual(
+            prefs["entity"]["default_tab"],
+            "overview",
+        )
+        self.assertTrue(
+            any(prefs["visibility"]["entity"].values())
+        )
+
+    def test_entity_hidden_default_tab_falls_back_to_first_visible(self):
+        prefs = _validate_ui_preferences({
+            "entity": {
+                "default_tab": "history",
+            },
+            "visibility": {
+                "entity": {
+                    "overview": True,
+                    "history": False,
+                    "relations": True,
+                    "sources": True,
+                },
+            },
+        })
+
+        self.assertEqual(
+            prefs["entity"]["default_tab"],
+            "overview",
+        )
+
+    def test_entity_tab_config_returns_visible_tabs_and_default(self):
+        prefs = _validate_ui_preferences({
+            "entity": {
+                "default_tab": "relations",
+            },
+            "visibility": {
+                "entity": {
+                    "overview": True,
+                    "history": False,
+                    "relations": True,
+                    "sources": False,
+                },
+            },
+        })
+
+        visible, default_tab = _entity_tab_config(prefs)
+
+        self.assertEqual(
+            visible,
+            {
+                "overview": True,
+                "history": False,
+                "relations": True,
+                "sources": False,
+            },
+        )
+        self.assertEqual(
+            default_tab,
+            "relations",
+        )
+
+    def test_entity_source_rows_deduplicate_references(self):
+        rows = _entity_source_rows({
+            "current": [
+                {"source_uri": "fixture://source/a"},
+            ],
+            "events": [
+                {"source_uri": "fixture://source/a"},
+            ],
+            "history": [
+                {"source_uri": "fixture://source/b"},
+            ],
+            "relations": [
+                {"source_uri": "fixture://source/b"},
+                {"source_uri": "fixture://source/b"},
+            ],
+        })
+
+        self.assertEqual(len(rows), 2)
+
+        by_uri = {
+            row["source_uri"]: row
+            for row in rows
+        }
+
+        self.assertEqual(
+            by_uri["fixture://source/a"]["reference_count"],
+            2,
+        )
+        self.assertIn(
+            "現在",
+            by_uri["fixture://source/a"]["used_by"],
+        )
+        self.assertIn(
+            "Event",
+            by_uri["fixture://source/a"]["used_by"],
+        )
+
+        self.assertEqual(
+            by_uri["fixture://source/b"]["reference_count"],
+            3,
+        )
+        self.assertIn(
+            "履歴",
+            by_uri["fixture://source/b"]["used_by"],
+        )
+        self.assertIn(
+            "関連",
+            by_uri["fixture://source/b"]["used_by"],
+        )
+ 
     def test_pkb_ui_open_state_is_centralized_and_resettable_by_process_restart(self):
         original = dict(_PKB_UI_OPEN)
         try:

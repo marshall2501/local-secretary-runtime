@@ -66,12 +66,28 @@ PKB_UI_DEFAULT_OPEN = {
     "reviewed": False,
     "limits": False,
 }
+
+# Legacy Entity accordion defaults.
+# Kept only so existing ui_preferences.json can be migrated safely.
 ENTITY_UI_DEFAULT_OPEN = {
     "current": True,
     "relations": True,
     "events": True,
     "history": False,
 }
+
+ENTITY_TAB_ORDER = ("overview", "history", "relations", "sources")
+ENTITY_TAB_LABELS = {
+    "overview": "概要",
+    "history": "履歴",
+    "relations": "関連",
+    "sources": "出典",
+}
+ENTITY_TAB_DEFAULT = "overview"
+ENTITY_TAB_DEFAULT_VISIBLE = {
+    key: True for key in ENTITY_TAB_ORDER
+}
+
 FINANCE_UI_DEFAULT_OPEN = {
     "filter": True,
     "stored": True,
@@ -98,7 +114,7 @@ CORE_ADVISOR_TIMEOUT_OPTIONS = (30, 60, 120, 180, 300, 600, 900)
 
 UI_VISIBILITY_DEFAULT = {
     "pkb": {key: True for key in PKB_UI_DEFAULT_OPEN},
-    "entity": {key: True for key in ENTITY_UI_DEFAULT_OPEN},
+    "entity": dict(ENTITY_TAB_DEFAULT_VISIBLE),
     "finance": {key: True for key in FINANCE_UI_DEFAULT_OPEN},
     "core": {
         "trace": True,
@@ -111,7 +127,9 @@ UI_VISIBILITY_DEFAULT = {
 def _default_ui_preferences() -> dict:
     return {
         "pkb": dict(PKB_UI_DEFAULT_OPEN),
-        "entity": dict(ENTITY_UI_DEFAULT_OPEN),
+        "entity": {
+            "default_tab": ENTITY_TAB_DEFAULT,
+        },
         "finance": {
             **FINANCE_UI_DEFAULT_OPEN,
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
@@ -147,12 +165,29 @@ def _validate_ui_preferences(raw: object) -> dict:
             if isinstance(value, bool):
                 result["pkb"][key] = value
 
+    # New Entity preference:
+    #   entity.default_tab = overview/history/relations/sources
+    #
+    # Old preferences used accordion booleans:
+    #   current / relations / events / history
+    #
+    # If a new default_tab does not exist, use the first legacy section which
+    # was configured to open. This keeps old ui_preferences.json usable.
     entity = raw.get("entity")
     if isinstance(entity, dict):
-        for key in ENTITY_UI_DEFAULT_OPEN:
-            value = entity.get(key)
-            if isinstance(value, bool):
-                result["entity"][key] = value
+        default_tab = entity.get("default_tab")
+        if default_tab in ENTITY_TAB_ORDER:
+            result["entity"]["default_tab"] = default_tab
+        elif "default_tab" not in entity:
+            for legacy_key, tab_key in (
+                ("current", "overview"),
+                ("events", "history"),
+                ("history", "history"),
+                ("relations", "relations"),
+            ):
+                if entity.get(legacy_key) is True:
+                    result["entity"]["default_tab"] = tab_key
+                    break
 
     finance = raw.get("finance")
     if isinstance(finance, dict):
@@ -179,16 +214,26 @@ def _validate_ui_preferences(raw: object) -> dict:
     advisor_model = raw.get("core_advisor_model")
     if isinstance(advisor_model, str):
         advisor_model = advisor_model.strip()
-        if advisor_model and len(advisor_model) <= 100 and not any(ch.isspace() for ch in advisor_model):
+        if (
+            advisor_model
+            and len(advisor_model) <= 100
+            and not any(ch.isspace() for ch in advisor_model)
+        ):
             result["core_advisor_model"] = advisor_model
 
     advisor_timeout = raw.get("core_advisor_timeout")
-    if type(advisor_timeout) is int and advisor_timeout in CORE_ADVISOR_TIMEOUT_OPTIONS:
+    if (
+        type(advisor_timeout) is int
+        and advisor_timeout in CORE_ADVISOR_TIMEOUT_OPTIONS
+    ):
         result["core_advisor_timeout"] = advisor_timeout
 
     visibility = raw.get("visibility")
     if isinstance(visibility, dict):
+        # PKB / Finance / Core keep their current schema.
         for section, defaults in UI_VISIBILITY_DEFAULT.items():
+            if section == "entity":
+                continue
             section_values = visibility.get(section)
             if not isinstance(section_values, dict):
                 continue
@@ -196,6 +241,56 @@ def _validate_ui_preferences(raw: object) -> dict:
                 value = section_values.get(key)
                 if isinstance(value, bool):
                     result["visibility"][section][key] = value
+
+        # Entity visibility supports both the new tab schema and the old
+        # accordion schema.
+        entity_visibility = visibility.get("entity")
+        if isinstance(entity_visibility, dict):
+            has_new_keys = (
+                "overview" in entity_visibility
+                or "sources" in entity_visibility
+            )
+
+            if has_new_keys:
+                for key in ENTITY_TAB_ORDER:
+                    value = entity_visibility.get(key)
+                    if isinstance(value, bool):
+                        result["visibility"]["entity"][key] = value
+            else:
+                current_value = entity_visibility.get("current")
+                if isinstance(current_value, bool):
+                    result["visibility"]["entity"]["overview"] = current_value
+
+                relations_value = entity_visibility.get("relations")
+                if isinstance(relations_value, bool):
+                    result["visibility"]["entity"]["relations"] = relations_value
+
+                legacy_history_values = [
+                    entity_visibility[key]
+                    for key in ("events", "history")
+                    if isinstance(entity_visibility.get(key), bool)
+                ]
+                if legacy_history_values:
+                    result["visibility"]["entity"]["history"] = any(
+                        legacy_history_values
+                    )
+
+                # "sources" did not exist in the old GUI.
+                # New installations and migrated old settings show it by default.
+                result["visibility"]["entity"]["sources"] = True
+
+    # Entity detail must always have at least one visible tab.
+    entity_visible = result["visibility"]["entity"]
+    if not any(entity_visible.values()):
+        entity_visible["overview"] = True
+
+    # A hidden tab cannot be the initial tab.
+    preferred_tab = result["entity"]["default_tab"]
+    if not entity_visible.get(preferred_tab, False):
+        result["entity"]["default_tab"] = next(
+            key for key in ENTITY_TAB_ORDER if entity_visible.get(key, False)
+        )
+
     return result
 
 
@@ -227,7 +322,6 @@ _UI_PREFERENCES = load_ui_preferences()
 # user's current accordion layout while moving between pages, while settings
 # can deliberately reset the live state to newly saved defaults.
 _PKB_UI_OPEN = dict(_UI_PREFERENCES["pkb"])
-_ENTITY_UI_OPEN = dict(_UI_PREFERENCES["entity"])
 _FINANCE_UI_OPEN = {
     key: _UI_PREFERENCES["finance"][key]
     for key in FINANCE_UI_DEFAULT_OPEN
@@ -241,8 +335,6 @@ def _apply_ui_preferences(preferences: dict) -> None:
     _UI_PREFERENCES = validated
     _PKB_UI_OPEN.clear()
     _PKB_UI_OPEN.update(validated["pkb"])
-    _ENTITY_UI_OPEN.clear()
-    _ENTITY_UI_OPEN.update(validated["entity"])
     _FINANCE_UI_OPEN.clear()
     _FINANCE_UI_OPEN.update(
         {key: validated["finance"][key] for key in FINANCE_UI_DEFAULT_OPEN}
@@ -255,12 +347,6 @@ def _set_pkb_ui_open(key: str, value: bool) -> None:
     if key not in PKB_UI_DEFAULT_OPEN:
         raise KeyError("unknown PKB accordion key")
     _PKB_UI_OPEN[key] = bool(value)
-
-
-def _set_entity_ui_open(key: str, value: bool) -> None:
-    if key not in ENTITY_UI_DEFAULT_OPEN:
-        raise KeyError("unknown Entity accordion key")
-    _ENTITY_UI_OPEN[key] = bool(value)
 
 
 def _set_finance_ui_open(key: str, value: bool) -> None:
@@ -297,6 +383,79 @@ def _save_core_advisor_settings(model: str | None, timeout_seconds: int) -> tupl
 def _block_visibility_class(section: str, key: str) -> str:
     visible = _UI_PREFERENCES["visibility"][section][key]
     return "" if visible else " hidden"
+
+def _entity_tab_config(
+    preferences: dict | None = None,
+) -> tuple[dict[str, bool], str]:
+    prefs = preferences or _UI_PREFERENCES
+
+    visible = {
+        key: bool(
+            prefs.get("visibility", {})
+            .get("entity", {})
+            .get(key, False)
+        )
+        for key in ENTITY_TAB_ORDER
+    }
+
+    if not any(visible.values()):
+        visible["overview"] = True
+
+    preferred = (
+        prefs.get("entity", {}).get("default_tab")
+        or ENTITY_TAB_DEFAULT
+    )
+
+    if (
+        preferred not in ENTITY_TAB_ORDER
+        or not visible.get(preferred, False)
+    ):
+        preferred = next(
+            key for key in ENTITY_TAB_ORDER if visible.get(key, False)
+        )
+
+    return visible, preferred
+
+
+def _entity_source_rows(detail: dict) -> list[dict]:
+    """Deduplicate Sources already referenced by Entity claims/relations."""
+    sources: dict[str, dict] = {}
+
+    for section_key, section_label in (
+        ("current", "現在"),
+        ("events", "Event"),
+        ("history", "履歴"),
+        ("relations", "関連"),
+    ):
+        for row in detail.get(section_key) or []:
+            uri = str(row.get("source_uri") or "").strip()
+            if not uri:
+                continue
+
+            item = sources.setdefault(
+                uri,
+                {
+                    "source_uri": uri,
+                    "areas": set(),
+                    "reference_count": 0,
+                },
+            )
+            item["areas"].add(section_label)
+            item["reference_count"] += 1
+
+    result = []
+    for index, uri in enumerate(sorted(sources), start=1):
+        item = sources[uri]
+        result.append(
+            {
+                "id": str(index),
+                "source_uri": uri,
+                "used_by": " / ".join(sorted(item["areas"])),
+                "reference_count": item["reference_count"],
+            }
+        )
+
+    return result
 
 
 COMPONENT_WRITE_PATTERN = re.compile(
@@ -4349,12 +4508,6 @@ def settings_page():
         "reviewed": "処理済みの確認待ち",
         "limits": "この最小実装の制限",
     }
-    entity_labels = {
-        "current": "現在のState / Attribute",
-        "relations": "Relations",
-        "events": "Event履歴",
-        "history": "過去のState / Attribute",
-    }
     finance_labels = {
         "filter": "家計フィルタ・検索",
         "stored": "保存済み家計",
@@ -4400,21 +4553,33 @@ def settings_page():
                         value=_UI_PREFERENCES["pkb"][key],
                     )
 
-        entity_open_controls = {}
         entity_visible_controls = {}
-        with ui.card().classes("w-full border-2 border-purple-200 bg-purple-50"):
-            ui.label("Entity詳細").classes("text-lg font-bold text-purple-900")
-            for key, label in entity_labels.items():
+        with ui.card().classes(
+            "w-full border-2 border-purple-200 bg-purple-50"
+        ):
+            ui.label("Entity詳細").classes(
+                "text-lg font-bold text-purple-900"
+            )
+            ui.label(
+                "各タブの表示と、Entity詳細を開いたときの初期タブを設定します。"
+            ).classes("text-sm text-grey-7")
+
+            for key in ENTITY_TAB_ORDER:
                 with ui.row().classes("w-full items-center gap-4"):
-                    ui.label(label).classes("grow")
+                    ui.label(ENTITY_TAB_LABELS[key]).classes("grow")
                     entity_visible_controls[key] = ui.switch(
                         "表示",
                         value=_UI_PREFERENCES["visibility"]["entity"][key],
                     )
-                    entity_open_controls[key] = ui.switch(
-                        "初期展開",
-                        value=_UI_PREFERENCES["entity"][key],
-                    )
+
+            entity_default_tab_select = ui.select(
+                options={
+                    key: ENTITY_TAB_LABELS[key]
+                    for key in ENTITY_TAB_ORDER
+                },
+                label="初期表示タブ",
+                value=_UI_PREFERENCES["entity"]["default_tab"],
+            ).classes("min-w-64")
 
         finance_open_controls = {}
         finance_visible_controls = {}
@@ -4483,8 +4648,10 @@ def settings_page():
                     for key, control in pkb_open_controls.items()
                 },
                 "entity": {
-                    key: bool(control.value)
-                    for key, control in entity_open_controls.items()
+                    "default_tab": (
+                        entity_default_tab_select.value
+                        or ENTITY_TAB_DEFAULT
+                    ),
                 },
                 "finance": {
                     **{
@@ -4526,10 +4693,12 @@ def settings_page():
                 control.value = preferences["pkb"][key]
             for key, control in pkb_visible_controls.items():
                 control.value = preferences["visibility"]["pkb"][key]
-            for key, control in entity_open_controls.items():
-                control.value = preferences["entity"][key]
             for key, control in entity_visible_controls.items():
                 control.value = preferences["visibility"]["entity"][key]
+
+            entity_default_tab_select.value = (
+                preferences["entity"]["default_tab"]
+            )
             for key, control in finance_open_controls.items():
                 control.value = preferences["finance"][key]
             for key, control in finance_visible_controls.items():
@@ -4544,14 +4713,31 @@ def settings_page():
 
         def save_and_apply():
             try:
+                if not any(
+                    bool(control.value)
+                    for control in entity_visible_controls.values()
+                ):
+                    ui.notify(
+                        "Entity詳細は少なくとも1つのタブを表示してください",
+                        type="negative",
+                    )
+                    return
+
                 saved = save_ui_preferences(collect_preferences())
                 _apply_ui_preferences(saved)
+
+                # Reflect validation/fallback immediately in the settings page.
+                sync_controls(saved)
+
                 ui.notify(
                     "表示設定を保存しました。各画面を開き直すと反映されます",
                     type="positive",
                 )
             except Exception as exc:
-                ui.notify("表示設定を保存できません: " + str(exc)[:220], type="negative")
+                ui.notify(
+                    "表示設定を保存できません: " + str(exc)[:220],
+                    type="negative",
+                )
 
         def restore_builtin():
             defaults = _default_ui_preferences()
@@ -5241,11 +5427,6 @@ def _display_result(result: dict):
 
 @ui.page("/entity/{entity_id}")
 def entity_page(entity_id: str):
-    def remember_expansion(key: str):
-        def _remember(event):
-            _set_entity_ui_open(key, event.value)
-        return _remember
-
     try:
         with connection() as db:
             detail = load_entity_detail(db, entity_id)
@@ -5258,158 +5439,254 @@ def entity_page(entity_id: str):
     with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
         _portal_header(
             "Entity 詳細",
-            "Entity / Current State / Relation / Event / Source を共通形式で表示",
+            "現在・履歴・関連・出典を共通Entity画面で確認",
         )
-        ui.button("PKBへ戻る", icon="arrow_back").props("flat href=/pkb tag=a")
+
+        # No arrow icon: keep navigation compact and text-only.
+        ui.button("PKBへ戻る").props("flat href=/pkb tag=a")
 
         if error:
-            with ui.card().classes("w-full border-2 border-red-300 bg-red-50"):
-                ui.label("Entity詳細を読み取れません: " + error).classes("text-red-800")
+            with ui.card().classes(
+                "w-full border-2 border-red-300 bg-red-50"
+            ):
+                ui.label(
+                    "Entity詳細を読み取れません: " + error
+                ).classes("text-red-800")
             return
+
         if detail is None:
             with ui.card().classes("w-full border-2 border-grey-300"):
                 ui.label("Entityが見つかりません。")
             return
 
         entity = detail["entity"]
-        with ui.card().classes("w-full border-2 border-blue-300 bg-blue-50"):
-            ui.label(entity["name"]).classes("text-2xl font-bold text-blue-900")
-            with ui.row().classes("w-full gap-3 flex-wrap"):
-                for label, value in (
-                    ("Domain", entity["domain"]),
-                    ("Type", entity["entity_type"]),
-                    ("Entity ID", entity["id"]),
-                ):
-                    with ui.card().classes("min-w-48"):
-                        ui.label(label).classes("text-xs text-grey-7")
-                        ui.label(str(value)).classes(
-                            "font-mono text-sm" if label == "Entity ID" else "text-base font-medium"
+
+        # Compact Entity header.
+        with ui.card().classes(
+            "w-full border-2 border-blue-300 bg-blue-50"
+        ):
+            with ui.row().classes(
+                "w-full items-center gap-4 flex-wrap"
+            ):
+                with ui.column().classes("gap-0 grow"):
+                    ui.label(entity["name"]).classes(
+                        "text-2xl font-bold text-blue-900"
+                    )
+                    ui.label(
+                        f'{entity["domain"]} / {entity["entity_type"]}'
+                    ).classes("text-sm text-grey-7")
+
+            ui.label(
+                f'Entity ID: {entity["id"]}'
+            ).classes("font-mono text-xs text-grey-7")
+
+        visible_tabs, default_tab = _entity_tab_config()
+        tab_refs = {}
+
+        with ui.tabs().classes("w-full") as tabs:
+            for key in ENTITY_TAB_ORDER:
+                if visible_tabs[key]:
+                    tab_refs[key] = ui.tab(ENTITY_TAB_LABELS[key])
+
+        with ui.tab_panels(
+            tabs,
+            value=tab_refs[default_tab],
+        ).classes("w-full"):
+
+            if visible_tabs["overview"]:
+                with ui.tab_panel(tab_refs["overview"]):
+                    rows = detail["current"]
+
+                    if not rows:
+                        ui.label(
+                            "現在値として表示できるState / Attributeはありません。"
+                        )
+                    else:
+                        display = [
+                            {
+                                **row,
+                                "value_display": str(row["value"]),
+                                "valid_from_display": str(row["valid_from"]),
+                            }
+                            for row in rows
+                        ]
+
+                        ui.table(
+                            columns=[
+                                {
+                                    "name": "kind",
+                                    "label": "意味",
+                                    "field": "semantic_kind",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "predicate",
+                                    "label": "項目",
+                                    "field": "predicate",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "value",
+                                    "label": "現在値",
+                                    "field": "value_display",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "since",
+                                    "label": "開始",
+                                    "field": "valid_from_display",
+                                    "align": "left",
+                                },
+                            ],
+                            rows=display,
+                            row_key="id",
+                        ).props("dense flat").classes("w-full")
+
+            if visible_tabs["history"]:
+                with ui.tab_panel(tab_refs["history"]):
+                    combined = []
+
+                    for row in detail["events"]:
+                        combined.append(
+                            {
+                                "id": "event:" + row["id"],
+                                "kind": "Event",
+                                "predicate": row["predicate"],
+                                "value_display": str(row["value"]),
+                                "time_display": str(row["valid_from"]),
+                                "_sort": str(row["valid_from"]),
+                            }
                         )
 
-        with ui.expansion(
-            "現在のState / Attribute",
-            value=_ENTITY_UI_OPEN["current"],
-            on_value_change=remember_expansion("current"),
-        ).classes(
-            "w-full border-2 border-green-300 bg-green-50 text-green-900"
-            + _block_visibility_class("entity", "current")
-        ):
-            rows = detail["current"]
-            if not rows:
-                ui.label("現在値として表示できるState / Attributeはありません。")
-            else:
-                display = [
-                    {
-                        **row,
-                        "value_display": str(row["value"]),
-                        "valid_from_display": str(row["valid_from"]),
-                    }
-                    for row in rows
-                ]
-                ui.table(
-                    columns=[
-                        {"name": "kind", "label": "意味", "field": "semantic_kind", "align": "left"},
-                        {"name": "predicate", "label": "項目", "field": "predicate", "align": "left"},
-                        {"name": "value", "label": "現在値", "field": "value_display", "align": "left"},
-                        {"name": "since", "label": "開始", "field": "valid_from_display", "align": "left"},
-                        {"name": "source", "label": "Source", "field": "source_uri", "align": "left"},
-                    ],
-                    rows=display,
-                    row_key="id",
-                ).props("dense flat").classes("w-full")
-
-        with ui.expansion(
-            "Relations",
-            value=_ENTITY_UI_OPEN["relations"],
-            on_value_change=remember_expansion("relations"),
-        ).classes(
-            "w-full border-2 border-purple-300 bg-purple-50 text-purple-900"
-            + _block_visibility_class("entity", "relations")
-        ):
-            relations = detail["relations"]
-            if not relations:
-                ui.label("現在または履歴Relationはありません。")
-            else:
-                for rel in relations:
-                    arrow = "→" if rel["direction"] == "outgoing" else "←"
-                    role = f" / role={rel['relation_role']}" if rel["relation_role"] else ""
-                    with ui.row().classes(
-                        "w-full items-center gap-3 border-b border-purple-200 py-2"
-                    ):
-                        ui.label(arrow).classes("text-lg font-bold")
-                        with ui.column().classes("grow gap-0"):
-                            ui.label(
-                                f"{rel['predicate']}{role} / {rel['other_entity_name']}"
-                            ).classes("font-medium")
-                            ui.label(
-                                f"{rel['other_entity_type']} / from {rel['valid_from']}"
-                            ).classes("text-xs text-grey-7")
-                        ui.button("詳細", icon="open_in_new").props(
-                            f"flat href=/entity/{rel['other_entity_id']} tag=a"
+                    for row in detail["history"]:
+                        combined.append(
+                            {
+                                "id": "history:" + row["id"],
+                                "kind": row["semantic_kind"],
+                                "predicate": row["predicate"],
+                                "value_display": str(row["value"]),
+                                "time_display": (
+                                    f'{row["valid_from"]} ～ {row["valid_to"]}'
+                                ),
+                                "_sort": str(row["valid_from"]),
+                            }
                         )
 
-        with ui.expansion(
-            "Event履歴",
-            value=_ENTITY_UI_OPEN["events"],
-            on_value_change=remember_expansion("events"),
-        ).classes(
-            "w-full border-2 border-orange-300 bg-orange-50 text-orange-900"
-            + _block_visibility_class("entity", "events")
-        ):
-            rows = detail["events"]
-            if not rows:
-                ui.label("Event履歴はありません。")
-            else:
-                display = [
-                    {
-                        **row,
-                        "value_display": str(row["value"]),
-                        "when_display": str(row["valid_from"]),
-                    }
-                    for row in rows
-                ]
-                ui.table(
-                    columns=[
-                        {"name": "when", "label": "時点", "field": "when_display", "align": "left"},
-                        {"name": "predicate", "label": "Event", "field": "predicate", "align": "left"},
-                        {"name": "value", "label": "値", "field": "value_display", "align": "left"},
-                        {"name": "source", "label": "Source", "field": "source_uri", "align": "left"},
-                    ],
-                    rows=display,
-                    row_key="id",
-                ).props("dense flat").classes("w-full")
+                    combined.sort(
+                        key=lambda row: row["_sort"],
+                        reverse=True,
+                    )
 
-        with ui.expansion(
-            "過去のState / Attribute",
-            value=_ENTITY_UI_OPEN["history"],
-            on_value_change=remember_expansion("history"),
-        ).classes(
-            "w-full border-2 border-grey-300 bg-grey-1"
-            + _block_visibility_class("entity", "history")
-        ):
-            rows = detail["history"]
-            if not rows:
-                ui.label("終了済みのState / Attributeはありません。")
-            else:
-                display = [
-                    {
-                        **row,
-                        "value_display": str(row["value"]),
-                        "period_display": f"{row['valid_from']} ～ {row['valid_to']}",
-                    }
-                    for row in rows
-                ]
-                ui.table(
-                    columns=[
-                        {"name": "kind", "label": "意味", "field": "semantic_kind", "align": "left"},
-                        {"name": "predicate", "label": "項目", "field": "predicate", "align": "left"},
-                        {"name": "value", "label": "値", "field": "value_display", "align": "left"},
-                        {"name": "period", "label": "有効期間", "field": "period_display", "align": "left"},
-                        {"name": "source", "label": "Source", "field": "source_uri", "align": "left"},
-                    ],
-                    rows=display,
-                    row_key="id",
-                ).props("dense flat").classes("w-full")
+                    if not combined:
+                        ui.label("履歴はありません。")
+                    else:
+                        ui.table(
+                            columns=[
+                                {
+                                    "name": "kind",
+                                    "label": "種類",
+                                    "field": "kind",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "time",
+                                    "label": "時点 / 有効期間",
+                                    "field": "time_display",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "predicate",
+                                    "label": "項目",
+                                    "field": "predicate",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "value",
+                                    "label": "値",
+                                    "field": "value_display",
+                                    "align": "left",
+                                },
+                            ],
+                            rows=combined,
+                            row_key="id",
+                        ).props("dense flat").classes("w-full")
+
+            if visible_tabs["relations"]:
+                with ui.tab_panel(tab_refs["relations"]):
+                    relations = detail["relations"]
+
+                    if not relations:
+                        ui.label(
+                            "現在または履歴Relationはありません。"
+                        )
+                    else:
+                        for rel in relations:
+                            direction_label = (
+                                "このEntityから"
+                                if rel["direction"] == "outgoing"
+                                else "このEntityへ"
+                            )
+                            role = (
+                                f' / role={rel["relation_role"]}'
+                                if rel["relation_role"]
+                                else ""
+                            )
+
+                            with ui.row().classes(
+                                "w-full items-center gap-3 "
+                                "border-b border-purple-200 py-2"
+                            ):
+                                with ui.column().classes("grow gap-0"):
+                                    ui.label(
+                                        f'{direction_label} / '
+                                        f'{rel["predicate"]}{role} / '
+                                        f'{rel["other_entity_name"]}'
+                                    ).classes("font-medium")
+
+                                    ui.label(
+                                        f'{rel["other_entity_type"]} / '
+                                        f'from {rel["valid_from"]}'
+                                    ).classes(
+                                        "text-xs text-grey-7"
+                                    )
+
+                                # No arrow/open icon.
+                                ui.button("詳細").props(
+                                    f'flat href=/entity/'
+                                    f'{rel["other_entity_id"]} tag=a'
+                                )
+
+            if visible_tabs["sources"]:
+                with ui.tab_panel(tab_refs["sources"]):
+                    rows = _entity_source_rows(detail)
+
+                    if not rows:
+                        ui.label("表示できるSourceはありません。")
+                    else:
+                        ui.table(
+                            columns=[
+                                {
+                                    "name": "source",
+                                    "label": "Source",
+                                    "field": "source_uri",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "used_by",
+                                    "label": "参照箇所",
+                                    "field": "used_by",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "count",
+                                    "label": "参照数",
+                                    "field": "reference_count",
+                                    "align": "right",
+                                },
+                            ],
+                            rows=rows,
+                            row_key="id",
+                        ).props("dense flat").classes("w-full")
 
 
 @ui.page("/pkb")
