@@ -171,6 +171,7 @@ class GuidedDialogueTests(unittest.TestCase):
             ),
             "question_for_user":("対象をもう少し具体的に教えてください" if state=="NEED_CLARIFICATION" else None),
             "answer_candidate":("観測された候補" if state=="READY" else None),
+            "knowledge_candidate":("スマホはPixel 10" if state=="KNOWLEDGE_CANDIDATE" else None),
             "action_candidate":None,
         }
 
@@ -315,6 +316,67 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(session["prompt_version"],PROMPT_VERSION)
         self.assertEqual(session["last_question_purpose"],"identify_missing_information")
         self.assertEqual(seen[1]["task_context"]["previous_turns"][0]["question_purpose"],"classify")
+    def test_knowledge_category_uses_minimal_candidate_purpose(self):
+        candidate=self.detail(state="KNOWLEDGE_CANDIDATE")
+        caller,seen=self.scripted(self.classification("KNOWLEDGE"),candidate)
+        session=start_dialogue("スマホをPixel 10に買い替えた",model="gemma3:12b",caller=caller)
+        self.assertEqual(seen[1]["question_purpose"],"formulate_knowledge_candidate")
+        self.assertIn("最小事実",seen[1]["question_from_ritsuko"])
+        self.assertEqual(session["status"],"proposal_ready")
+        self.assertEqual(session["detail"]["knowledge_candidate"],"スマホはPixel 10")
+
+    def test_knowledge_candidate_requires_explicit_candidate_and_no_requests(self):
+        candidate=self.detail(state="KNOWLEDGE_CANDIDATE")
+        candidate["knowledge_candidate"]=None
+        self.assertIn("knowledge_candidate:required",validate_turn("analyze",candidate))
+        candidate["knowledge_candidate"]="スマホはPixel 10"
+        candidate["information_requests"]=[{"source":"pkb","what":"追加属性","reason":"補足"}]
+        self.assertIn("information_requests:unexpected_for_knowledge_candidate",validate_turn("analyze",candidate))
+
+    def test_v2_prompt_has_freshness_and_user_last_resort_rules(self):
+        caller,seen=self.scripted(self.classification(),self.detail(source="web",what="公式の最新公開情報"))
+        start_dialogue("最新ドライバーは？",model="gemma3:12b",caller=caller)
+        prompt=seen[1]["question_from_ritsuko"]
+        self.assertIn("fresh external source",prompt)
+        self.assertIn("source=userは通常のread sourceではありません",prompt)
+        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v2")
+
+    def test_user_source_is_reviewed_once_before_waiting_on_user(self):
+        first=self.detail(source="user",what="症状の詳細")
+        reviewed=self.detail(source="user",what="症状の詳細")
+        caller,seen=self.scripted(self.classification("PROBLEM"),first,reviewed)
+        session=start_dialogue("PCが固まる",model="gemma3:12b",caller=caller)
+        self.assertEqual([x["question_purpose"] for x in seen],[
+            "classify","identify_missing_information","review_or_repair"
+        ])
+        self.assertTrue(session["user_source_reviewed"])
+        self.assertEqual(session["status"],"waiting_user")
+        self.assertEqual(session["next_step"],"ask_user_for_information")
+
+    def test_unclear_with_two_observations_uses_repair_instead_of_deeper_search(self):
+        first=self.detail(source="task_history",what="直近Task")
+        second=self.detail(source="task_history",what="完了後の履歴")
+        final=self.detail(state="READY")
+        caller,seen=self.scripted(self.classification("UNCLEAR"),first,second,final)
+        s1=start_dialogue("あれどうなった？",model="gemma3:12b",caller=caller)
+        s2=continue_with_observation(s1,"直近候補TaskはA",caller=caller)
+        s3=continue_with_observation(s2,"他に候補はない",caller=caller)
+        self.assertEqual(seen[-1]["question_purpose"],"review_or_repair")
+        self.assertIn("際限なく広げない",seen[-1]["question_from_ritsuko"])
+        self.assertEqual(s3["status"],"candidate_ready")
+
+    def test_need_information_on_last_turn_is_terminal_not_waiting(self):
+        initial=self.detail(source="task_history",what="履歴1")
+        next1=self.detail(source="task_history",what="履歴2")
+        last=self.detail(source="task_history",what="履歴3")
+        caller,seen=self.scripted(self.classification("UNCLEAR"),initial,next1,last)
+        s1=start_dialogue("あれ？",model="gemma3:12b",caller=caller)
+        s2=continue_with_observation(s1,"候補A",caller=caller)
+        s3=continue_with_observation(s2,"候補はAだけ",caller=caller)
+        self.assertEqual(len(s3["turns"]),4)
+        self.assertEqual(s3["status"],"stopped")
+        self.assertEqual(s3["next_step"],"max_turns_reached_with_pending_information")
+        self.assertTrue(s3["pending_requests"])
     def test_invalid_schema_stops_without_a_followup(self):
         caller,seen=self.scripted({"category":"INFORMATION"})
         session=start_dialogue("メインPCについて",model="gemma3:12b",caller=caller)

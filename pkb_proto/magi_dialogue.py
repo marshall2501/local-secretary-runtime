@@ -29,12 +29,13 @@ SOURCES = (
     "external_service", "pc_observation", "user",
 )
 MAX_TURNS = 4
-PROMPT_VERSION = "d19-state-driven-v1"
+PROMPT_VERSION = "d19-state-driven-v2"
 QUESTION_PURPOSES = (
     "understand_or_disambiguate",
     "identify_missing_information",
     "evaluate_observation",
     "formulate_answer",
+    "formulate_knowledge_candidate",
     "formulate_action",
     "review_or_repair",
 )
@@ -75,35 +76,47 @@ DETAIL_RULES = """現在のEnvelopeにあるユーザー原文、分類、Task C
 取得すれば答えられそうという将来の見通しや検索手順は、ユーザーへの回答ではありません。
 必要な情報があるならNEED_INFORMATIONとし、source / what / reasonを具体的に返してください。
 request_id等の管理IDはRITSUKOが採番するので生成しないでください。
-調べられる情報を未確認のままユーザーへの質問へ変えないでください。
-ユーザーへの質問は、利用可能な情報源では解けないblockingな曖昧さ・不足に限定してください。
+時間依存の公開情報で「最新・現在・本日」等の鮮度が要求される場合、鮮度を示すObservationが無ければPKBだけを最新情報の根拠にせず、web等のfresh external sourceを要求してください。
+本人固有の既知情報・履歴・過去取得値はPKBやtask_historyを優先できますが、公開情報の現在性そのものとは区別してください。
+source=userは通常のread sourceではありません。PKB / task_history / files / web等で解けないblocking情報にだけ使い、既存情報源で解決できる可能性があれば先にそちらを要求してください。
+明確で低リスクな本人申告や訂正は、ユーザーが明示した最小事実だけでKNOWLEDGE_CANDIDATEにできます。理由・経緯・利用目的・製品仕様等の補足を記録候補化の必須条件にしないでください。
+曖昧な参照語は、内部Observationから最も近い候補が一意で反証がない場合、その候補を「〜のことなら」のような限定表現付きで参照先として扱えます。候補が複数残る、または誤認の影響が大きい場合はNEED_CLARIFICATIONにしてください。過去履歴を無制限に広げ続けないでください。
 追加Observationがある場合は必ず内容を検討し、前回と同じ情報要求を理由なく繰り返さないでください。
 stateは現在の状況に最も近い1つを選択してください。
 READY=現在与えられた根拠だけで、ユーザーが求めた答えそのものをanswer_candidateへ書ける
 NEED_INFORMATION=情報源の読取・新しい観測が必要。information_requestsへ取得先と最小事実を返す
 NEED_CLARIFICATION=情報源では解決できず本人に聞かなければ進められない
-KNOWLEDGE_CANDIDATE=新情報・訂正を記録候補として検討可能
+KNOWLEDGE_CANDIDATE=明確な新情報・訂正の最小事実をknowledge_candidateへ書ける
 ACTION_PROPOSAL=権限・安全検査が必要な実行候補を提案
 UNABLE=現状では対応できない
-READYやACTION_PROPOSALでも、成功・完了・実行済みと宣言してはいけません。"""
+READY / KNOWLEDGE_CANDIDATE / ACTION_PROPOSALでも、成功・登録済み・完了・実行済みと宣言してはいけません。"""
 
 PURPOSE_INSTRUCTIONS = {
     "understand_or_disambiguate": """依頼の意味・対象・要求結果を解決できるかを検討してください。
 参照語や省略があっても、Task履歴・PKB等の利用可能な情報源で解決できそうなら、すぐ本人へ質問せずNEED_INFORMATIONでその情報を要求してください。
-情報源でも解決できない重要な曖昧さだけNEED_CLARIFICATIONにしてください。""",
+Observationから最も近い候補が一意で反証がなければ、限定表現付きでその候補を参照先として扱うことを検討してください。
+候補が複数残る、または誤認がblockingならNEED_CLARIFICATIONにしてください。内部履歴を無制限に遡らないでください。""",
     "identify_missing_information": """依頼を進めるために、今の証拠だけで十分かを判断してください。
 十分なら目的に応じてREADY / KNOWLEDGE_CANDIDATE / ACTION_PROPOSAL等を返してください。
-不足なら、本人固有情報・最新公開情報・Task履歴などの性質を考えて、必要最小限の事実と取得元をNEED_INFORMATIONで要求してください。""",
+不足なら必要最小限の事実と取得元をNEED_INFORMATIONで要求してください。
+時間依存の公開情報はfreshnessを満たすweb等を優先し、source=userは他の利用可能な情報源では解けないblocking情報だけにしてください。""",
     "evaluate_observation": """新しく追加されたObservationを前回の不足情報と照合してください。
 不足が解消したなら、現在の根拠から回答候補・記録候補・Action候補へ進んでください。
-まだ不足する場合だけNEED_INFORMATIONを返し、前回と同じ要求を繰り返すなら、今回のObservationの何が不足しているためかを明確にしてください。""",
+曖昧参照で一意の強い候補が得られたなら、限定表現付きで参照解決することを検討してください。
+まだ不足する場合だけNEED_INFORMATIONを返し、前回より古い／広い履歴を漫然と掘り続けないでください。内部情報で解けないblocking曖昧さならNEED_CLARIFICATIONに切り替えてください。""",
     "formulate_answer": """現在の根拠だけでユーザーへ直接答えられるかを判断してください。
 答えられるなら検索予定ではなく答えそのものをREADYのanswer_candidateへ返してください。
 答えに未取得の事実が必要ならNEED_INFORMATIONへ切り替えてください。""",
+    "formulate_knowledge_candidate": """ユーザー原文に明確な本人情報・訂正が含まれるかを判断してください。
+低リスクで明確なら、ユーザーが実際に述べた最小事実だけをKNOWLEDGE_CANDIDATEのknowledge_candidateへ書いてください。
+変更日・理由・利用目的・製品仕様等、ユーザーが述べていない補足は候補化の必須条件にしないでください。
+重大な矛盾や対象不明など候補化を阻む情報だけが不足する場合に限りNEED_INFORMATION / NEED_CLARIFICATIONを選んでください。""",
     "formulate_action": """依頼された操作・監視・処理について、実行候補と前提・影響・必要権限を整理してください。
 自分では実行せず、情報や対象が不足するなら先にNEED_INFORMATIONまたはNEED_CLARIFICATIONを選んでください。""",
     "review_or_repair": """直前のMAGI返答に矛盾または無進展の疑いがあります。現在のTask ContextとObservationから再点検してください。
 検索・確認・実行の予定をREADYの回答とみなさず、Observation後に同一情報要求を無根拠に繰り返さないでください。
+source=userを提案している場合は既存情報源で代替できないblocking情報だけを残してください。
+曖昧参照で一意の強い候補があるなら限定付き解決、候補が残るなら本人確認を選び、内部履歴を際限なく広げないでください。
 必要ならstateと要求内容を訂正し、進めない場合はその理由を具体化してください。""",
 }
 
@@ -124,7 +137,7 @@ _CLASSIFICATION_SCHEMA = {
 _DETAIL_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["understood_request", "state", "reason", "information_requests",
-                 "question_for_user", "answer_candidate", "action_candidate"],
+                 "question_for_user", "answer_candidate", "knowledge_candidate", "action_candidate"],
     "properties": {
         "understood_request": {"type": "string"},
         "state": {"type": "string", "enum": list(STATES)},
@@ -140,6 +153,7 @@ _DETAIL_SCHEMA = {
         }},
         "question_for_user": {"type": ["string", "null"]},
         "answer_candidate": {"type": ["string", "null"]},
+        "knowledge_candidate": {"type": ["string", "null"]},
         "action_candidate": {"type": ["string", "null"]},
     },
 }
@@ -191,6 +205,11 @@ def validate_turn(stage: str, output: object) -> list[str]:
                 errors.append("information_requests:unexpected_for_ready")
         if output.get("state") == "NEED_CLARIFICATION" and not str(output.get("question_for_user") or "").strip():
             errors.append("question_for_user:required")
+        if output.get("state") == "KNOWLEDGE_CANDIDATE":
+            if not isinstance(output.get("knowledge_candidate"), str) or not output["knowledge_candidate"].strip():
+                errors.append("knowledge_candidate:required")
+            if items:
+                errors.append("information_requests:unexpected_for_knowledge_candidate")
     return errors
 
 def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) -> dict:
@@ -253,6 +272,9 @@ def _select_question_purpose(session: dict) -> str:
     """Choose only the kind of judgment; MAGI still performs semantic analysis."""
     detail = session.get("detail") or {}
     if detail.get("state") == "NEED_INFORMATION" and session.get("observations"):
+        category = (session.get("classification") or {}).get("category")
+        if category == "UNCLEAR" and len(session["observations"]) >= 2:
+            return "review_or_repair"
         return "evaluate_observation"
     if detail.get("state") == "READY":
         return "review_or_repair"
@@ -261,6 +283,8 @@ def _select_question_purpose(session: dict) -> str:
         return "understand_or_disambiguate"
     if category in {"ACTION", "MONITORING"}:
         return "formulate_action"
+    if category == "KNOWLEDGE":
+        return "formulate_knowledge_candidate"
     if category == "CONVERSATION":
         return "formulate_answer"
     return "identify_missing_information"
@@ -336,6 +360,19 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
 
     if state == "NEED_INFORMATION":
         requests = response["information_requests"]
+        if (any(item.get("source") == "user" for item in requests)
+                and purpose != "review_or_repair"
+                and not session.get("user_source_reviewed")
+                and len(session["turns"]) < MAX_TURNS):
+            session["user_source_reviewed"] = True
+            prompt = _compose_question(
+                session, "review_or_repair",
+                issue="source=userが提案された。既存のPKB / task_history / files / web等で代替できないblocking情報だけuser要求として残す",
+            )
+            reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout)
+            if reviewed is None:
+                return session
+            return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair")
         signatures = _request_signatures(requests)
         repeated = bool(session["observations"]) and bool(signatures) and all(
             signature in session["previous_request_signatures"] for signature in signatures
@@ -359,9 +396,17 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
             {"request_id": f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}",
              **deepcopy(item)} for i, item in enumerate(requests, 1)
         ]
-        session.update(status="waiting_information", next_step="review_information_requests")
+        if len(session["turns"]) >= MAX_TURNS:
+            session.update(status="stopped", next_step="max_turns_reached_with_pending_information")
+        elif requests and all(item.get("source") == "user" for item in requests):
+            session.update(status="waiting_user", next_step="ask_user_for_information")
+        else:
+            session.update(status="waiting_information", next_step="review_information_requests")
     elif state == "NEED_CLARIFICATION":
-        session.update(status="waiting_user", next_step="consider_user_question")
+        if len(session["turns"]) >= MAX_TURNS:
+            session.update(status="stopped", next_step="max_turns_reached_with_user_question")
+        else:
+            session.update(status="waiting_user", next_step="consider_user_question")
     elif state in {"ACTION_PROPOSAL", "KNOWLEDGE_CANDIDATE"}:
         session.update(status="proposal_ready", next_step="review_proposal")
     elif state == "READY":
@@ -386,7 +431,7 @@ def start_dialogue(user_raw: str, *, model: str, timeout: float = 900.0,
         "status": "running", "next_step": "classify",
         "classification": None, "detail": None,
         "observations": [], "pending_requests": [], "previous_request_signatures": [],
-        "last_question_purpose": None,
+        "user_source_reviewed": False, "last_question_purpose": None,
         "turns": [], "legacy_router_used": False, "tool_read_executed": False,
     }
     if not session["user_raw"] or not model:
