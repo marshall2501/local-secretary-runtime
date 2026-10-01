@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from pkb_proto.magi_observation_loop import run_pkb_observation_loop
+from pkb_proto.magi_observation_loop import (
+    review_proposal,
+    run_pkb_observation_loop,
+)
 
 
 class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
@@ -138,6 +141,130 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("execute", calls)
         self.assertIn(("persist", None, "waiting_information"), calls)
 
+
+    async def test_review_proposal_claims_re_evaluates_and_finalizes(self):
+        calls = []
+        task_id = __import__("uuid").UUID(
+            "11111111-1111-4111-8111-111111111111"
+        )
+        session = {
+            "task_id": str(task_id),
+            "status": "proposal_ready",
+            "turns": [{}, {}, {}, {}, {}],
+        }
+        observation = {
+            "source": "memory_intake",
+            "verified": True,
+            "text": "Memory Intake committed / pending",
+        }
+
+        def claim(claimed_id, decision, memory_result):
+            calls.append(("claim", str(claimed_id), decision, memory_result))
+            return (
+                dict(session),
+                "pkb_search",
+                dict(observation),
+                {"decision": decision, "status": "processing"},
+            )
+
+        async def continue_review(saved, observed, **kwargs):
+            calls.append(("continue", saved["task_id"], observed["source"]))
+            updated = dict(saved)
+            updated.update(
+                status="review_evaluated",
+                next_step="ritsuko_finalize_review",
+                post_review_evaluation={"state": "READY"},
+                turns=[*saved["turns"], {
+                    "question_purpose": "evaluate_review_result",
+                    "status": "ok",
+                }],
+            )
+            return updated
+
+        def finalize(saved_id, updated, capability):
+            calls.append((
+                "finalize",
+                str(saved_id),
+                capability,
+                updated["status"],
+            ))
+
+        def abort(*args):
+            calls.append(("abort",))
+
+        updated = await review_proposal(
+            task_id,
+            "remember",
+            timeout=10,
+            claim_proposal_review_record=claim,
+            finalize_proposal_review_record=finalize,
+            abort_proposal_review_record=abort,
+            memory_result={"status": "committed", "input_id": "input-1"},
+            review_continuation=continue_review,
+        )
+
+        self.assertEqual(updated["status"], "review_evaluated")
+        self.assertEqual(
+            [item[0] for item in calls],
+            ["claim", "continue", "finalize"],
+        )
+        self.assertEqual(calls[0][2], "remember")
+        self.assertEqual(calls[-1][2], "pkb_search")
+
+    async def test_review_proposal_returns_task_to_retry_on_re_evaluation_failure(self):
+        calls = []
+        task_id = __import__("uuid").UUID(
+            "11111111-1111-4111-8111-111111111111"
+        )
+
+        def claim(claimed_id, decision, memory_result):
+            calls.append(("claim", decision))
+            return (
+                {
+                    "task_id": str(task_id),
+                    "status": "proposal_ready",
+                    "turns": [{}, {}, {}, {}, {}],
+                },
+                "pkb_search",
+                {
+                    "source": "proposal_review",
+                    "verified": True,
+                    "text": "answer only",
+                },
+                {"decision": decision, "status": "processing"},
+            )
+
+        async def fail_review(*args, **kwargs):
+            return {
+                "task_id": str(task_id),
+                "status": "stopped",
+                "next_step": "magi_unavailable",
+            }
+
+        def finalize(*args):
+            calls.append(("finalize",))
+
+        def abort(saved_id, error_type):
+            calls.append(("abort", str(saved_id), error_type))
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "proposal_review_re_evaluation_failed",
+        ):
+            await review_proposal(
+                task_id,
+                "answer_only",
+                timeout=10,
+                claim_proposal_review_record=claim,
+                finalize_proposal_review_record=finalize,
+                abort_proposal_review_record=abort,
+                review_continuation=fail_review,
+            )
+
+        self.assertEqual(
+            [item[0] for item in calls],
+            ["claim", "abort"],
+        )
 
     async def test_resume_user_answer_claims_same_task_continues_and_persists(self):
         calls = []
