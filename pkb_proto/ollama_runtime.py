@@ -10,6 +10,7 @@ import os
 
 DEFAULT_OLLAMA_CONTEXT_TOKENS = 65536
 DEFAULT_MAGI_OLLAMA_NUM_PREDICT = 4096
+OLLAMA_NUM_PREDICT_OPTIONS = (1024, 2048, 4096, 8192, 16384)
 OLLAMA_CONTEXT_OPTIONS = (4096, 8192, 16384, 32768, 65536, 131072)
 _MIN_CONTEXT_TOKENS = 1024
 _MAX_CONTEXT_TOKENS = 1048576
@@ -27,22 +28,26 @@ def normalize_context_tokens(value: object | None, *, default: int = DEFAULT_OLL
     return tokens
 
 
-def configured_magi_num_predict() -> int:
-    """Return the bounded MAGI Ollama generation budget.
-
-    Ollama reasoning/thinking tokens count against num_predict, so the MAGI
-    path uses a larger default than the old 1150-token cap.
-    """
-    raw = os.environ.get("LSA_MAGI_OLLAMA_NUM_PREDICT", "").strip()
-    if not raw:
-        return DEFAULT_MAGI_OLLAMA_NUM_PREDICT
+def normalize_magi_num_predict(
+    value: object | None,
+    *,
+    default: int = DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
+) -> int:
+    if value is None or str(value).strip() == "":
+        value = default
     try:
-        tokens = int(raw)
-    except ValueError as exc:
+        tokens = int(value)
+    except (TypeError, ValueError) as exc:
         raise ValueError("invalid_magi_ollama_num_predict") from exc
     if not 256 <= tokens <= 32768:
         raise ValueError("invalid_magi_ollama_num_predict")
     return tokens
+
+
+def configured_magi_num_predict() -> int:
+    """Return the bootstrap/fallback MAGI Ollama generation budget."""
+    raw = os.environ.get("LSA_MAGI_OLLAMA_NUM_PREDICT", "").strip()
+    return normalize_magi_num_predict(raw or DEFAULT_MAGI_OLLAMA_NUM_PREDICT)
 
 
 def configured_context_tokens(env_name: str | None = None) -> int:
