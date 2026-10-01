@@ -34,6 +34,8 @@ DEFAULT_CREDENTIAL_ENVS = {
     "gemini": "GEMINI_API_KEY",
 }
 DEFAULT_TIMEOUT_SECONDS = 120
+DEFAULT_RETRY_HTTP_CODES = (429, 500, 502, 503, 504)
+DEFAULT_RETRY_WITHIN_TURN = True
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -68,9 +70,32 @@ def _env_int(name: str, default: int) -> int:
 def provider_defaults(provider: str) -> tuple[str, str | None]:
     if provider not in PROVIDERS:
         raise ValueError("unsupported_provider")
-    endpoint = DEFAULT_ENDPOINTS[provider]
-    credential_env = DEFAULT_CREDENTIAL_ENVS[provider]
-    return endpoint, credential_env
+    return DEFAULT_ENDPOINTS[provider], DEFAULT_CREDENTIAL_ENVS[provider]
+
+
+def normalize_retry_http_codes(value: object | None) -> tuple[int, ...]:
+    if value is None:
+        return DEFAULT_RETRY_HTTP_CODES
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raise ValueError("invalid_retry_http_codes")
+
+    codes: list[int] = []
+    for item in raw_items:
+        try:
+            code = int(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid_retry_http_codes") from exc
+        if not 400 <= code <= 599:
+            raise ValueError("invalid_retry_http_codes")
+        if code not in codes:
+            codes.append(code)
+    if len(codes) > 20:
+        raise ValueError("too_many_retry_http_codes")
+    return tuple(codes)
 
 
 def _normalize_provider(value: object) -> str:
@@ -126,11 +151,7 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
         provider = _normalize_provider(
             os.environ.get(prefix + "PROVIDER") or legacy_providers[member]
         )
-        model = (
-            os.environ.get(prefix + "MODEL")
-            or legacy_models[member]
-            or ""
-        ).strip()
+        model = (os.environ.get(prefix + "MODEL") or legacy_models[member] or "").strip()
         endpoint_default, credential_default = provider_defaults(provider)
         endpoint = (
             os.environ.get(prefix + "ENDPOINT")
@@ -143,10 +164,7 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
             )
             or endpoint_default
         ).strip()
-        credential_env = (
-            os.environ.get(prefix + "CREDENTIAL_ENV")
-            or credential_default
-        )
+        credential_env = os.environ.get(prefix + "CREDENTIAL_ENV") or credential_default
         configured_context = normalize_context_tokens(
             os.environ.get(prefix + "CONTEXT_TOKENS")
             or os.environ.get("LSA_OLLAMA_CONTEXT_TOKENS")
@@ -165,18 +183,14 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
             "model": model,
             "endpoint": endpoint,
             "credential_env": credential_env,
-            "context_window_tokens": (
-                configured_context
-                if provider == "ollama"
-                else None
-            ),
+            "context_window_tokens": configured_context if provider == "ollama" else None,
             "ollama_num_predict": (
-                configured_magi_num_predict()
-                if provider == "ollama"
-                else None
+                configured_magi_num_predict() if provider == "ollama" else None
             ),
+            "retry_http_codes": list(DEFAULT_RETRY_HTTP_CODES),
             "weight": _env_float(prefix + "WEIGHT", 1.0),
             "timeout_seconds": _env_int(prefix + "TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
+            "retry_within_turn": DEFAULT_RETRY_WITHIN_TURN,
             "enabled": bool(enabled and model),
             "settings_source": "env_fallback",
         })
@@ -193,7 +207,8 @@ def _row_profile(row) -> dict:
         "credential_env": row[5],
         "context_window_tokens": row[6],
         "ollama_num_predict": row[7],
-        "enabled": bool(row[8]),
+        "retry_http_codes": list(row[8] or []),
+        "enabled": bool(row[9]),
     }
 
 
@@ -202,7 +217,8 @@ def list_llm_profiles(db, *, include_disabled: bool = False) -> list[dict]:
     with db.cursor() as cur:
         cur.execute(
             f"""SELECT id, display_name, provider, model, endpoint, credential_env,
-                       context_window_tokens, ollama_num_predict, enabled
+                       context_window_tokens, ollama_num_predict,
+                       retry_http_codes, enabled
                 FROM secretary.llm_profiles
                 {where}
                 ORDER BY provider, display_name, model"""
@@ -220,6 +236,7 @@ def upsert_llm_profile(
     credential_env: str | None = None,
     context_window_tokens: int | None = None,
     ollama_num_predict: int | None = None,
+    retry_http_codes: object | None = None,
     enabled: bool = True,
     profile_id: str | None = None,
 ) -> dict:
@@ -235,6 +252,7 @@ def upsert_llm_profile(
     )
     requested_context = context_window_tokens
     requested_num_predict = ollama_num_predict
+    requested_retry_codes = retry_http_codes
     display_name = str(display_name or f"{provider} / {model}").strip()
     if not display_name:
         raise ValueError("display_name_required")
@@ -246,7 +264,7 @@ def upsert_llm_profile(
             except ValueError as exc:
                 raise ValueError("invalid_profile_id") from exc
             cur.execute(
-                """SELECT id, context_window_tokens, ollama_num_predict
+                """SELECT id, context_window_tokens, ollama_num_predict, retry_http_codes
                    FROM secretary.llm_profiles
                    WHERE id=%s""",
                 (requested_profile_id,),
@@ -257,7 +275,7 @@ def upsert_llm_profile(
             profile_uuid = row[0]
         else:
             cur.execute(
-                """SELECT id, context_window_tokens, ollama_num_predict
+                """SELECT id, context_window_tokens, ollama_num_predict, retry_http_codes
                    FROM secretary.llm_profiles
                    WHERE provider=%s AND model=%s
                      AND endpoint IS NOT DISTINCT FROM %s
@@ -266,6 +284,7 @@ def upsert_llm_profile(
             )
             row = cur.fetchone()
             profile_uuid = row[0] if row else uuid4()
+
         if provider == "ollama":
             context_window_tokens = normalize_context_tokens(
                 requested_context if requested_context is not None
@@ -280,31 +299,41 @@ def upsert_llm_profile(
         else:
             context_window_tokens = None
             ollama_num_predict = None
+
+        retry_http_codes = normalize_retry_http_codes(
+            requested_retry_codes
+            if requested_retry_codes is not None
+            else row[3] if row and row[3] is not None
+            else DEFAULT_RETRY_HTTP_CODES
+        )
+
         if row:
             cur.execute(
                 """UPDATE secretary.llm_profiles
                    SET display_name=%s, provider=%s, model=%s, endpoint=%s,
                        credential_env=%s, context_window_tokens=%s,
-                       ollama_num_predict=%s, enabled=%s, updated_at=now()
+                       ollama_num_predict=%s, retry_http_codes=%s,
+                       enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
                     display_name, provider, model, endpoint, credential_env,
                     context_window_tokens, ollama_num_predict,
-                    bool(enabled), profile_uuid,
+                    list(retry_http_codes), bool(enabled), profile_uuid,
                 ),
             )
         else:
             cur.execute(
                 """INSERT INTO secretary.llm_profiles
                    (id, display_name, provider, model, endpoint, credential_env,
-                    context_window_tokens, ollama_num_predict, enabled)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    context_window_tokens, ollama_num_predict, retry_http_codes, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     profile_uuid, display_name, provider, model, endpoint,
                     credential_env, context_window_tokens, ollama_num_predict,
-                    bool(enabled),
+                    list(retry_http_codes), bool(enabled),
                 ),
             )
+
     return {
         "id": str(profile_uuid),
         "display_name": display_name,
@@ -314,6 +343,7 @@ def upsert_llm_profile(
         "credential_env": credential_env,
         "context_window_tokens": context_window_tokens,
         "ollama_num_predict": ollama_num_predict,
+        "retry_http_codes": list(retry_http_codes),
         "enabled": bool(enabled),
     }
 
@@ -333,6 +363,7 @@ def sync_ollama_profiles(db, models: list[str], *, endpoint: str | None = None) 
             credential_env=None,
             context_window_tokens=None,
             ollama_num_predict=None,
+            retry_http_codes=None,
             enabled=True,
         ))
     return synced
@@ -348,6 +379,7 @@ def _profile_id_for_spec(db, spec: dict) -> str:
         credential_env=spec.get("credential_env"),
         context_window_tokens=spec.get("context_window_tokens"),
         ollama_num_predict=spec.get("ollama_num_predict"),
+        retry_http_codes=spec.get("retry_http_codes"),
         enabled=True,
     )
     return profile["id"]
@@ -358,8 +390,9 @@ def load_member_specs(db) -> list[dict]:
         cur.execute(
             """SELECT a.member, a.profile_id, p.display_name, p.provider, p.model,
                       p.endpoint, p.credential_env, p.context_window_tokens,
-                      p.ollama_num_predict,
-                      a.weight, a.timeout_seconds, a.enabled, p.enabled
+                      p.ollama_num_predict, p.retry_http_codes,
+                      a.weight, a.timeout_seconds, a.retry_within_turn,
+                      a.enabled, p.enabled
                FROM secretary.magi_member_assignments a
                JOIN secretary.llm_profiles p ON p.id=a.profile_id"""
         )
@@ -380,9 +413,11 @@ def load_member_specs(db) -> list[dict]:
             "credential_env": row[6],
             "context_window_tokens": row[7],
             "ollama_num_predict": row[8],
-            "weight": float(row[9]),
-            "timeout_seconds": int(row[10]),
-            "enabled": bool(row[11] and row[12]),
+            "retry_http_codes": list(row[9] or []),
+            "weight": float(row[10]),
+            "timeout_seconds": int(row[11]),
+            "retry_within_turn": bool(row[12]),
+            "enabled": bool(row[13] and row[14]),
             "settings_source": "database",
         })
     return specs
@@ -409,6 +444,9 @@ def save_member_assignments(db, assignments: list[dict]) -> list[dict]:
             "timeout_seconds": _normalize_timeout(
                 item.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
             ),
+            "retry_within_turn": bool(
+                item.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)
+            ),
         }
 
     if set(by_member) != set(MEMBER_NAMES):
@@ -431,17 +469,20 @@ def save_member_assignments(db, assignments: list[dict]) -> list[dict]:
                     raise ValueError("disabled_profile")
                 cur.execute(
                     """INSERT INTO secretary.magi_member_assignments
-                       (member, profile_id, enabled, weight, timeout_seconds, updated_at)
-                       VALUES (%s,%s,%s,%s,%s,now())
+                       (member, profile_id, enabled, weight, timeout_seconds,
+                        retry_within_turn, updated_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,now())
                        ON CONFLICT (member) DO UPDATE SET
                          profile_id=EXCLUDED.profile_id,
                          enabled=EXCLUDED.enabled,
                          weight=EXCLUDED.weight,
                          timeout_seconds=EXCLUDED.timeout_seconds,
+                         retry_within_turn=EXCLUDED.retry_within_turn,
                          updated_at=now()""",
                     (
                         member, item["profile_id"], item["enabled"],
                         item["weight"], item["timeout_seconds"],
+                        item["retry_within_turn"],
                     ),
                 )
     return load_member_specs(db)
@@ -461,6 +502,9 @@ def bootstrap_member_assignments(db, fallback_specs: list[dict]) -> list[dict]:
             "enabled": spec["enabled"],
             "weight": spec["weight"],
             "timeout_seconds": spec["timeout_seconds"],
+            "retry_within_turn": spec.get(
+                "retry_within_turn", DEFAULT_RETRY_WITHIN_TURN
+            ),
         })
 
     if not any(item["enabled"] for item in assignments):
