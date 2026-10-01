@@ -241,6 +241,70 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('手動Observationで継続（開発用）'))
             self.assertTrue(self.elements('未解決の情報要求（自動PKB read対象外または追加情報が必要）'))
 
+    async def test_waiting_magi_task_open_restores_interactive_user_resume(self):
+        saved_session = {
+            'task_id': self.waiting[0]['id'],
+            'user_raw': 'メインPCのGPUの種類は？',
+            'model': '',
+            'prompt_version': 'd19-state-driven-v4',
+            'status': 'waiting_user',
+            'next_step': 'ask_user_after_exhausted_pkb',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': 'GPUモデルを知りたい',
+            },
+            'detail': {
+                'state': 'NEED_INFORMATION',
+                'reason': 'PKBでモデル未確認',
+            },
+            'pending_requests': [{
+                'request_id': 'REQ-1',
+                'source': 'user',
+                'what': 'GPU1のモデル',
+                'reason': 'PKBで未確認',
+            }],
+            'observations': [{
+                'source': 'pkb',
+                'verified': True,
+                'confidentiality': 'private',
+                'text': 'GPU1はあるがmodel未確認',
+            }],
+            'previous_request_signatures': [],
+            'conversation_context': [],
+            'user_question': 'GPU1のモデルを教えてください',
+            'magi_disagreement': None,
+            'user_source_reviewed': True,
+            'last_question_purpose': 'review_or_repair',
+            'turns': [{
+                'stage': 'analyze',
+                'question_purpose': 'review_or_repair',
+                'request_envelope': {'turn': 4},
+                'status': 'ok',
+                'response': {'state': 'NEED_INFORMATION'},
+                'errors': [],
+                'diagnostic': {},
+                'member_results': [],
+                'consensus': None,
+            }],
+            'legacy_router_used': False,
+            'tool_read_executed': True,
+        }
+        self.waiting[0].update({
+            'core_slice': 'ritsuko_magi_observation_v1',
+            'selected_capability': 'pkb_search',
+            'magi_session': saved_session,
+        })
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=[]
+        ):
+            daily.core_page()
+            await self.click('開く', 0)
+            self.assertFalse(
+                self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
+            )
+            self.assertTrue(self.elements('追加説明・選択'))
+            self.assertTrue(self.elements('追加説明を渡して対話継続'))
+
     async def test_completed_magi_task_open_restores_saved_dialogue_read_only(self):
         saved_session = {
             'task_id': self.done[0]['id'],
