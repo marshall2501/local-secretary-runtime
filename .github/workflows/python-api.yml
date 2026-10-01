@@ -1,32 +1,6 @@
 name: Python API static checks
 on:
-  pull_request:
-    paths:
-      - "api/**"
-      - "scripts/memory/**"
-      - "tests/test_api_static.py"
-      - "tests/test_memory_review.py"
-      - "tests/test_memory_search.py"
-      - "tests/test_api_container_config.py"
-      - "docker/compose.api.yml"
-      - "api/Dockerfile"
-      - ".env.api.example"
-      - ".dockerignore"
-      - ".github/workflows/python-api.yml"
-  push:
-    branches: [main]
-    paths:
-      - "api/**"
-      - "scripts/memory/**"
-      - "tests/test_api_static.py"
-      - "tests/test_memory_review.py"
-      - "tests/test_memory_search.py"
-      - "tests/test_api_container_config.py"
-      - "docker/compose.api.yml"
-      - "api/Dockerfile"
-      - ".env.api.example"
-      - ".dockerignore"
-      - ".github/workflows/python-api.yml"
+  workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest

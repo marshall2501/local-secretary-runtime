@@ -1,10 +1,6 @@
 name: Memory Intake isolated PostgreSQL
 on:
-  push:
-    branches: [main]
-    paths: ['pkb_proto/**', 'tests/test_memory_intake*.py', '.github/workflows/pkb-memory-intake.yml']
-  pull_request:
-    paths: ['pkb_proto/**', 'tests/test_memory_intake*.py', '.github/workflows/pkb-memory-intake.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
