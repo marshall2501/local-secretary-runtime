@@ -4207,7 +4207,14 @@ def core_page(task_id: str = ""):
                     ui.label(
                         "Proposal review: "
                         + str(proposal_review.get("decision") or "-")
+                        + " / " + str(proposal_review.get("status") or "-")
                     ).classes("font-mono text-xs text-green-800")
+                    evaluation = proposal_review.get("magi_evaluation")
+                    if isinstance(evaluation, dict):
+                        ui.label(
+                            "Post-review MAGI: "
+                            + str(evaluation.get("state") or "-")
+                        ).classes("font-mono text-xs text-purple-800")
                     memory_summary = proposal_review.get("memory_intake")
                     if isinstance(memory_summary, dict):
                         decisions = [
@@ -4432,22 +4439,62 @@ def core_page(task_id: str = ""):
                             trace_panel.refresh()
                             resume_panel.refresh()
 
-                        async def complete_answer_only():
+                        async def run_proposal_review(
+                            decision: str,
+                            memory_result: dict | None = None,
+                        ) -> None:
+                            if state["guided_busy"]:
+                                return
+                            stop_event = begin_guided_run(len(session["turns"]) + 1)
                             answer_only_button.disable()
                             remember_button.disable()
+                            guided_button.disable()
+                            guided_result_panel.refresh()
                             try:
-                                await run.io_bound(
-                                    _complete_magi_answer_only_record,
+                                state["guided_session"] = await review_magi_proposal(
                                     UUID(session["task_id"]),
+                                    decision,
+                                    timeout=guided_timeout_seconds(session),
+                                    claim_proposal_review_record=(
+                                        _claim_magi_proposal_review_record
+                                    ),
+                                    finalize_proposal_review_record=(
+                                        _finalize_magi_proposal_review_record
+                                    ),
+                                    abort_proposal_review_record=(
+                                        _abort_magi_proposal_review_record
+                                    ),
+                                    memory_result=memory_result,
+                                    stop_requested=stop_event.is_set,
+                                    on_turn_start=note_guided_turn,
                                 )
                                 await refresh_after_proposal_review()
+                            finally:
+                                state["guided_busy"] = False
+                                state["guided_stop_event"] = None
+                                guided_button.enable()
+                                guided_result_panel.refresh()
+                                open_tasks_panel.refresh()
+                                completed_tasks_panel.refresh()
+
+                        async def complete_answer_only():
+                            try:
+                                await run_proposal_review("answer_only")
                                 ui.notify(
-                                    "回答だけでTaskを完了しました",
+                                    "回答レビューを再評価し、Taskを完了しました",
                                     type="positive",
                                 )
                             except Exception as exc:
                                 answer_only_button.enable()
                                 remember_button.enable()
+                                try:
+                                    saved_trace = await run.io_bound(
+                                        load_core_task_trace,
+                                        UUID(session["task_id"]),
+                                    )
+                                    state["trace"] = saved_trace
+                                except Exception:
+                                    pass
                                 ui.notify(
                                     type(exc).__name__ + ": " + str(exc)[:180],
                                     type="negative",
@@ -4465,19 +4512,18 @@ def core_page(task_id: str = ""):
                                     register_memory_intake,
                                     intake,
                                 )
-                                await run.io_bound(
-                                    _complete_magi_memory_review_record,
-                                    UUID(session["task_id"]),
+                                await run_proposal_review(
+                                    "remember",
                                     memory_result,
                                 )
-                                await refresh_after_proposal_review()
                                 decisions = [
                                     str(item.get("decision") or "-")
                                     for item in (memory_result.get("candidates") or [])
                                     if isinstance(item, dict)
                                 ]
                                 ui.notify(
-                                    "Memory Intake処理後にTaskを完了しました"
+                                    "Memory Intake結果をMAGIへ再評価し、"
+                                    "RITSUKOがTaskを完了しました"
                                     + (
                                         " (" + ", ".join(decisions) + ")"
                                         if decisions else ""
@@ -4487,6 +4533,14 @@ def core_page(task_id: str = ""):
                             except Exception as exc:
                                 answer_only_button.enable()
                                 remember_button.enable()
+                                try:
+                                    saved_trace = await run.io_bound(
+                                        load_core_task_trace,
+                                        UUID(session["task_id"]),
+                                    )
+                                    state["trace"] = saved_trace
+                                except Exception:
+                                    pass
                                 ui.notify(
                                     type(exc).__name__ + ": " + str(exc)[:180],
                                     type="negative",
