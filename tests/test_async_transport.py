@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -7,7 +8,7 @@ import anyio
 import httpx
 
 from pkb_proto.async_transport import AsyncRequestTimeout, request_json
-from pkb_proto.magi_async import call_guided_panel_async
+from pkb_proto.magi_async import call_guided_panel_async, start_dialogue_async
 
 
 class _SlowTransport(httpx.AsyncBaseTransport):
@@ -28,6 +29,23 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
                     timeout=0.02,
                     client=client,
                 )
+
+    async def test_parent_cancel_propagates_without_waiting_for_deadline(self):
+        async with httpx.AsyncClient(
+            transport=_SlowTransport(), timeout=None
+        ) as client:
+            task = asyncio.create_task(
+                request_json(
+                    "GET",
+                    "https://example.invalid/cancel",
+                    timeout=10,
+                    client=client,
+                )
+            )
+            await asyncio.sleep(0.02)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
 
     async def test_panel_members_execute_concurrently(self):
         active = 0
@@ -188,6 +206,72 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["consensus"]["valid_members"], ["MELCHIOR"])
         by_name = {item["name"]: item for item in result["member_results"]}
         self.assertEqual(by_name["CASPER"]["errors"], ["timeout"])
+
+
+
+class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_request_after_current_turn_prevents_next_turn(self):
+        stop = {"requested": False}
+        calls = []
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            calls.append(envelope["turn"])
+            stop["requested"] = True
+            return {
+                "status": "ok",
+                "response": {
+                    "category": "INFORMATION",
+                    "understood_request": "富士山の高さを知りたい",
+                    "reason": "情報照会",
+                    "confidence": "high",
+                    "multiple_requests": False,
+                },
+                "errors": [],
+                "diagnostic": {"mode": "test"},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        specs = [
+            {
+                "name": "MELCHIOR",
+                "profile_id": "p1",
+                "provider": "ollama",
+                "model": "local-a",
+                "weight": 1.0,
+                "timeout_seconds": 1,
+                "enabled": True,
+            },
+            {
+                "name": "CASPER",
+                "profile_id": "p2",
+                "provider": "openai",
+                "model": "cloud-b",
+                "weight": 1.0,
+                "timeout_seconds": 1,
+                "enabled": False,
+            },
+            {
+                "name": "BALTHASAR",
+                "profile_id": "p3",
+                "provider": "gemini",
+                "model": "cloud-c",
+                "weight": 1.0,
+                "timeout_seconds": 1,
+                "enabled": False,
+            },
+        ]
+        session = await start_dialogue_async(
+            "富士山の高さを教えて",
+            member_specs=specs,
+            timeout=1,
+            caller=caller,
+            stop_requested=lambda: stop["requested"],
+        )
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(session["turns"]), 1)
+        self.assertEqual(session["status"], "stopped")
+        self.assertEqual(session["next_step"], "user_requested_stop")
 
 
 if __name__ == "__main__":
