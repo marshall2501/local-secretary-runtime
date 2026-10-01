@@ -48,7 +48,7 @@ from .magi_dialogue import (
     validate_turn,
 )
 from .magi_settings import DEFAULT_TIMEOUT_SECONDS
-from .ollama_runtime import configured_magi_num_predict, normalize_context_tokens
+from .ollama_runtime import configured_magi_num_predict, normalize_context_tokens, normalize_magi_num_predict
 from .ritsuko_magi_protocol import default_resource_catalog
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -86,6 +86,7 @@ async def _call_ollama_guided_async(
     timeout: float,
     base_url: str | None = None,
     context_window_tokens: int | None = None,
+    ollama_num_predict: int | None = None,
 ) -> dict:
     stage = envelope["stage"]
     schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
@@ -99,7 +100,11 @@ async def _call_ollama_guided_async(
         ],
         "options": {
             "temperature": 0,
-            "num_predict": configured_magi_num_predict(),
+            "num_predict": normalize_magi_num_predict(
+                ollama_num_predict
+                if ollama_num_predict is not None
+                else configured_magi_num_predict()
+            ),
             "num_ctx": normalize_context_tokens(context_window_tokens),
         },
     }
@@ -363,6 +368,7 @@ async def _call_panel_member_async(
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
             context_window_tokens=spec.get("context_window_tokens"),
+            ollama_num_predict=spec.get("ollama_num_predict"),
         )
     elif provider == "openai":
         result = await _call_openai_guided_async(
@@ -396,6 +402,7 @@ async def _call_panel_member_async(
         "weight": spec["weight"],
         "timeout_seconds": spec.get("timeout_seconds"),
         "context_window_tokens": spec.get("context_window_tokens"),
+        "ollama_num_predict": spec.get("ollama_num_predict"),
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
@@ -431,6 +438,8 @@ async def call_guided_panel_async(
                 "model": spec["model"],
                 "weight": spec["weight"],
                 "timeout_seconds": spec.get("timeout_seconds"),
+                "context_window_tokens": spec.get("context_window_tokens"),
+                "ollama_num_predict": spec.get("ollama_num_predict"),
                 "status": "unavailable",
                 "response": None,
                 "errors": [type(exc).__name__],
@@ -459,6 +468,7 @@ async def call_guided_panel_async(
                     "weight": spec["weight"],
                     "timeout_seconds": spec["timeout_seconds"],
                     "context_window_tokens": spec.get("context_window_tokens"),
+                    "ollama_num_predict": spec.get("ollama_num_predict"),
                 }
                 for spec in specs
             ],
