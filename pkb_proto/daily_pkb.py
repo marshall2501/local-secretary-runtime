@@ -54,8 +54,10 @@ from .magi_settings import (
     save_member_assignments, sync_ollama_profiles, upsert_llm_profile,
 )
 from .ollama_runtime import (
+    DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
     OLLAMA_CONTEXT_OPTIONS,
+    OLLAMA_NUM_PREDICT_OPTIONS,
 )
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
@@ -583,6 +585,7 @@ def _register_magi_profile(
     endpoint: str | None = None,
     credential_env: str | None = None,
     context_window_tokens: int | None = None,
+    ollama_num_predict: int | None = None,
 ) -> dict:
     with connection() as db:
         return upsert_llm_profile(
@@ -593,6 +596,7 @@ def _register_magi_profile(
             endpoint=endpoint,
             credential_env=credential_env,
             context_window_tokens=context_window_tokens,
+            ollama_num_predict=ollama_num_predict,
             enabled=True,
         )
 
@@ -5267,9 +5271,15 @@ def settings_page():
                             if item["provider"] == "ollama"
                             else "provider管理"
                         )
+                        generation_label = (
+                            str(item.get("ollama_num_predict")) + " tokens"
+                            if item["provider"] == "ollama"
+                            else "provider管理"
+                        )
                         ui.label(
                             f"{item['display_name']} / provider={item['provider']} "
                             f"/ model={item['model']} / context={context_label} "
+                            f"/ generation={generation_label} "
                             f"/ credential={credential} / {state_label}"
                         ).classes("font-mono text-xs")
 
@@ -5306,6 +5316,14 @@ def settings_page():
                     value=DEFAULT_OLLAMA_CONTEXT_TOKENS,
                     label="Context Window（Ollamaのみ）",
                 ).classes("min-w-56")
+                profile_generation = ui.select(
+                    options={
+                        value: f"{value} tokens"
+                        for value in OLLAMA_NUM_PREDICT_OPTIONS
+                    },
+                    value=DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
+                    label="Generation Budget（Ollamaのみ）",
+                ).classes("min-w-56")
 
                 def fill_provider_defaults():
                     try:
@@ -5322,9 +5340,15 @@ def settings_page():
                         if provider == "ollama"
                         else None
                     )
+                    profile_generation.value = (
+                        DEFAULT_MAGI_OLLAMA_NUM_PREDICT
+                        if provider == "ollama"
+                        else None
+                    )
                     profile_endpoint.update()
                     profile_credential.update()
                     profile_context.update()
+                    profile_generation.update()
 
                 ui.button(
                     "既定値を入れる",
@@ -5344,6 +5368,12 @@ def settings_page():
                             int(profile_context.value)
                             if str(profile_provider.value or "") == "ollama"
                             and profile_context.value is not None
+                            else None
+                        ),
+                        ollama_num_predict=(
+                            int(profile_generation.value)
+                            if str(profile_provider.value or "") == "ollama"
+                            and profile_generation.value is not None
                             else None
                         ),
                     )
