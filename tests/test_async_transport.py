@@ -107,11 +107,12 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
                 model="qwen3.5:9b",
                 timeout=1,
                 context_window_tokens=32768,
+                ollama_num_predict=8192,
             )
         self.assertEqual(result["status"], "ok")
         payload = mock.await_args.kwargs["json_body"]
         self.assertEqual(payload["options"]["num_ctx"], 32768)
-        self.assertEqual(payload["options"]["num_predict"], 4096)
+        self.assertEqual(payload["options"]["num_predict"], 8192)
 
     async def test_magi_ollama_num_predict_env_override_is_used(self):
         response = {
