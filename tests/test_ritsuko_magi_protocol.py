@@ -9,7 +9,7 @@ from pkb_proto.magi_client import call_member, choose_model
 from pkb_proto.magi_dialogue import (
     CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation,
     continue_with_user_clarification, panel_member_specs,
-    select_weighted_consensus, validate_turn,
+    select_weighted_consensus, validate_turn, _call_openai_guided,
 )
 
 from pkb_proto.ritsuko_magi_protocol import (
@@ -418,6 +418,35 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(specs[0]["weight"],1.5)
         self.assertFalse(specs[1]["enabled"])
         self.assertFalse(specs[2]["enabled"])
+
+    def test_openai_adapter_uses_responses_structured_output_without_storing(self):
+        output=self.classification("INFORMATION")
+        outer={
+            "id":"resp-test","status":"completed",
+            "output":[{
+                "type":"message",
+                "content":[{"type":"output_text","text":json.dumps(output)}],
+            }],
+            "usage":{"input_tokens":10,"output_tokens":5},
+        }
+        with patch.dict("os.environ", {
+            "OPENAI_API_KEY":"test-key",
+            "OPENAI_BASE_URL":"https://api.openai.com/v1",
+        }, clear=False), patch(
+            "pkb_proto.magi_dialogue.urlopen",
+            return_value=BytesIO(json.dumps(outer).encode("utf-8")),
+        ) as mocked:
+            result=_call_openai_guided(
+                {"stage":"classify","user_input":{"raw":"test"}},
+                model="gpt-test",timeout=5,
+            )
+        self.assertEqual(result["status"],"ok")
+        request=mocked.call_args.args[0]
+        payload=json.loads(request.data.decode("utf-8"))
+        self.assertFalse(payload["store"])
+        self.assertEqual(payload["text"]["format"]["type"],"json_schema")
+        self.assertTrue(payload["text"]["format"]["strict"])
+        self.assertNotIn("test-key",json.dumps(result))
 
     def test_weighted_consensus_uses_two_of_three_matching_decisions(self):
         a=self.classification("INFORMATION")
