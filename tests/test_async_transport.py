@@ -18,6 +18,7 @@ from pkb_proto.magi_async import (
     _call_gemini_guided_async,
     _call_ollama_guided_async,
     call_guided_panel_async,
+    continue_with_verified_observation_async,
     start_dialogue_async,
 )
 
@@ -494,6 +495,149 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_verified_private_pkb_observation_uses_only_local_member(self):
+        seen = {}
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen["envelope"] = envelope
+            seen["specs"] = member_specs
+            return {
+                "status": "ok",
+                "response": {
+                    "understood_request": "メインPCのGPUモデルを知りたい",
+                    "state": "READY",
+                    "reason": "PKB Observationに必要なモデル情報がある",
+                    "information_requests": [],
+                    "question_for_user": None,
+                    "answer_candidate": "メインPCのGPUは Radeon RX 9070 XT です。",
+                    "knowledge_candidate": None,
+                    "action_candidate": None,
+                },
+                "errors": [],
+                "diagnostic": {"mode": "test"},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-1",
+            "user_raw": "メインPCのGPUの種類は？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {"name": "MELCHIOR", "provider": "ollama", "model": "qwen",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+                {"name": "CASPER", "provider": "openai", "model": "cloud",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+                {"name": "BALTHASAR", "provider": "gemini", "model": "cloud2",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+            ],
+            "status": "waiting_information",
+            "next_step": "review_information_requests",
+            "classification": {
+                "category": "INFORMATION",
+                "understood_request": "GPUモデルを知りたい",
+                "reason": "情報照会",
+                "confidence": "high",
+                "multiple_requests": False,
+            },
+            "detail": {
+                "understood_request": "GPUモデルを知りたい",
+                "state": "NEED_INFORMATION",
+                "reason": "PKBが必要",
+                "information_requests": [
+                    {"source": "pkb", "what": "GPUモデル", "reason": "回答に必要"}
+                ],
+                "question_for_user": None,
+                "answer_candidate": None,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            },
+            "observations": [],
+            "pending_requests": [
+                {"request_id": "REQ-1", "source": "pkb",
+                 "what": "GPUモデル", "reason": "回答に必要"}
+            ],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "identify_missing_information",
+            "turns": [
+                {"stage": "classify", "request_envelope": {"turn": 1}},
+                {"stage": "analyze", "request_envelope": {"turn": 2}},
+            ],
+            "legacy_router_used": False,
+            "tool_read_executed": False,
+        }
+        updated = await continue_with_verified_observation_async(
+            session,
+            {
+                "source": "pkb",
+                "verified": True,
+                "confidentiality": "private",
+                "text": "PKBの記録では Radeon RX 9070 XT。",
+                "responds_to": ["REQ-1"],
+            },
+            timeout=10,
+            caller=caller,
+        )
+        self.assertEqual([x["provider"] for x in seen["specs"]], ["ollama"])
+        self.assertEqual(
+            seen["envelope"]["context_policy"]["mode"],
+            "local_only_private_pkb",
+        )
+        self.assertEqual(seen["envelope"]["observations"][0]["source"], "pkb")
+        self.assertTrue(updated["tool_read_executed"])
+        self.assertEqual(updated["status"], "candidate_ready")
+        self.assertEqual(
+            updated["cloud_context_gate"]["withheld_members"][0]["provider"],
+            "openai",
+        )
+
+    async def test_verified_private_pkb_observation_fails_closed_without_local_member(self):
+        session = {
+            "task_id": "task-1",
+            "user_raw": "私の情報は？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {"name": "CASPER", "provider": "openai", "model": "cloud",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+            ],
+            "status": "waiting_information",
+            "next_step": "review_information_requests",
+            "classification": {},
+            "detail": {},
+            "observations": [],
+            "pending_requests": [{"request_id": "REQ-1", "source": "pkb"}],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "identify_missing_information",
+            "turns": [],
+            "legacy_router_used": False,
+            "tool_read_executed": False,
+        }
+        updated = await continue_with_verified_observation_async(
+            session,
+            {
+                "source": "pkb",
+                "verified": True,
+                "confidentiality": "private",
+                "text": "private fact",
+                "responds_to": ["REQ-1"],
+            },
+            timeout=10,
+        )
+        self.assertEqual(updated["status"], "stopped")
+        self.assertEqual(
+            updated["next_step"], "cloud_context_gate_no_local_member"
+        )
+
     async def test_stop_request_after_current_turn_prevents_next_turn(self):
         stop = {"requested": False}
         calls = []
