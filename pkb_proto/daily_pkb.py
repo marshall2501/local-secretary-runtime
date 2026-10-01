@@ -4244,7 +4244,8 @@ def core_page(task_id: str = ""):
             async def start_guided():
                 if state["guided_busy"]:
                     return
-                if not str(guided_input.value or "").strip():
+                request_text = str(guided_input.value or "").strip()
+                if not request_text:
                     ui.notify("入力文を指定してください", type="warning")
                     return
                 specs = save_guided_assignments(notify=False)
@@ -4252,23 +4253,82 @@ def core_page(task_id: str = ""):
                     return
                 stop_event = begin_guided_run(1)
                 state["guided_session"] = None
+                task_uuid = uuid4()
+                task_created = False
                 guided_button.disable()
                 guided_result_panel.refresh()
                 try:
-                    state["guided_session"] = await start_dialogue_async(
-                        guided_input.value,
+                    await run.io_bound(
+                        _create_magi_core_task_record,
+                        task_uuid,
+                        request_text,
+                        specs,
+                    )
+                    task_created = True
+                    session = await start_dialogue_async(
+                        request_text,
                         member_specs=specs,
                         timeout=guided_timeout_seconds(),
                         stop_requested=stop_event.is_set,
                         on_turn_start=note_guided_turn,
+                        task_id=str(task_uuid),
+                    )
+                    state["guided_session"] = session
+                    guided_result_panel.refresh()
+
+                    pkb_request = pending_pkb_request(session)
+                    if pkb_request is not None and not stop_event.is_set():
+                        execution = await run.io_bound(
+                            _execute_magi_pkb_request,
+                            request_text,
+                            pkb_request,
+                        )
+                        await run.io_bound(
+                            _record_magi_pkb_read_record,
+                            task_uuid,
+                            execution,
+                            pkb_request,
+                        )
+                        observation = verified_pkb_observation(
+                            execution, pkb_request
+                        )
+                        session = await continue_with_verified_observation_async(
+                            session,
+                            observation,
+                            timeout=guided_timeout_seconds(session),
+                            stop_requested=stop_event.is_set,
+                            on_turn_start=note_guided_turn,
+                        )
+                        state["guided_session"] = session
+
+                    await run.io_bound(
+                        _persist_magi_core_session_record,
+                        task_uuid,
+                        state["guided_session"],
+                        (
+                            "pkb_search"
+                            if state["guided_session"].get("tool_read_executed")
+                            else None
+                        ),
                     )
                 except Exception as exc:
+                    if task_created:
+                        try:
+                            await run.io_bound(
+                                _fail_magi_core_task_record,
+                                task_uuid,
+                                type(exc).__name__,
+                            )
+                        except Exception:
+                            pass
                     ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
                 finally:
                     state["guided_busy"] = False
                     state["guided_stop_event"] = None
                     guided_button.enable()
                     guided_result_panel.refresh()
+                    open_tasks_panel.refresh()
+                    completed_tasks_panel.refresh()
 
             guided_button = ui.button(
                 "分類から対話を開始", icon="play_arrow",
