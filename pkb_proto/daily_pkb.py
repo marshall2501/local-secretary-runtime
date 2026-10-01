@@ -586,6 +586,7 @@ def _register_magi_profile(
     credential_env: str | None = None,
     context_window_tokens: int | None = None,
     ollama_num_predict: int | None = None,
+    profile_id: str | None = None,
 ) -> dict:
     with connection() as db:
         return upsert_llm_profile(
@@ -598,6 +599,7 @@ def _register_magi_profile(
             context_window_tokens=context_window_tokens,
             ollama_num_predict=ollama_num_predict,
             enabled=True,
+            profile_id=profile_id,
         )
 
 
