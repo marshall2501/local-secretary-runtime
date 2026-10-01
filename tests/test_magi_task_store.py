@@ -225,6 +225,108 @@ class MagiTaskStoreTests(unittest.TestCase):
         )
         self.assertEqual(update[1][0].obj["proposal_review"]["decision"], "remember")
 
+    @staticmethod
+    def review_session():
+        return {
+            "status": "proposal_ready",
+            "next_step": "review_proposal",
+            "tool_read_executed": True,
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True, "text": "model unavailable"},
+                {
+                    "source": "user_clarification",
+                    "text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                },
+            ],
+        }
+
+    def test_answer_only_completes_user_grounded_proposal_without_memory(self):
+        db = _DB(fetches=[(
+            "waiting_external",
+            {
+                "core_slice": "ritsuko_magi_observation_v1",
+                "magi_session": self.review_session(),
+            },
+        )])
+        result = complete_answer_only(db, task_id=TASK_ID)
+        self.assertEqual(result["decision"], "answer_only")
+        self.assertIsNone(result["memory_intake"])
+        update = next(
+            call for call in db.cur.calls
+            if "SET status='completed'" in call[0]
+        )
+        checkpoint = update[1][0].obj
+        self.assertEqual(
+            checkpoint["message"],
+            "メインPCのGPUはRadeon RX 9070 XTです。",
+        )
+        self.assertEqual(
+            checkpoint["proposal_review"]["decision"],
+            "answer_only",
+        )
+
+    def test_memory_review_uses_persisted_retry_safe_envelope_then_completes(self):
+        initial = {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "magi_session": self.review_session(),
+        }
+        db = _DB(fetches=[("waiting_external", initial)])
+        intake = prepare_memory_intake(db, task_id=TASK_ID)
+        self.assertEqual(
+            intake.raw_text,
+            "メインPCのGPUモデル名: Radeon RX 9070 XT",
+        )
+        prepared_update = next(
+            call for call in db.cur.calls
+            if "UPDATE secretary.tasks SET checkpoint" in call[0]
+        )
+        prepared_checkpoint = prepared_update[1][0].obj
+        self.assertEqual(
+            prepared_checkpoint["proposal_memory_intake"]["input_id"],
+            intake.input_id,
+        )
+
+        completion_db = _DB(fetches=[(
+            "waiting_external",
+            prepared_checkpoint,
+        )])
+        review = complete_memory_review(
+            completion_db,
+            task_id=TASK_ID,
+            memory_result={
+                "status": "committed",
+                "input_id": intake.input_id,
+                "source_id": str(SOURCE_ID),
+                "candidates": [{
+                    "candidate_id": "1",
+                    "decision": "pending",
+                    "reason": "unresolved",
+                    "claim_id": None,
+                    "pending_id": "pending-1",
+                    "derived_claim_ids": [],
+                }],
+            },
+        )
+        self.assertEqual(review["decision"], "remember")
+        self.assertEqual(
+            review["memory_intake"]["receipts"][0]["decision"],
+            "pending",
+        )
+        update = next(
+            call for call in completion_db.cur.calls
+            if "SET status='completed'" in call[0]
+        )
+        self.assertEqual(
+            update[1][0].obj["proposal_review"]["decision"],
+            "remember",
+        )
+
     def test_record_pkb_read_writes_source_action_result_and_checkpoint(self):
         db = _DB(fetches=[
             None,
