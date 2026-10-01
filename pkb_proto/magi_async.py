@@ -107,6 +107,7 @@ async def _call_ollama_guided_async(
     payload = {
         "model": model,
         "stream": False,
+        "think": False,
         "format": schema,
         "messages": [
             {"role": "system", "content": SYSTEM},
