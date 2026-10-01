@@ -454,6 +454,14 @@ def finalize_proposal_review(
         or last_turn.get("status") != "ok"
     ):
         raise ValueError("proposal_review_turn_not_ok")
+    envelope = last_turn.get("request_envelope") or {}
+    if str(envelope.get("task_id") or "") != str(task_id):
+        raise ValueError("proposal_review_turn_task_mismatch")
+    turn_response = last_turn.get("response")
+    if not isinstance(turn_response, dict):
+        raise ValueError("proposal_review_turn_response_missing")
+    if turn_response != (session.get("post_review_evaluation") or {}):
+        raise ValueError("proposal_review_evaluation_mismatch")
 
     with db.transaction(), db.cursor() as cur:
         cur.execute(
@@ -479,7 +487,7 @@ def finalize_proposal_review(
         if not answer:
             raise ValueError("proposal_review_answer_missing")
 
-        evaluation = deepcopy(session.get("post_review_evaluation") or {})
+        evaluation = deepcopy(turn_response)
         if evaluation.get("state") not in {"READY", "KNOWLEDGE_CANDIDATE"}:
             raise ValueError("proposal_review_evaluation_not_finalizable")
 
