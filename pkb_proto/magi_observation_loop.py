@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import anyio
 
 from .magi_async import (
+    continue_with_user_clarification_async,
     continue_with_verified_observation_async,
     start_dialogue_async,
 )
@@ -102,6 +103,59 @@ async def run_pkb_observation_loop(
                 await anyio.to_thread.run_sync(
                     fail_task_record,
                     task_uuid,
+                    type(exc).__name__,
+                )
+            except Exception:
+                pass
+        raise
+
+
+
+async def resume_user_answer(
+    task_id: UUID,
+    user_text: str,
+    *,
+    timeout: float,
+    claim_user_resume_record: Callable,
+    persist_session_record: Callable,
+    fail_task_record: Callable,
+    stop_requested=None,
+    on_turn_start=None,
+    user_continuation=continue_with_user_clarification_async,
+) -> dict:
+    """Resume one persisted waiting_user MAGI Task with the same Task ID."""
+    text = str(user_text or "").strip()
+    if not text:
+        raise ValueError("empty_user_clarification")
+
+    claimed = False
+    try:
+        session, selected_capability = await anyio.to_thread.run_sync(
+            claim_user_resume_record,
+            task_id,
+            len(text),
+        )
+        claimed = True
+        updated = await user_continuation(
+            session,
+            text,
+            timeout=timeout,
+            stop_requested=stop_requested,
+            on_turn_start=on_turn_start,
+        )
+        await anyio.to_thread.run_sync(
+            persist_session_record,
+            task_id,
+            updated,
+            selected_capability,
+        )
+        return updated
+    except Exception as exc:
+        if claimed:
+            try:
+                await anyio.to_thread.run_sync(
+                    fail_task_record,
+                    task_id,
                     type(exc).__name__,
                 )
             except Exception:
