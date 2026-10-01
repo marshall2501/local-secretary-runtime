@@ -11,6 +11,8 @@ not on provider-specific client libraries.
 """
 from __future__ import annotations
 
+import random
+import time
 from typing import Any
 
 import anyio
@@ -41,6 +43,15 @@ class AsyncTransportError(RuntimeError):
     """HTTP transport failed before a usable response was received."""
 
 
+class AsyncRetryExhausted(RuntimeError):
+    """A retry-enabled request finished without a usable response."""
+
+    def __init__(self, cause: Exception, diagnostic: dict):
+        super().__init__("retry_exhausted")
+        self.cause = cause
+        self.diagnostic = diagnostic
+
+
 async def request_json(
     method: str,
     url: str,
@@ -50,12 +61,7 @@ async def request_json(
     timeout: float,
     client: httpx.AsyncClient | None = None,
 ) -> Any:
-    """Send one cancellable JSON request with an overall hard deadline.
-
-    The timeout covers connect, upload, server wait, response download and JSON
-    decoding. Cancellation from the parent task is deliberately not converted
-    into an ordinary provider error.
-    """
+    """Send one cancellable JSON request with an overall hard deadline."""
     if timeout <= 0:
         raise ValueError("timeout_must_be_positive")
 
@@ -109,3 +115,136 @@ async def request_json(
         raise
     except httpx.HTTPError as exc:
         raise AsyncTransportError(type(exc).__name__) from exc
+
+
+def _retry_final_status(exc: Exception) -> str:
+    if isinstance(exc, AsyncHTTPStatusError):
+        return f"http_{exc.status_code}"
+    if isinstance(exc, AsyncRequestTimeout):
+        return "timeout"
+    if isinstance(exc, AsyncTransportError):
+        return "transport_error"
+    return type(exc).__name__
+
+
+async def request_json_with_retry(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    json_body: Any = None,
+    timeout: float,
+    retry_enabled: bool,
+    retry_http_codes: tuple[int, ...] | list[int],
+    max_retries: int = 3,
+    retry_budget_fraction: float = 0.5,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[Any, dict]:
+    """Send one logical request, optionally retrying transient failures.
+
+    The member timeout remains the hard overall deadline. Once the first
+    retryable failure occurs, retries get at most half of the configured member
+    timeout, further bounded by the remaining hard deadline. Retries never
+    create extra MAGI votes or turns.
+    """
+    timeout = float(timeout)
+    if timeout <= 0:
+        raise ValueError("timeout_must_be_positive")
+    if max_retries < 0:
+        raise ValueError("max_retries_must_be_nonnegative")
+    if not 0 < retry_budget_fraction <= 1:
+        raise ValueError("invalid_retry_budget_fraction")
+
+    retry_codes = {int(code) for code in retry_http_codes}
+    started = time.monotonic()
+    retry_started: float | None = None
+    retry_budget_seconds = timeout * retry_budget_fraction
+    attempts = 0
+    status_codes_seen: list[int] = []
+    wait_seconds = 0.0
+
+    def diagnostic(final_status: str) -> dict:
+        return {
+            "retry_enabled": bool(retry_enabled),
+            "attempt_count": attempts,
+            "retry_count": max(0, attempts - 1),
+            "retry_http_codes_seen": status_codes_seen,
+            "retry_wait_seconds": round(wait_seconds, 3),
+            "retry_budget_seconds": round(retry_budget_seconds, 3),
+            "final_status": final_status,
+        }
+
+    async def run(active: httpx.AsyncClient) -> tuple[Any, dict]:
+        nonlocal attempts, retry_started, wait_seconds
+        while True:
+            attempts += 1
+            elapsed = time.monotonic() - started
+            remaining_total = timeout - elapsed
+            if remaining_total <= 0:
+                exc = AsyncRequestTimeout("request_deadline_exceeded")
+                raise AsyncRetryExhausted(exc, diagnostic("timeout"))
+
+            try:
+                result = await request_json(
+                    method,
+                    url,
+                    headers=headers,
+                    json_body=json_body,
+                    timeout=remaining_total,
+                    client=active,
+                )
+                return result, diagnostic("ok")
+            except (AsyncHTTPStatusError, AsyncTransportError) as exc:
+                if isinstance(exc, AsyncHTTPStatusError):
+                    status_codes_seen.append(exc.status_code)
+                    retryable = exc.status_code in retry_codes
+                else:
+                    retryable = True
+
+                retries_used = attempts - 1
+                if (
+                    not retry_enabled
+                    or not retryable
+                    or retries_used >= max_retries
+                ):
+                    raise AsyncRetryExhausted(
+                        exc, diagnostic(_retry_final_status(exc))
+                    ) from exc
+
+                now = time.monotonic()
+                if retry_started is None:
+                    retry_started = now
+                retry_elapsed = now - retry_started
+                remaining_retry_budget = retry_budget_seconds - retry_elapsed
+                remaining_total = timeout - (now - started)
+                if remaining_retry_budget <= 0 or remaining_total <= 0:
+                    raise AsyncRetryExhausted(
+                        exc, diagnostic(_retry_final_status(exc))
+                    ) from exc
+
+                backoff = (2 ** retries_used) + random.uniform(0.0, 0.25)
+                delay = min(backoff, remaining_retry_budget, remaining_total)
+                if delay <= 0:
+                    raise AsyncRetryExhausted(
+                        exc, diagnostic(_retry_final_status(exc))
+                    ) from exc
+                await anyio.sleep(delay)
+                wait_seconds += delay
+            except AsyncRequestTimeout as exc:
+                raise AsyncRetryExhausted(
+                    exc, diagnostic("timeout")
+                ) from exc
+
+    try:
+        with anyio.fail_after(timeout):
+            if client is not None:
+                return await run(client)
+            async with httpx.AsyncClient(timeout=None) as owned:
+                return await run(owned)
+    except AsyncRetryExhausted:
+        raise
+    except TimeoutError as exc:
+        timeout_exc = AsyncRequestTimeout("request_deadline_exceeded")
+        raise AsyncRetryExhausted(
+            timeout_exc, diagnostic("timeout")
+        ) from exc
