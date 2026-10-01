@@ -5439,8 +5439,11 @@ def settings_page():
         ui.separator()
         pkb_open_controls = {}
         pkb_visible_controls = {}
-        with ui.card().classes("w-full border-2 border-green-200 bg-green-50"):
-            ui.label("PKB").classes("text-lg font-bold text-green-900")
+        with ui.expansion(
+            "PKB",
+            value=False,
+            icon="account_tree",
+        ).classes("w-full border-2 border-green-200 bg-green-50"):
             for key, label in pkb_labels.items():
                 with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                     ui.label(label).classes("grow")
@@ -5457,12 +5460,11 @@ def settings_page():
                         )
 
         entity_visible_controls = {}
-        with ui.card().classes(
-            "w-full border-2 border-purple-200 bg-purple-50"
-        ):
-            ui.label("Entity詳細").classes(
-                "text-lg font-bold text-purple-900"
-            )
+        with ui.expansion(
+            "Entity詳細",
+            value=False,
+            icon="category",
+        ).classes("w-full border-2 border-purple-200 bg-purple-50"):
             ui.label(
                 "各タブの表示と、Entity詳細を開いたときの初期タブを設定します。"
             ).classes("text-sm text-grey-7")
@@ -5486,8 +5488,11 @@ def settings_page():
 
         finance_open_controls = {}
         finance_visible_controls = {}
-        with ui.card().classes("w-full border-2 border-blue-200 bg-blue-50"):
-            ui.label("家計・資産").classes("text-lg font-bold text-blue-900")
+        with ui.expansion(
+            "家計・資産",
+            value=False,
+            icon="account_balance_wallet",
+        ).classes("w-full border-2 border-blue-200 bg-blue-50"):
             for key, label in finance_labels.items():
                 with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                     ui.label(label).classes("grow")
@@ -5508,8 +5513,11 @@ def settings_page():
         core_list_controls = {}
         core_open_controls = {}
         core_visible_controls = {}
-        with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
-            ui.label("RITSUKO — Task表示件数").classes("text-lg font-bold")
+        with ui.expansion(
+            "RITSUKO — Task表示件数",
+            value=False,
+            icon="format_list_numbered",
+        ).classes("w-full border-2 border-slate-200 bg-slate-50"):
             ui.label(
                 "各一覧の初期件数と「さらに読み込む」で追加する件数です。"
                 "保存するとサーバー再起動なしで反映されます。"
@@ -5521,8 +5529,11 @@ def settings_page():
                     value=_UI_PREFERENCES["core"][key],
                 ).classes("min-w-64")
 
-        with ui.card().classes("w-full border-2 border-slate-200 bg-slate-50"):
-            ui.label("RITSUKO — 検証・補足の表示").classes("text-lg font-bold")
+        with ui.expansion(
+            "RITSUKO — 検証・補足の表示",
+            value=False,
+            icon="fact_check",
+        ).classes("w-full border-2 border-slate-200 bg-slate-50"):
             ui.label(
                 "主操作の依頼ブロックは常時表示。検証・補足ブロックだけ非表示にできます。"
             ).classes("text-sm text-grey-7")
