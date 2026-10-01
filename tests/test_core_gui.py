@@ -302,7 +302,11 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
             )
-            self.assertTrue(self.elements('追加説明・選択'))
+            clarification = next(
+                e for e in self.client.elements.values()
+                if e._props.get('label') == '追加説明・選択'
+            )
+            self.assertIsNotNone(clarification)
             self.assertTrue(self.elements('追加説明を渡して対話継続'))
 
     async def test_completed_magi_task_open_restores_saved_dialogue_read_only(self):
