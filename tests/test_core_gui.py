@@ -309,6 +309,87 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(clarification)
             self.assertTrue(self.elements('追加説明を渡して対話継続'))
 
+    async def test_proposal_ready_magi_task_offers_answer_only_and_memory_choices(self):
+        saved_session = {
+            'task_id': self.waiting[0]['id'],
+            'user_raw': 'メインPCのGPUの種類は？',
+            'model': '',
+            'prompt_version': 'd19-state-driven-v4',
+            'status': 'proposal_ready',
+            'next_step': 'review_proposal',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': 'GPUモデルを知りたい',
+            },
+            'detail': {
+                'state': 'KNOWLEDGE_CANDIDATE',
+                'reason': '本人回答で不足情報が解消した',
+                'answer_candidate': 'メインPCのGPUはRadeon RX 9070 XTです。',
+                'knowledge_candidate': 'メインPCのGPUモデル名: Radeon RX 9070 XT',
+            },
+            'pending_requests': [],
+            'observations': [
+                {
+                    'source': 'pkb',
+                    'verified': True,
+                    'confidentiality': 'private',
+                    'text': 'GPU1はあるがmodel未確認',
+                },
+                {
+                    'source': 'user_clarification',
+                    'verified': False,
+                    'text': 'Radeon RX 9070 XT',
+                    'responds_to': ['REQ-1'],
+                },
+            ],
+            'previous_request_signatures': [],
+            'conversation_context': [
+                {'role': 'user', 'text': 'Radeon RX 9070 XT'},
+            ],
+            'user_question': None,
+            'magi_disagreement': None,
+            'user_source_reviewed': False,
+            'last_question_purpose': 'evaluate_observation',
+            'turns': [{
+                'stage': 'analyze',
+                'question_purpose': 'evaluate_observation',
+                'request_envelope': {'turn': 5},
+                'status': 'ok',
+                'response': {'state': 'KNOWLEDGE_CANDIDATE'},
+                'errors': [],
+                'diagnostic': {},
+                'member_results': [],
+                'consensus': None,
+            }],
+            'legacy_router_used': False,
+            'tool_read_executed': True,
+            'cloud_context_gate': {
+                'status': 'applied',
+                'mode': 'local_only_private_pkb',
+            },
+        }
+        self.waiting[0].update({
+            'core_slice': 'ritsuko_magi_observation_v1',
+            'phase': 'awaiting_review',
+            'selected_capability': 'pkb_search',
+            'magi_session': saved_session,
+        })
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=[]
+        ):
+            daily.core_page()
+            await self.click('開く', 0)
+            self.assertTrue(self.elements('回答だけで完了'))
+            self.assertTrue(self.elements('記憶にも反映して完了'))
+            self.assertTrue(any(
+                'メインPCのGPUモデル名: Radeon RX 9070 XT'
+                in getattr(e, 'text', '')
+                for e in self.client.elements.values()
+            ))
+            self.assertFalse(
+                self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
+            )
+
     async def test_completed_magi_task_open_restores_saved_dialogue_read_only(self):
         saved_session = {
             'task_id': self.done[0]['id'],
