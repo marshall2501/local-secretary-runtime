@@ -252,7 +252,7 @@ def _call_ollama_guided(
     stage = envelope["stage"]
     schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
     payload = {
-        "model": model, "stream": False, "format": schema,
+        "model": model, "stream": False, "think": False, "format": schema,
         "messages": [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": json.dumps(envelope, ensure_ascii=False)},
