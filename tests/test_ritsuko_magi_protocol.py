@@ -512,8 +512,11 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(result["status"],"ok")
         request=mocked.call_args.args[0]
         payload=json.loads(request.data.decode("utf-8"))
-        self.assertEqual(payload["generationConfig"]["responseMimeType"],"application/json")
-        self.assertIn("responseSchema",payload["generationConfig"])
+        response_format=payload["generationConfig"]["responseFormat"]
+        self.assertEqual(response_format["text"]["mimeType"],"application/json")
+        self.assertIn("schema",response_format["text"])
+        self.assertNotIn("responseMimeType",payload["generationConfig"])
+        self.assertNotIn("responseSchema",payload["generationConfig"])
         self.assertNotIn("temperature",payload["generationConfig"])
         self.assertNotIn("gemini-test-key",json.dumps(result))
 
