@@ -4350,6 +4350,346 @@ def core_page(task_id: str = ""):
                             + str(memory_summary.get("status") or "-")
                             + (" / " + ", ".join(decisions) if decisions else "")
                         ).classes("font-mono text-xs text-green-800")
+                if (
+                    not state.get("guided_history_read_only")
+                    and session["status"] == "waiting_information"
+                ):
+                    ui.label(
+                        "未解決の情報要求（自動PKB read対象外または追加情報が必要）"
+                    ).classes("font-bold text-orange-900")
+                    ui.code(json.dumps(
+                        session["pending_requests"], ensure_ascii=False, indent=2
+                    ), language="json").classes("w-full")
+                    observation_input = ui.textarea(
+                        label="開発用手動Observation（実PKB取得ではない）",
+                        placeholder="自動read対象外の開発検証にだけ使用",
+                    ).classes("w-full")
+
+                    async def continue_guided():
+                        if state["guided_busy"]:
+                            return
+                        if not str(observation_input.value or "").strip():
+                            ui.notify("試験用Observationを入力してください", type="warning")
+                            return
+                        stop_event = begin_guided_run(len(session["turns"]) + 1)
+                        guided_button.disable()
+                        guided_result_panel.refresh()
+                        try:
+                            state["guided_session"] = await continue_with_observation_async(
+                                session,
+                                observation_input.value,
+                                timeout=guided_timeout_seconds(session),
+                                stop_requested=stop_event.is_set,
+                                on_turn_start=note_guided_turn,
+                            )
+                        except Exception as exc:
+                            ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
+                        finally:
+                            state["guided_busy"] = False
+                            state["guided_stop_event"] = None
+                            guided_button.enable()
+                            guided_result_panel.refresh()
+
+                    ui.button(
+                        "手動Observationで継続（開発用）",
+                        icon="refresh", on_click=continue_guided,
+                    ).props("outline")
+                elif (
+                    not state.get("guided_history_read_only")
+                    and session["status"] == "waiting_user"
+                ):
+                    with ui.card().classes(
+                        "w-full border border-orange-300 bg-orange-50 shadow-none"
+                    ):
+                        ui.label("RITSUKOからの確認").classes(
+                            "font-bold text-orange-900"
+                        )
+                        ui.label("RITSUKOが本人への確認を必要とする状態です。").classes(
+                            "text-sm text-orange-900"
+                        )
+                        user_resume = saved_task.get("user_resume")
+                        if isinstance(user_resume, dict) and user_resume.get("status") in {
+                            "processing", "retry_required"
+                        }:
+                            ui.label(
+                                "前回の本人回答Turnは "
+                                + str(user_resume.get("status"))
+                                + " です。安全のため、前回と同じ回答内容を再入力して再試行してください。"
+                            ).classes("text-xs text-orange-800")
+                        question = session.get("user_question") or (
+                            (session.get("detail") or {}).get("question_for_user")
+                        )
+                        if question:
+                            ui.label("質問: " + question).classes("text-sm")
+                            clarification_input = ui.textarea(
+                                label="追加説明・選択",
+                                placeholder="回答や追加説明を自然な言葉で入力",
+                            ).props("rows=2 outlined dense").classes("w-full")
+
+                        async def continue_with_user():
+                            if state["guided_busy"]:
+                                return
+                            if not str(clarification_input.value or "").strip():
+                                ui.notify("追加説明を入力してください", type="warning")
+                                return
+                            stop_event = begin_guided_run(len(session["turns"]) + 1)
+                            guided_button.disable()
+                            guided_result_panel.refresh()
+                            try:
+                                state["guided_session"] = await resume_user_answer(
+                                    UUID(session["task_id"]),
+                                    clarification_input.value,
+                                    timeout=guided_timeout_seconds(session),
+                                    claim_user_resume_record=_claim_magi_user_resume_record,
+                                    persist_session_record=_persist_magi_core_session_record,
+                                    abort_user_resume_record=_abort_magi_user_resume_record,
+                                    fail_task_record=_fail_magi_core_task_record,
+                                    stop_requested=stop_event.is_set,
+                                    on_turn_start=note_guided_turn,
+                                )
+                            except Exception as exc:
+                                ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
+                            finally:
+                                state["guided_busy"] = False
+                                state["guided_stop_event"] = None
+                                guided_button.enable()
+                                try:
+                                    saved_trace = load_core_task_trace(UUID(session["task_id"]))
+                                    if (
+                                        (state.get("result") or {}).get("task_id")
+                                        == session["task_id"]
+                                    ):
+                                        state["result"] = core_task_selection_result(
+                                            saved_trace["task"]
+                                        )
+                                        state["trace"] = saved_trace
+                                except Exception:
+                                    pass
+                                guided_result_panel.refresh()
+                                open_tasks_panel.refresh()
+                                completed_tasks_panel.refresh()
+                                core_result.refresh()
+                                trace_panel.refresh()
+                                resume_panel.refresh()
+
+                        ui.button(
+                            "追加説明を渡して対話継続",
+                            icon="chat", on_click=continue_with_user,
+                        ).props("outline")
+                elif (
+                    not state.get("guided_history_read_only")
+                    and session["status"] == "proposal_ready"
+                ):
+                    detail = session.get("detail") or {}
+                    if detail.get("state") == "KNOWLEDGE_CANDIDATE":
+                        with ui.card().classes(
+                            "w-full border border-blue-300 bg-blue-50 shadow-none"
+                        ):
+                            ui.label("RITSUKOからの確認").classes(
+                                "font-bold text-blue-900"
+                            )
+                                answer = str(detail.get("answer_candidate") or "").strip()
+                            knowledge = str(detail.get("knowledge_candidate") or "").strip()
+                            ui.label(
+                                "本人回答を根拠に、回答候補と記憶候補ができています。"
+                            ).classes("font-bold text-orange-900")
+                            if answer:
+                                ui.label("回答候補: " + answer).classes("text-sm")
+                            if knowledge:
+                                ui.label("記憶候補: " + knowledge).classes(
+                                    "text-sm font-medium"
+                                )
+                            ui.label(
+                                "「回答だけで完了」はPKBへ新規記憶を書きません。"
+                                "「記憶にも反映」は表示中の記憶候補を本人が確認した内容として"
+                                "Memory IntakeのGrounding / WriteDecisionへ渡し、"
+                                "その結果をObservationとしてMAGIへ再評価してからRITSUKOが完了判定します。"
+                                "MAGIが直接PKBを書き換えることはありません。"
+                            ).classes("text-xs text-grey-7")
+                            active_review = saved_task.get("proposal_review")
+                            prepared_intake = saved_task.get("proposal_memory_intake")
+                            active_review_status = (
+                                active_review.get("status")
+                                if isinstance(active_review, dict)
+                                else None
+                            )
+                            active_review_decision = (
+                                active_review.get("decision")
+                                if isinstance(active_review, dict)
+                                else None
+                            )
+                            if active_review_status in {"processing", "retry_required"}:
+                                ui.label(
+                                    "前回のProposal review: "
+                                    + str(active_review_decision or "-")
+                                    + " / " + str(active_review_status)
+                                    + "。同じTaskで再評価を再試行できます。"
+                                ).classes("text-xs text-orange-800")
+                            if isinstance(prepared_intake, dict):
+                                ui.label(
+                                    "Memory Intakeは開始済みです。"
+                                    "同じinput_idで再送・再評価し、回答だけ経路へは戻しません。"
+                                ).classes("text-xs text-blue-800")
+
+                            async def refresh_after_proposal_review() -> None:
+                                saved_trace = await run.io_bound(
+                                    load_core_task_trace,
+                                    UUID(session["task_id"]),
+                                )
+                                state["trace"] = saved_trace
+                                state["result"] = core_task_selection_result(
+                                    saved_trace["task"]
+                                )
+                                state["guided_session"] = (
+                                    saved_trace["task"].get("magi_session") or session
+                                )
+                                state["guided_history_read_only"] = True
+                                guided_result_panel.refresh()
+                                open_tasks_panel.refresh()
+                                completed_tasks_panel.refresh()
+                                core_result.refresh()
+                                trace_panel.refresh()
+                                resume_panel.refresh()
+
+                            async def execute_proposal_review(
+                                decision: str,
+                            ) -> None:
+                                if state["guided_busy"]:
+                                    return
+                                stop_event = begin_guided_run(len(session["turns"]) + 1)
+                                answer_only_button.disable()
+                                remember_button.disable()
+                                guided_button.disable()
+                                guided_result_panel.refresh()
+                                memory_result = None
+                                try:
+                                    if decision == "remember":
+                                        intake = await run.io_bound(
+                                            _prepare_magi_memory_intake_record,
+                                            UUID(session["task_id"]),
+                                        )
+                                        memory_result = await run.io_bound(
+                                            register_memory_intake,
+                                            intake,
+                                        )
+                                    state["guided_session"] = await review_magi_proposal(
+                                        UUID(session["task_id"]),
+                                        decision,
+                                        timeout=guided_timeout_seconds(session),
+                                        claim_proposal_review_record=(
+                                            _claim_magi_proposal_review_record
+                                        ),
+                                        finalize_proposal_review_record=(
+                                            _finalize_magi_proposal_review_record
+                                        ),
+                                        abort_proposal_review_record=(
+                                            _abort_magi_proposal_review_record
+                                        ),
+                                        memory_result=memory_result,
+                                        stop_requested=stop_event.is_set,
+                                        on_turn_start=note_guided_turn,
+                                    )
+                                    await refresh_after_proposal_review()
+                                    if decision == "remember":
+                                        decisions = [
+                                            str(item.get("decision") or "-")
+                                            for item in (
+                                                (memory_result or {}).get("candidates") or []
+                                            )
+                                            if isinstance(item, dict)
+                                        ]
+                                        ui.notify(
+                                            "Memory Intake結果をMAGIへ再評価し、"
+                                            "RITSUKOがTaskを完了しました"
+                                            + (
+                                                " (" + ", ".join(decisions) + ")"
+                                                if decisions else ""
+                                            ),
+                                            type="positive",
+                                        )
+                                    else:
+                                        ui.notify(
+                                            "回答レビューをMAGIへ再評価し、"
+                                            "RITSUKOがTaskを完了しました",
+                                            type="positive",
+                                        )
+                                except Exception as exc:
+                                    try:
+                                        saved_trace = await run.io_bound(
+                                            load_core_task_trace,
+                                            UUID(session["task_id"]),
+                                        )
+                                        state["trace"] = saved_trace
+                                        state["result"] = core_task_selection_result(
+                                            saved_trace["task"]
+                                        )
+                                    except Exception:
+                                        pass
+                                    ui.notify(
+                                        type(exc).__name__ + ": " + str(exc)[:180],
+                                        type="negative",
+                                    )
+                                finally:
+                                    state["guided_busy"] = False
+                                    state["guided_stop_event"] = None
+                                    guided_button.enable()
+                                    guided_result_panel.refresh()
+                                    open_tasks_panel.refresh()
+                                    completed_tasks_panel.refresh()
+                                    core_result.refresh()
+                                    trace_panel.refresh()
+                                    resume_panel.refresh()
+
+                            async def complete_answer_only():
+                                await execute_proposal_review("answer_only")
+
+                            async def remember_and_complete():
+                                await execute_proposal_review("remember")
+
+                            with ui.row().classes("gap-2 flex-wrap"):
+                                answer_label = (
+                                    "回答レビューを再試行"
+                                    if (
+                                        active_review_decision == "answer_only"
+                                        and active_review_status
+                                        in {"processing", "retry_required"}
+                                    )
+                                    else "回答だけで完了"
+                                )
+                                remember_label = (
+                                    "記憶結果の再評価を再試行"
+                                    if (
+                                        isinstance(prepared_intake, dict)
+                                        or active_review_decision == "remember"
+                                    )
+                                    else "記憶にも反映して完了"
+                                )
+                                answer_only_button = ui.button(
+                                    answer_label,
+                                    icon="done",
+                                    color="green",
+                                    on_click=complete_answer_only,
+                                )
+                                remember_button = ui.button(
+                                    remember_label,
+                                    icon="save",
+                                    color="blue",
+                                    on_click=remember_and_complete,
+                                )
+                                if isinstance(prepared_intake, dict) or (
+                                    active_review_status == "processing"
+                                    and active_review_decision == "remember"
+                                ):
+                                    answer_only_button.disable()
+                                if (
+                                    active_review_status == "processing"
+                                    and active_review_decision == "answer_only"
+                                ):
+                                    remember_button.disable()
+                    else:
+                        ui.label(
+                            "このProposal種別の実行経路はまだ接続していません。"
+                        ).classes("text-sm text-orange-900")
                 session_text = json.dumps(export_dialogue(session), ensure_ascii=False, indent=2)
                 ui.button(
                     "対話結果を一括コピー", icon="content_copy",
@@ -4408,334 +4748,7 @@ def core_page(task_id: str = ""):
                             json.dumps(turn["diagnostic"], ensure_ascii=False, indent=2),
                             language="json",
                         ).classes("w-full")
-                if (
-                    not state.get("guided_history_read_only")
-                    and session["status"] == "waiting_information"
-                ):
-                    ui.label(
-                        "未解決の情報要求（自動PKB read対象外または追加情報が必要）"
-                    ).classes("font-bold text-orange-900")
-                    ui.code(json.dumps(
-                        session["pending_requests"], ensure_ascii=False, indent=2
-                    ), language="json").classes("w-full")
-                    observation_input = ui.textarea(
-                        label="開発用手動Observation（実PKB取得ではない）",
-                        placeholder="自動read対象外の開発検証にだけ使用",
-                    ).classes("w-full")
 
-                    async def continue_guided():
-                        if state["guided_busy"]:
-                            return
-                        if not str(observation_input.value or "").strip():
-                            ui.notify("試験用Observationを入力してください", type="warning")
-                            return
-                        stop_event = begin_guided_run(len(session["turns"]) + 1)
-                        guided_button.disable()
-                        guided_result_panel.refresh()
-                        try:
-                            state["guided_session"] = await continue_with_observation_async(
-                                session,
-                                observation_input.value,
-                                timeout=guided_timeout_seconds(session),
-                                stop_requested=stop_event.is_set,
-                                on_turn_start=note_guided_turn,
-                            )
-                        except Exception as exc:
-                            ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
-                        finally:
-                            state["guided_busy"] = False
-                            state["guided_stop_event"] = None
-                            guided_button.enable()
-                            guided_result_panel.refresh()
-
-                    ui.button(
-                        "手動Observationで継続（開発用）",
-                        icon="refresh", on_click=continue_guided,
-                    ).props("outline")
-                elif (
-                    not state.get("guided_history_read_only")
-                    and session["status"] == "waiting_user"
-                ):
-                    ui.label("RITSUKOが本人への確認を必要とする状態です。").classes(
-                        "text-orange-900"
-                    )
-                    user_resume = saved_task.get("user_resume")
-                    if isinstance(user_resume, dict) and user_resume.get("status") in {
-                        "processing", "retry_required"
-                    }:
-                        ui.label(
-                            "前回の本人回答Turnは "
-                            + str(user_resume.get("status"))
-                            + " です。安全のため、前回と同じ回答内容を再入力して再試行してください。"
-                        ).classes("text-xs text-orange-800")
-                    question = session.get("user_question") or (
-                        (session.get("detail") or {}).get("question_for_user")
-                    )
-                    if question:
-                        ui.label("質問: " + question).classes("text-sm")
-                    clarification_input = ui.textarea(
-                        label="追加説明・選択",
-                        placeholder="内部のPattern名ではなく、求めている結果を自然な言葉で入力",
-                    ).classes("w-full")
-
-                    async def continue_with_user():
-                        if state["guided_busy"]:
-                            return
-                        if not str(clarification_input.value or "").strip():
-                            ui.notify("追加説明を入力してください", type="warning")
-                            return
-                        stop_event = begin_guided_run(len(session["turns"]) + 1)
-                        guided_button.disable()
-                        guided_result_panel.refresh()
-                        try:
-                            state["guided_session"] = await resume_user_answer(
-                                UUID(session["task_id"]),
-                                clarification_input.value,
-                                timeout=guided_timeout_seconds(session),
-                                claim_user_resume_record=_claim_magi_user_resume_record,
-                                persist_session_record=_persist_magi_core_session_record,
-                                abort_user_resume_record=_abort_magi_user_resume_record,
-                                fail_task_record=_fail_magi_core_task_record,
-                                stop_requested=stop_event.is_set,
-                                on_turn_start=note_guided_turn,
-                            )
-                        except Exception as exc:
-                            ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
-                        finally:
-                            state["guided_busy"] = False
-                            state["guided_stop_event"] = None
-                            guided_button.enable()
-                            try:
-                                saved_trace = load_core_task_trace(UUID(session["task_id"]))
-                                if (
-                                    (state.get("result") or {}).get("task_id")
-                                    == session["task_id"]
-                                ):
-                                    state["result"] = core_task_selection_result(
-                                        saved_trace["task"]
-                                    )
-                                    state["trace"] = saved_trace
-                            except Exception:
-                                pass
-                            guided_result_panel.refresh()
-                            open_tasks_panel.refresh()
-                            completed_tasks_panel.refresh()
-                            core_result.refresh()
-                            trace_panel.refresh()
-                            resume_panel.refresh()
-
-                    ui.button(
-                        "追加説明を渡して対話継続",
-                        icon="chat", on_click=continue_with_user,
-                    ).props("outline")
-                elif (
-                    not state.get("guided_history_read_only")
-                    and session["status"] == "proposal_ready"
-                ):
-                    detail = session.get("detail") or {}
-                    if detail.get("state") == "KNOWLEDGE_CANDIDATE":
-                        answer = str(detail.get("answer_candidate") or "").strip()
-                        knowledge = str(detail.get("knowledge_candidate") or "").strip()
-                        ui.label(
-                            "本人回答を根拠に、回答候補と記憶候補ができています。"
-                        ).classes("font-bold text-orange-900")
-                        if answer:
-                            ui.label("回答候補: " + answer).classes("text-sm")
-                        if knowledge:
-                            ui.label("記憶候補: " + knowledge).classes(
-                                "text-sm font-medium"
-                            )
-                        ui.label(
-                            "「回答だけで完了」はPKBへ新規記憶を書きません。"
-                            "「記憶にも反映」は表示中の記憶候補を本人が確認した内容として"
-                            "Memory IntakeのGrounding / WriteDecisionへ渡し、"
-                            "その結果をObservationとしてMAGIへ再評価してからRITSUKOが完了判定します。"
-                            "MAGIが直接PKBを書き換えることはありません。"
-                        ).classes("text-xs text-grey-7")
-                        active_review = saved_task.get("proposal_review")
-                        prepared_intake = saved_task.get("proposal_memory_intake")
-                        active_review_status = (
-                            active_review.get("status")
-                            if isinstance(active_review, dict)
-                            else None
-                        )
-                        active_review_decision = (
-                            active_review.get("decision")
-                            if isinstance(active_review, dict)
-                            else None
-                        )
-                        if active_review_status in {"processing", "retry_required"}:
-                            ui.label(
-                                "前回のProposal review: "
-                                + str(active_review_decision or "-")
-                                + " / " + str(active_review_status)
-                                + "。同じTaskで再評価を再試行できます。"
-                            ).classes("text-xs text-orange-800")
-                        if isinstance(prepared_intake, dict):
-                            ui.label(
-                                "Memory Intakeは開始済みです。"
-                                "同じinput_idで再送・再評価し、回答だけ経路へは戻しません。"
-                            ).classes("text-xs text-blue-800")
-
-                        async def refresh_after_proposal_review() -> None:
-                            saved_trace = await run.io_bound(
-                                load_core_task_trace,
-                                UUID(session["task_id"]),
-                            )
-                            state["trace"] = saved_trace
-                            state["result"] = core_task_selection_result(
-                                saved_trace["task"]
-                            )
-                            state["guided_session"] = (
-                                saved_trace["task"].get("magi_session") or session
-                            )
-                            state["guided_history_read_only"] = True
-                            guided_result_panel.refresh()
-                            open_tasks_panel.refresh()
-                            completed_tasks_panel.refresh()
-                            core_result.refresh()
-                            trace_panel.refresh()
-                            resume_panel.refresh()
-
-                        async def execute_proposal_review(
-                            decision: str,
-                        ) -> None:
-                            if state["guided_busy"]:
-                                return
-                            stop_event = begin_guided_run(len(session["turns"]) + 1)
-                            answer_only_button.disable()
-                            remember_button.disable()
-                            guided_button.disable()
-                            guided_result_panel.refresh()
-                            memory_result = None
-                            try:
-                                if decision == "remember":
-                                    intake = await run.io_bound(
-                                        _prepare_magi_memory_intake_record,
-                                        UUID(session["task_id"]),
-                                    )
-                                    memory_result = await run.io_bound(
-                                        register_memory_intake,
-                                        intake,
-                                    )
-                                state["guided_session"] = await review_magi_proposal(
-                                    UUID(session["task_id"]),
-                                    decision,
-                                    timeout=guided_timeout_seconds(session),
-                                    claim_proposal_review_record=(
-                                        _claim_magi_proposal_review_record
-                                    ),
-                                    finalize_proposal_review_record=(
-                                        _finalize_magi_proposal_review_record
-                                    ),
-                                    abort_proposal_review_record=(
-                                        _abort_magi_proposal_review_record
-                                    ),
-                                    memory_result=memory_result,
-                                    stop_requested=stop_event.is_set,
-                                    on_turn_start=note_guided_turn,
-                                )
-                                await refresh_after_proposal_review()
-                                if decision == "remember":
-                                    decisions = [
-                                        str(item.get("decision") or "-")
-                                        for item in (
-                                            (memory_result or {}).get("candidates") or []
-                                        )
-                                        if isinstance(item, dict)
-                                    ]
-                                    ui.notify(
-                                        "Memory Intake結果をMAGIへ再評価し、"
-                                        "RITSUKOがTaskを完了しました"
-                                        + (
-                                            " (" + ", ".join(decisions) + ")"
-                                            if decisions else ""
-                                        ),
-                                        type="positive",
-                                    )
-                                else:
-                                    ui.notify(
-                                        "回答レビューをMAGIへ再評価し、"
-                                        "RITSUKOがTaskを完了しました",
-                                        type="positive",
-                                    )
-                            except Exception as exc:
-                                try:
-                                    saved_trace = await run.io_bound(
-                                        load_core_task_trace,
-                                        UUID(session["task_id"]),
-                                    )
-                                    state["trace"] = saved_trace
-                                    state["result"] = core_task_selection_result(
-                                        saved_trace["task"]
-                                    )
-                                except Exception:
-                                    pass
-                                ui.notify(
-                                    type(exc).__name__ + ": " + str(exc)[:180],
-                                    type="negative",
-                                )
-                            finally:
-                                state["guided_busy"] = False
-                                state["guided_stop_event"] = None
-                                guided_button.enable()
-                                guided_result_panel.refresh()
-                                open_tasks_panel.refresh()
-                                completed_tasks_panel.refresh()
-                                core_result.refresh()
-                                trace_panel.refresh()
-                                resume_panel.refresh()
-
-                        async def complete_answer_only():
-                            await execute_proposal_review("answer_only")
-
-                        async def remember_and_complete():
-                            await execute_proposal_review("remember")
-
-                        with ui.row().classes("gap-2 flex-wrap"):
-                            answer_label = (
-                                "回答レビューを再試行"
-                                if (
-                                    active_review_decision == "answer_only"
-                                    and active_review_status
-                                    in {"processing", "retry_required"}
-                                )
-                                else "回答だけで完了"
-                            )
-                            remember_label = (
-                                "記憶結果の再評価を再試行"
-                                if (
-                                    isinstance(prepared_intake, dict)
-                                    or active_review_decision == "remember"
-                                )
-                                else "記憶にも反映して完了"
-                            )
-                            answer_only_button = ui.button(
-                                answer_label,
-                                icon="done",
-                                color="green",
-                                on_click=complete_answer_only,
-                            )
-                            remember_button = ui.button(
-                                remember_label,
-                                icon="save",
-                                color="blue",
-                                on_click=remember_and_complete,
-                            )
-                            if isinstance(prepared_intake, dict) or (
-                                active_review_status == "processing"
-                                and active_review_decision == "remember"
-                            ):
-                                answer_only_button.disable()
-                            if (
-                                active_review_status == "processing"
-                                and active_review_decision == "answer_only"
-                            ):
-                                remember_button.disable()
-                    else:
-                        ui.label(
-                            "このProposal種別の実行経路はまだ接続していません。"
-                        ).classes("text-sm text-orange-900")
 
             async def start_guided():
                 if state["guided_busy"]:
