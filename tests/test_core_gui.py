@@ -221,16 +221,12 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 'errors': [], 'diagnostic': {},
             }],
         }
-        async def fake_bound(fn, *args, **kwargs):
-            return None
-        async def fake_start(*args, **kwargs):
+        async def fake_loop(*args, **kwargs):
             return deepcopy(fixture)
         with self.client, patch.object(
             daily, 'list_magi_models', return_value=['gemma3:12b']
         ), patch.object(daily, 'choose_magi_model', return_value='gemma3:12b'), \
-             patch.object(daily, 'start_dialogue_async', side_effect=fake_start), \
-             patch.object(daily, 'pending_pkb_request', return_value=None), \
-             patch.object(daily.run, 'io_bound', side_effect=fake_bound):
+             patch.object(daily, 'run_pkb_observation_loop', side_effect=fake_loop):
             daily.core_page()
             old = next(e for e in self.client.elements.values()
                        if isinstance(e, ui.expansion)
