@@ -1566,6 +1566,53 @@ def _execute_magi_pkb_request(
     return _execute_core_read("pkb_search", requested or user_raw)
 
 
+def _create_magi_core_task_record(
+    task_id: UUID,
+    request: str,
+    member_specs: list[dict],
+) -> None:
+    with connection() as db:
+        create_magi_core_task(
+            db,
+            task_id=task_id,
+            request=request,
+            member_specs=member_specs,
+        )
+
+
+def _persist_magi_core_session_record(
+    task_id: UUID,
+    session: dict,
+    selected_capability: str | None = None,
+) -> dict:
+    with connection() as db:
+        return persist_magi_core_session(
+            db,
+            task_id=task_id,
+            session=session,
+            selected_capability=selected_capability,
+        )
+
+
+def _record_magi_pkb_read_record(
+    task_id: UUID,
+    execution: dict,
+    pending_request: dict,
+) -> tuple[str, str]:
+    with connection() as db:
+        return record_magi_pkb_read(
+            db,
+            task_id=task_id,
+            execution=execution,
+            pending_request=pending_request,
+        )
+
+
+def _fail_magi_core_task_record(task_id: UUID, error_type: str) -> None:
+    with connection() as db:
+        fail_magi_core_task(db, task_id=task_id, error=error_type)
+
+
 def _execute_core_read(capability: str, text: str) -> dict:
     """Execute one bounded read-only capability and return normalized evidence metadata."""
     if capability == "pkb_search":
