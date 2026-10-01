@@ -3906,7 +3906,7 @@ def core_page(task_id: str = ""):
             ui.notify(label + "をコピーしました", type="positive")
 
         with ui.card().classes("w-full border-2 border-teal-300 bg-teal-50"):
-            ui.label("RITSUKO ⇄ MAGI 分類から対話を回す試験").classes(
+            ui.label("RITSUKO ⇄ MAGI Observation Loop v1").classes(
                 "text-lg font-bold text-teal-900"
             )
             ui.label(
@@ -3914,13 +3914,14 @@ def core_page(task_id: str = ""):
                 "次の質問目的を選び、問いを組み立て直します。"
             ).classes("text-sm")
             ui.label(
-                "隔離試験：MELCHIOR / CASPER / BALTHASARはLLMの3つの席です。"
-                "各席にはlocal / cloudを問わず登録済みの任意LLMを割り当てられます。"
-                "有効な席へ同じ問いを同時送信し、重み付き投票で候補を統合します。"
-                "PKB/Webの実読取、Task DB更新、外部操作は行いません。"
+                "MELCHIOR / CASPER / BALTHASARはProvider非依存のLLM席です。"
+                "分類・分析でPKB readが必要と判断された場合、RITSUKOがread-onlyで実PKBを取得し、"
+                "Task / Action / Result / Source / Auditへ記録してObservationとして再投入します。"
+                "個人PKB Observationを含む再分析はCloud Context Gateによりlocal席だけへ送信します。"
+                "このv1ではWeb・家計・記憶書込・外部操作は自動実行しません。"
             ).classes("text-xs text-orange-800")
             guided_input = ui.textarea(
-                label="ユーザー原文（分類から開始）",
+                label="RITSUKOへ依頼",
                 value="メインPCのGPUの種類は？",
             ).classes("w-full")
 
@@ -4104,9 +4105,19 @@ def core_page(task_id: str = ""):
                     )
                     return
                 ui.label(
-                    f"Task（試験用）: {session['task_id']} / status={session['status']}"
+                    f"Task: {session['task_id']} / status={session['status']}"
                     f" / RITSUKO next={session['next_step']}"
                 ).classes("font-mono text-xs")
+                if session.get("tool_read_executed"):
+                    ui.label(
+                        "実PKB read済み / Action・Result記録対象"
+                    ).classes("text-xs text-green-800")
+                gate = session.get("cloud_context_gate") or {}
+                if gate:
+                    ui.label(
+                        "Cloud Context Gate: " + str(gate.get("status") or "-")
+                        + " / " + str(gate.get("mode") or "-")
+                    ).classes("font-mono text-xs text-purple-800")
                 session_text = json.dumps(export_dialogue(session), ensure_ascii=False, indent=2)
                 ui.button(
                     "対話結果を一括コピー", icon="content_copy",
@@ -4167,14 +4178,14 @@ def core_page(task_id: str = ""):
                         ).classes("w-full")
                 if session["status"] == "waiting_information":
                     ui.label(
-                        "RITSUKOが検討すべき情報要求（まだ実読取していません）"
+                        "未解決の情報要求（自動PKB read対象外または追加情報が必要）"
                     ).classes("font-bold text-orange-900")
                     ui.code(json.dumps(
                         session["pending_requests"], ensure_ascii=False, indent=2
                     ), language="json").classes("w-full")
                     observation_input = ui.textarea(
-                        label="試験用Observation（手入力。実PKB/Web取得ではない）",
-                        placeholder="開発検証用に架空の取得結果を入力",
+                        label="開発用手動Observation（実PKB取得ではない）",
+                        placeholder="自動read対象外の開発検証にだけ使用",
                     ).classes("w-full")
 
                     async def continue_guided():
@@ -4203,7 +4214,7 @@ def core_page(task_id: str = ""):
                             guided_result_panel.refresh()
 
                     ui.button(
-                        "Observationを渡して対話継続（試験）",
+                        "手動Observationで継続（開発用）",
                         icon="refresh", on_click=continue_guided,
                     ).props("outline")
                 elif session["status"] == "waiting_user":
@@ -4340,7 +4351,7 @@ def core_page(task_id: str = ""):
                     completed_tasks_panel.refresh()
 
             guided_button = ui.button(
-                "分類から対話を開始", icon="play_arrow",
+                "RITSUKOへ依頼", icon="play_arrow",
                 color="teal", on_click=start_guided,
             )
             guided_result_panel()
