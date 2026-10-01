@@ -402,6 +402,40 @@ def _call_openai_guided(
                 "diagnostic": {"provider": "openai", "error": type(exc).__name__}}
 
 
+_GEMINI_SCHEMA_KEYS = frozenset({
+    "$id", "$defs", "$ref", "$anchor",
+    "type", "format", "title", "description", "enum",
+    "items", "prefixItems", "minItems", "maxItems",
+    "minimum", "maximum", "anyOf", "oneOf",
+    "properties", "additionalProperties", "required",
+})
+
+
+def _gemini_response_schema(value: object) -> object:
+    """Return the Gemini-supported JSON Schema subset.
+
+    Semantic constraints omitted by the provider schema (for example minLength)
+    remain enforced by RITSUKO's independent validate_turn validation.
+    """
+    if isinstance(value, list):
+        return [_gemini_response_schema(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    result = {}
+    for key, item in value.items():
+        if key not in _GEMINI_SCHEMA_KEYS:
+            continue
+        if key in {"properties", "$defs"} and isinstance(item, dict):
+            result[key] = {
+                name: _gemini_response_schema(spec)
+                for name, spec in item.items()
+            }
+        else:
+            result[key] = _gemini_response_schema(item)
+    return result
+
+
 def _extract_gemini_text(outer: object) -> str | None:
     if not isinstance(outer, dict):
         return None
@@ -458,7 +492,7 @@ def _call_gemini_guided(
             "responseFormat": {
                 "text": {
                     "mimeType": "application/json",
-                    "schema": schema,
+                    "schema": _gemini_response_schema(schema),
                 }
             },
         },
