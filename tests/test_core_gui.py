@@ -392,16 +392,16 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
     async def test_task_count_settings_are_separate_from_limits_toggle(self):
         with self.client:
             daily.settings_page()
-            def card_for(element):
-                while not isinstance(element, ui.card):
+            def expansion_for(element):
+                while not isinstance(element, ui.expansion):
                     element = element.parent_slot.parent
                 return element
             counts = self.elements('RITSUKO — Task表示件数')[0]
             limits = self.elements('この縦断でまだ行わないこと')[0]
-            self.assertIsNot(card_for(counts), card_for(limits))
+            self.assertIsNot(expansion_for(counts), expansion_for(limits))
             for label in ('進行中・確認待ち 初期表示件数', '完了済み 初期表示件数'):
                 control = next(e for e in self.client.elements.values() if e._props.get('label') == label)
-                self.assertIs(card_for(control), card_for(counts))
+                self.assertIs(expansion_for(control), expansion_for(counts))
             limit_row = limits.parent_slot.parent
             self.assertEqual(len([e for e in limit_row if isinstance(e, ui.switch)]), 1)
             self.assertFalse(any(isinstance(e, ui.select) for e in limit_row))
