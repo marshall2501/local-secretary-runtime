@@ -21,7 +21,11 @@ from .magi_client import OLLAMA
 from .magi_settings import (
     DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, fallback_member_specs,
 )
-from .ollama_runtime import DEFAULT_OLLAMA_CONTEXT_TOKENS, normalize_context_tokens
+from .ollama_runtime import (
+    DEFAULT_OLLAMA_CONTEXT_TOKENS,
+    configured_magi_num_predict,
+    normalize_context_tokens,
+)
 from .ritsuko_magi_protocol import default_resource_catalog
 
 CATEGORIES = (
@@ -247,7 +251,7 @@ def _call_ollama_guided(
         ],
         "options": {
             "temperature": 0,
-            "num_predict": 1150,
+            "num_predict": configured_magi_num_predict(),
             "num_ctx": normalize_context_tokens(context_window_tokens),
         },
     }
@@ -270,6 +274,7 @@ def _call_ollama_guided(
             "thinking_length": len(thinking) if isinstance(thinking, str) else 0,
             "done_reason": outer.get("done_reason") if isinstance(outer, dict) else None,
             "eval_count": outer.get("eval_count") if isinstance(outer, dict) else None,
+            "num_predict": payload["options"]["num_predict"],
         }
         if not isinstance(raw, str):
             return {"status": "invalid", "response": None,
