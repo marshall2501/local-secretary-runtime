@@ -111,6 +111,37 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "ok")
         payload = mock.await_args.kwargs["json_body"]
         self.assertEqual(payload["options"]["num_ctx"], 32768)
+        self.assertEqual(payload["options"]["num_predict"], 4096)
+
+    async def test_magi_ollama_num_predict_env_override_is_used(self):
+        response = {
+            "message": {
+                "content": (
+                    '{"category":"INFORMATION",'
+                    '"understood_request":"GPUを知りたい",'
+                    '"reason":"情報照会",'
+                    '"confidence":"high",'
+                    '"multiple_requests":false}'
+                )
+            },
+            "done_reason": "stop",
+        }
+        mock = AsyncMock(return_value=response)
+        with patch.dict(
+            "os.environ",
+            {"LSA_MAGI_OLLAMA_NUM_PREDICT": "2048"},
+            clear=False,
+        ), patch("pkb_proto.magi_async.request_json", mock):
+            result = await _call_ollama_guided_async(
+                {"stage": "classify"},
+                model="qwen3.5:9b",
+                timeout=1,
+                context_window_tokens=65536,
+            )
+        self.assertEqual(result["status"], "ok")
+        payload = mock.await_args.kwargs["json_body"]
+        self.assertEqual(payload["options"]["num_predict"], 2048)
+        self.assertEqual(result["diagnostic"]["num_predict"], 2048)
 
     async def test_panel_members_execute_concurrently(self):
         active = 0
