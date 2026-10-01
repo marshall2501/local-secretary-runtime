@@ -277,8 +277,13 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             "turns": [{}, {}, {}, {}],
         }
 
-        def claim(claimed_id, reply_length):
-            calls.append(("claim", str(claimed_id), reply_length))
+        def claim(claimed_id, reply_length, reply_fingerprint):
+            calls.append((
+                "claim",
+                str(claimed_id),
+                reply_length,
+                reply_fingerprint,
+            ))
             return (dict(session), "pkb_search")
 
         async def continue_user(saved, text, **kwargs):
@@ -294,6 +299,9 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         def persist(saved_id, updated, capability):
             calls.append(("persist", str(saved_id), capability, updated["status"]))
 
+        def abort(*args):
+            calls.append(("abort",))
+
         def fail(*args):
             calls.append(("fail",))
 
@@ -304,6 +312,7 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             timeout=10,
             claim_user_resume_record=claim,
             persist_session_record=persist,
+            abort_user_resume_record=abort,
             fail_task_record=fail,
             user_continuation=continue_user,
         )
@@ -313,7 +322,52 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             ["claim", "continue", "persist"],
         )
         self.assertEqual(calls[0][1], str(task_id))
+        self.assertEqual(len(calls[0][3]), 64)
         self.assertEqual(calls[-1][2], "pkb_search")
+        self.assertNotIn("abort", [item[0] for item in calls])
+
+
+    async def test_user_resume_failure_aborts_to_retryable_state(self):
+        calls = []
+        task_id = __import__("uuid").UUID(
+            "11111111-1111-4111-8111-111111111111"
+        )
+
+        def claim(claimed_id, reply_length, reply_fingerprint):
+            calls.append(("claim", reply_length, reply_fingerprint))
+            return (
+                {
+                    "task_id": str(task_id),
+                    "status": "waiting_user",
+                    "pending_requests": [{"request_id": "REQ-1"}],
+                    "turns": [{}, {}, {}, {}],
+                },
+                "pkb_search",
+            )
+
+        async def fail_continue(*args, **kwargs):
+            raise RuntimeError("transport failed")
+
+        def persist(*args):
+            calls.append(("persist",))
+
+        def abort(saved_id, error_type):
+            calls.append(("abort", str(saved_id), error_type))
+
+        with self.assertRaisesRegex(RuntimeError, "transport failed"):
+            from pkb_proto.magi_observation_loop import resume_user_answer
+            await resume_user_answer(
+                task_id,
+                "Radeon RX 9070 XT",
+                timeout=10,
+                claim_user_resume_record=claim,
+                persist_session_record=persist,
+                abort_user_resume_record=abort,
+                user_continuation=fail_continue,
+            )
+
+        self.assertEqual([item[0] for item in calls], ["claim", "abort"])
+        self.assertEqual(calls[-1][2], "RuntimeError")
 
 
 if __name__ == "__main__":
