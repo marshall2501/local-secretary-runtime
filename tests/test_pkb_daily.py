@@ -29,6 +29,7 @@ from pkb_proto.daily_pkb import (
     _compare_driver_values,
     _driver_web_query_from_detail,
     _execute_cooperative_local_probe,
+    _execute_magi_pkb_request,
     _clarified_driver_web_target,
     core_answer,
     core_task_selection_result,
@@ -621,6 +622,67 @@ class DailyPKBParserTests(unittest.TestCase):
                 "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 "status": "mystery",
             })
+
+    @patch("pkb_proto.daily_pkb.load_entity_detail")
+    @patch("pkb_proto.daily_pkb.resolve_component_reference")
+    @patch("pkb_proto.daily_pkb._entity_map")
+    @patch("pkb_proto.daily_pkb.connection")
+    def test_magi_pkb_request_resolves_component_and_returns_model(
+        self, connection_mock, entity_map_mock, resolve_mock, detail_mock
+    ):
+        entity_map_mock.return_value = ENTITIES
+        resolve_mock.return_value = {
+            "id": ENTITIES["GPU1"]["id"],
+            "name": "GPU1",
+            "entity_type": "gpu",
+            "relation_role": "primary_gpu",
+            "parent_name": "メインPC",
+            "role_token": "GPU",
+        }
+        detail_mock.return_value = {
+            "entity": {
+                "id": ENTITIES["GPU1"]["id"],
+                "name": "GPU1",
+                "domain": "pc",
+                "entity_type": "gpu",
+            },
+            "current": [
+                {
+                    "predicate": "manufacturer",
+                    "value": "AMD",
+                    "semantic_kind": "attribute",
+                    "valid_to": None,
+                },
+                {
+                    "predicate": "model",
+                    "value": "Radeon RX 9070 XT",
+                    "semantic_kind": "attribute",
+                    "valid_to": None,
+                },
+                {
+                    "predicate": "current_driver",
+                    "value": "26.9.1",
+                    "semantic_kind": "state",
+                    "valid_to": None,
+                },
+            ],
+            "relations": [],
+            "events": [],
+        }
+        result = _execute_magi_pkb_request(
+            "メインPCのGPUの種類は？",
+            {
+                "source": "pkb",
+                "request_ids": ["REQ-1"],
+                "what": "メインPCに搭載されているGPUの種類（モデル）",
+            },
+        )
+        self.assertEqual(result["operation"], "entity_detail")
+        self.assertEqual(result["result"]["result_kind"], "entity_detail")
+        self.assertIn("AMD Radeon RX 9070 XT", result["answer"])
+        self.assertIn("26.9.1", result["answer"])
+        resolve_mock.assert_called_once()
+        detail_mock.assert_called_once()
 
     @patch("pkb_proto.daily_pkb.list_components")
     @patch("pkb_proto.daily_pkb.load_entity_detail")
