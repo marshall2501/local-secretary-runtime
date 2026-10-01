@@ -43,6 +43,8 @@ from .magi_dialogue import (
     _extract_openai_output_text,
     _normalized_member_specs,
     _request_signatures,
+    _latest_verified_pkb_observation,
+    _wait_for_user_after_exhausted_pkb,
     _select_question_purpose,
     _stop_between_turns,
     select_weighted_consensus,
@@ -702,6 +704,66 @@ async def _apply_detail_async(
                 member_specs_override=member_specs_override,
                 context_policy=context_policy,
             )
+
+        latest_verified_pkb = _latest_verified_pkb_observation(session)
+        if latest_verified_pkb is not None and requests:
+            all_pkb = all(item.get("source") == "pkb" for item in requests)
+            all_user = all(item.get("source") == "user" for item in requests)
+            if purpose == "review_or_repair" and all_user:
+                session["pending_requests"] = [
+                    {
+                        "request_id": (
+                            f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}"
+                        ),
+                        **deepcopy(item),
+                    }
+                    for i, item in enumerate(requests, 1)
+                ]
+                session["user_question"] = "確認したいこと: " + " / ".join(
+                    item["what"] for item in requests
+                )
+                session.update(
+                    status="waiting_user",
+                    next_step="ask_user_for_information",
+                )
+                return session
+            if all_pkb:
+                if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+                    prompt = _compose_question(
+                        session,
+                        "review_or_repair",
+                        issue=(
+                            "verified PKB Observation直後に同じPKB sourceが再要求された。"
+                            "言い換えで同一事実を再読しない。直前のreadで未確認だったblocking事実なら"
+                            "source=userへ切り替え、別の事実なら何が異なるかを明確にする"
+                        ),
+                    )
+                    reviewed = await _send_async(
+                        session,
+                        "analyze",
+                        "review_or_repair",
+                        prompt,
+                        timeout=timeout,
+                        caller=caller,
+                        stop_requested=stop_requested,
+                        on_turn_start=on_turn_start,
+                        member_specs_override=member_specs_override,
+                        context_policy=context_policy,
+                    )
+                    if reviewed is None:
+                        return session
+                    return await _apply_detail_async(
+                        session,
+                        reviewed,
+                        timeout=timeout,
+                        purpose="review_or_repair",
+                        caller=caller,
+                        stop_requested=stop_requested,
+                        on_turn_start=on_turn_start,
+                        member_specs_override=member_specs_override,
+                        context_policy=context_policy,
+                    )
+                return _wait_for_user_after_exhausted_pkb(session, requests)
 
         signatures = _request_signatures(requests)
         repeated = bool(session["observations"]) and bool(signatures) and all(
