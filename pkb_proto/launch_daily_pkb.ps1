@@ -87,12 +87,40 @@ try {
             }
 
             $value = $Matches[2]
-            if ($value.Length -ge 2) {
-                $doubleQuoted = $value.StartsWith('"') -and $value.EndsWith('"')
-                $singleQuoted = $value.StartsWith("'") -and $value.EndsWith("'")
-                if ($doubleQuoted -or $singleQuoted) {
-                    $value = $value.Substring(1, $value.Length - 2)
-                }
+            if (($value -match '^"(.*)"
+            $previousRuntimeEnv[$name] = [Environment]::GetEnvironmentVariable(
+                $name, [EnvironmentVariableTarget]::Process
+            )
+            [Environment]::SetEnvironmentVariable(
+                $name, $value, [EnvironmentVariableTarget]::Process
+            )
+            $loadedRuntimeEnv.Add($name)
+        }
+    }
+
+    $env:LSA_PKB_DAILY_PORT = "$port"
+    $env:LSA_PKB_DAILY_SECRET = $secret
+    Push-Location $root
+    $locationPushed = $true
+
+    & $python -m pkb_proto.daily_pkb
+    if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
+} finally {
+    Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
+    Remove-Item Env:LSA_PKB_DAILY_SECRET -ErrorAction SilentlyContinue
+
+    foreach ($name in $loadedRuntimeEnv) {
+        [Environment]::SetEnvironmentVariable(
+            $name, $previousRuntimeEnv[$name], [EnvironmentVariableTarget]::Process
+        )
+    }
+
+    if ($locationPushed) {
+        Pop-Location
+    }
+}
+) -or ($value -match "^'(.*)'$")) {
+                $value = $Matches[1]
             }
 
             $previousRuntimeEnv[$name] = [Environment]::GetEnvironmentVariable(
