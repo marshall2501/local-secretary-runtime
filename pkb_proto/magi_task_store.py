@@ -248,3 +248,43 @@ def record_pkb_read(
             ),
         )
     return str(action_id), str(result_id)
+
+
+def fail_task(db, *, task_id: UUID, error: str) -> None:
+    """Fail one persisted MAGI Task without storing secret-bearing exception detail."""
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            "SELECT checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return
+        checkpoint = row[0] or {}
+        checkpoint.update({
+            "phase": "failed",
+            "reason": "magi_observation_loop_failed",
+            "error_type": str(error)[:160],
+            "final_core_decision": {
+                "next_step": "stop",
+                "reason": "magi_observation_loop_failed",
+                "task_status": "failed",
+            },
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='failed', checkpoint=%s, completed_at=NULL
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.failed',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({"error_type": str(error)[:160]}),
+            ),
+        )
