@@ -513,6 +513,39 @@ class GuidedDialogueTests(unittest.TestCase):
             [("MELCHIOR","openai"),("CASPER","ollama"),("BALTHASAR","gemini")],
         )
 
+    def test_dialogue_can_start_from_db_style_member_specs_without_legacy_model(self):
+        specs=[
+            {"name":"MELCHIOR","provider":"ollama","model":"local-a",
+             "endpoint":"http://127.0.0.1:11434","credential_env":None,
+             "weight":1.0,"timeout_seconds":30,"enabled":True},
+            {"name":"CASPER","provider":"openai","model":"cloud-b",
+             "endpoint":"https://api.openai.com/v1","credential_env":"OPENAI_API_KEY",
+             "weight":1.0,"timeout_seconds":30,"enabled":False},
+            {"name":"BALTHASAR","provider":"gemini","model":"cloud-c",
+             "endpoint":"https://generativelanguage.googleapis.com/v1beta",
+             "credential_env":"GEMINI_API_KEY",
+             "weight":1.0,"timeout_seconds":30,"enabled":False},
+        ]
+        classify=self.classification("INFORMATION")
+        detail=self.detail(source="pkb")
+        calls=[]
+        def fake_member(spec,envelope,*,timeout):
+            calls.append((spec["name"],spec["provider"],envelope["stage"]))
+            response=classify if envelope["stage"]=="classify" else detail
+            return {
+                "name":spec["name"],"provider":spec["provider"],"model":spec["model"],
+                "weight":spec["weight"],"timeout_seconds":spec["timeout_seconds"],
+                "status":"ok","response":response,"errors":[],"diagnostic":{},
+            }
+        with patch("pkb_proto.magi_dialogue._call_panel_member",side_effect=fake_member):
+            session=start_dialogue("私の構成は？",member_specs=specs,timeout=30)
+        self.assertEqual(session["status"],"waiting_information")
+        self.assertEqual(session["member_specs"][0]["provider"],"ollama")
+        self.assertEqual(calls,[
+            ("MELCHIOR","ollama","classify"),
+            ("MELCHIOR","ollama","analyze"),
+        ])
+
     def test_weighted_consensus_uses_two_of_three_matching_decisions(self):
         a=self.classification("INFORMATION")
         b=self.classification("INFORMATION")
