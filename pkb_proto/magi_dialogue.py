@@ -491,7 +491,7 @@ def _call_gemini_guided(
             "maxOutputTokens": 1600,
             "responseFormat": {
                 "text": {
-                    "mimeType": "application/json",
+                    "mimeType": "APPLICATION_JSON",
                     "schema": _gemini_response_schema(schema),
                 }
             },
