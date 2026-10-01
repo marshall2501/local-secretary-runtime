@@ -219,6 +219,8 @@ def _load_reviewable_proposal(cur, task_id: UUID) -> tuple[dict, dict]:
 def complete_answer_only(db, *, task_id: UUID) -> dict:
     with db.transaction(), db.cursor() as cur:
         checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        if isinstance(checkpoint.get("proposal_memory_intake"), dict):
+            raise ValueError("memory_review_already_prepared")
         review = {
             "decision": "answer_only",
             "answer": proposal["answer"],
@@ -265,7 +267,20 @@ def prepare_memory_intake(db, *, task_id: UUID) -> MemoryIntake:
         prepared = checkpoint.get("proposal_memory_intake")
         if isinstance(prepared, dict):
             return MemoryIntake(**prepared)
-        intake = MemoryIntake.issue(proposal["knowledge_candidate"])
+        issued = MemoryIntake.issue(proposal["knowledge_candidate"])
+        intake = MemoryIntake(
+            contract_version=issued.contract_version,
+            input_id=issued.input_id,
+            raw_text=issued.raw_text,
+            source_kind=issued.source_kind,
+            source_ref=(
+                f"fixture://magi-task/{task_id}/{issued.input_id}"
+            ),
+            recorded_at=issued.recorded_at,
+            confidentiality=issued.confidentiality,
+            timezone=issued.timezone,
+            observed_at=issued.observed_at,
+        )
         prepared = {
             "contract_version": intake.contract_version,
             "input_id": intake.input_id,
