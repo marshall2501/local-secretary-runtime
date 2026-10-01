@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from pkb_proto.magi_settings import (
+    DEFAULT_TIMEOUT_SECONDS,
     MEMBER_NAMES,
     fallback_member_specs,
     provider_defaults,
@@ -55,6 +56,12 @@ class MagiSettingsTests(unittest.TestCase):
         self.assertIsNone(provider_defaults("ollama")[1])
         self.assertEqual(provider_defaults("openai")[1], "OPENAI_API_KEY")
         self.assertEqual(provider_defaults("gemini")[1], "GEMINI_API_KEY")
+
+    def test_default_member_timeout_is_120_seconds(self):
+        with patch.dict(os.environ, {}, clear=True):
+            specs = fallback_member_specs("gemma3:12b")
+        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 120)
+        self.assertTrue(all(item["timeout_seconds"] == 120 for item in specs))
 
     def test_assignment_validation_requires_all_three_slots(self):
         with self.assertRaisesRegex(ValueError, "all_magi_members_required"):
