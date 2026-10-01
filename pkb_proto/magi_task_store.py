@@ -392,7 +392,9 @@ def finalize_proposal_review(
     session: dict,
     selected_capability: str | None = None,
 ) -> dict:
-    """Finalize only after a successful MAGI review-result turn."""
+    """Finalize only after a successful, task-matched MAGI review-result turn."""
+    if str(session.get("task_id") or "") != str(task_id):
+        raise ValueError("proposal_review_task_mismatch")
     if session.get("status") != "review_evaluated":
         raise ValueError("proposal_review_not_evaluated")
     if session.get("next_step") != "ritsuko_finalize_review":
@@ -432,6 +434,38 @@ def finalize_proposal_review(
             raise ValueError("proposal_review_answer_missing")
 
         evaluation = deepcopy(session.get("post_review_evaluation") or {})
+        if evaluation.get("state") not in {"READY", "KNOWLEDGE_CANDIDATE"}:
+            raise ValueError("proposal_review_evaluation_not_finalizable")
+
+        expected_source = (
+            "proposal_review"
+            if review.get("decision") == "answer_only"
+            else "memory_intake"
+        )
+        review_observations = [
+            item for item in (session.get("observations") or [])
+            if isinstance(item, dict)
+            and item.get("source") == expected_source
+            and item.get("verified") is True
+            and item.get("review_decision") == review.get("decision")
+        ]
+        if not review_observations:
+            raise ValueError("proposal_review_observation_missing")
+        latest_review_observation = review_observations[-1]
+        if (
+            str(latest_review_observation.get("answer") or "").strip()
+            != answer
+        ):
+            raise ValueError("proposal_review_answer_mismatch")
+        if review.get("decision") == "remember":
+            expected_memory = review.get("memory_intake") or {}
+            observed_memory = latest_review_observation.get("memory_intake") or {}
+            if (
+                observed_memory.get("input_id")
+                != expected_memory.get("input_id")
+            ):
+                raise ValueError("proposal_review_memory_mismatch")
+
         review["status"] = "completed"
         review["magi_evaluation"] = {
             "state": evaluation.get("state"),
