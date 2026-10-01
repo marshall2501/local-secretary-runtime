@@ -181,6 +181,46 @@ class GuidedDialogueTests(unittest.TestCase):
             "action_candidate":None,
         }
 
+    def test_user_stop_after_current_turn_prevents_followup(self):
+        stop = {"requested": False}
+        seen = []
+
+        def caller(envelope, *, model, timeout):
+            seen.append(envelope)
+            stop["requested"] = True
+            return {
+                "status": "ok",
+                "response": self.classification(),
+                "errors": [],
+                "diagnostic": {},
+            }
+
+        session = start_dialogue(
+            "富士山の高さを教えて",
+            model="gemma3:12b",
+            caller=caller,
+            stop_requested=lambda: stop["requested"],
+        )
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(len(session["turns"]), 1)
+        self.assertEqual(session["classification"]["category"], "INFORMATION")
+        self.assertEqual(session["status"], "stopped")
+        self.assertEqual(session["next_step"], "user_requested_stop")
+
+    def test_turn_progress_callback_reports_each_started_turn(self):
+        caller, seen = self.scripted(
+            self.classification(), self.detail(source="web", what="公開情報")
+        )
+        turns = []
+        start_dialogue(
+            "富士山の高さを教えて",
+            model="gemma3:12b",
+            caller=caller,
+            on_turn_start=turns.append,
+        )
+        self.assertEqual(turns, [1, 2])
+        self.assertEqual(len(seen), 2)
+
     def test_classification_drives_a_followup_question_and_core_owns_ids(self):
         caller, seen=self.scripted(
             self.classification(), self.detail(source="pkb",what="本人のメインPC GPU")
