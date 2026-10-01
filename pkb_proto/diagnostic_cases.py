@@ -6,6 +6,7 @@ instruction reception, basic reasoning and extraction-prompt complexity.
 from __future__ import annotations
 
 from .extraction_service import extraction_messages
+from .ollama_runtime import configured_context_tokens
 
 MODES = (
     "疎通：固定文字列",
@@ -59,7 +60,7 @@ def build_ollama_payload(episode: dict, model: str, predict: int,
         "model": model,
         "stream": False,
         "messages": messages,
-        "options": {"temperature": 0, "num_predict": predict},
+        "options": {"temperature": 0, "num_predict": predict, "num_ctx": configured_context_tokens()},
     }
     if json_format:
         result["format"] = "json"
