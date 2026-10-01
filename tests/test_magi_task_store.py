@@ -365,6 +365,15 @@ class MagiTaskStoreTests(unittest.TestCase):
                 {
                     "question_purpose": "evaluate_review_result",
                     "status": "ok",
+                    "request_envelope": {
+                        "task_id": str(TASK_ID),
+                        "question_purpose": "evaluate_review_result",
+                    },
+                    "response": {
+                        "state": "READY",
+                        "reason": "本人回答で元質問には回答可能",
+                        "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
+                    },
                 },
             ],
         })
@@ -428,6 +437,14 @@ class MagiTaskStoreTests(unittest.TestCase):
                 {
                     "question_purpose": "evaluate_review_result",
                     "status": "ok",
+                    "request_envelope": {
+                        "task_id": str(TASK_ID),
+                        "question_purpose": "evaluate_review_result",
+                    },
+                    "response": {
+                        "state": "NEED_INFORMATION",
+                        "reason": "unexpected extra lookup",
+                    },
                 },
             ],
         })
