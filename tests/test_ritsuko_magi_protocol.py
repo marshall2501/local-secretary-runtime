@@ -515,6 +515,10 @@ class GuidedDialogueTests(unittest.TestCase):
         response_format=payload["generationConfig"]["responseFormat"]
         self.assertEqual(response_format["text"]["mimeType"],"application/json")
         self.assertIn("schema",response_format["text"])
+        gemini_schema=response_format["text"]["schema"]
+        self.assertNotIn("minLength",gemini_schema["properties"]["understood_request"])
+        self.assertNotIn("minLength",gemini_schema["properties"]["reason"])
+        self.assertFalse(gemini_schema["additionalProperties"])
         self.assertNotIn("responseMimeType",payload["generationConfig"])
         self.assertNotIn("responseSchema",payload["generationConfig"])
         self.assertNotIn("temperature",payload["generationConfig"])
