@@ -922,8 +922,11 @@ def start_dialogue(
         "user_source_reviewed": False, "last_question_purpose": None,
         "turns": [], "legacy_router_used": False, "tool_read_executed": False,
     }
-    if not session["user_raw"] or not model:
+    if not session["user_raw"]:
         session.update(status="stopped", next_step="invalid_input")
+        return session
+    if caller is call_guided_panel and not specs:
+        session.update(status="stopped", next_step="no_magi_member")
         return session
     classification = _send(
         session, "classify", "classify", CLASSIFY_QUESTION, caller, timeout=timeout
