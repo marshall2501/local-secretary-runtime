@@ -41,7 +41,10 @@ from .magi_client import (
     choose_model as choose_magi_model,
     list_chat_models as list_magi_models,
 )
-from .magi_dialogue import start_dialogue, continue_with_observation, export_dialogue
+from .magi_dialogue import (
+    start_dialogue, continue_with_observation, continue_with_user_clarification,
+    export_dialogue, panel_member_specs,
+)
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -3672,8 +3675,9 @@ def core_page(task_id: str = ""):
                 "次の質問目的を選び、問いを組み立て直します。"
             ).classes("text-sm")
             ui.label(
-                "隔離試験：MAGI実行はMELCHIOR 1つのみ。PKB/Webの実読取、"
-                "Task DB更新、外部操作は行いません。"
+                "隔離試験：MELCHIOR(local)と、環境設定で許可したCASPER/BALTHASAR(cloud)を"
+                "同じ問いへ同時送信し、重み付き投票で候補を統合します。"
+                "PKB/Webの実読取、Task DB更新、外部操作は行いません。"
             ).classes("text-xs text-orange-800")
             guided_input = ui.textarea(
                 label="ユーザー原文（分類から開始）",
@@ -3682,19 +3686,21 @@ def core_page(task_id: str = ""):
             with ui.row().classes("w-full gap-2 items-end flex-wrap"):
                 guided_model = ui.select(
                     options=installed_magi_models, value=default_magi_model,
-                    label="MELCHIOR / Ollama model（有効）",
+                    label="MELCHIOR / Ollama model",
                 ).classes("min-w-64")
-                for member in ("BALTHASAR", "CASPER"):
-                    inactive = ui.select(
-                        options=installed_magi_models, value=None,
-                        label=f"{member} / model（無効）",
-                    ).classes("min-w-48")
-                    inactive.disable()
                 guided_timeout = ui.select(
                     options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
                     value=int(state.get("advisor_timeout") or 900),
-                    label="各回Timeout（秒）",
+                    label="各member Timeout（秒）",
                 ).classes("min-w-36")
+            configured_specs = panel_member_specs(str(default_magi_model or ""))
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                for spec in configured_specs:
+                    state_text = "有効" if spec["enabled"] else "無効"
+                    ui.label(
+                        f"{spec['name']}: {spec['provider']} / {spec['model'] or '-'} "
+                        f"/ weight={spec['weight']} / {state_text}"
+                    ).classes("text-xs font-mono text-grey-8")
 
             @ui.refreshable
             def guided_result_panel():
@@ -3741,12 +3747,24 @@ def core_page(task_id: str = ""):
                         ui.label(f"status={turn['status']} / errors={turn['errors']}").classes(
                             "font-mono text-xs"
                         )
-                        ui.label("MAGI返答").classes("font-bold text-sm")
+                        ui.label("MAGI統合結果").classes("font-bold text-sm")
                         ui.code(
                             json.dumps(turn["response"], ensure_ascii=False, indent=2)
                             if turn["response"] is not None else "null",
                             language="json",
                         ).classes("w-full")
+                        if turn.get("consensus") is not None:
+                            ui.label("重み付き投票").classes("font-bold text-sm")
+                            ui.code(
+                                json.dumps(turn["consensus"], ensure_ascii=False, indent=2),
+                                language="json",
+                            ).classes("w-full")
+                        if turn.get("member_results"):
+                            ui.label("各MAGI member返答").classes("font-bold text-sm")
+                            ui.code(
+                                json.dumps(turn["member_results"], ensure_ascii=False, indent=2),
+                                language="json",
+                            ).classes("w-full")
                         ui.label("RITSUKOからの質問・Envelope").classes("font-bold text-sm")
                         ui.code(
                             json.dumps(turn["request_envelope"], ensure_ascii=False, indent=2),
@@ -3795,14 +3813,45 @@ def core_page(task_id: str = ""):
                         icon="refresh", on_click=continue_guided,
                     ).props("outline")
                 elif session["status"] == "waiting_user":
-                    ui.label("RITSUKOが本人への確認を検討する状態です。").classes(
+                    ui.label("RITSUKOが本人への確認を必要とする状態です。").classes(
                         "text-orange-900"
                     )
-                    question = (session.get("detail") or {}).get("question_for_user") or (
-                        (session.get("classification") or {}).get("clarification_question")
+                    question = session.get("user_question") or (
+                        (session.get("detail") or {}).get("question_for_user")
                     )
                     if question:
-                        ui.label("質問候補: " + question).classes("text-sm")
+                        ui.label("質問: " + question).classes("text-sm")
+                    clarification_input = ui.textarea(
+                        label="追加説明・選択",
+                        placeholder="内部のPattern名ではなく、求めている結果を自然な言葉で入力",
+                    ).classes("w-full")
+
+                    async def continue_with_user():
+                        if state["guided_busy"]:
+                            return
+                        if not str(clarification_input.value or "").strip():
+                            ui.notify("追加説明を入力してください", type="warning")
+                            return
+                        state["guided_busy"] = True
+                        guided_button.disable()
+                        guided_result_panel.refresh()
+                        try:
+                            state["guided_session"] = await run.io_bound(
+                                continue_with_user_clarification, session,
+                                clarification_input.value,
+                                timeout=float(guided_timeout.value or 900),
+                            )
+                        except Exception as exc:
+                            ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
+                        finally:
+                            state["guided_busy"] = False
+                            guided_button.enable()
+                            guided_result_panel.refresh()
+
+                    ui.button(
+                        "追加説明を渡して対話継続（試験）",
+                        icon="chat", on_click=continue_with_user,
+                    ).props("outline")
 
             async def start_guided():
                 if state["guided_busy"]:
