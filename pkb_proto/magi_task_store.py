@@ -6,7 +6,12 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
-from .magi_core_bridge import CORE_SLICE, task_projection
+from .magi_core_bridge import (
+    CORE_SLICE,
+    reviewable_user_knowledge_proposal,
+    task_projection,
+)
+from .memory_contracts import MemoryIntake
 
 
 def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) -> None:
@@ -184,6 +189,185 @@ def persist_session(
             ),
         )
     return projection
+
+
+def _load_reviewable_proposal(cur, task_id: UUID) -> tuple[dict, dict]:
+    cur.execute(
+        """SELECT status, checkpoint
+           FROM secretary.tasks
+           WHERE id=%s
+           FOR UPDATE""",
+        (task_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError("unknown_task")
+    status, checkpoint = row[0], row[1] or {}
+    if status != "waiting_external":
+        raise ValueError("task_not_waiting_external")
+    if checkpoint.get("core_slice") != CORE_SLICE:
+        raise ValueError("not_magi_observation_task")
+    session = checkpoint.get("magi_session")
+    if not isinstance(session, dict):
+        raise ValueError("missing_magi_session")
+    proposal = reviewable_user_knowledge_proposal(session)
+    if proposal is None:
+        raise ValueError("knowledge_proposal_not_user_grounded")
+    return checkpoint, proposal
+
+
+def complete_answer_only(db, *, task_id: UUID) -> dict:
+    with db.transaction(), db.cursor() as cur:
+        checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        review = {
+            "decision": "answer_only",
+            "answer": proposal["answer"],
+            "memory_intake": None,
+        }
+        checkpoint.update({
+            "phase": "completed",
+            "question": None,
+            "message": proposal["answer"],
+            "reason": "user_grounded_answer_only",
+            "proposal_review": review,
+            "final_core_decision": {
+                "next_step": "respond",
+                "reason": "user_grounded_answer_only",
+                "task_status": "completed",
+            },
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='completed', checkpoint=%s, completed_at=now()
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.proposal_answer_only',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "responds_to": proposal["responds_to"],
+                    "user_text_length": len(proposal["user_text"]),
+                }),
+            ),
+        )
+        return review
+
+
+def prepare_memory_intake(db, *, task_id: UUID) -> MemoryIntake:
+    with db.transaction(), db.cursor() as cur:
+        checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        prepared = checkpoint.get("proposal_memory_intake")
+        if isinstance(prepared, dict):
+            return MemoryIntake(**prepared)
+        intake = MemoryIntake.issue(proposal["knowledge_candidate"])
+        prepared = {
+            "contract_version": intake.contract_version,
+            "input_id": intake.input_id,
+            "raw_text": intake.raw_text,
+            "source_kind": intake.source_kind,
+            "source_ref": intake.source_ref,
+            "recorded_at": intake.recorded_at,
+            "confidentiality": intake.confidentiality,
+            "timezone": intake.timezone,
+            "observed_at": intake.observed_at,
+        }
+        checkpoint["proposal_memory_intake"] = prepared
+        checkpoint["reason"] = "memory_intake_prepared"
+        cur.execute(
+            "UPDATE secretary.tasks SET checkpoint=%s WHERE id=%s",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.memory_intake_prepared',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "input_id": intake.input_id,
+                    "candidate_length": len(proposal["knowledge_candidate"]),
+                    "confirmation_basis": "user_clicked_displayed_candidate",
+                }),
+            ),
+        )
+        return intake
+
+
+def complete_memory_review(db, *, task_id: UUID, memory_result: dict) -> dict:
+    with db.transaction(), db.cursor() as cur:
+        checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        prepared = checkpoint.get("proposal_memory_intake")
+        if not isinstance(prepared, dict):
+            raise ValueError("memory_intake_not_prepared")
+        if memory_result.get("input_id") != prepared.get("input_id"):
+            raise ValueError("memory_intake_result_mismatch")
+        if memory_result.get("status") not in {"committed", "replayed"}:
+            raise ValueError("memory_intake_not_committed")
+        receipts = [
+            {
+                "candidate_id": item.get("candidate_id"),
+                "decision": item.get("decision"),
+                "reason": item.get("reason"),
+                "claim_id": item.get("claim_id"),
+                "pending_id": item.get("pending_id"),
+                "derived_claim_ids": list(item.get("derived_claim_ids") or []),
+            }
+            for item in (memory_result.get("candidates") or [])
+            if isinstance(item, dict)
+        ][:100]
+        memory_summary = {
+            "input_id": prepared["input_id"],
+            "status": memory_result.get("status"),
+            "source_id": memory_result.get("source_id"),
+            "receipts": receipts,
+        }
+        review = {
+            "decision": "remember",
+            "answer": proposal["answer"],
+            "memory_intake": memory_summary,
+        }
+        checkpoint.update({
+            "phase": "completed",
+            "question": None,
+            "message": proposal["answer"],
+            "reason": "user_confirmed_memory_intake",
+            "proposal_review": review,
+            "final_core_decision": {
+                "next_step": "respond",
+                "reason": "user_confirmed_memory_intake",
+                "task_status": "completed",
+            },
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='completed', checkpoint=%s, completed_at=now()
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.proposal_memory_reviewed',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "input_id": prepared["input_id"],
+                    "memory_status": memory_result.get("status"),
+                    "decisions": [item.get("decision") for item in receipts],
+                }),
+            ),
+        )
+        return review
 
 
 def record_pkb_read(
