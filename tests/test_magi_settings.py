@@ -11,6 +11,7 @@ from pkb_proto.magi_settings import (
     provider_defaults,
     save_member_assignments,
 )
+from pkb_proto.ollama_runtime import DEFAULT_OLLAMA_CONTEXT_TOKENS
 
 
 class MagiSettingsTests(unittest.TestCase):
@@ -56,6 +57,23 @@ class MagiSettingsTests(unittest.TestCase):
         self.assertIsNone(provider_defaults("ollama")[1])
         self.assertEqual(provider_defaults("openai")[1], "OPENAI_API_KEY")
         self.assertEqual(provider_defaults("gemini")[1], "GEMINI_API_KEY")
+
+    def test_default_ollama_context_is_64k_and_cloud_has_no_context(self):
+        with patch.dict(os.environ, {}, clear=True):
+            specs = fallback_member_specs("gemma3:12b")
+        by_name = {item["name"]: item for item in specs}
+        self.assertEqual(DEFAULT_OLLAMA_CONTEXT_TOKENS, 65536)
+        self.assertEqual(by_name["MELCHIOR"]["context_window_tokens"], 65536)
+        self.assertIsNone(by_name["CASPER"]["context_window_tokens"])
+        self.assertIsNone(by_name["BALTHASAR"]["context_window_tokens"])
+
+    def test_ollama_context_env_override_is_used_for_bootstrap(self):
+        env = {
+            "LSA_MAGI_MELCHIOR_CONTEXT_TOKENS": "32768",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            specs = fallback_member_specs("qwen3.5:9b")
+        self.assertEqual(specs[0]["context_window_tokens"], 32768)
 
     def test_default_member_timeout_is_120_seconds(self):
         with patch.dict(os.environ, {}, clear=True):
