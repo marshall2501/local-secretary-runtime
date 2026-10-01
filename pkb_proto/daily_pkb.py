@@ -2930,7 +2930,8 @@ def load_recent_core_tasks(limit: int = 10, offset: int = 0) -> list[dict]:
                    LEFT JOIN secretary.actions a ON a.task_id=t.id
                    LEFT JOIN secretary.results r ON r.action_id=a.id
                    WHERE t.requested_by='local_user'
-                     AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
+                     AND COALESCE(t.checkpoint->>'core_slice', '') IN
+                         ('daily_read_only_v1','ritsuko_magi_observation_v1')
                    GROUP BY t.id
                    ORDER BY t.updated_at DESC, t.id DESC
                    LIMIT %s OFFSET %s""",
@@ -2948,6 +2949,8 @@ def load_recent_core_tasks(limit: int = 10, offset: int = 0) -> list[dict]:
             "created_at": row[4],
             "updated_at": row[5],
             "completed_at": row[6],
+            "core_slice": checkpoint.get("core_slice"),
+            "core_slice": checkpoint.get("core_slice"),
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "action_count": row[8],
@@ -2973,7 +2976,8 @@ def load_open_core_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
                    LEFT JOIN secretary.actions a ON a.task_id=t.id
                    LEFT JOIN secretary.results r ON r.action_id=a.id
                    WHERE t.requested_by='local_user'
-                     AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
+                     AND COALESCE(t.checkpoint->>'core_slice', '') IN
+                         ('daily_read_only_v1','ritsuko_magi_observation_v1')
                      AND t.status IN ('waiting_external', 'running')
                    GROUP BY t.id
                    ORDER BY t.updated_at DESC, t.id DESC
@@ -2991,6 +2995,7 @@ def load_open_core_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
             "revision": row[3],
             "created_at": row[4],
             "updated_at": row[5],
+            "core_slice": checkpoint.get("core_slice"),
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "question": checkpoint.get("question"),
@@ -3021,7 +3026,8 @@ def load_completed_core_tasks(limit: int = 8, offset: int = 0) -> list[dict]:
                    LEFT JOIN secretary.actions a ON a.task_id=t.id
                    LEFT JOIN secretary.results r ON r.action_id=a.id
                    WHERE t.requested_by='local_user'
-                     AND COALESCE(t.checkpoint->>'core_slice', '')='daily_read_only_v1'
+                     AND COALESCE(t.checkpoint->>'core_slice', '') IN
+                         ('daily_read_only_v1','ritsuko_magi_observation_v1')
                      AND t.status='completed'
                    GROUP BY t.id
                    ORDER BY COALESCE(t.completed_at, t.updated_at) DESC, t.id DESC
@@ -3040,6 +3046,7 @@ def load_completed_core_tasks(limit: int = 8, offset: int = 0) -> list[dict]:
             "created_at": row[4],
             "updated_at": row[5],
             "completed_at": row[6],
+            "core_slice": checkpoint.get("core_slice"),
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "question": checkpoint.get("question"),
@@ -3064,6 +3071,7 @@ def core_task_selection_result(item: dict) -> dict:
     return {
         "task_id": task_id,
         "status": status,
+        "core_slice": item.get("core_slice"),
         "phase": item.get("phase"),
         "selected_capability": item.get("selected_capability"),
         "question": item.get("question"),
@@ -3130,6 +3138,7 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "created_at": task[5],
             "updated_at": task[6],
             "completed_at": task[7],
+            "core_slice": checkpoint.get("core_slice"),
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "question": checkpoint.get("question"),
@@ -3144,6 +3153,7 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "reason": checkpoint.get("reason"),
             "final_core_decision": checkpoint.get("final_core_decision"),
             "result_count": checkpoint.get("result_count"),
+            "magi_session": checkpoint.get("magi_session"),
         },
         "actions": [
             {
@@ -4790,9 +4800,9 @@ def core_page(task_id: str = ""):
 
             with task_drawer:
                 with ui.column().classes("w-full gap-2 no-wrap"):
-                    ui.label("既存Task（旧経路）").classes("text-lg font-bold shrink-0")
+                    ui.label("既存Task").classes("text-lg font-bold shrink-0")
                     ui.label(
-                        "Protocol v1 Cycle 1試験の結果はここには保存されません。"
+                        "RITSUKOのTaskは経路に関係なくここから確認できます。"
                     ).classes("text-xs text-grey-7")
                     ui.link("Task履歴を見る", "/core/history").classes("shrink-0")
                     with ui.column().classes("w-full no-wrap"):
