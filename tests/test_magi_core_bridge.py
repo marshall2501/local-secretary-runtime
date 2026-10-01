@@ -135,6 +135,51 @@ class MagiCoreBridgeTests(unittest.TestCase):
         base["observations"] = base["observations"][:1]
         self.assertIsNone(reviewable_user_knowledge_proposal(base))
 
+    def test_user_grounded_knowledge_proposal_is_reviewable(self):
+        session = {
+            "status": "proposal_ready",
+            "tool_read_executed": True,
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True, "text": "model unavailable"},
+                {
+                    "source": "user_clarification",
+                    "text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                },
+            ],
+        }
+        review = reviewable_user_knowledge_proposal(session)
+        self.assertIsNotNone(review)
+        self.assertEqual(review["user_text"], "Radeon RX 9070 XT")
+        self.assertEqual(review["responds_to"], ["REQ-1"])
+
+    def test_model_only_or_paraphrased_proposal_is_not_reviewable(self):
+        session = {
+            "status": "proposal_ready",
+            "tool_read_executed": True,
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "answer_candidate": "メインPCのGPUは別モデルです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: 別モデル",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True, "text": "model unavailable"},
+                {
+                    "source": "user_clarification",
+                    "text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                },
+            ],
+        }
+        self.assertIsNone(reviewable_user_knowledge_proposal(session))
+        session["observations"] = session["observations"][:1]
+        self.assertIsNone(reviewable_user_knowledge_proposal(session))
+
     def test_user_stop_projects_to_paused_not_failed(self):
         projection = task_projection({
             "status": "stopped",
