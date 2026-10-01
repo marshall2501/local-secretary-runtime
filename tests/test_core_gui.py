@@ -390,6 +390,160 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
             )
 
+    async def test_memory_choice_runs_intake_then_post_review_re_evaluation(self):
+        saved_session = {
+            'task_id': self.waiting[0]['id'],
+            'user_raw': 'メインPCのGPUの種類は？',
+            'model': '',
+            'prompt_version': 'd19-state-driven-v4',
+            'status': 'proposal_ready',
+            'next_step': 'review_proposal',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': 'GPUモデルを知りたい',
+            },
+            'detail': {
+                'state': 'KNOWLEDGE_CANDIDATE',
+                'reason': '本人回答で不足情報が解消した',
+                'answer_candidate': 'メインPCのGPUはRadeon RX 9070 XTです。',
+                'knowledge_candidate': 'メインPCのGPUモデル名: Radeon RX 9070 XT',
+            },
+            'pending_requests': [],
+            'observations': [
+                {
+                    'source': 'pkb',
+                    'verified': True,
+                    'confidentiality': 'private',
+                    'text': 'GPU1はあるがmodel未確認',
+                },
+                {
+                    'source': 'user_clarification',
+                    'verified': False,
+                    'text': 'Radeon RX 9070 XT',
+                    'responds_to': ['REQ-1'],
+                },
+            ],
+            'previous_request_signatures': [],
+            'conversation_context': [],
+            'user_question': None,
+            'magi_disagreement': None,
+            'user_source_reviewed': False,
+            'last_question_purpose': 'evaluate_observation',
+            'turns': [{
+                'stage': 'analyze',
+                'question_purpose': 'evaluate_observation',
+                'request_envelope': {'turn': 5},
+                'status': 'ok',
+                'response': {'state': 'KNOWLEDGE_CANDIDATE'},
+                'errors': [],
+                'diagnostic': {},
+                'member_results': [],
+                'consensus': None,
+            }],
+            'legacy_router_used': False,
+            'tool_read_executed': True,
+            'cloud_context_gate': {
+                'status': 'applied',
+                'mode': 'local_only_private_pkb',
+            },
+        }
+        self.waiting[0].update({
+            'core_slice': 'ritsuko_magi_observation_v1',
+            'phase': 'awaiting_review',
+            'selected_capability': 'pkb_search',
+            'magi_session': saved_session,
+        })
+        memory_result = {
+            'status': 'committed',
+            'input_id': 'input-1',
+            'source_id': 'source-1',
+            'candidates': [{
+                'candidate_id': 'candidate-1',
+                'decision': 'pending',
+                'reason': 'unresolved',
+                'claim_id': None,
+                'pending_id': 'pending-1',
+                'derived_claim_ids': [],
+            }],
+        }
+        captured = {}
+
+        async def fake_review(task_id, decision, **kwargs):
+            captured['task_id'] = str(task_id)
+            captured['decision'] = decision
+            captured['memory_result'] = kwargs.get('memory_result')
+            updated = deepcopy(saved_session)
+            updated.update({
+                'status': 'review_evaluated',
+                'next_step': 'ritsuko_finalize_review',
+                'last_question_purpose': 'evaluate_review_result',
+                'post_review_evaluation': {
+                    'state': 'READY',
+                    'reason': '本人回答で元質問には回答可能',
+                    'answer_candidate': 'メインPCのGPUはRadeon RX 9070 XTです。',
+                },
+                'turns': [
+                    *saved_session['turns'],
+                    {
+                        'stage': 'analyze',
+                        'question_purpose': 'evaluate_review_result',
+                        'request_envelope': {
+                            'turn': 6,
+                            'question_purpose': 'evaluate_review_result',
+                        },
+                        'status': 'ok',
+                        'response': {'state': 'READY'},
+                        'errors': [],
+                        'diagnostic': {},
+                        'member_results': [],
+                        'consensus': None,
+                    },
+                ],
+            })
+            self.waiting[0].update({
+                'status': 'completed',
+                'phase': 'completed',
+                'message': 'メインPCのGPUはRadeon RX 9070 XTです。',
+                'proposal_review': {
+                    'decision': 'remember',
+                    'status': 'completed',
+                    'memory_intake': {
+                        'status': 'committed',
+                        'receipts': [{'decision': 'pending'}],
+                    },
+                    'magi_evaluation': {'state': 'READY'},
+                },
+                'magi_session': updated,
+            })
+            return updated
+
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=[]
+        ), patch.object(
+            daily, '_prepare_magi_memory_intake_record',
+            return_value=daily.MemoryIntake.issue(
+                'メインPCのGPUモデル名: Radeon RX 9070 XT'
+            ),
+        ), patch.object(
+            daily, 'register_memory_intake',
+            return_value=memory_result,
+        ), patch.object(
+            daily, 'review_magi_proposal',
+            side_effect=fake_review,
+        ):
+            daily.core_page()
+            await self.click('開く', 0)
+            await self.click('記憶にも反映して完了')
+            self.assertEqual(captured['decision'], 'remember')
+            self.assertEqual(captured['memory_result'], memory_result)
+            self.assertTrue(
+                self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
+            )
+            self.assertTrue(self.elements('Proposal review: remember / completed'))
+            self.assertTrue(self.elements('Post-review MAGI: READY'))
+            self.assertTrue(self.elements('Memory Intake: committed / pending'))
+            self.assertFalse(self.elements('記憶にも反映して完了'))
+
     async def test_completed_magi_task_open_restores_saved_dialogue_read_only(self):
         saved_session = {
             'task_id': self.done[0]['id'],
