@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from .magi_core_bridge import (
     CORE_SLICE,
+    proposal_review_observation,
     reviewable_user_knowledge_proposal,
     task_projection,
 )
@@ -383,6 +384,286 @@ def complete_memory_review(db, *, task_id: UUID, memory_result: dict) -> dict:
             ),
         )
         return review
+
+
+def _memory_summary_for_review(
+    checkpoint: dict,
+    memory_result: dict | None,
+) -> dict:
+    prepared = checkpoint.get("proposal_memory_intake")
+    if not isinstance(prepared, dict):
+        raise ValueError("memory_intake_not_prepared")
+    result = memory_result or {}
+    if result.get("input_id") != prepared.get("input_id"):
+        raise ValueError("memory_intake_result_mismatch")
+    if result.get("status") not in {"committed", "replayed"}:
+        raise ValueError("memory_intake_not_committed")
+    receipts = [
+        {
+            "candidate_id": item.get("candidate_id"),
+            "decision": item.get("decision"),
+            "reason": item.get("reason"),
+            "claim_id": item.get("claim_id"),
+            "pending_id": item.get("pending_id"),
+            "derived_claim_ids": list(item.get("derived_claim_ids") or []),
+        }
+        for item in (result.get("candidates") or [])
+        if isinstance(item, dict)
+    ][:100]
+    return {
+        "input_id": prepared.get("input_id"),
+        "status": result.get("status"),
+        "source_id": result.get("source_id"),
+        "receipts": receipts,
+    }
+
+
+def claim_proposal_review(
+    db,
+    *,
+    task_id: UUID,
+    decision: str,
+    memory_result: dict | None = None,
+) -> tuple[dict, str | None, dict, dict]:
+    """Atomically claim a reviewed proposal for one final MAGI re-evaluation."""
+    if decision not in {"answer_only", "remember"}:
+        raise ValueError("invalid_proposal_review_decision")
+
+    with db.transaction(), db.cursor() as cur:
+        checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        session = checkpoint.get("magi_session")
+        if not isinstance(session, dict):
+            raise ValueError("missing_magi_session")
+
+        if decision == "answer_only":
+            if isinstance(checkpoint.get("proposal_memory_intake"), dict):
+                raise ValueError("memory_review_already_prepared")
+            memory_summary = None
+        else:
+            memory_summary = _memory_summary_for_review(
+                checkpoint,
+                memory_result,
+            )
+
+        review = {
+            "decision": decision,
+            "status": "processing",
+            "answer": proposal["answer"],
+            "knowledge_candidate": proposal["knowledge_candidate"],
+            "user_text": proposal["user_text"],
+            "responds_to": list(proposal["responds_to"]),
+            "memory_intake": deepcopy(memory_summary),
+        }
+        observation = proposal_review_observation(
+            proposal,
+            decision=decision,
+            memory_summary=memory_summary,
+        )
+        checkpoint.update({
+            "phase": "orient",
+            "question": None,
+            "message": None,
+            "reason": "proposal_review_re_evaluation",
+            "proposal_review": deepcopy(review),
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='running', checkpoint=%s, completed_at=NULL
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.proposal_review_started',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "decision": decision,
+                    "memory_status": (
+                        memory_summary.get("status")
+                        if isinstance(memory_summary, dict)
+                        else None
+                    ),
+                    "responds_to": list(proposal["responds_to"]),
+                }),
+            ),
+        )
+        return (
+            deepcopy(session),
+            checkpoint.get("selected_capability"),
+            observation,
+            review,
+        )
+
+
+def finalize_proposal_review(
+    db,
+    *,
+    task_id: UUID,
+    session: dict,
+    selected_capability: str | None = None,
+) -> dict:
+    """Finalize only after a successful MAGI review-result turn."""
+    if session.get("status") != "review_evaluated":
+        raise ValueError("proposal_review_not_evaluated")
+    if session.get("next_step") != "ritsuko_finalize_review":
+        raise ValueError("proposal_review_not_ready_for_finalization")
+    turns = session.get("turns") or []
+    if not turns:
+        raise ValueError("proposal_review_turn_missing")
+    last_turn = turns[-1]
+    if (
+        last_turn.get("question_purpose") != "evaluate_review_result"
+        or last_turn.get("status") != "ok"
+    ):
+        raise ValueError("proposal_review_turn_not_ok")
+
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, checkpoint
+               FROM secretary.tasks
+               WHERE id=%s
+               FOR UPDATE""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("unknown_task")
+        status, checkpoint = row[0], row[1] or {}
+        if status != "running":
+            raise ValueError("proposal_review_task_not_running")
+        if checkpoint.get("core_slice") != CORE_SLICE:
+            raise ValueError("not_magi_observation_task")
+
+        review = checkpoint.get("proposal_review")
+        if not isinstance(review, dict) or review.get("status") != "processing":
+            raise ValueError("proposal_review_not_claimed")
+        answer = str(review.get("answer") or "").strip()
+        if not answer:
+            raise ValueError("proposal_review_answer_missing")
+
+        evaluation = deepcopy(session.get("post_review_evaluation") or {})
+        review["status"] = "completed"
+        review["magi_evaluation"] = {
+            "state": evaluation.get("state"),
+            "reason": evaluation.get("reason"),
+            "answer_candidate": evaluation.get("answer_candidate"),
+        }
+        decision = str(review.get("decision") or "")
+        reason = (
+            "proposal_review_evaluated_answer_only"
+            if decision == "answer_only"
+            else "proposal_review_evaluated_memory"
+        )
+        checkpoint.update({
+            "phase": "completed",
+            "selected_capability": (
+                selected_capability
+                if selected_capability is not None
+                else checkpoint.get("selected_capability")
+            ),
+            "question": None,
+            "message": answer,
+            "reason": reason,
+            "proposal_review": review,
+            "magi_session": deepcopy(session),
+            "final_core_decision": {
+                "next_step": "respond",
+                "reason": reason,
+                "task_status": "completed",
+            },
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='completed', checkpoint=%s, completed_at=now()
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.proposal_review_completed',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "decision": decision,
+                    "magi_state": evaluation.get("state"),
+                    "turn_count": len(turns),
+                    "memory_status": (
+                        (review.get("memory_intake") or {}).get("status")
+                        if isinstance(review.get("memory_intake"), dict)
+                        else None
+                    ),
+                }),
+            ),
+        )
+        return deepcopy(review)
+
+
+def abort_proposal_review(
+    db,
+    *,
+    task_id: UUID,
+    error: str,
+) -> None:
+    """Return an interrupted review to awaiting_review without losing the proposal."""
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, checkpoint
+               FROM secretary.tasks
+               WHERE id=%s
+               FOR UPDATE""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return
+        status, checkpoint = row[0], row[1] or {}
+        review = checkpoint.get("proposal_review")
+        if status != "running" or not isinstance(review, dict):
+            return
+        if review.get("status") != "processing":
+            return
+
+        review["status"] = "retry_required"
+        review["last_error_type"] = str(error)[:160]
+        checkpoint.update({
+            "phase": "awaiting_review",
+            "question": None,
+            "message": None,
+            "reason": "proposal_review_re_evaluation_failed",
+            "proposal_review": review,
+            "final_core_decision": {
+                "next_step": "retry_proposal_review",
+                "reason": "proposal_review_re_evaluation_failed",
+                "task_status": "waiting_external",
+            },
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='waiting_external', checkpoint=%s, completed_at=NULL
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.proposal_review_retry_required',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "decision": review.get("decision"),
+                    "error_type": str(error)[:160],
+                }),
+            ),
+        )
 
 
 def record_pkb_read(
