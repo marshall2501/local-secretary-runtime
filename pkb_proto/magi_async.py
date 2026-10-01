@@ -522,6 +522,8 @@ async def _send_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    member_specs_override: list[dict] | None = None,
+    context_policy: dict | None = None,
 ) -> dict | None:
     if len(session["turns"]) >= MAX_TURNS:
         session.update(status="stopped", next_step="max_turns_reached")
@@ -553,14 +555,21 @@ async def _send_async(
             },
             "observations": deepcopy(session["observations"]),
         })
+    if context_policy:
+        envelope["context_policy"] = deepcopy(context_policy)
     if on_turn_start is not None:
         on_turn_start(turn_number)
 
+    active_specs = (
+        member_specs_override
+        if member_specs_override is not None
+        else session.get("member_specs")
+    )
     result = await caller(
         envelope,
         model=session.get("model") or "",
         timeout=timeout,
-        member_specs=session.get("member_specs"),
+        member_specs=active_specs,
     )
     response = result.get("response")
     errors = list(result.get("errors") or [])
@@ -581,6 +590,7 @@ async def _send_async(
         "diagnostic": deepcopy(result.get("diagnostic") or {}),
         "member_results": deepcopy(result.get("member_results") or []),
         "consensus": deepcopy(result.get("consensus")),
+        "context_policy": deepcopy(context_policy) if context_policy else None,
     })
     session["last_question_purpose"] = question_purpose
 
@@ -610,6 +620,8 @@ async def _apply_detail_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    member_specs_override: list[dict] | None = None,
+    context_policy: dict | None = None,
 ) -> dict:
     session["detail"] = deepcopy(response)
     session["user_question"] = None
@@ -633,6 +645,8 @@ async def _apply_detail_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            member_specs_override=member_specs_override,
+            context_policy=context_policy,
         )
         if reviewed is None:
             return session
@@ -644,6 +658,8 @@ async def _apply_detail_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            member_specs_override=member_specs_override,
+            context_policy=context_policy,
         )
 
     if state == "NEED_INFORMATION":
@@ -703,6 +719,8 @@ async def _apply_detail_async(
                     caller=caller,
                     stop_requested=stop_requested,
                     on_turn_start=on_turn_start,
+                    member_specs_override=member_specs_override,
+                    context_policy=context_policy,
                 )
                 if reviewed is None:
                     return session
@@ -714,6 +732,8 @@ async def _apply_detail_async(
                     caller=caller,
                     stop_requested=stop_requested,
                     on_turn_start=on_turn_start,
+                    member_specs_override=member_specs_override,
+                    context_policy=context_policy,
                 )
             session.update(status="stopped", next_step="repeated_request_without_progress")
             return session
@@ -770,6 +790,8 @@ async def _advance_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    member_specs_override: list[dict] | None = None,
+    context_policy: dict | None = None,
 ) -> dict:
     if _stop_between_turns(session, stop_requested):
         return session
@@ -784,6 +806,8 @@ async def _advance_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        member_specs_override=member_specs_override,
+        context_policy=context_policy,
     )
     if response is None:
         return session
@@ -795,6 +819,8 @@ async def _advance_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        member_specs_override=member_specs_override,
+        context_policy=context_policy,
     )
 
 
@@ -807,12 +833,13 @@ async def start_dialogue_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    task_id: str | None = None,
 ) -> dict:
     specs = _normalized_member_specs(member_specs, model)
     from uuid import uuid4
 
     session = {
-        "task_id": str(uuid4()),
+        "task_id": str(task_id or uuid4()),
         "user_raw": user_raw.strip(),
         "model": model,
         "prompt_version": PROMPT_VERSION,
@@ -899,6 +926,95 @@ async def continue_with_observation_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+    )
+
+
+async def continue_with_verified_observation_async(
+    session: dict,
+    observation: dict,
+    *,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    caller=call_guided_panel_async,
+    stop_requested=None,
+    on_turn_start=None,
+) -> dict:
+    """Continue from one RITSUKO-verified private PKB Observation.
+
+    Until Cloud Context Gate is explicitly accepted for personal PKB data, the
+    post-read turn is sent only to enabled local Ollama members from the Task
+    snapshot. Cloud members remain part of the Task snapshot but are withheld
+    from this turn.
+    """
+    updated = deepcopy(session)
+    if updated.get("status") != "waiting_information":
+        raise ValueError("not_waiting_for_information")
+    if not isinstance(observation, dict):
+        raise ValueError("invalid_observation")
+    if observation.get("source") != "pkb" or observation.get("verified") is not True:
+        raise ValueError("verified_pkb_observation_required")
+    text = str(observation.get("text") or "").strip()
+    if not text:
+        raise ValueError("empty_observation")
+    if len(updated["turns"]) >= MAX_TURNS:
+        updated.update(status="stopped", next_step="max_turns_reached")
+        return updated
+
+    safe_observation = deepcopy(observation)
+    safe_observation["text"] = text[:4000]
+    if isinstance(safe_observation.get("evidence_preview"), list):
+        safe_observation["evidence_preview"] = safe_observation["evidence_preview"][:12]
+    safe_observation["responds_to"] = [
+        str(value) for value in (safe_observation.get("responds_to") or [])
+    ][:12]
+    updated["observations"].append(safe_observation)
+    updated["pending_requests"] = []
+    updated["tool_read_executed"] = True
+    updated["status"] = "running"
+    updated["next_step"] = "evaluate_observation"
+
+    local_specs = [
+        deepcopy(spec)
+        for spec in (updated.get("member_specs") or [])
+        if spec.get("enabled") and spec.get("provider") == "ollama"
+    ]
+    withheld = [
+        {
+            "name": spec.get("name"),
+            "provider": spec.get("provider"),
+            "model": spec.get("model"),
+        }
+        for spec in (updated.get("member_specs") or [])
+        if spec.get("enabled") and spec.get("provider") != "ollama"
+    ]
+    if not local_specs:
+        updated["cloud_context_gate"] = {
+            "mode": "local_only_private_pkb",
+            "withheld_members": withheld,
+            "status": "blocked_no_local_member",
+        }
+        updated.update(
+            status="stopped",
+            next_step="cloud_context_gate_no_local_member",
+        )
+        return updated
+
+    context_policy = {
+        "mode": "local_only_private_pkb",
+        "reason": "verified_private_pkb_observation",
+        "withheld_members": withheld,
+    }
+    updated["cloud_context_gate"] = {
+        **deepcopy(context_policy),
+        "status": "applied",
+    }
+    return await _advance_async(
+        updated,
+        timeout=timeout,
+        caller=caller,
+        stop_requested=stop_requested,
+        on_turn_start=on_turn_start,
+        member_specs_override=local_specs,
+        context_policy=context_policy,
     )
 
 
