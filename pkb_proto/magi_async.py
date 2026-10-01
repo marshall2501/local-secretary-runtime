@@ -45,6 +45,8 @@ from .magi_dialogue import (
     _request_signatures,
     _latest_verified_pkb_observation,
     _wait_for_user_after_exhausted_pkb,
+    _turn_limit,
+    _extend_turn_limit_for_user_resume,
     _select_question_purpose,
     _stop_between_turns,
     select_weighted_consensus,
@@ -528,7 +530,7 @@ async def _send_async(
     member_specs_override: list[dict] | None = None,
     context_policy: dict | None = None,
 ) -> dict | None:
-    if len(session["turns"]) >= MAX_TURNS:
+    if len(session["turns"]) >= _turn_limit(session):
         session.update(status="stopped", next_step="max_turns_reached")
         return None
     if _stop_between_turns(session, stop_requested):
@@ -671,7 +673,7 @@ async def _apply_detail_async(
             any(item.get("source") == "user" for item in requests)
             and purpose != "review_or_repair"
             and not session.get("user_source_reviewed")
-            and len(session["turns"]) < MAX_TURNS
+            and len(session["turns"]) < _turn_limit(session)
         ):
             session["user_source_reviewed"] = True
             prompt = _compose_question(
@@ -728,7 +730,7 @@ async def _apply_detail_async(
                 )
                 return session
             if all_pkb:
-                if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+                if purpose != "review_or_repair" and len(session["turns"]) < _turn_limit(session):
                     prompt = _compose_question(
                         session,
                         "review_or_repair",
@@ -771,7 +773,7 @@ async def _apply_detail_async(
             for signature in signatures
         )
         if repeated:
-            if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+            if purpose != "review_or_repair" and len(session["turns"]) < _turn_limit(session):
                 prompt = _compose_question(
                     session,
                     "review_or_repair",
@@ -817,7 +819,7 @@ async def _apply_detail_async(
             }
             for i, item in enumerate(requests, 1)
         ]
-        if len(session["turns"]) >= MAX_TURNS:
+        if len(session["turns"]) >= _turn_limit(session):
             session.update(
                 status="stopped",
                 next_step="max_turns_reached_with_pending_information",
@@ -833,7 +835,7 @@ async def _apply_detail_async(
                 next_step="review_information_requests",
             )
     elif state == "NEED_CLARIFICATION":
-        if len(session["turns"]) >= MAX_TURNS:
+        if len(session["turns"]) >= _turn_limit(session):
             session.update(
                 status="stopped",
                 next_step="max_turns_reached_with_user_question",
@@ -925,6 +927,7 @@ async def start_dialogue_async(
         "user_source_reviewed": False,
         "last_question_purpose": None,
         "turns": [],
+        "turn_limit": MAX_TURNS,
         "legacy_router_used": False,
         "tool_read_executed": False,
     }
@@ -974,7 +977,7 @@ async def continue_with_observation_async(
         raise ValueError("not_waiting_for_information")
     if not isinstance(observation_text, str) or not observation_text.strip():
         raise ValueError("empty_observation")
-    if len(updated["turns"]) >= MAX_TURNS:
+    if len(updated["turns"]) >= _turn_limit(updated):
         updated.update(status="stopped", next_step="max_turns_reached")
         return updated
 
@@ -994,6 +997,57 @@ async def continue_with_observation_async(
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
     )
+
+
+def _private_pkb_local_scope(session: dict) -> tuple[list[dict] | None, dict | None]:
+    """Keep every later turn local while private verified PKB remains in context."""
+    has_private_pkb = any(
+        isinstance(item, dict)
+        and item.get("source") == "pkb"
+        and item.get("verified") is True
+        and item.get("confidentiality", "private") == "private"
+        for item in (session.get("observations") or [])
+    )
+    if not has_private_pkb:
+        return None, None
+
+    local_specs = [
+        deepcopy(spec)
+        for spec in (session.get("member_specs") or [])
+        if spec.get("enabled") and spec.get("provider") == "ollama"
+    ]
+    withheld = [
+        {
+            "name": spec.get("name"),
+            "provider": spec.get("provider"),
+            "model": spec.get("model"),
+        }
+        for spec in (session.get("member_specs") or [])
+        if spec.get("enabled") and spec.get("provider") != "ollama"
+    ]
+    if not local_specs:
+        session["cloud_context_gate"] = {
+            "mode": "local_only_private_pkb",
+            "reason": "verified_private_pkb_observation",
+            "withheld_members": withheld,
+            "status": "blocked_no_local_member",
+        }
+        session.update(
+            status="stopped",
+            next_step="cloud_context_gate_no_local_member",
+        )
+        return [], None
+
+    context_policy = {
+        "mode": "local_only_private_pkb",
+        "reason": "verified_private_pkb_observation",
+        "withheld_members": withheld,
+    }
+    session["cloud_context_gate"] = {
+        **deepcopy(context_policy),
+        "status": "applied",
+    }
+    return local_specs, context_policy
 
 
 async def continue_with_verified_observation_async(
@@ -1022,7 +1076,7 @@ async def continue_with_verified_observation_async(
     text = str(observation.get("text") or "").strip()
     if not text:
         raise ValueError("empty_observation")
-    if len(updated["turns"]) >= MAX_TURNS:
+    if len(updated["turns"]) >= _turn_limit(updated):
         updated.update(status="stopped", next_step="max_turns_reached")
         return updated
 
@@ -1039,41 +1093,9 @@ async def continue_with_verified_observation_async(
     updated["status"] = "running"
     updated["next_step"] = "evaluate_observation"
 
-    local_specs = [
-        deepcopy(spec)
-        for spec in (updated.get("member_specs") or [])
-        if spec.get("enabled") and spec.get("provider") == "ollama"
-    ]
-    withheld = [
-        {
-            "name": spec.get("name"),
-            "provider": spec.get("provider"),
-            "model": spec.get("model"),
-        }
-        for spec in (updated.get("member_specs") or [])
-        if spec.get("enabled") and spec.get("provider") != "ollama"
-    ]
-    if not local_specs:
-        updated["cloud_context_gate"] = {
-            "mode": "local_only_private_pkb",
-            "withheld_members": withheld,
-            "status": "blocked_no_local_member",
-        }
-        updated.update(
-            status="stopped",
-            next_step="cloud_context_gate_no_local_member",
-        )
+    local_specs, context_policy = _private_pkb_local_scope(updated)
+    if local_specs == []:
         return updated
-
-    context_policy = {
-        "mode": "local_only_private_pkb",
-        "reason": "verified_private_pkb_observation",
-        "withheld_members": withheld,
-    }
-    updated["cloud_context_gate"] = {
-        **deepcopy(context_policy),
-        "status": "applied",
-    }
     return await _advance_async(
         updated,
         timeout=timeout,
@@ -1109,6 +1131,11 @@ async def continue_with_user_clarification_async(
     updated["user_question"] = None
     updated["magi_disagreement"] = None
     updated["status"] = "running"
+    _extend_turn_limit_for_user_resume(updated)
+
+    local_specs, context_policy = _private_pkb_local_scope(updated)
+    if local_specs == []:
+        return updated
 
     if updated.get("classification") is None:
         updated["next_step"] = "classify_with_context"
@@ -1121,6 +1148,8 @@ async def continue_with_user_clarification_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            member_specs_override=local_specs,
+            context_policy=context_policy,
         )
         if classification is None:
             return updated
@@ -1134,6 +1163,8 @@ async def continue_with_user_clarification_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            member_specs_override=local_specs,
+            context_policy=context_policy,
         )
 
     responds_to = [
@@ -1159,6 +1190,8 @@ async def continue_with_user_clarification_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        member_specs_override=local_specs,
+        context_policy=context_policy,
     )
     if response is None:
         return updated
@@ -1170,4 +1203,6 @@ async def continue_with_user_clarification_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        member_specs_override=local_specs,
+        context_policy=context_policy,
     )
