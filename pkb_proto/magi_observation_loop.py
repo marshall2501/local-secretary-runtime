@@ -96,7 +96,7 @@ async def run_pkb_observation_loop(
             "pkb_search" if session.get("tool_read_executed") else None,
         )
         return session
-    except BaseException as exc:
+    except Exception as exc:
         if task_created:
             try:
                 await anyio.to_thread.run_sync(
@@ -104,6 +104,6 @@ async def run_pkb_observation_loop(
                     task_uuid,
                     type(exc).__name__,
                 )
-            except BaseException:
+            except Exception:
                 pass
         raise
