@@ -4352,6 +4352,15 @@ def core_page(task_id: str = ""):
                     ui.label("RITSUKOが本人への確認を必要とする状態です。").classes(
                         "text-orange-900"
                     )
+                    user_resume = saved_task.get("user_resume")
+                    if isinstance(user_resume, dict) and user_resume.get("status") in {
+                        "processing", "retry_required"
+                    }:
+                        ui.label(
+                            "前回の本人回答Turnは "
+                            + str(user_resume.get("status"))
+                            + " です。安全のため、前回と同じ回答内容を再入力して再試行してください。"
+                        ).classes("text-xs text-orange-800")
                     question = session.get("user_question") or (
                         (session.get("detail") or {}).get("question_for_user")
                     )
