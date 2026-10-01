@@ -48,7 +48,7 @@ from .magi_dialogue import (
     validate_turn,
 )
 from .magi_settings import DEFAULT_TIMEOUT_SECONDS
-from .ollama_runtime import normalize_context_tokens
+from .ollama_runtime import configured_magi_num_predict, normalize_context_tokens
 from .ritsuko_magi_protocol import default_resource_catalog
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -99,7 +99,7 @@ async def _call_ollama_guided_async(
         ],
         "options": {
             "temperature": 0,
-            "num_predict": 1150,
+            "num_predict": configured_magi_num_predict(),
             "num_ctx": normalize_context_tokens(context_window_tokens),
         },
     }
@@ -121,6 +121,7 @@ async def _call_ollama_guided_async(
             "thinking_length": len(thinking) if isinstance(thinking, str) else 0,
             "done_reason": outer.get("done_reason") if isinstance(outer, dict) else None,
             "eval_count": outer.get("eval_count") if isinstance(outer, dict) else None,
+            "num_predict": payload["options"]["num_predict"],
         }
         if not isinstance(raw, str):
             return {
