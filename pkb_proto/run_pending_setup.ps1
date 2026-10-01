@@ -18,8 +18,9 @@ $file016 = Join-Path $root 'pkb_proto\sql\016_pkb_proto_finance.sql'
 $file017 = Join-Path $root 'pkb_proto\sql\017_pkb_proto_core_task_privileges.sql'
 $file019 = Join-Path $root 'pkb_proto\sql\019_pkb_proto_memory_intake.sql'
 $file020 = Join-Path $root 'pkb_proto\sql\020_magi_llm_settings.sql'
+$file021 = Join-Path $root 'pkb_proto\sql\021_ollama_context_window.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -358,7 +359,35 @@ if ($LASTEXITCODE -ne 0 -or ($verify020 | Out-String).Trim() -ne '1' -or ($setti
     throw 'MAGI LLM settings schema or privilege verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 020 (MAGI LLM settings included).'
+$has021 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='021_ollama_context_window.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 021 schema version.' }
+if (($has021 | Out-String).Trim() -eq '0') {
+    $hash021 = (Get-FileHash -LiteralPath $file021 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql021 = [IO.File]::ReadAllText($file021).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash021)
+    $tmpName021 = 'ollama-context-window-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp021 = Join-Path ([IO.Path]::GetTempPath()) $tmpName021
+    $remoteTmp021 = '/tmp/' + $tmpName021
+    try {
+        [IO.File]::WriteAllText($localTmp021, $sql021, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp021 ($id + ':' + $remoteTmp021) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 021 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp021
+        if ($LASTEXITCODE -ne 0) { throw '021 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp021) { Remove-Item -LiteralPath $localTmp021 }
+        & docker exec $id rm -f $remoteTmp021 | Out-Null
+    }
+} elseif (($has021 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 021 migration records.'
+}
+
+$verify021 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='021_ollama_context_window.sql';"
+$contextColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='llm_profiles' AND column_name='context_window_tokens';"
+if ($LASTEXITCODE -ne 0 -or ($verify021 | Out-String).Trim() -ne '1' -or ($contextColumn | Out-String).Trim() -ne '1') {
+    throw 'Ollama context-window migration verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 021 (Ollama context window included).'
 
 
 
