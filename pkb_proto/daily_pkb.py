@@ -5354,8 +5354,8 @@ def core_page(task_id: str = ""):
                                 "font-bold text-orange-900"
                             )
                             ui.label(
-                                "新RITSUKO⇄MAGI経路の本人追加説明resumeは次段で接続します。"
-                                "旧経路のresumeへは流しません。"
+                                "上部のRITSUKO ⇄ MAGI Observation Loopから、"
+                                "保存済み対話へ追加回答して同じTask IDで再開できます。"
                             ).classes("text-sm")
                         return
 
