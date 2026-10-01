@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $envFile = Join-Path $root '.env.postgres'
+$runtimeEnvFile = Join-Path $root '.env'
 $secret = Join-Path $root 'secrets\pkb-proto-writer-password.txt'
 $db = 'secretary_pkb_proto_20260927'
 $role = 'secretary_pkb_proto_writer_20260927'
@@ -49,14 +50,79 @@ if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
     throw 'Dedicated isolated PKB writer role is missing.'
 }
 
-$env:LSA_PKB_DAILY_PORT = "$port"
-$env:LSA_PKB_DAILY_SECRET = $secret
-Push-Location $root
+$allowedRuntimeEnv = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal
+)
+@(
+    'OPENAI_API_KEY',
+    'OPENAI_BASE_URL',
+    'LSA_MAGI_CLOUD_ENABLED',
+    'LSA_MAGI_CASPER_ENABLED',
+    'LSA_MAGI_CASPER_MODEL',
+    'LSA_MAGI_CASPER_WEIGHT',
+    'LSA_MAGI_BALTHASAR_ENABLED',
+    'LSA_MAGI_BALTHASAR_MODEL',
+    'LSA_MAGI_BALTHASAR_WEIGHT',
+    'LSA_MAGI_MELCHIOR_WEIGHT'
+) | ForEach-Object { [void]$allowedRuntimeEnv.Add($_) }
+
+$previousRuntimeEnv = @{}
+$loadedRuntimeEnv = [System.Collections.Generic.List[string]]::new()
+$seenRuntimeEnv = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal
+)
+$locationPushed = $false
+
 try {
+    if (Test-Path -LiteralPath $runtimeEnvFile -PathType Leaf) {
+        foreach ($rawLine in Get-Content -LiteralPath $runtimeEnvFile) {
+            $line = $rawLine.Trim()
+            if (-not $line -or $line.StartsWith('#')) { continue }
+            if ($line -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=(.*)) { continue }
+
+            $name = $Matches[1]
+            if (-not $allowedRuntimeEnv.Contains($name)) { continue }
+            if (-not $seenRuntimeEnv.Add($name)) {
+                throw "Duplicate allowed runtime environment variable in .env: $name"
+            }
+
+            $value = $Matches[2]
+            if ($value.Length -ge 2) {
+                $doubleQuoted = $value.StartsWith('"') -and $value.EndsWith('"')
+                $singleQuoted = $value.StartsWith("'") -and $value.EndsWith("'")
+                if ($doubleQuoted -or $singleQuoted) {
+                    $value = $value.Substring(1, $value.Length - 2)
+                }
+            }
+
+            $previousRuntimeEnv[$name] = [Environment]::GetEnvironmentVariable(
+                $name, [EnvironmentVariableTarget]::Process
+            )
+            [Environment]::SetEnvironmentVariable(
+                $name, $value, [EnvironmentVariableTarget]::Process
+            )
+            $loadedRuntimeEnv.Add($name)
+        }
+    }
+
+    $env:LSA_PKB_DAILY_PORT = "$port"
+    $env:LSA_PKB_DAILY_SECRET = $secret
+    Push-Location $root
+    $locationPushed = $true
+
     & $python -m pkb_proto.daily_pkb
     if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
 } finally {
     Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_SECRET -ErrorAction SilentlyContinue
-    Pop-Location
+
+    foreach ($name in $loadedRuntimeEnv) {
+        [Environment]::SetEnvironmentVariable(
+            $name, $previousRuntimeEnv[$name], [EnvironmentVariableTarget]::Process
+        )
+    }
+
+    if ($locationPushed) {
+        Pop-Location
+    }
 }
