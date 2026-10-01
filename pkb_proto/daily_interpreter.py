@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .ollama_runtime import configured_context_tokens
+
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED_MODELS = ("llama3.1:8b", "qwen3.5:9b")
 ALLOWED_PREDICATES = {
@@ -177,7 +179,7 @@ def interpret(text: str, entity_names: set[str], timeout: float = 90.0) -> Inter
             "stream": False,
             "format": "json",
             "messages": messages(text, sorted(entity_names)),
-            "options": {"temperature": 0, "num_predict": 350},
+            "options": {"temperature": 0, "num_predict": 350, "num_ctx": configured_context_tokens()},
         }
         req = Request(
             OLLAMA + "/api/chat",
