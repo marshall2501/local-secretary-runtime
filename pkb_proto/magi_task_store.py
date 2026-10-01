@@ -1,0 +1,250 @@
+"""Persist the state-driven RITSUKO⇄MAGI vertical slice in Core tables."""
+from __future__ import annotations
+
+from copy import deepcopy
+from uuid import UUID
+
+from psycopg.types.json import Jsonb
+
+from .magi_core_bridge import CORE_SLICE, task_projection
+
+
+def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) -> None:
+    checkpoint = {
+        "core_slice": CORE_SLICE,
+        "phase": "orient",
+        "protocol": "d19-state-driven-v4",
+        "selected_capability": None,
+        "question": None,
+        "message": None,
+        "member_specs": deepcopy(member_specs),
+        "magi_session": None,
+        "final_core_decision": None,
+    }
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """INSERT INTO secretary.tasks
+               (id, request, requested_by, domain, completion_criteria,
+                permission_scope, status, checkpoint)
+               VALUES (%s, %s, 'local_user', 'general', %s, %s, 'running', %s)""",
+            (
+                task_id,
+                request,
+                "Return a grounded answer from bounded PKB evidence or stop safely.",
+                Jsonb({
+                    "pkb_read": True,
+                    "finance_read": False,
+                    "web_research": False,
+                    "external_actions": False,
+                    "cloud_private_pkb_context": False,
+                }),
+                Jsonb(checkpoint),
+            ),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.task_started',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "core_slice": CORE_SLICE,
+                    "member_count": sum(
+                        1 for item in member_specs if item.get("enabled")
+                    ),
+                }),
+            ),
+        )
+
+
+def persist_session(
+    db,
+    *,
+    task_id: UUID,
+    session: dict,
+    selected_capability: str | None = None,
+) -> dict:
+    projection = task_projection(session)
+    checkpoint_patch = {
+        "phase": projection["phase"],
+        "selected_capability": selected_capability,
+        "question": projection["question"],
+        "message": projection["message"],
+        "reason": projection["reason"],
+        "magi_session": deepcopy(session),
+        "final_core_decision": {
+            "next_step": projection["next_step"],
+            "reason": projection["reason"],
+            "task_status": projection["task_status"],
+        },
+    }
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            "SELECT checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("unknown_task")
+        checkpoint = row[0] or {}
+        checkpoint.update(checkpoint_patch)
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status=%s, checkpoint=%s,
+                   completed_at=CASE WHEN %s='completed' THEN now() ELSE NULL END
+               WHERE id=%s""",
+            (
+                projection["task_status"],
+                Jsonb(checkpoint),
+                projection["task_status"],
+                task_id,
+            ),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', %s, %s, 'task', %s, %s)""",
+            (
+                (
+                    "core.magi.completed"
+                    if projection["task_status"] == "completed"
+                    else "core.magi.state_saved"
+                ),
+                task_id,
+                task_id,
+                Jsonb({
+                    "dialogue_status": session.get("status"),
+                    "next_step": projection["next_step"],
+                    "turn_count": len(session.get("turns") or []),
+                    "tool_read_executed": bool(session.get("tool_read_executed")),
+                }),
+            ),
+        )
+    return projection
+
+
+def record_pkb_read(
+    db,
+    *,
+    task_id: UUID,
+    execution: dict,
+    pending_request: dict,
+) -> tuple[str, str]:
+    request_ids = list(pending_request.get("request_ids") or [])
+    request_key = request_ids[0] if request_ids else "pkb"
+    idempotency_key = f"ritsuko-magi:{task_id}:pkb:{request_key}"
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT a.id, r.id
+               FROM secretary.actions a
+               LEFT JOIN secretary.results r ON r.action_id=a.id
+               WHERE a.idempotency_key=%s""",
+            (idempotency_key,),
+        )
+        existing = cur.fetchone()
+        if existing is not None and existing[1] is not None:
+            return str(existing[0]), str(existing[1])
+
+        cur.execute(
+            """INSERT INTO secretary.sources
+               (source_type, uri, citation, retrieved_at, confidentiality, metadata)
+               VALUES ('tool', %s, %s, now(), 'private', %s)
+               RETURNING id""",
+            (
+                f"tool://ritsuko-magi/pkb/{task_id}/{request_key}",
+                execution.get("citation")
+                or "RITSUKO bounded read-only PKB result",
+                Jsonb({
+                    "task_id": str(task_id),
+                    "capability": "pkb_search",
+                    "request_ids": request_ids,
+                    "what": pending_request.get("what"),
+                    "result_count": int(execution.get("total") or 0),
+                    **(execution.get("source_metadata") or {}),
+                }),
+            ),
+        )
+        source_id = cur.fetchone()[0]
+
+        cur.execute(
+            """INSERT INTO secretary.actions
+               (task_id, actor, tool, operation, parameters, risk,
+                authorization_basis, status, idempotency_key,
+                reversible, started_at, finished_at)
+               VALUES (%s, 'ritsuko_core', %s, %s, %s,
+                       'read_only', 'ritsuko_magi_pkb_read_v1',
+                       'succeeded', %s, true, now(), now())
+               RETURNING id""",
+            (
+                task_id,
+                execution.get("tool") or "pkb",
+                execution.get("operation") or "search",
+                Jsonb({
+                    "what": pending_request.get("what"),
+                    "request_ids": request_ids,
+                    "bounded": True,
+                    "cloud_context_gate": "local_only_private_pkb",
+                }),
+                idempotency_key,
+            ),
+        )
+        action_id = cur.fetchone()[0]
+
+        result = execution.get("result") or {}
+        cur.execute(
+            """INSERT INTO secretary.results
+               (action_id, source_id, outcome, summary, evidence,
+                verified_by, verified_at)
+               VALUES (%s, %s, %s, %s, %s, %s, now())
+               RETURNING id""",
+            (
+                action_id,
+                source_id,
+                "success" if int(execution.get("total") or 0) > 0 else "inconclusive",
+                str(execution.get("answer") or ""),
+                Jsonb({
+                    "result_kind": result.get("result_kind"),
+                    "total": int(execution.get("total") or 0),
+                    "data": result,
+                    "responds_to": request_ids,
+                }),
+                execution.get("verified_by") or "deterministic_pkb_query",
+            ),
+        )
+        result_id = cur.fetchone()[0]
+        cur.execute(
+            """SELECT checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE""",
+            (task_id,),
+        )
+        checkpoint = (cur.fetchone() or [{}])[0] or {}
+        checkpoint.update({
+            "phase": "observe",
+            "selected_capability": "pkb_search",
+            "action_id": str(action_id),
+            "result_id": str(result_id),
+            "result_count": int(execution.get("total") or 0),
+        })
+        cur.execute(
+            "UPDATE secretary.tasks SET checkpoint=%s WHERE id=%s",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, action_id,
+                object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.pkb_observed',
+                       %s, %s, 'task', %s, %s)""",
+            (
+                task_id,
+                action_id,
+                task_id,
+                Jsonb({
+                    "request_ids": request_ids,
+                    "result_count": int(execution.get("total") or 0),
+                    "cloud_context_gate": "local_only_private_pkb",
+                }),
+            ),
+        )
+    return str(action_id), str(result_id)
