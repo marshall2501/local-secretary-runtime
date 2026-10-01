@@ -12,10 +12,12 @@ from copy import deepcopy
 import json
 import os
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from .magi_client import OLLAMA
+from .magi_settings import MEMBER_NAMES, PROVIDERS, fallback_member_specs
 from .ritsuko_magi_protocol import default_resource_catalog
 
 CATEGORIES = (
@@ -43,8 +45,7 @@ QUESTION_PURPOSES = (
 )
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_CASPER_MODEL = "gpt-5.6-sol"
-DEFAULT_BALTHASAR_MODEL = "gpt-5.6-terra"
+GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _MEMBER_PRIORITY = {"MELCHIOR": 0, "CASPER": 1, "BALTHASAR": 2}
 
 PREREQUISITE_KNOWLEDGE = """前提知識：
@@ -227,8 +228,10 @@ def validate_turn(stage: str, output: object) -> list[str]:
                 errors.append("information_requests:unexpected_for_knowledge_candidate")
     return errors
 
-def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) -> dict:
-    """Only the transport; no semantic routing, DB/Web access or tool invocation."""
+def _call_ollama_guided(
+    envelope: dict, *, model: str, timeout: float, base_url: str | None = None
+) -> dict:
+    """Ollama transport only; no semantic routing or tool access."""
     stage = envelope["stage"]
     schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
     payload = {
@@ -239,81 +242,53 @@ def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) ->
         ],
         "options": {"temperature": 0, "num_predict": 1150},
     }
+    endpoint = str(base_url or OLLAMA).strip().rstrip("/")
     try:
-        req = Request(OLLAMA + "/api/chat",
-                      data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                      headers={"Content-Type": "application/json"}, method="POST")
+        req = Request(
+            endpoint + "/api/chat",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         with urlopen(req, timeout=timeout) as resp:
             outer = json.load(resp)
         msg = outer.get("message") if isinstance(outer, dict) else None
         raw = msg.get("content") if isinstance(msg, dict) else None
         thinking = msg.get("thinking") if isinstance(msg, dict) else None
         diagnostic = {
+            "provider": "ollama",
             "content_length": len(raw) if isinstance(raw, str) else 0,
             "thinking_length": len(thinking) if isinstance(thinking, str) else 0,
-            "done_reason": outer.get("done_reason"),
-            "eval_count": outer.get("eval_count"),
+            "done_reason": outer.get("done_reason") if isinstance(outer, dict) else None,
+            "eval_count": outer.get("eval_count") if isinstance(outer, dict) else None,
         }
         if not isinstance(raw, str):
-            return {"status": "invalid", "response": None, "errors": ["missing_content"], "diagnostic": diagnostic}
+            return {"status": "invalid", "response": None,
+                    "errors": ["missing_content"], "diagnostic": diagnostic}
         try:
             data = json.loads(raw)
         except ValueError:
-            return {"status": "invalid", "response": None, "errors": ["invalid_json"], "diagnostic": diagnostic}
+            return {"status": "invalid", "response": None,
+                    "errors": ["invalid_json"], "diagnostic": diagnostic}
         errors = validate_turn(stage, data)
         return {"status": "ok" if not errors else "invalid", "response": data,
                 "errors": errors, "diagnostic": diagnostic}
     except (OSError, HTTPError, URLError, TimeoutError, ValueError) as exc:
         return {"status": "unavailable", "response": None,
                 "errors": [type(exc).__name__],
-                "diagnostic": {"error": type(exc).__name__}}
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+                "diagnostic": {"provider": "ollama", "error": type(exc).__name__}}
 
 
-def _env_weight(name: str, default: float = 1.0) -> float:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
+def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) -> dict:
+    """Backward-compatible local Ollama entry point used by isolated tests."""
+    return _call_ollama_guided(
+        envelope, model=model, timeout=timeout, base_url=OLLAMA
+    )
 
 
 def panel_member_specs(local_model: str) -> list[dict]:
-    """Return safe member configuration; secrets are never included."""
-    cloud_enabled = _env_bool("LSA_MAGI_CLOUD_ENABLED", False)
-    return [
-        {
-            "name": "MELCHIOR",
-            "provider": "ollama",
-            "model": local_model,
-            "weight": _env_weight("LSA_MAGI_MELCHIOR_WEIGHT", 1.0),
-            "enabled": True,
-        },
-        {
-            "name": "CASPER",
-            "provider": "openai",
-            "model": os.environ.get("LSA_MAGI_CASPER_MODEL", DEFAULT_CASPER_MODEL).strip()
-                     or DEFAULT_CASPER_MODEL,
-            "weight": _env_weight("LSA_MAGI_CASPER_WEIGHT", 1.0),
-            "enabled": cloud_enabled and _env_bool("LSA_MAGI_CASPER_ENABLED", True),
-        },
-        {
-            "name": "BALTHASAR",
-            "provider": "openai",
-            "model": os.environ.get("LSA_MAGI_BALTHASAR_MODEL", DEFAULT_BALTHASAR_MODEL).strip()
-                     or DEFAULT_BALTHASAR_MODEL,
-            "weight": _env_weight("LSA_MAGI_BALTHASAR_WEIGHT", 1.0),
-            "enabled": cloud_enabled and _env_bool("LSA_MAGI_BALTHASAR_ENABLED", True),
-        },
-    ]
+    """Backward-compatible name for env bootstrap/fallback member settings."""
+    return fallback_member_specs(local_model)
 
 
 def _extract_openai_output_text(outer: object) -> str | None:
@@ -331,18 +306,32 @@ def _extract_openai_output_text(outer: object) -> str | None:
     return "".join(parts) if parts else None
 
 
-def _call_openai_guided(envelope: dict, *, model: str, timeout: float) -> dict:
-    """Responses API adapter. No API key or raw reasoning is returned in diagnostics."""
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+def _call_openai_guided(
+    envelope: dict,
+    *,
+    model: str,
+    timeout: float,
+    base_url: str | None = None,
+    credential_env: str | None = None,
+) -> dict:
+    """OpenAI Responses adapter; secret values are never returned."""
+    credential_name = credential_env or "OPENAI_API_KEY"
+    api_key = os.environ.get(credential_name, "").strip()
     if not api_key:
         return {
             "status": "unavailable", "response": None,
-            "errors": ["missing_openai_api_key"],
-            "diagnostic": {"provider": "openai", "error": "missing_openai_api_key"},
+            "errors": ["missing_provider_credential"],
+            "diagnostic": {
+                "provider": "openai",
+                "error": "missing_provider_credential",
+                "credential_env": credential_name,
+            },
         }
     stage = envelope["stage"]
     schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
-    base_url = os.environ.get("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL).strip().rstrip("/")
+    endpoint = str(
+        base_url or os.environ.get("OPENAI_BASE_URL") or OPENAI_DEFAULT_BASE_URL
+    ).strip().rstrip("/")
     payload = {
         "model": model,
         "store": False,
@@ -360,7 +349,7 @@ def _call_openai_guided(envelope: dict, *, model: str, timeout: float) -> dict:
     }
     try:
         req = Request(
-            base_url + "/responses",
+            endpoint + "/responses",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
@@ -398,6 +387,143 @@ def _call_openai_guided(envelope: dict, *, model: str, timeout: float) -> dict:
         return {"status": "unavailable", "response": None,
                 "errors": [type(exc).__name__],
                 "diagnostic": {"provider": "openai", "error": type(exc).__name__}}
+
+
+def _extract_gemini_text(outer: object) -> str | None:
+    if not isinstance(outer, dict):
+        return None
+    for candidate in outer.get("candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content")
+        if not isinstance(content, dict):
+            continue
+        parts = content.get("parts") or []
+        text_parts = [
+            part.get("text") for part in parts
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ]
+        if text_parts:
+            return "".join(text_parts)
+    return None
+
+
+def _call_gemini_guided(
+    envelope: dict,
+    *,
+    model: str,
+    timeout: float,
+    base_url: str | None = None,
+    credential_env: str | None = None,
+) -> dict:
+    """Gemini generateContent adapter using structured JSON output."""
+    credential_name = credential_env or "GEMINI_API_KEY"
+    api_key = os.environ.get(credential_name, "").strip()
+    if not api_key:
+        return {
+            "status": "unavailable", "response": None,
+            "errors": ["missing_provider_credential"],
+            "diagnostic": {
+                "provider": "gemini",
+                "error": "missing_provider_credential",
+                "credential_env": credential_name,
+            },
+        }
+    stage = envelope["stage"]
+    schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
+    endpoint = str(
+        base_url or os.environ.get("GEMINI_BASE_URL") or GEMINI_DEFAULT_BASE_URL
+    ).strip().rstrip("/")
+    payload = {
+        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": json.dumps(envelope, ensure_ascii=False)}],
+        }],
+        "generationConfig": {
+            "temperature": 0,
+            "maxOutputTokens": 1600,
+            "responseMimeType": "application/json",
+            "responseSchema": schema,
+        },
+    }
+    try:
+        req = Request(
+            endpoint + "/models/" + quote(model, safe="") + ":generateContent",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+            method="POST",
+        )
+        with urlopen(req, timeout=timeout) as resp:
+            outer = json.load(resp)
+        raw = _extract_gemini_text(outer)
+        usage = outer.get("usageMetadata") if isinstance(outer, dict) else None
+        diagnostic = {
+            "provider": "gemini",
+            "prompt_tokens": usage.get("promptTokenCount") if isinstance(usage, dict) else None,
+            "candidate_tokens": usage.get("candidatesTokenCount") if isinstance(usage, dict) else None,
+            "total_tokens": usage.get("totalTokenCount") if isinstance(usage, dict) else None,
+        }
+        if not isinstance(raw, str):
+            return {"status": "invalid", "response": None,
+                    "errors": ["missing_content"], "diagnostic": diagnostic}
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return {"status": "invalid", "response": None,
+                    "errors": ["invalid_json"], "diagnostic": diagnostic}
+        errors = validate_turn(stage, data)
+        return {"status": "ok" if not errors else "invalid", "response": data,
+                "errors": errors, "diagnostic": diagnostic}
+    except HTTPError as exc:
+        return {"status": "unavailable", "response": None,
+                "errors": ["HTTPError"],
+                "diagnostic": {"provider": "gemini", "http_status": exc.code}}
+    except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {"status": "unavailable", "response": None,
+                "errors": [type(exc).__name__],
+                "diagnostic": {"provider": "gemini", "error": type(exc).__name__}}
+
+
+def _normalized_member_specs(
+    member_specs: list[dict] | None, local_model: str
+) -> list[dict]:
+    source = member_specs if member_specs is not None else panel_member_specs(local_model)
+    normalized = []
+    seen = set()
+    for raw in source:
+        name = str(raw.get("name") or "").strip().upper()
+        provider = str(raw.get("provider") or "").strip().lower()
+        model = str(raw.get("model") or "").strip()
+        if name not in MEMBER_NAMES or name in seen:
+            raise ValueError("invalid_magi_member_specs")
+        if provider not in PROVIDERS:
+            raise ValueError("unsupported_provider")
+        seen.add(name)
+        item = {
+            "name": name,
+            "profile_id": raw.get("profile_id"),
+            "profile_label": raw.get("profile_label") or f"{provider} / {model or '-'}",
+            "provider": provider,
+            "model": model,
+            "endpoint": str(raw.get("endpoint") or "").strip() or None,
+            "credential_env": (
+                str(raw.get("credential_env") or "").strip() or None
+            ),
+            "weight": float(raw.get("weight") or 1.0),
+            "timeout_seconds": int(raw.get("timeout_seconds") or 900),
+            "enabled": bool(raw.get("enabled") and model),
+            "settings_source": raw.get("settings_source") or "explicit",
+        }
+        if item["weight"] <= 0 or not 1 <= item["timeout_seconds"] <= 3600:
+            raise ValueError("invalid_magi_member_specs")
+        normalized.append(item)
+    if not any(item["enabled"] for item in normalized):
+        raise ValueError("no_enabled_magi_member")
+    return normalized
 
 
 def _decision_signature(stage: str, response: dict) -> str:
@@ -475,13 +601,30 @@ def select_weighted_consensus(stage: str, member_results: list[dict]) -> dict:
 def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
     member_envelope = deepcopy(envelope)
     member_envelope["magi_member"] = spec["name"]
-    if spec["provider"] == "ollama":
-        result = call_guided_member(
-            member_envelope, model=spec["model"], timeout=timeout
+    member_timeout = float(spec.get("timeout_seconds") or timeout)
+    provider = spec["provider"]
+    if provider == "ollama":
+        result = _call_ollama_guided(
+            member_envelope,
+            model=spec["model"],
+            timeout=member_timeout,
+            base_url=spec.get("endpoint"),
         )
-    elif spec["provider"] == "openai":
+    elif provider == "openai":
         result = _call_openai_guided(
-            member_envelope, model=spec["model"], timeout=timeout
+            member_envelope,
+            model=spec["model"],
+            timeout=member_timeout,
+            base_url=spec.get("endpoint"),
+            credential_env=spec.get("credential_env"),
+        )
+    elif provider == "gemini":
+        result = _call_gemini_guided(
+            member_envelope,
+            model=spec["model"],
+            timeout=member_timeout,
+            base_url=spec.get("endpoint"),
+            credential_env=spec.get("credential_env"),
         )
     else:
         result = {
@@ -490,9 +633,11 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
         }
     return {
         "name": spec["name"],
-        "provider": spec["provider"],
+        "profile_id": spec.get("profile_id"),
+        "provider": provider,
         "model": spec["model"],
         "weight": spec["weight"],
+        "timeout_seconds": spec.get("timeout_seconds"),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
         "errors": list(result.get("errors") or []),
@@ -500,9 +645,18 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
     }
 
 
-def call_guided_panel(envelope: dict, *, model: str, timeout: float = 900.0) -> dict:
-    """Run enabled MAGI members concurrently and return weighted structured consensus."""
-    specs = [spec for spec in panel_member_specs(model) if spec["enabled"]]
+def call_guided_panel(
+    envelope: dict,
+    *,
+    model: str = "",
+    timeout: float = 900.0,
+    member_specs: list[dict] | None = None,
+) -> dict:
+    """Run enabled provider-independent MAGI slots concurrently."""
+    specs = [
+        spec for spec in _normalized_member_specs(member_specs, model)
+        if spec["enabled"]
+    ]
     member_results: list[dict | None] = [None] * len(specs)
     with ThreadPoolExecutor(max_workers=max(1, len(specs))) as executor:
         future_to_index = {
@@ -513,11 +667,15 @@ def call_guided_panel(envelope: dict, *, model: str, timeout: float = 900.0) -> 
             index = future_to_index[future]
             try:
                 member_results[index] = future.result()
-            except Exception as exc:  # defensive isolation between MAGI members
+            except Exception as exc:  # isolate one provider/member failure
                 spec = specs[index]
                 member_results[index] = {
-                    "name": spec["name"], "provider": spec["provider"],
-                    "model": spec["model"], "weight": spec["weight"],
+                    "name": spec["name"],
+                    "profile_id": spec.get("profile_id"),
+                    "provider": spec["provider"],
+                    "model": spec["model"],
+                    "weight": spec["weight"],
+                    "timeout_seconds": spec.get("timeout_seconds"),
                     "status": "unavailable", "response": None,
                     "errors": [type(exc).__name__],
                     "diagnostic": {"error": type(exc).__name__},
@@ -533,11 +691,22 @@ def call_guided_panel(envelope: dict, *, model: str, timeout: float = 900.0) -> 
         "diagnostic": {
             "mode": "weighted_panel",
             "enabled_members": [spec["name"] for spec in specs],
+            "assignments": [
+                {
+                    "name": spec["name"],
+                    "provider": spec["provider"],
+                    "model": spec["model"],
+                    "weight": spec["weight"],
+                    "timeout_seconds": spec["timeout_seconds"],
+                }
+                for spec in specs
+            ],
             "valid_members": list(consensus.get("valid_members") or []),
         },
         "member_results": completed,
         "consensus": consensus,
     }
+
 
 def _compose_question(session: dict, purpose: str, *, issue: str | None = None) -> str:
     if purpose not in QUESTION_PURPOSES:
@@ -600,7 +769,15 @@ def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller,
             },
             "observations": deepcopy(session["observations"]),
         })
-    result = caller(envelope, model=session["model"], timeout=timeout)
+    if caller is call_guided_panel:
+        result = caller(
+            envelope,
+            model=session.get("model") or "",
+            timeout=timeout,
+            member_specs=session.get("member_specs"),
+        )
+    else:
+        result = caller(envelope, model=session.get("model") or "", timeout=timeout)
     response = result.get("response")
     errors = list(result.get("errors") or [])
     result_status = result.get("status")
@@ -723,11 +900,21 @@ def _advance(session: dict, caller, *, timeout: float) -> dict:
         return session
     return _apply_detail(session, response, caller, timeout=timeout, purpose=purpose)
 
-def start_dialogue(user_raw: str, *, model: str, timeout: float = 900.0,
-                   caller=call_guided_panel) -> dict:
+def start_dialogue(
+    user_raw: str,
+    *,
+    model: str = "",
+    member_specs: list[dict] | None = None,
+    timeout: float = 900.0,
+    caller=call_guided_panel,
+) -> dict:
+    specs = _normalized_member_specs(member_specs, model) if caller is call_guided_panel else (
+        deepcopy(member_specs) if member_specs is not None else []
+    )
     session = {
         "task_id": str(uuid4()), "user_raw": user_raw.strip(), "model": model,
         "prompt_version": PROMPT_VERSION, "magi_mode": "weighted_panel",
+        "member_specs": specs,
         "status": "running", "next_step": "classify",
         "classification": None, "detail": None,
         "observations": [], "pending_requests": [], "previous_request_signatures": [],
