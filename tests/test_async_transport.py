@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, patch
 import anyio
 import httpx
 
-from pkb_proto.async_transport import AsyncRequestTimeout, request_json
+from pkb_proto.async_transport import (
+    AsyncHTTPStatusError,
+    AsyncRequestTimeout,
+    request_json,
+)
 from pkb_proto.magi_async import (
     _call_ollama_guided_async,
     call_guided_panel_async,
@@ -33,6 +37,38 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
                     timeout=0.02,
                     client=client,
                 )
+
+    async def test_http_error_retains_provider_status_and_message_only(self):
+        class _ErrorTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    400,
+                    json={
+                        "error": {
+                            "status": "INVALID_ARGUMENT",
+                            "message": "Unsupported field: minLength",
+                        }
+                    },
+                    request=request,
+                )
+
+        async with httpx.AsyncClient(
+            transport=_ErrorTransport(), timeout=None
+        ) as client:
+            with self.assertRaises(AsyncHTTPStatusError) as caught:
+                await request_json(
+                    "POST",
+                    "https://example.invalid/error",
+                    json_body={"secret": "not echoed"},
+                    timeout=1,
+                    client=client,
+                )
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(caught.exception.provider_status, "INVALID_ARGUMENT")
+        self.assertEqual(
+            caught.exception.provider_message,
+            "Unsupported field: minLength",
+        )
 
     async def test_parent_cancel_propagates_without_waiting_for_deadline(self):
         async with httpx.AsyncClient(
