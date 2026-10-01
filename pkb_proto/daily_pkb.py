@@ -52,6 +52,7 @@ from .magi_async import (
 from .magi_core_bridge import pending_pkb_request, verified_pkb_observation
 from .magi_task_store import (
     create_task as create_magi_core_task,
+    fail_task as fail_magi_core_task,
     persist_session as persist_magi_core_session,
     record_pkb_read as record_magi_pkb_read,
 )
