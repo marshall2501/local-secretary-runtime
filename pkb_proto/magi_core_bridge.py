@@ -64,7 +64,19 @@ def task_projection(session: dict) -> dict:
     status = session.get("status")
     answer = detail.get("answer_candidate")
 
-    if status == "candidate_ready" and isinstance(answer, str) and answer.strip():
+    verified_observations = [
+        item for item in (session.get("observations") or [])
+        if isinstance(item, dict)
+        and item.get("verified") is True
+        and item.get("source") == "pkb"
+    ]
+    if (
+        status == "candidate_ready"
+        and isinstance(answer, str)
+        and answer.strip()
+        and session.get("tool_read_executed") is True
+        and verified_observations
+    ):
         return {
             "task_status": "completed",
             "phase": "completed",
@@ -72,6 +84,15 @@ def task_projection(session: dict) -> dict:
             "message": answer.strip(),
             "question": None,
             "reason": "validated_answer_candidate_after_verified_observation",
+        }
+    if status == "candidate_ready":
+        return {
+            "task_status": "waiting_external",
+            "phase": "awaiting_review",
+            "next_step": "review_answer_candidate",
+            "message": None,
+            "question": None,
+            "reason": "answer_candidate_not_grounded_by_verified_pkb_observation",
         }
 
     if status == "waiting_user":
@@ -102,6 +123,16 @@ def task_projection(session: dict) -> dict:
             "message": None,
             "question": None,
             "reason": session.get("next_step"),
+        }
+
+    if status == "stopped" and session.get("next_step") == "user_requested_stop":
+        return {
+            "task_status": "paused",
+            "phase": "paused",
+            "next_step": "user_requested_stop",
+            "message": None,
+            "question": None,
+            "reason": "user_requested_stop",
         }
 
     return {
