@@ -139,5 +139,55 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("persist", None, "waiting_information"), calls)
 
 
+    async def test_resume_user_answer_claims_same_task_continues_and_persists(self):
+        calls = []
+        task_id = __import__("uuid").UUID("11111111-1111-4111-8111-111111111111")
+        session = {
+            "task_id": str(task_id),
+            "status": "waiting_user",
+            "next_step": "ask_user_after_exhausted_pkb",
+            "pending_requests": [{"request_id": "REQ-1", "source": "user"}],
+            "turns": [{}, {}, {}, {}],
+        }
+
+        def claim(claimed_id, reply_length):
+            calls.append(("claim", str(claimed_id), reply_length))
+            return (dict(session), "pkb_search")
+
+        async def continue_user(saved, text, **kwargs):
+            calls.append(("continue", saved["task_id"], text))
+            updated = dict(saved)
+            updated.update(
+                status="candidate_ready",
+                next_step="review_answer_candidate",
+                detail={"answer_candidate": "Radeon RX 9070 XT"},
+            )
+            return updated
+
+        def persist(saved_id, updated, capability):
+            calls.append(("persist", str(saved_id), capability, updated["status"]))
+
+        def fail(*args):
+            calls.append(("fail",))
+
+        from pkb_proto.magi_observation_loop import resume_user_answer
+        updated = await resume_user_answer(
+            task_id,
+            "Radeon RX 9070 XT",
+            timeout=10,
+            claim_user_resume_record=claim,
+            persist_session_record=persist,
+            fail_task_record=fail,
+            user_continuation=continue_user,
+        )
+        self.assertEqual(updated["status"], "candidate_ready")
+        self.assertEqual(
+            [item[0] for item in calls],
+            ["claim", "continue", "persist"],
+        )
+        self.assertEqual(calls[0][1], str(task_id))
+        self.assertEqual(calls[-1][2], "pkb_search")
+
+
 if __name__ == "__main__":
     unittest.main()
