@@ -15,6 +15,7 @@ from pkb_proto.async_transport import (
     request_json_with_retry,
 )
 from pkb_proto.magi_async import (
+    _call_gemini_guided_async,
     _call_ollama_guided_async,
     call_guided_panel_async,
     start_dialogue_async,
@@ -196,6 +197,47 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
+
+    async def test_gemini_retry_failure_keeps_safe_attempt_diagnostics(self):
+        retry_diagnostic = {
+            "retry_enabled": True,
+            "attempt_count": 4,
+            "retry_count": 3,
+            "retry_http_codes_seen": [503, 503, 503, 503],
+            "retry_wait_seconds": 7.0,
+            "retry_budget_seconds": 60.0,
+            "final_status": "http_503",
+        }
+        failure = AsyncRetryExhausted(
+            AsyncHTTPStatusError(
+                503,
+                provider_status="UNAVAILABLE",
+                provider_message="temporary high demand",
+            ),
+            retry_diagnostic,
+        )
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "test-only-secret"},
+            clear=False,
+        ), patch(
+            "pkb_proto.magi_async.request_json_with_retry",
+            new=AsyncMock(side_effect=failure),
+        ):
+            result = await _call_gemini_guided_async(
+                {"stage": "classify"},
+                model="gemini-test",
+                timeout=120,
+                retry_within_turn=True,
+                retry_http_codes=[503],
+            )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["errors"], ["HTTPError"])
+        self.assertEqual(result["diagnostic"]["http_status"], 503)
+        self.assertEqual(result["diagnostic"]["provider_status"], "UNAVAILABLE")
+        self.assertEqual(result["diagnostic"]["attempt_count"], 4)
+        self.assertEqual(result["diagnostic"]["retry_count"], 3)
+        self.assertNotIn("test-only-secret", str(result))
 
     async def test_parent_cancel_propagates_without_waiting_for_deadline(self):
         async with httpx.AsyncClient(
