@@ -20,6 +20,7 @@ from .magi_client import OLLAMA
 from .magi_settings import (
     DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, fallback_member_specs,
 )
+from .ollama_runtime import DEFAULT_OLLAMA_CONTEXT_TOKENS, normalize_context_tokens
 from .ritsuko_magi_protocol import default_resource_catalog
 
 CATEGORIES = (
@@ -231,7 +232,8 @@ def validate_turn(stage: str, output: object) -> list[str]:
     return errors
 
 def _call_ollama_guided(
-    envelope: dict, *, model: str, timeout: float, base_url: str | None = None
+    envelope: dict, *, model: str, timeout: float, base_url: str | None = None,
+    context_window_tokens: int | None = None,
 ) -> dict:
     """Ollama transport only; no semantic routing or tool access."""
     stage = envelope["stage"]
@@ -242,7 +244,11 @@ def _call_ollama_guided(
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": json.dumps(envelope, ensure_ascii=False)},
         ],
-        "options": {"temperature": 0, "num_predict": 1150},
+        "options": {
+            "temperature": 0,
+            "num_predict": 1150,
+            "num_ctx": normalize_context_tokens(context_window_tokens),
+        },
     }
     endpoint = str(base_url or OLLAMA).strip().rstrip("/")
     try:
@@ -281,10 +287,14 @@ def _call_ollama_guided(
                 "diagnostic": {"provider": "ollama", "error": type(exc).__name__}}
 
 
-def call_guided_member(envelope: dict, *, model: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict:
+def call_guided_member(
+    envelope: dict, *, model: str, timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    context_window_tokens: int = DEFAULT_OLLAMA_CONTEXT_TOKENS,
+) -> dict:
     """Backward-compatible local Ollama entry point used by isolated tests."""
     return _call_ollama_guided(
-        envelope, model=model, timeout=timeout, base_url=OLLAMA
+        envelope, model=model, timeout=timeout, base_url=OLLAMA,
+        context_window_tokens=context_window_tokens,
     )
 
 
@@ -515,6 +525,11 @@ def _normalized_member_specs(
             "credential_env": (
                 str(raw.get("credential_env") or "").strip() or None
             ),
+            "context_window_tokens": (
+                normalize_context_tokens(raw.get("context_window_tokens"))
+                if provider == "ollama"
+                else None
+            ),
             "weight": float(raw.get("weight") or 1.0),
             "timeout_seconds": int(raw.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
             "enabled": bool(raw.get("enabled") and model),
@@ -611,6 +626,7 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
             model=spec["model"],
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
+            context_window_tokens=spec.get("context_window_tokens"),
         )
     elif provider == "openai":
         result = _call_openai_guided(
