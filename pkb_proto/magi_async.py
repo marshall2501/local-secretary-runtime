@@ -386,6 +386,7 @@ async def _call_panel_member_async(
         "model": spec["model"],
         "weight": spec["weight"],
         "timeout_seconds": spec.get("timeout_seconds"),
+        "context_window_tokens": spec.get("context_window_tokens"),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
         "errors": list(result.get("errors") or []),
