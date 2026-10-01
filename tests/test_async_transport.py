@@ -597,6 +597,139 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "openai",
         )
 
+    async def test_rephrased_pkb_repeat_after_verified_read_falls_back_to_user(self):
+        responses = [
+            {
+                "understood_request": "GPUモデルを知りたい",
+                "state": "NEED_INFORMATION",
+                "reason": "GPUモデルがまだ不明",
+                "information_requests": [
+                    {
+                        "source": "pkb",
+                        "what": "GPU1の具体的な製品モデル名または型番",
+                        "reason": "モデル属性が必要",
+                    }
+                ],
+                "question_for_user": None,
+                "answer_candidate": None,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            },
+            {
+                "understood_request": "GPUモデルを知りたい",
+                "state": "NEED_INFORMATION",
+                "reason": "モデルが依然不明",
+                "information_requests": [
+                    {
+                        "source": "pkb",
+                        "what": "GPU1のモデル名",
+                        "reason": "回答に必要",
+                    }
+                ],
+                "question_for_user": None,
+                "answer_candidate": None,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            },
+        ]
+        seen_purposes = []
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen_purposes.append(envelope["question_purpose"])
+            return {
+                "status": "ok",
+                "response": responses.pop(0),
+                "errors": [],
+                "diagnostic": {"mode": "test"},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-1",
+            "user_raw": "メインPCのGPUの種類は？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {
+                    "name": "MELCHIOR",
+                    "provider": "ollama",
+                    "model": "local",
+                    "enabled": True,
+                    "weight": 1.0,
+                    "timeout_seconds": 10,
+                }
+            ],
+            "status": "waiting_information",
+            "next_step": "review_information_requests",
+            "classification": {
+                "category": "INFORMATION",
+                "understood_request": "GPUモデルを知りたい",
+                "reason": "情報照会",
+                "confidence": "high",
+                "multiple_requests": False,
+            },
+            "detail": {
+                "understood_request": "GPUモデルを知りたい",
+                "state": "NEED_INFORMATION",
+                "reason": "PKB確認が必要",
+                "information_requests": [
+                    {"source": "pkb", "what": "メインPCのGPU種類", "reason": "回答に必要"}
+                ],
+                "question_for_user": None,
+                "answer_candidate": None,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            },
+            "observations": [],
+            "pending_requests": [
+                {
+                    "request_id": "REQ-1",
+                    "source": "pkb",
+                    "what": "メインPCのGPU種類",
+                    "reason": "回答に必要",
+                }
+            ],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "identify_missing_information",
+            "turns": [
+                {"stage": "classify", "request_envelope": {"turn": 1}},
+                {"stage": "analyze", "request_envelope": {"turn": 2}},
+            ],
+            "legacy_router_used": False,
+            "tool_read_executed": False,
+        }
+
+        updated = await continue_with_verified_observation_async(
+            session,
+            {
+                "source": "pkb",
+                "verified": True,
+                "confidentiality": "private",
+                "text": "GPU1はありますが、モデル属性は確認できませんでした。",
+                "responds_to": ["REQ-1"],
+            },
+            timeout=10,
+            caller=caller,
+        )
+
+        self.assertEqual(
+            seen_purposes,
+            ["evaluate_observation", "review_or_repair"],
+        )
+        self.assertEqual(updated["status"], "waiting_user")
+        self.assertEqual(updated["next_step"], "ask_user_after_exhausted_pkb")
+        self.assertIn("PKBでは確認できませんでした", updated["user_question"])
+        self.assertTrue(updated["pending_requests"])
+        self.assertTrue(
+            all(item["source"] == "user" for item in updated["pending_requests"])
+        )
+        self.assertEqual(len(updated["turns"]), 4)
+
     async def test_verified_private_pkb_observation_fails_closed_without_local_member(self):
         session = {
             "task_id": "task-1",
