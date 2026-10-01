@@ -307,7 +307,15 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 if e._props.get('label') == '追加説明・選択'
             )
             self.assertIsNotNone(clarification)
+            self.assertEqual(str(clarification._props.get('rows')), '2')
+            self.assertTrue(self.elements('RITSUKOからの確認'))
             self.assertTrue(self.elements('追加説明を渡して対話継続'))
+            turn = next(
+                e for e in self.client.elements.values()
+                if isinstance(e, ui.expansion)
+                and str(e._props.get('label') or '').startswith('Turn 4:')
+            )
+            self.assertLess(clarification.id, turn.id)
 
     async def test_proposal_ready_magi_task_offers_answer_only_and_memory_choices(self):
         saved_session = {
@@ -381,11 +389,18 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             await self.click('開く', 0)
             self.assertTrue(self.elements('回答だけで完了'))
             self.assertTrue(self.elements('記憶にも反映して完了'))
+            review_heading = self.elements('RITSUKOからの確認')[0]
             self.assertTrue(any(
                 'メインPCのGPUモデル名: Radeon RX 9070 XT'
                 in getattr(e, 'text', '')
                 for e in self.client.elements.values()
             ))
+            turn = next(
+                e for e in self.client.elements.values()
+                if isinstance(e, ui.expansion)
+                and str(e._props.get('label') or '').startswith('Turn 5:')
+            )
+            self.assertLess(review_heading.id, turn.id)
             self.assertFalse(
                 self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
             )
