@@ -53,6 +53,10 @@ from .magi_settings import (
     fallback_member_specs, list_llm_profiles, load_member_specs, provider_defaults,
     save_member_assignments, sync_ollama_profiles, upsert_llm_profile,
 )
+from .ollama_runtime import (
+    DEFAULT_OLLAMA_CONTEXT_TOKENS,
+    OLLAMA_CONTEXT_OPTIONS,
+)
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
 from .finance_preview import analyze_moneyforward_csv
@@ -578,6 +582,7 @@ def _register_magi_profile(
     display_name: str | None = None,
     endpoint: str | None = None,
     credential_env: str | None = None,
+    context_window_tokens: int | None = None,
 ) -> dict:
     with connection() as db:
         return upsert_llm_profile(
@@ -587,6 +592,7 @@ def _register_magi_profile(
             display_name=display_name,
             endpoint=endpoint,
             credential_env=credential_env,
+            context_window_tokens=context_window_tokens,
             enabled=True,
         )
 
@@ -3752,6 +3758,11 @@ def core_page(task_id: str = ""):
             profile_options = {
                 item["id"]: (
                     f"{item['display_name']}  [{item['provider']} / {item['model']}]"
+                    + (
+                        f" [ctx={int(item['context_window_tokens']) // 1024}K]"
+                        if item["provider"] == "ollama" and item.get("context_window_tokens")
+                        else ""
+                    )
                 )
                 for item in magi_profiles
             }
@@ -5251,9 +5262,15 @@ def settings_page():
                     for item in profiles:
                         state_label = "有効" if item["enabled"] else "無効"
                         credential = item.get("credential_env") or "不要"
+                        context_label = (
+                            str(item.get("context_window_tokens")) + " tokens"
+                            if item["provider"] == "ollama"
+                            else "provider管理"
+                        )
                         ui.label(
                             f"{item['display_name']} / provider={item['provider']} "
-                            f"/ model={item['model']} / credential={credential} / {state_label}"
+                            f"/ model={item['model']} / context={context_label} "
+                            f"/ credential={credential} / {state_label}"
                         ).classes("font-mono text-xs")
 
             llm_profiles_panel()
@@ -5281,6 +5298,14 @@ def settings_page():
                     "Credential環境変数名（cloudのみ・任意）",
                     placeholder="OPENAI_API_KEY / GEMINI_API_KEY",
                 ).classes("min-w-72")
+                profile_context = ui.select(
+                    options={
+                        value: f"{value // 1024}K ({value})"
+                        for value in OLLAMA_CONTEXT_OPTIONS
+                    },
+                    value=DEFAULT_OLLAMA_CONTEXT_TOKENS,
+                    label="Context Window（Ollamaのみ）",
+                ).classes("min-w-56")
 
                 def fill_provider_defaults():
                     try:
@@ -5289,10 +5314,17 @@ def settings_page():
                         )
                     except Exception:
                         return
+                    provider = str(profile_provider.value or "")
                     profile_endpoint.value = endpoint
                     profile_credential.value = credential or ""
+                    profile_context.value = (
+                        DEFAULT_OLLAMA_CONTEXT_TOKENS
+                        if provider == "ollama"
+                        else None
+                    )
                     profile_endpoint.update()
                     profile_credential.update()
+                    profile_context.update()
 
                 ui.button(
                     "既定値を入れる",
@@ -5308,6 +5340,12 @@ def settings_page():
                         display_name=str(profile_display.value or "").strip() or None,
                         endpoint=str(profile_endpoint.value or "").strip() or None,
                         credential_env=str(profile_credential.value or "").strip() or None,
+                        context_window_tokens=(
+                            int(profile_context.value)
+                            if str(profile_provider.value or "") == "ollama"
+                            and profile_context.value is not None
+                            else None
+                        ),
                     )
                     ui.notify(
                         "LLM profileを保存しました: " + saved["display_name"],
