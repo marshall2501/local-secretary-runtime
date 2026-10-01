@@ -59,13 +59,7 @@ def verified_pkb_observation(execution: dict, pending_request: dict) -> dict:
 
 
 def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
-    """Return a deterministic review payload for a user-grounded knowledge proposal.
-
-    This is intentionally conservative: the proposal must come from the D-23
-    PKB→user fallback path, and the user's literal clarification must appear in
-    both the answer and knowledge candidate.  MAGI cannot make the Task complete
-    by itself.
-    """
+    """Return a deterministic review payload for a user-grounded knowledge proposal."""
     if session.get("status") != "proposal_ready":
         return None
     detail = session.get("detail") or {}
@@ -107,45 +101,73 @@ def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
     }
 
 
-def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
-    """Return a deterministic review payload for a user-grounded knowledge proposal."""
-    if session.get("status") != "proposal_ready":
-        return None
-    detail = session.get("detail") or {}
-    if detail.get("state") != "KNOWLEDGE_CANDIDATE":
-        return None
-    if session.get("tool_read_executed") is not True:
-        return None
-    if not any(
-        isinstance(item, dict)
-        and item.get("source") == "pkb"
-        and item.get("verified") is True
-        for item in (session.get("observations") or [])
-    ):
-        return None
-    user_observations = [
-        item for item in (session.get("observations") or [])
+def proposal_review_observation(
+    proposal: dict,
+    *,
+    decision: str,
+    memory_summary: dict | None = None,
+) -> dict:
+    """Build the bounded private Observation produced by the user's review choice."""
+    if decision not in {"answer_only", "remember"}:
+        raise ValueError("invalid_proposal_review_decision")
+
+    base = {
+        "verified": True,
+        "confidentiality": "private",
+        "review_decision": decision,
+        "answer": str(proposal.get("answer") or "").strip()[:4000],
+        "knowledge_candidate": str(
+            proposal.get("knowledge_candidate") or ""
+        ).strip()[:4000],
+        "user_text": str(proposal.get("user_text") or "").strip()[:4000],
+        "responds_to": [
+            str(x) for x in (proposal.get("responds_to") or [])
+        ][:20],
+    }
+    if decision == "answer_only":
+        return {
+            **base,
+            "source": "proposal_review",
+            "text": (
+                "本人が回答候補を確認し、永続記憶への反映は行わず、"
+                "この回答だけで元Taskを完了することを選択した。"
+            ),
+            "memory_intake": None,
+        }
+
+    summary = deepcopy(memory_summary or {})
+    if summary.get("status") not in {"committed", "replayed"}:
+        raise ValueError("memory_intake_not_committed")
+    receipts = [
+        {
+            "candidate_id": item.get("candidate_id"),
+            "decision": item.get("decision"),
+            "reason": item.get("reason"),
+            "claim_id": item.get("claim_id"),
+            "pending_id": item.get("pending_id"),
+            "derived_claim_ids": list(item.get("derived_claim_ids") or []),
+        }
+        for item in (summary.get("receipts") or [])
         if isinstance(item, dict)
-        and item.get("source") == "user_clarification"
-        and str(item.get("text") or "").strip()
-        and list(item.get("responds_to") or [])
-    ]
-    if not user_observations:
-        return None
-    latest = user_observations[-1]
-    literal = str(latest.get("text") or "").strip()
-    answer = str(detail.get("answer_candidate") or "").strip()
-    knowledge = str(detail.get("knowledge_candidate") or "").strip()
-    if not answer or not knowledge:
-        return None
-    folded = literal.casefold()
-    if folded not in answer.casefold() or folded not in knowledge.casefold():
-        return None
+    ][:100]
+    bounded_summary = {
+        "input_id": summary.get("input_id"),
+        "status": summary.get("status"),
+        "source_id": summary.get("source_id"),
+        "receipts": receipts,
+    }
+    decisions = [str(item.get("decision") or "-") for item in receipts]
     return {
-        "answer": answer,
-        "knowledge_candidate": knowledge,
-        "user_text": literal,
-        "responds_to": [str(x) for x in (latest.get("responds_to") or [])][:20],
+        **base,
+        "source": "memory_intake",
+        "text": (
+            "本人が記憶反映を選択し、Memory Intakeが"
+            + str(bounded_summary.get("status") or "-")
+            + "で完了した。WriteDecision="
+            + (", ".join(decisions) if decisions else "none")
+            + "。pendingは確認待ち候補であり確定PKB current factではない。"
+        )[:4000],
+        "memory_intake": bounded_summary,
     }
 
 
