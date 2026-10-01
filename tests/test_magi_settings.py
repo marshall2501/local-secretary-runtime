@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from uuid import UUID
 from unittest.mock import patch
 
 from pkb_proto.magi_settings import (
@@ -10,6 +11,7 @@ from pkb_proto.magi_settings import (
     fallback_member_specs,
     provider_defaults,
     save_member_assignments,
+    upsert_llm_profile,
 )
 from pkb_proto.ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
@@ -87,6 +89,50 @@ class MagiSettingsTests(unittest.TestCase):
             specs = fallback_member_specs("gemma3:12b")
         self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 120)
         self.assertTrue(all(item["timeout_seconds"] == 120 for item in specs))
+
+    def test_existing_profile_can_be_updated_by_id(self):
+        profile_id = UUID("11111111-1111-1111-1111-111111111111")
+
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, sql, params):
+                self.calls.append((sql, params))
+
+            def fetchone(self):
+                return (profile_id, 65536, 4096)
+
+        class DB:
+            def __init__(self):
+                self.cur = Cursor()
+
+            def cursor(self):
+                return self.cur
+
+        db = DB()
+        saved = upsert_llm_profile(
+            db,
+            provider="ollama",
+            model="qwen3.5:9b",
+            display_name="Ollama / qwen3.5:9b",
+            endpoint="http://127.0.0.1:11434",
+            context_window_tokens=65536,
+            ollama_num_predict=8192,
+            profile_id=str(profile_id),
+        )
+        self.assertEqual(saved["id"], str(profile_id))
+        self.assertEqual(saved["ollama_num_predict"], 8192)
+        update_sql, update_params = db.cur.calls[-1]
+        self.assertIn("UPDATE secretary.llm_profiles", update_sql)
+        self.assertEqual(update_params[-1], profile_id)
+        self.assertEqual(update_params[6], 8192)
 
     def test_assignment_validation_requires_all_three_slots(self):
         with self.assertRaisesRegex(ValueError, "all_magi_members_required"):
