@@ -105,6 +105,7 @@ from .write_service import write_one
 from .web_research import research_web
 from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
+from .provider_usage import ProviderUsageError, read_openai_month_usage
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -3726,6 +3727,7 @@ _FEATURES = [
     ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
     ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
     ("RITSUKO", "試験中", "blue-grey", "/core", "Secretary Core / Orchestrator。Task・MAGI通信・最終判断を管理"),
+    ("API利用状況", "試験中", "indigo", "/api-usage", "OpenAI Organization Usage/Costsの今月実績を読取表示"),
     ("開発Workbench", "利用可能", "green", "http://127.0.0.1:8092/", "LLM/PKB/Coreの開発検証用。日常GUIとは分離"),
 ]
 
@@ -3737,6 +3739,7 @@ def _nav():
         ui.button("PKB", icon="account_tree").props("flat href=/pkb tag=a")
         ui.button("RITSUKO", icon="hub").props("flat href=/core tag=a")
         ui.button("家計・資産", icon="account_balance_wallet").props("flat href=/finance tag=a")
+        ui.button("API利用状況", icon="query_stats").props("flat href=/api-usage tag=a")
         ui.button("設定", icon="settings").props("flat href=/settings tag=a")
 
 
@@ -3823,6 +3826,110 @@ def top_page():
             ui.label("金融実データは隔離DBのみ。運用DB・外部金融サービス操作はまだ行いません。").classes(
                 "text-sm text-orange-800"
             )
+
+
+@ui.page("/api-usage")
+def api_usage_page():
+    state = {"result": None, "error": None, "busy": False}
+
+    with ui.column().classes("w-full max-w-6xl mx-auto gap-4 p-4"):
+        _portal_header(
+            "API利用状況",
+            "外部Providerの利用実績を読取表示します。初版はOpenAIのみです。",
+        )
+
+        with ui.card().classes("w-full border-2 border-indigo-200"):
+            with ui.row().classes("w-full items-center justify-between gap-3"):
+                with ui.column().classes("gap-0"):
+                    ui.label("OpenAI").classes("text-xl font-bold")
+                    ui.label(
+                        "今月（UTC）のOrganization Usage / Costs。PKBへの履歴保存は次段階です。"
+                    ).classes("text-sm text-grey-7")
+                refresh_button = ui.button("最新を取得", icon="refresh", color="indigo")
+
+            status = ui.label("未取得").classes("text-sm text-grey-7")
+            metrics = ui.row().classes("w-full gap-3 flex-wrap")
+            model_table = ui.column().classes("w-full gap-2")
+
+            def render_result(result: dict | None, error: str | None = None):
+                metrics.clear()
+                model_table.clear()
+                if error:
+                    status.set_text(error)
+                    status.classes(replace="text-sm text-red-700")
+                    return
+                if not result:
+                    status.set_text("未取得")
+                    return
+
+                status.classes(replace="text-sm text-grey-7")
+                status.set_text(
+                    f"取得: {result['fetched_at']} / credential: {result['credential_env']}"
+                )
+                totals = result["totals"]
+                costs = result["costs"]
+                cost_text = " / ".join(
+                    f"{currency.upper()} {value:,.4f}"
+                    for currency, value in sorted(costs.items())
+                ) or "取得値なし"
+
+                with metrics:
+                    for title, value in (
+                        ("今月のCost", cost_text),
+                        ("Requests", f"{totals['requests']:,}"),
+                        ("Input tokens", f"{totals['input_tokens']:,}"),
+                        ("Output tokens", f"{totals['output_tokens']:,}"),
+                    ):
+                        with ui.card().classes("min-w-48 bg-indigo-50"):
+                            ui.label(title).classes("text-xs text-grey-7")
+                            ui.label(value).classes("text-lg font-bold")
+
+                with model_table:
+                    ui.label("モデル別 Usage").classes("font-bold")
+                    rows = result.get("by_model") or []
+                    if not rows:
+                        ui.label("この期間のcompletion usageはありません。").classes(
+                            "text-sm text-grey-7"
+                        )
+                    else:
+                        ui.table(
+                            columns=[
+                                {"name": "model", "label": "Model", "field": "model", "align": "left"},
+                                {"name": "requests", "label": "Requests", "field": "requests", "align": "right"},
+                                {"name": "input_tokens", "label": "Input", "field": "input_tokens", "align": "right"},
+                                {"name": "output_tokens", "label": "Output", "field": "output_tokens", "align": "right"},
+                            ],
+                            rows=rows,
+                            row_key="model",
+                        ).classes("w-full")
+
+            async def refresh():
+                if state["busy"]:
+                    return
+                state["busy"] = True
+                refresh_button.disable()
+                status.set_text("OpenAIから取得中...")
+                try:
+                    result = await run.io_bound(read_openai_month_usage)
+                    state["result"] = result
+                    state["error"] = None
+                    render_result(result)
+                except ProviderUsageError as exc:
+                    state["error"] = str(exc)
+                    render_result(None, state["error"])
+                except Exception:
+                    state["error"] = "API利用状況の取得で予期しないエラーが発生しました。"
+                    render_result(None, state["error"])
+                finally:
+                    state["busy"] = False
+                    refresh_button.enable()
+
+            refresh_button.on_click(refresh)
+
+        ui.label(
+            "この画面は現在値の確認用です。残高・利用上限は推測せず、"
+            "OpenAI APIから取得できたUsage/Costsだけを表示します。"
+        ).classes("text-xs text-grey-7")
 
 
 @ui.page("/features")
