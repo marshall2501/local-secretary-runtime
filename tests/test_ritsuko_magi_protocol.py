@@ -7,7 +7,9 @@ import unittest
 
 from pkb_proto.magi_client import call_member, choose_model
 from pkb_proto.magi_dialogue import (
-    CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation, validate_turn,
+    CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation,
+    continue_with_user_clarification, panel_member_specs,
+    select_weighted_consensus, validate_turn,
 )
 
 from pkb_proto.ritsuko_magi_protocol import (
@@ -321,7 +323,7 @@ class GuidedDialogueTests(unittest.TestCase):
         session=start_dialogue("最新情報は？",model="gemma3:12b",caller=caller)
         self.assertEqual(session["prompt_version"],PROMPT_VERSION)
         self.assertEqual(session["last_question_purpose"],"identify_missing_information")
-        self.assertEqual(seen[1]["task_context"]["previous_turns"][0]["question_purpose"],"classify")
+        self.assertNotIn("previous_turns",seen[1]["task_context"])
     def test_knowledge_category_uses_minimal_candidate_purpose(self):
         candidate=self.detail(state="KNOWLEDGE_CANDIDATE")
         caller,seen=self.scripted(self.classification("KNOWLEDGE"),candidate)
@@ -339,13 +341,13 @@ class GuidedDialogueTests(unittest.TestCase):
         candidate["information_requests"]=[{"source":"pkb","what":"追加属性","reason":"補足"}]
         self.assertIn("information_requests:unexpected_for_knowledge_candidate",validate_turn("analyze",candidate))
 
-    def test_v3_prompt_has_freshness_and_user_last_resort_rules(self):
+    def test_v4_prompt_has_freshness_and_user_last_resort_rules(self):
         caller,seen=self.scripted(self.classification(),self.detail(source="web",what="公式の最新公開情報"))
         start_dialogue("最新ドライバーは？",model="gemma3:12b",caller=caller)
         prompt=seen[1]["question_from_ritsuko"]
         self.assertIn("fresh external source",prompt)
         self.assertIn("source=userは通常のread sourceではありません",prompt)
-        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v3")
+        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v4")
 
     def test_user_source_is_reviewed_once_before_waiting_on_user(self):
         first=self.detail(source="user",what="症状の詳細")
@@ -405,6 +407,88 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertIn("利用可能であることは、その内容を取得済みという意味ではありません",SYSTEM)
         self.assertIn("Observation",SYSTEM)
         self.assertIn("今回指定された判断だけ",SYSTEM)
+
+    def test_panel_cloud_members_are_opt_in_and_have_configurable_weights(self):
+        with patch.dict("os.environ", {
+            "LSA_MAGI_CLOUD_ENABLED":"0",
+            "LSA_MAGI_MELCHIOR_WEIGHT":"1.5",
+        }, clear=False):
+            specs=panel_member_specs("gemma3:12b")
+        self.assertTrue(specs[0]["enabled"])
+        self.assertEqual(specs[0]["weight"],1.5)
+        self.assertFalse(specs[1]["enabled"])
+        self.assertFalse(specs[2]["enabled"])
+
+    def test_weighted_consensus_uses_two_of_three_matching_decisions(self):
+        a=self.classification("INFORMATION")
+        b=self.classification("INFORMATION")
+        c=self.classification("INVESTIGATION")
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":a},
+            {"name":"CASPER","weight":1.0,"status":"ok","response":b},
+            {"name":"BALTHASAR","weight":1.0,"status":"ok","response":c},
+        ])
+        self.assertEqual(result["status"],"ok")
+        self.assertEqual(result["response"]["category"],"INFORMATION")
+        self.assertEqual(result["decision_signature"],
+                         "category=INFORMATION;multiple_requests=false")
+
+    def test_weight_can_override_member_count(self):
+        info=self.classification("INFORMATION")
+        problem=self.classification("PROBLEM")
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":info},
+            {"name":"CASPER","weight":2.5,"status":"ok","response":problem},
+            {"name":"BALTHASAR","weight":1.0,"status":"ok","response":info},
+        ])
+        self.assertEqual(result["status"],"ok")
+        self.assertEqual(result["response"]["category"],"PROBLEM")
+        self.assertEqual(result["selected_member"],"CASPER")
+
+    def test_three_way_weighted_tie_requires_clarification(self):
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok",
+             "response":self.classification("INFORMATION")},
+            {"name":"CASPER","weight":1.0,"status":"ok",
+             "response":self.classification("PROBLEM")},
+            {"name":"BALTHASAR","weight":1.0,"status":"ok",
+             "response":self.classification("INVESTIGATION")},
+        ])
+        self.assertEqual(result["status"],"disagreement")
+        self.assertIsNone(result["response"])
+
+    def test_panel_disagreement_can_resume_with_user_context(self):
+        def disagree(envelope, *, model, timeout):
+            return {
+                "status":"disagreement","response":None,
+                "errors":["weighted_vote_tie"],"diagnostic":{},
+                "member_results":[],
+                "consensus":{"status":"disagreement","reason":"weighted_vote_tie"},
+            }
+        session=start_dialogue("それ確認して",model="gemma3:12b",caller=disagree)
+        self.assertEqual(session["status"],"waiting_user")
+        self.assertEqual(session["next_step"],"magi_disagreement_requires_clarification")
+        self.assertIn("具体的",session["user_question"])
+
+        caller,seen=self.scripted(
+            self.classification("INFORMATION"),
+            self.detail(source="pkb",what="対象の現在値"),
+        )
+        resumed=continue_with_user_clarification(
+            session,"メインPCのGPUについて確認したい",caller=caller,
+        )
+        self.assertEqual(resumed["classification"]["category"],"INFORMATION")
+        self.assertIn("conversation_context",seen[0])
+        self.assertEqual(seen[0]["conversation_context"][-1]["text"],
+                         "メインPCのGPUについて確認したい")
+        self.assertEqual(resumed["status"],"waiting_information")
+
+    def test_analyze_request_does_not_send_full_previous_turn_history(self):
+        caller,seen=self.scripted(
+            self.classification(), self.detail(source="pkb"),
+        )
+        start_dialogue("私の構成は？",model="gemma3:12b",caller=caller)
+        self.assertNotIn("previous_turns",seen[1]["task_context"])
 
     def test_invalid_schema_stops_without_a_followup(self):
         caller,seen=self.scripted({"category":"INFORMATION"})
