@@ -1107,6 +1107,75 @@ async def continue_with_verified_observation_async(
     )
 
 
+async def continue_with_proposal_review_async(
+    session: dict,
+    observation: dict,
+    *,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    caller=call_guided_panel_async,
+    stop_requested=None,
+    on_turn_start=None,
+) -> dict:
+    """Re-evaluate a user-approved proposal review before RITSUKO finalizes."""
+    updated = deepcopy(session)
+    if updated.get("status") != "proposal_ready":
+        raise ValueError("not_waiting_for_proposal_review")
+    if not isinstance(observation, dict):
+        raise ValueError("invalid_review_observation")
+    if observation.get("source") not in {"proposal_review", "memory_intake"}:
+        raise ValueError("invalid_review_observation_source")
+    if observation.get("verified") is not True:
+        raise ValueError("verified_review_observation_required")
+    text = str(observation.get("text") or "").strip()
+    if not text:
+        raise ValueError("empty_review_observation")
+
+    safe_observation = deepcopy(observation)
+    safe_observation["text"] = text[:4000]
+    safe_observation["responds_to"] = [
+        str(value) for value in (safe_observation.get("responds_to") or [])
+    ][:20]
+    memory_summary = safe_observation.get("memory_intake")
+    if isinstance(memory_summary, dict):
+        memory_summary["receipts"] = [
+            deepcopy(item)
+            for item in (memory_summary.get("receipts") or [])
+            if isinstance(item, dict)
+        ][:100]
+
+    _extend_turn_limit_for_user_resume(updated)
+    updated["observations"].append(safe_observation)
+    updated["status"] = "running"
+    updated["next_step"] = "evaluate_review_result"
+
+    local_specs, context_policy = _private_pkb_local_scope(updated)
+    if local_specs == []:
+        return updated
+
+    prompt = _compose_question(updated, "evaluate_review_result")
+    response = await _send_async(
+        updated,
+        "analyze",
+        "evaluate_review_result",
+        prompt,
+        timeout=timeout,
+        caller=caller,
+        stop_requested=stop_requested,
+        on_turn_start=on_turn_start,
+        member_specs_override=local_specs,
+        context_policy=context_policy,
+    )
+    if response is None:
+        return updated
+
+    updated["post_review_evaluation"] = deepcopy(response)
+    updated.update(
+        status="review_evaluated",
+        next_step="ritsuko_finalize_review",
+    )
+    return updated
+
+
 async def continue_with_user_clarification_async(
     session: dict,
     user_text: str,
