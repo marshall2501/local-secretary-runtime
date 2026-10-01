@@ -273,6 +273,26 @@ class MagiTaskStoreTests(unittest.TestCase):
                 "reason": "本人回答で元質問には回答可能",
                 "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
             },
+            "observations": [
+                *session["observations"],
+                {
+                    "source": "memory_intake",
+                    "verified": True,
+                    "confidentiality": "private",
+                    "review_decision": "remember",
+                    "answer": "メインPCのGPUはRadeon RX 9070 XTです。",
+                    "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+                    "user_text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                    "text": "Memory Intake committed / pending",
+                    "memory_intake": {
+                        "input_id": "input-1",
+                        "status": "committed",
+                        "source_id": str(SOURCE_ID),
+                        "receipts": [{"decision": "pending"}],
+                    },
+                },
+            ],
             "turns": [
                 *session["turns"],
                 {
@@ -301,6 +321,59 @@ class MagiTaskStoreTests(unittest.TestCase):
             saved["final_core_decision"]["reason"],
             "proposal_review_evaluated_memory",
         )
+
+    def test_finalize_review_rejects_nonfinalizable_magi_state(self):
+        checkpoint = self.review_checkpoint()
+        checkpoint["proposal_review"] = {
+            "decision": "answer_only",
+            "status": "processing",
+            "answer": "メインPCのGPUはRadeon RX 9070 XTです。",
+            "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            "user_text": "Radeon RX 9070 XT",
+            "responds_to": ["REQ-1"],
+            "memory_intake": None,
+        }
+        session = self.review_session()
+        session.update({
+            "status": "review_evaluated",
+            "next_step": "ritsuko_finalize_review",
+            "post_review_evaluation": {
+                "state": "NEED_INFORMATION",
+                "reason": "unexpected extra lookup",
+            },
+            "observations": [
+                *session["observations"],
+                {
+                    "source": "proposal_review",
+                    "verified": True,
+                    "confidentiality": "private",
+                    "review_decision": "answer_only",
+                    "answer": "メインPCのGPUはRadeon RX 9070 XTです。",
+                    "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+                    "user_text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                    "text": "answer only",
+                    "memory_intake": None,
+                },
+            ],
+            "turns": [
+                *session["turns"],
+                {
+                    "question_purpose": "evaluate_review_result",
+                    "status": "ok",
+                },
+            ],
+        })
+        db = _DB(fetches=[("running", checkpoint)])
+        with self.assertRaisesRegex(
+            ValueError,
+            "proposal_review_evaluation_not_finalizable",
+        ):
+            finalize_proposal_review(
+                db,
+                task_id=TASK_ID,
+                session=session,
+            )
 
     def test_abort_review_returns_task_to_retryable_awaiting_review(self):
         checkpoint = self.review_checkpoint()
