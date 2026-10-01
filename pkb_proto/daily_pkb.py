@@ -3762,13 +3762,13 @@ def core_page(task_id: str = ""):
                 ).classes("text-xs text-red-700")
 
             ui.label("MAGI member configuration").classes("font-medium text-teal-900")
-            with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
+            with ui.element("div").classes("w-full grid grid-cols-3 gap-3 items-stretch"):
                 for member in MEMBER_NAMES:
                     spec = spec_by_member.get(member) or {
                         "profile_id": None, "enabled": False,
                         "weight": 1.0, "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
                     }
-                    with ui.card().classes("min-w-64 grow border border-teal-200 bg-white"):
+                    with ui.card().classes("w-full min-w-0 border border-teal-200 bg-white"):
                         ui.label(member).classes("font-bold")
                         enabled_control = ui.switch(
                             "有効", value=bool(spec.get("enabled"))
