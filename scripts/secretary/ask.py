@@ -20,6 +20,7 @@ import urllib.request
 API_URL = "http://127.0.0.1:8010"
 OLLAMA_URL = "http://127.0.0.1:11434"
 MODEL = os.getenv("LSA_OLLAMA_MODEL", "qwen3:8b")
+OLLAMA_CONTEXT_TOKENS = int(os.getenv("LSA_OLLAMA_CONTEXT_TOKENS", "65536"))
 MAX_CANDIDATES = 100
 MAX_CONTEXT = 20
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +48,7 @@ def ollama(messages: list[dict], *, json_output: bool = False, model: str | None
         "messages": messages,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0, "num_ctx": 4096},
+        "options": {"temperature": 0, "num_ctx": OLLAMA_CONTEXT_TOKENS},
     }
     if json_output:
         payload["format"] = "json"
