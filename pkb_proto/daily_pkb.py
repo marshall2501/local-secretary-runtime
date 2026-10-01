@@ -53,6 +53,7 @@ from .magi_observation_loop import (
 )
 from .magi_task_store import (
     abort_proposal_review as abort_magi_proposal_review,
+    abort_user_resume as abort_magi_user_resume,
     claim_proposal_review as claim_magi_proposal_review,
     claim_user_resume as claim_magi_user_resume,
     create_task as create_magi_core_task,
@@ -1589,12 +1590,26 @@ def _create_magi_core_task_record(
 def _claim_magi_user_resume_record(
     task_id: UUID,
     reply_length: int,
+    reply_fingerprint: str,
 ) -> tuple[dict, str | None]:
     with connection() as db:
         return claim_magi_user_resume(
             db,
             task_id=task_id,
             reply_length=reply_length,
+            reply_fingerprint=reply_fingerprint,
+        )
+
+
+def _abort_magi_user_resume_record(
+    task_id: UUID,
+    error_type: str,
+) -> None:
+    with connection() as db:
+        abort_magi_user_resume(
+            db,
+            task_id=task_id,
+            error=error_type,
         )
 
 
@@ -3223,6 +3238,7 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "magi_session": checkpoint.get("magi_session"),
             "proposal_review": checkpoint.get("proposal_review"),
             "proposal_memory_intake": checkpoint.get("proposal_memory_intake"),
+            "user_resume": checkpoint.get("user_resume"),
         },
         "actions": [
             {
@@ -4362,6 +4378,7 @@ def core_page(task_id: str = ""):
                                 timeout=guided_timeout_seconds(session),
                                 claim_user_resume_record=_claim_magi_user_resume_record,
                                 persist_session_record=_persist_magi_core_session_record,
+                                abort_user_resume_record=_abort_magi_user_resume_record,
                                 fail_task_record=_fail_magi_core_task_record,
                                 stop_requested=stop_event.is_set,
                                 on_turn_start=note_guided_turn,
