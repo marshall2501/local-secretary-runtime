@@ -49,9 +49,20 @@ from .magi_async import (
     continue_with_user_clarification_async,
 )
 from .magi_settings import (
-    DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, bootstrap_member_assignments,
-    fallback_member_specs, list_llm_profiles, load_member_specs, provider_defaults,
-    save_member_assignments, sync_ollama_profiles, upsert_llm_profile,
+    DEFAULT_RETRY_HTTP_CODES,
+    DEFAULT_RETRY_WITHIN_TURN,
+    DEFAULT_TIMEOUT_SECONDS,
+    MEMBER_NAMES,
+    PROVIDERS,
+    bootstrap_member_assignments,
+    fallback_member_specs,
+    list_llm_profiles,
+    load_member_specs,
+    normalize_retry_http_codes,
+    provider_defaults,
+    save_member_assignments,
+    sync_ollama_profiles,
+    upsert_llm_profile,
 )
 from .ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
@@ -586,6 +597,7 @@ def _register_magi_profile(
     credential_env: str | None = None,
     context_window_tokens: int | None = None,
     ollama_num_predict: int | None = None,
+    retry_http_codes: object | None = None,
     profile_id: str | None = None,
 ) -> dict:
     with connection() as db:
@@ -598,6 +610,7 @@ def _register_magi_profile(
             credential_env=credential_env,
             context_window_tokens=context_window_tokens,
             ollama_num_predict=ollama_num_predict,
+            retry_http_codes=retry_http_codes,
             enabled=True,
             profile_id=profile_id,
         )
@@ -3810,11 +3823,21 @@ def core_page(task_id: str = ""):
                             value=int(spec.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
                             label="Timeout（秒）",
                         ).classes("w-full")
+                        retry_control = ui.switch(
+                            "Turn内リトライ",
+                            value=bool(
+                                spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)
+                            ),
+                        )
+                        ui.label(
+                            "Retry時間上限はTimeoutの50%・最大3回"
+                        ).classes("text-xs text-grey-7")
                         guided_member_controls[member] = {
                             "enabled": enabled_control,
                             "profile": profile_control,
                             "weight": weight_control,
                             "timeout": timeout_control,
+                            "retry": retry_control,
                         }
 
             def collect_guided_assignments() -> list[dict]:
@@ -3826,6 +3849,9 @@ def core_page(task_id: str = ""):
                         "weight": float(guided_member_controls[member]["weight"].value or 1.0),
                         "timeout_seconds": int(
                             guided_member_controls[member]["timeout"].value or DEFAULT_TIMEOUT_SECONDS
+                        ),
+                        "retry_within_turn": bool(
+                            guided_member_controls[member]["retry"].value
                         ),
                     }
                     for member in MEMBER_NAMES
@@ -5324,6 +5350,11 @@ def settings_page():
                     value=DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
                     label="Generation Budget（Ollamaのみ）",
                 ).classes("min-w-56")
+                profile_retry_codes = ui.input(
+                    "Retry HTTP codes",
+                    value=",".join(str(code) for code in DEFAULT_RETRY_HTTP_CODES),
+                    placeholder="429,500,502,503,504",
+                ).classes("min-w-64 grow")
 
             def fill_provider_defaults():
                 try:
@@ -5345,10 +5376,14 @@ def settings_page():
                     if provider == "ollama"
                     else None
                 )
+                profile_retry_codes.value = ",".join(
+                    str(code) for code in DEFAULT_RETRY_HTTP_CODES
+                )
                 profile_endpoint.update()
                 profile_credential.update()
                 profile_context.update()
                 profile_generation.update()
+                profile_retry_codes.update()
 
             def apply_selected_profile(_event=None):
                 profile_id = str(profile_edit_target.value or "").strip()
@@ -5362,10 +5397,13 @@ def settings_page():
                 profile_credential.value = item.get("credential_env") or ""
                 profile_context.value = item.get("context_window_tokens")
                 profile_generation.value = item.get("ollama_num_predict")
+                profile_retry_codes.value = ",".join(
+                    str(code) for code in item.get("retry_http_codes") or []
+                )
                 for control in (
                     profile_provider, profile_model, profile_display,
                     profile_endpoint, profile_credential,
-                    profile_context, profile_generation,
+                    profile_context, profile_generation, profile_retry_codes,
                 ):
                     control.update()
 
@@ -5401,6 +5439,9 @@ def settings_page():
                             if str(profile_provider.value or "") == "ollama"
                             and profile_generation.value is not None
                             else None
+                        ),
+                        retry_http_codes=normalize_retry_http_codes(
+                            profile_retry_codes.value
                         ),
                         profile_id=(
                             str(profile_edit_target.value)
