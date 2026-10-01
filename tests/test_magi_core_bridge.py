@@ -4,6 +4,7 @@ import unittest
 
 from pkb_proto.magi_core_bridge import (
     pending_pkb_request,
+    reviewable_user_knowledge_proposal,
     task_projection,
     verified_pkb_observation,
 )
@@ -87,6 +88,52 @@ class MagiCoreBridgeTests(unittest.TestCase):
             projection["reason"],
             "answer_candidate_not_grounded_by_verified_pkb_observation",
         )
+
+    def test_user_grounded_knowledge_proposal_is_reviewable(self):
+        session = {
+            "status": "proposal_ready",
+            "tool_read_executed": True,
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True, "text": "model unavailable"},
+                {
+                    "source": "user_clarification",
+                    "verified": False,
+                    "text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                },
+            ],
+        }
+        review = reviewable_user_knowledge_proposal(session)
+        self.assertIsNotNone(review)
+        self.assertEqual(review["user_text"], "Radeon RX 9070 XT")
+        self.assertEqual(review["responds_to"], ["REQ-1"])
+
+    def test_model_only_or_paraphrased_proposal_is_not_reviewable(self):
+        base = {
+            "status": "proposal_ready",
+            "tool_read_executed": True,
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "answer_candidate": "メインPCのGPUは別モデルです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: 別モデル",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True, "text": "model unavailable"},
+                {
+                    "source": "user_clarification",
+                    "text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                },
+            ],
+        }
+        self.assertIsNone(reviewable_user_knowledge_proposal(base))
+        base["observations"] = base["observations"][:1]
+        self.assertIsNone(reviewable_user_knowledge_proposal(base))
 
     def test_user_stop_projects_to_paused_not_failed(self):
         projection = task_projection({
