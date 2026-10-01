@@ -10,7 +10,9 @@ import httpx
 from pkb_proto.async_transport import (
     AsyncHTTPStatusError,
     AsyncRequestTimeout,
+    AsyncRetryExhausted,
     request_json,
+    request_json_with_retry,
 )
 from pkb_proto.magi_async import (
     _call_ollama_guided_async,
@@ -70,6 +72,131 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "Unsupported field: minLength",
         )
 
+
+    async def test_retryable_503_retries_within_same_logical_request(self):
+        class _SequenceTransport(httpx.AsyncBaseTransport):
+            def __init__(self):
+                self.calls = 0
+
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                self.calls += 1
+                if self.calls < 3:
+                    return httpx.Response(
+                        503,
+                        json={"error": {"status": "UNAVAILABLE", "message": "busy"}},
+                        request=request,
+                    )
+                return httpx.Response(200, json={"ok": True}, request=request)
+
+        transport = _SequenceTransport()
+        async with httpx.AsyncClient(transport=transport, timeout=None) as client:
+            with patch(
+                "pkb_proto.async_transport.random.uniform",
+                return_value=0.0,
+            ), patch(
+                "pkb_proto.async_transport.anyio.sleep",
+                new=AsyncMock(return_value=None),
+            ):
+                result, diagnostic = await request_json_with_retry(
+                    "POST",
+                    "https://example.invalid/retry",
+                    timeout=10,
+                    retry_enabled=True,
+                    retry_http_codes=[503],
+                    client=client,
+                )
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(transport.calls, 3)
+        self.assertEqual(diagnostic["attempt_count"], 3)
+        self.assertEqual(diagnostic["retry_count"], 2)
+        self.assertEqual(diagnostic["retry_http_codes_seen"], [503, 503])
+        self.assertEqual(diagnostic["retry_budget_seconds"], 5.0)
+        self.assertEqual(diagnostic["final_status"], "ok")
+
+    async def test_retry_can_be_disabled_per_member(self):
+        class _ErrorTransport(httpx.AsyncBaseTransport):
+            def __init__(self):
+                self.calls = 0
+
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                self.calls += 1
+                return httpx.Response(
+                    503,
+                    json={"error": {"status": "UNAVAILABLE", "message": "busy"}},
+                    request=request,
+                )
+
+        transport = _ErrorTransport()
+        async with httpx.AsyncClient(transport=transport, timeout=None) as client:
+            with self.assertRaises(AsyncRetryExhausted) as caught:
+                await request_json_with_retry(
+                    "POST",
+                    "https://example.invalid/no-retry",
+                    timeout=10,
+                    retry_enabled=False,
+                    retry_http_codes=[503],
+                    client=client,
+                )
+        self.assertEqual(transport.calls, 1)
+        self.assertEqual(caught.exception.diagnostic["attempt_count"], 1)
+        self.assertEqual(caught.exception.diagnostic["retry_count"], 0)
+        self.assertEqual(caught.exception.diagnostic["final_status"], "http_503")
+
+    async def test_nonconfigured_http_code_is_not_retried(self):
+        class _ErrorTransport(httpx.AsyncBaseTransport):
+            def __init__(self):
+                self.calls = 0
+
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                self.calls += 1
+                return httpx.Response(
+                    400,
+                    json={"error": {"status": "INVALID_ARGUMENT", "message": "bad request"}},
+                    request=request,
+                )
+
+        transport = _ErrorTransport()
+        async with httpx.AsyncClient(transport=transport, timeout=None) as client:
+            with self.assertRaises(AsyncRetryExhausted) as caught:
+                await request_json_with_retry(
+                    "POST",
+                    "https://example.invalid/non-retryable",
+                    timeout=10,
+                    retry_enabled=True,
+                    retry_http_codes=[429, 500, 502, 503, 504],
+                    client=client,
+                )
+        self.assertEqual(transport.calls, 1)
+        self.assertEqual(caught.exception.diagnostic["retry_http_codes_seen"], [400])
+        self.assertEqual(caught.exception.diagnostic["final_status"], "http_400")
+
+    async def test_parent_cancel_propagates_during_retry_wait(self):
+        class _ErrorTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    503,
+                    json={"error": {"status": "UNAVAILABLE", "message": "busy"}},
+                    request=request,
+                )
+
+        async with httpx.AsyncClient(
+            transport=_ErrorTransport(), timeout=None
+        ) as client:
+            task = asyncio.create_task(
+                request_json_with_retry(
+                    "GET",
+                    "https://example.invalid/retry-cancel",
+                    timeout=10,
+                    retry_enabled=True,
+                    retry_http_codes=[503],
+                    client=client,
+                )
+            )
+            await asyncio.sleep(0.02)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
     async def test_parent_cancel_propagates_without_waiting_for_deadline(self):
         async with httpx.AsyncClient(
             transport=_SlowTransport(), timeout=None
@@ -100,8 +227,17 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             },
             "done_reason": "stop",
         }
-        mock = AsyncMock(return_value=response)
-        with patch("pkb_proto.magi_async.request_json", mock):
+        retry_diagnostic = {
+            "retry_enabled": True,
+            "attempt_count": 1,
+            "retry_count": 0,
+            "retry_http_codes_seen": [],
+            "retry_wait_seconds": 0.0,
+            "retry_budget_seconds": 0.5,
+            "final_status": "ok",
+        }
+        mock = AsyncMock(return_value=(response, retry_diagnostic))
+        with patch("pkb_proto.magi_async.request_json_with_retry", mock):
             result = await _call_ollama_guided_async(
                 {"stage": "classify"},
                 model="qwen3.5:9b",
@@ -132,7 +268,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "os.environ",
             {"LSA_MAGI_OLLAMA_NUM_PREDICT": "2048"},
             clear=False,
-        ), patch("pkb_proto.magi_async.request_json", mock):
+        ), patch("pkb_proto.magi_async.request_json_with_retry", mock):
             result = await _call_ollama_guided_async(
                 {"stage": "classify"},
                 model="qwen3.5:9b",
