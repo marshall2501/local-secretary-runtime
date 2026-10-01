@@ -59,6 +59,67 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
         )
 
 
+def claim_user_resume(
+    db,
+    *,
+    task_id: UUID,
+    reply_length: int,
+) -> tuple[dict, str | None]:
+    """Atomically claim one waiting MAGI Task before a user-resume LLM turn."""
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, checkpoint
+               FROM secretary.tasks
+               WHERE id=%s
+               FOR UPDATE""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("unknown_task")
+        status, checkpoint = row[0], row[1] or {}
+        if status != "waiting_external":
+            raise ValueError("task_not_waiting_external")
+        if checkpoint.get("core_slice") != CORE_SLICE:
+            raise ValueError("not_magi_observation_task")
+        session = checkpoint.get("magi_session")
+        if not isinstance(session, dict) or session.get("status") != "waiting_user":
+            raise ValueError("task_not_waiting_for_user")
+
+        pending_ids = [
+            str(item.get("request_id"))
+            for item in (session.get("pending_requests") or [])
+            if isinstance(item, dict) and item.get("request_id")
+        ][:20]
+        next_checkpoint = {
+            **checkpoint,
+            "phase": "orient",
+            "question": None,
+            "reason": "user_reply_received",
+        }
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='running', checkpoint=%s
+               WHERE id=%s""",
+            (Jsonb(next_checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.user_reply_received',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({
+                    "reply_length": max(0, int(reply_length)),
+                    "pending_request_ids": pending_ids,
+                }),
+            ),
+        )
+        return deepcopy(session), checkpoint.get("selected_capability")
+
+
 def persist_session(
     db,
     *,
