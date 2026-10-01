@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
-from pkb_proto.magi_task_store import create_task, persist_session, record_pkb_read
+from pkb_proto.magi_task_store import (
+    claim_user_resume,
+    create_task,
+    persist_session,
+    record_pkb_read,
+)
 
 
 TASK_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -65,6 +70,37 @@ class MagiTaskStoreTests(unittest.TestCase):
         self.assertTrue(scope["pkb_read"])
         self.assertFalse(scope["web_research"])
         self.assertFalse(scope["cloud_private_pkb_context"])
+
+    def test_claim_user_resume_requires_waiting_magi_task_and_preserves_snapshot(self):
+        saved_session = {
+            "task_id": str(TASK_ID),
+            "status": "waiting_user",
+            "pending_requests": [{"request_id": "REQ-1", "source": "user"}],
+        }
+        db = _DB(fetches=[(
+            "waiting_external",
+            {
+                "core_slice": "ritsuko_magi_observation_v1",
+                "selected_capability": "pkb_search",
+                "magi_session": saved_session,
+            },
+        )])
+        session, capability = claim_user_resume(
+            db,
+            task_id=TASK_ID,
+            reply_length=18,
+        )
+        self.assertEqual(session, saved_session)
+        self.assertEqual(capability, "pkb_search")
+        sql = "\n".join(call[0] for call in db.cur.calls)
+        self.assertIn("SET status='running'", sql)
+        self.assertIn("core.magi.user_reply_received", sql)
+        audit = next(
+            call for call in db.cur.calls
+            if "core.magi.user_reply_received" in call[0]
+        )
+        self.assertEqual(audit[1][-1].obj["reply_length"], 18)
+        self.assertEqual(audit[1][-1].obj["pending_request_ids"], ["REQ-1"])
 
     def test_persist_verified_candidate_completes_task(self):
         db = _DB(fetches=[({"core_slice": "ritsuko_magi_observation_v1"},)])
