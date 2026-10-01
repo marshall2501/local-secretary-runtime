@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from .ollama_runtime import configured_context_tokens
+
 from .episode_intake import load_fixture
 from .extraction_service import extraction_messages
 
@@ -27,7 +29,7 @@ def main() -> None:
         "stream": False,
         "format": "json",
         "messages": extraction_messages(episode),
-        "options": {"temperature": 0, "num_predict": 1100},
+        "options": {"temperature": 0, "num_predict": 1100, "num_ctx": configured_context_tokens()},
     }
     req = Request(
         "http://127.0.0.1:11434/api/chat",
