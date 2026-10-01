@@ -10,6 +10,7 @@ from pkb_proto.magi_dialogue import (
     CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation,
     continue_with_user_clarification, panel_member_specs,
     select_weighted_consensus, validate_turn, _call_openai_guided,
+    _call_gemini_guided, call_guided_panel,
 )
 
 from pkb_proto.ritsuko_magi_protocol import (
@@ -447,6 +448,70 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(payload["text"]["format"]["type"],"json_schema")
         self.assertTrue(payload["text"]["format"]["strict"])
         self.assertNotIn("test-key",json.dumps(result))
+
+    def test_gemini_adapter_uses_structured_json_and_hides_key(self):
+        output=self.classification("INFORMATION")
+        outer={
+            "candidates":[{
+                "content":{"parts":[{"text":json.dumps(output)}]},
+            }],
+            "usageMetadata":{
+                "promptTokenCount":10,
+                "candidatesTokenCount":5,
+                "totalTokenCount":15,
+            },
+        }
+        with patch.dict("os.environ", {"GEMINI_API_KEY":"gemini-test-key"}, clear=False), patch(
+            "pkb_proto.magi_dialogue.urlopen",
+            return_value=BytesIO(json.dumps(outer).encode("utf-8")),
+        ) as mocked:
+            result=_call_gemini_guided(
+                {"stage":"classify","user_input":{"raw":"test"}},
+                model="gemini-test",timeout=5,
+            )
+        self.assertEqual(result["status"],"ok")
+        request=mocked.call_args.args[0]
+        payload=json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload["generationConfig"]["responseMimeType"],"application/json")
+        self.assertIn("responseSchema",payload["generationConfig"])
+        self.assertNotIn("gemini-test-key",json.dumps(result))
+
+    def test_panel_accepts_arbitrary_provider_assignment_per_member(self):
+        specs=[
+            {"name":"MELCHIOR","provider":"openai","model":"cloud-a",
+             "endpoint":"https://example.invalid/v1","credential_env":"KEY_A",
+             "weight":1.0,"timeout_seconds":30,"enabled":True},
+            {"name":"CASPER","provider":"ollama","model":"local-b",
+             "endpoint":"http://127.0.0.1:11434","credential_env":None,
+             "weight":1.0,"timeout_seconds":30,"enabled":True},
+            {"name":"BALTHASAR","provider":"gemini","model":"cloud-c",
+             "endpoint":"https://example.invalid/v1beta","credential_env":"KEY_C",
+             "weight":1.0,"timeout_seconds":30,"enabled":True},
+        ]
+        responses={
+            "MELCHIOR":self.classification("INFORMATION"),
+            "CASPER":self.classification("INFORMATION"),
+            "BALTHASAR":self.classification("PROBLEM"),
+        }
+        def fake_member(spec,envelope,*,timeout):
+            return {
+                "name":spec["name"],"provider":spec["provider"],"model":spec["model"],
+                "weight":spec["weight"],"timeout_seconds":spec["timeout_seconds"],
+                "status":"ok","response":responses[spec["name"]],
+                "errors":[],"diagnostic":{},
+            }
+        with patch("pkb_proto.magi_dialogue._call_panel_member",side_effect=fake_member):
+            result=call_guided_panel(
+                {"stage":"classify","magi_member":"MAGI_PANEL"},
+                member_specs=specs,timeout=30,
+            )
+        self.assertEqual(result["status"],"ok")
+        self.assertEqual(result["response"]["category"],"INFORMATION")
+        assignments=result["diagnostic"]["assignments"]
+        self.assertEqual(
+            [(x["name"],x["provider"]) for x in assignments],
+            [("MELCHIOR","openai"),("CASPER","ollama"),("BALTHASAR","gemini")],
+        )
 
     def test_weighted_consensus_uses_two_of_three_matching_decisions(self):
         a=self.classification("INFORMATION")
