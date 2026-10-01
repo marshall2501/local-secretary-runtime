@@ -43,7 +43,12 @@ from .magi_client import (
 )
 from .magi_dialogue import (
     start_dialogue, continue_with_observation, continue_with_user_clarification,
-    export_dialogue, panel_member_specs,
+    export_dialogue,
+)
+from .magi_settings import (
+    MEMBER_NAMES, PROVIDERS, bootstrap_member_assignments, fallback_member_specs,
+    list_llm_profiles, load_member_specs, provider_defaults,
+    save_member_assignments, sync_ollama_profiles, upsert_llm_profile,
 )
 from .daily_interpreter import interpret as interpret_daily
 from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
@@ -539,6 +544,44 @@ def connection():
         db.close()
         raise RuntimeError("Refusing a non-isolated PKB database")
     return db
+
+
+def _load_magi_configuration(
+    installed_ollama_models: list[str],
+    default_local_model: str | None,
+) -> tuple[list[dict], list[dict]]:
+    """Load DB settings, importing env defaults only when DB has no assignments."""
+    with connection() as db:
+        sync_ollama_profiles(db, installed_ollama_models)
+        bootstrap_member_assignments(
+            db, fallback_member_specs(default_local_model)
+        )
+        return list_llm_profiles(db), load_member_specs(db)
+
+
+def _save_magi_assignments(assignments: list[dict]) -> list[dict]:
+    with connection() as db:
+        return save_member_assignments(db, assignments)
+
+
+def _register_magi_profile(
+    *,
+    provider: str,
+    model: str,
+    display_name: str | None = None,
+    endpoint: str | None = None,
+    credential_env: str | None = None,
+) -> dict:
+    with connection() as db:
+        return upsert_llm_profile(
+            db,
+            provider=provider,
+            model=model,
+            display_name=display_name,
+            endpoint=endpoint,
+            credential_env=credential_env,
+            enabled=True,
+        )
 
 
 def _entities(db) -> list[dict]:
@@ -3675,32 +3718,123 @@ def core_page(task_id: str = ""):
                 "次の質問目的を選び、問いを組み立て直します。"
             ).classes("text-sm")
             ui.label(
-                "隔離試験：MELCHIOR(local)と、環境設定で許可したCASPER/BALTHASAR(cloud)を"
-                "同じ問いへ同時送信し、重み付き投票で候補を統合します。"
+                "隔離試験：MELCHIOR / CASPER / BALTHASARはLLMの3つの席です。"
+                "各席にはlocal / cloudを問わず登録済みの任意LLMを割り当てられます。"
+                "有効な席へ同じ問いを同時送信し、重み付き投票で候補を統合します。"
                 "PKB/Webの実読取、Task DB更新、外部操作は行いません。"
             ).classes("text-xs text-orange-800")
             guided_input = ui.textarea(
                 label="ユーザー原文（分類から開始）",
                 value="メインPCのGPUの種類は？",
             ).classes("w-full")
-            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
-                guided_model = ui.select(
-                    options=installed_magi_models, value=default_magi_model,
-                    label="MELCHIOR / Ollama model",
-                ).classes("min-w-64")
-                guided_timeout = ui.select(
-                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
-                    value=int(state.get("advisor_timeout") or 900),
-                    label="各member Timeout（秒）",
-                ).classes("min-w-36")
-            configured_specs = panel_member_specs(str(default_magi_model or ""))
-            with ui.row().classes("w-full gap-2 flex-wrap"):
-                for spec in configured_specs:
-                    state_text = "有効" if spec["enabled"] else "無効"
-                    ui.label(
-                        f"{spec['name']}: {spec['provider']} / {spec['model'] or '-'} "
-                        f"/ weight={spec['weight']} / {state_text}"
-                    ).classes("text-xs font-mono text-grey-8")
+
+            try:
+                magi_profiles, configured_specs = _load_magi_configuration(
+                    installed_magi_models, default_magi_model
+                )
+                state["magi_settings_error"] = None
+            except Exception as exc:
+                magi_profiles = []
+                configured_specs = fallback_member_specs(default_magi_model)
+                state["magi_settings_error"] = str(exc)
+
+            state["magi_member_specs"] = configured_specs
+            spec_by_member = {item["name"]: item for item in configured_specs}
+            profile_options = {
+                item["id"]: (
+                    f"{item['display_name']}  [{item['provider']} / {item['model']}]"
+                )
+                for item in magi_profiles
+            }
+            guided_member_controls = {}
+
+            if state.get("magi_settings_error"):
+                ui.label(
+                    "DBのMAGI設定を読み込めません。bootstrap値を表示中: "
+                    + state["magi_settings_error"][:180]
+                ).classes("text-xs text-red-700")
+
+            ui.label("MAGI member configuration").classes("font-medium text-teal-900")
+            with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
+                for member in MEMBER_NAMES:
+                    spec = spec_by_member.get(member) or {
+                        "profile_id": None, "enabled": False,
+                        "weight": 1.0, "timeout_seconds": 900,
+                    }
+                    with ui.card().classes("min-w-64 grow border border-teal-200 bg-white"):
+                        ui.label(member).classes("font-bold")
+                        enabled_control = ui.switch(
+                            "有効", value=bool(spec.get("enabled"))
+                        )
+                        profile_control = ui.select(
+                            options=profile_options,
+                            value=spec.get("profile_id"),
+                            label=f"{member} / LLM profile",
+                        ).classes("w-full")
+                        weight_control = ui.number(
+                            label="Weight",
+                            value=float(spec.get("weight") or 1.0),
+                            min=0.1, max=100, step=0.1,
+                        ).classes("w-full")
+                        timeout_control = ui.select(
+                            options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                            value=int(spec.get("timeout_seconds") or 900),
+                            label="Timeout（秒）",
+                        ).classes("w-full")
+                        guided_member_controls[member] = {
+                            "enabled": enabled_control,
+                            "profile": profile_control,
+                            "weight": weight_control,
+                            "timeout": timeout_control,
+                        }
+
+            def collect_guided_assignments() -> list[dict]:
+                return [
+                    {
+                        "name": member,
+                        "profile_id": guided_member_controls[member]["profile"].value,
+                        "enabled": bool(guided_member_controls[member]["enabled"].value),
+                        "weight": float(guided_member_controls[member]["weight"].value or 1.0),
+                        "timeout_seconds": int(
+                            guided_member_controls[member]["timeout"].value or 900
+                        ),
+                    }
+                    for member in MEMBER_NAMES
+                ]
+
+            def save_guided_assignments(*, notify: bool = True) -> list[dict] | None:
+                try:
+                    saved = _save_magi_assignments(collect_guided_assignments())
+                    state["magi_member_specs"] = saved
+                    state["magi_settings_error"] = None
+                    if notify:
+                        ui.notify("MAGI LLM設定をDBへ保存しました", type="positive")
+                    return saved
+                except Exception as exc:
+                    state["magi_settings_error"] = str(exc)
+                    ui.notify(
+                        "MAGI LLM設定を保存できません: " + str(exc)[:180],
+                        type="negative",
+                    )
+                    return None
+
+            with ui.row().classes("w-full gap-2 items-center"):
+                ui.button(
+                    "LLM設定を保存",
+                    icon="save",
+                    on_click=lambda: save_guided_assignments(notify=True),
+                ).props("outline dense")
+                ui.link("LLM profileの追加・確認", "/settings").classes(
+                    "text-sm text-blue-700"
+                )
+
+            def guided_timeout_seconds(session: dict | None = None) -> float:
+                specs = (session or {}).get("member_specs") or state.get("magi_member_specs") or []
+                enabled = [
+                    int(item.get("timeout_seconds") or 900)
+                    for item in specs if item.get("enabled")
+                ]
+                return float(max(enabled) if enabled else 900)
 
             @ui.refreshable
             def guided_result_panel():
@@ -3799,7 +3933,7 @@ def core_page(task_id: str = ""):
                         try:
                             state["guided_session"] = await run.io_bound(
                                 continue_with_observation, session,
-                                observation_input.value, timeout=float(guided_timeout.value or 900),
+                                observation_input.value, timeout=guided_timeout_seconds(session),
                             )
                         except Exception as exc:
                             ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
@@ -3839,7 +3973,7 @@ def core_page(task_id: str = ""):
                             state["guided_session"] = await run.io_bound(
                                 continue_with_user_clarification, session,
                                 clarification_input.value,
-                                timeout=float(guided_timeout.value or 900),
+                                timeout=guided_timeout_seconds(session),
                             )
                         except Exception as exc:
                             ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
@@ -3856,9 +3990,11 @@ def core_page(task_id: str = ""):
             async def start_guided():
                 if state["guided_busy"]:
                     return
-                model = str(guided_model.value or "").strip()
-                if not model or not str(guided_input.value or "").strip():
-                    ui.notify("入力文とLLMモデルを指定してください", type="warning")
+                if not str(guided_input.value or "").strip():
+                    ui.notify("入力文を指定してください", type="warning")
+                    return
+                specs = save_guided_assignments(notify=False)
+                if not specs:
                     return
                 state["guided_busy"] = True
                 state["guided_session"] = None
@@ -3866,8 +4002,10 @@ def core_page(task_id: str = ""):
                 guided_result_panel.refresh()
                 try:
                     state["guided_session"] = await run.io_bound(
-                        start_dialogue, guided_input.value, model=model,
-                        timeout=float(guided_timeout.value or 900),
+                        start_dialogue,
+                        guided_input.value,
+                        member_specs=specs,
+                        timeout=guided_timeout_seconds(),
                     )
                 except Exception as exc:
                     ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
