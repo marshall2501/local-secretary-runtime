@@ -19,7 +19,13 @@ from uuid import uuid4
 
 from .magi_client import OLLAMA
 from .magi_settings import (
-    DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, fallback_member_specs,
+    DEFAULT_RETRY_HTTP_CODES,
+    DEFAULT_RETRY_WITHIN_TURN,
+    DEFAULT_TIMEOUT_SECONDS,
+    MEMBER_NAMES,
+    PROVIDERS,
+    fallback_member_specs,
+    normalize_retry_http_codes,
 )
 from .ollama_runtime import (
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
@@ -588,8 +594,16 @@ def _normalized_member_specs(
                 if provider == "ollama"
                 else None
             ),
+            "retry_http_codes": list(normalize_retry_http_codes(
+                raw.get("retry_http_codes")
+                if raw.get("retry_http_codes") is not None
+                else DEFAULT_RETRY_HTTP_CODES
+            )),
             "weight": float(raw.get("weight") or 1.0),
             "timeout_seconds": int(raw.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
+            "retry_within_turn": bool(
+                raw.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)
+            ),
             "enabled": bool(raw.get("enabled") and model),
             "settings_source": raw.get("settings_source") or "explicit",
         }
@@ -718,6 +732,8 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
         "timeout_seconds": spec.get("timeout_seconds"),
         "context_window_tokens": spec.get("context_window_tokens"),
         "ollama_num_predict": spec.get("ollama_num_predict"),
+        "retry_http_codes": list(spec.get("retry_http_codes") or []),
+        "retry_within_turn": bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
@@ -759,6 +775,8 @@ def call_guided_panel(
                     "timeout_seconds": spec.get("timeout_seconds"),
                     "context_window_tokens": spec.get("context_window_tokens"),
                     "ollama_num_predict": spec.get("ollama_num_predict"),
+                    "retry_http_codes": list(spec.get("retry_http_codes") or []),
+                    "retry_within_turn": bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
                     "status": "unavailable", "response": None,
                     "errors": [type(exc).__name__],
                     "diagnostic": {"error": type(exc).__name__},
@@ -783,6 +801,8 @@ def call_guided_panel(
                     "timeout_seconds": spec["timeout_seconds"],
                     "context_window_tokens": spec.get("context_window_tokens"),
                     "ollama_num_predict": spec.get("ollama_num_predict"),
+                    "retry_http_codes": list(spec.get("retry_http_codes") or []),
+                    "retry_within_turn": bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
                 }
                 for spec in specs
             ],
