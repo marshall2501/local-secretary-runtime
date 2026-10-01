@@ -279,7 +279,6 @@ async def _call_gemini_guided_async(
             "parts": [{"text": json.dumps(envelope, ensure_ascii=False)}],
         }],
         "generationConfig": {
-            "temperature": 0,
             "maxOutputTokens": 1600,
             "responseMimeType": "application/json",
             "responseSchema": schema,
