@@ -226,7 +226,10 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         with self.client, patch.object(
             daily, 'list_magi_models', return_value=['gemma3:12b']
         ), patch.object(daily, 'choose_magi_model', return_value='gemma3:12b'), \
-             patch.object(daily, 'run_pkb_observation_loop', side_effect=fake_loop):
+             patch.object(
+                 daily, '_save_magi_assignments',
+                 side_effect=lambda assignments: deepcopy(assignments),
+             ), patch.object(daily, 'run_pkb_observation_loop', side_effect=fake_loop):
             daily.core_page()
             old = next(e for e in self.client.elements.values()
                        if isinstance(e, ui.expansion)
