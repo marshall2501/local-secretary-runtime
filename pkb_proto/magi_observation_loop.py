@@ -147,6 +147,11 @@ async def resume_user_answer(
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
         )
+        if (
+            updated.get("status") == "stopped"
+            and updated.get("next_step") != "user_requested_stop"
+        ):
+            raise ValueError("user_resume_re_evaluation_failed")
         await anyio.to_thread.run_sync(
             persist_session_record,
             task_id,
