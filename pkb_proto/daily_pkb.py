@@ -2998,6 +2998,7 @@ def load_open_core_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "question": checkpoint.get("question"),
+            "message": checkpoint.get("message"),
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
             "advisor_shadow": checkpoint.get("advisor_shadow"),
@@ -3075,9 +3076,12 @@ def core_task_selection_result(item: dict) -> dict:
         "selected_capability": item.get("selected_capability"),
         "question": item.get("question"),
         "message": (
-            "完了済みTaskを閲覧しています。"
-            if status == "completed"
-            else "保存済みTaskを選択しました。"
+            item.get("message")
+            or (
+                "完了済みTaskを閲覧しています。"
+                if status == "completed"
+                else "保存済みTaskを選択しました。"
+            )
         ),
         "effective_request": item.get("effective_request"),
         "comparison": item.get("comparison"),
