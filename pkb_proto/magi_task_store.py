@@ -204,8 +204,12 @@ def _load_reviewable_proposal(cur, task_id: UUID) -> tuple[dict, dict]:
     if row is None:
         raise ValueError("unknown_task")
     status, checkpoint = row[0], row[1] or {}
-    if status != "waiting_external":
-        raise ValueError("task_not_waiting_external")
+    if status not in {"waiting_external", "running"}:
+        raise ValueError("task_not_reviewable")
+    if status == "running":
+        review = checkpoint.get("proposal_review")
+        if not isinstance(review, dict) or review.get("status") != "processing":
+            raise ValueError("task_not_waiting_external")
     if checkpoint.get("core_slice") != CORE_SLICE:
         raise ValueError("not_magi_observation_task")
     session = checkpoint.get("magi_session")
@@ -220,6 +224,13 @@ def _load_reviewable_proposal(cur, task_id: UUID) -> tuple[dict, dict]:
 def prepare_memory_intake(db, *, task_id: UUID) -> MemoryIntake:
     with db.transaction(), db.cursor() as cur:
         checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        active_review = checkpoint.get("proposal_review")
+        if (
+            isinstance(active_review, dict)
+            and active_review.get("status") == "processing"
+            and active_review.get("decision") != "remember"
+        ):
+            raise ValueError("proposal_review_already_processing")
         prepared = checkpoint.get("proposal_memory_intake")
         if isinstance(prepared, dict):
             return MemoryIntake(**prepared)
@@ -320,6 +331,41 @@ def claim_proposal_review(
         session = checkpoint.get("magi_session")
         if not isinstance(session, dict):
             raise ValueError("missing_magi_session")
+
+        active_review = checkpoint.get("proposal_review")
+        if (
+            isinstance(active_review, dict)
+            and active_review.get("status") == "processing"
+        ):
+            if active_review.get("decision") != decision:
+                raise ValueError("proposal_review_already_processing")
+            memory_summary = deepcopy(active_review.get("memory_intake"))
+            if decision == "remember":
+                supplied = _memory_summary_for_review(checkpoint, memory_result)
+                if supplied.get("input_id") != (memory_summary or {}).get("input_id"):
+                    raise ValueError("proposal_review_memory_mismatch")
+            observation = proposal_review_observation(
+                proposal,
+                decision=decision,
+                memory_summary=memory_summary,
+            )
+            cur.execute(
+                """INSERT INTO secretary.audit_events
+                   (actor, event_type, task_id, object_type, object_id, details)
+                   VALUES ('ritsuko_core', 'core.magi.proposal_review_resumed',
+                           %s, 'task', %s, %s)""",
+                (
+                    task_id,
+                    task_id,
+                    Jsonb({"decision": decision}),
+                ),
+            )
+            return (
+                deepcopy(session),
+                checkpoint.get("selected_capability"),
+                observation,
+                deepcopy(active_review),
+            )
 
         if decision == "answer_only":
             if isinstance(checkpoint.get("proposal_memory_intake"), dict):
