@@ -552,7 +552,11 @@ def _load_magi_configuration(
 ) -> tuple[list[dict], list[dict]]:
     """Load DB settings, importing env defaults only when DB has no assignments."""
     with connection() as db:
-        sync_ollama_profiles(db, installed_ollama_models)
+        sync_ollama_profiles(
+            db,
+            installed_ollama_models,
+            endpoint=os.environ.get("OLLAMA_HOST") or None,
+        )
         bootstrap_member_assignments(
             db, fallback_member_specs(default_local_model)
         )
