@@ -48,6 +48,28 @@ SOURCES = (
     "external_service", "pc_observation", "user",
 )
 MAX_TURNS = 4
+
+
+def _turn_limit(session: dict) -> int:
+    """Return the current bounded MAGI turn ceiling for this interaction cycle."""
+    value = session.get("turn_limit")
+    if type(value) is int and value >= MAX_TURNS:
+        return value
+    return MAX_TURNS
+
+
+def _extend_turn_limit_for_user_resume(session: dict) -> None:
+    """Open one fresh bounded turn window after new user input.
+
+    Turn history is preserved.  The safety bound applies per externally-resumed
+    interaction cycle instead of making a four-turn Task permanently unresumable.
+    """
+    session["turn_limit"] = max(
+        _turn_limit(session),
+        len(session.get("turns") or []) + MAX_TURNS,
+    )
+
+
 PROMPT_VERSION = "d19-state-driven-v4"
 QUESTION_PURPOSES = (
     "understand_or_disambiguate",
@@ -859,7 +881,7 @@ def _stop_between_turns(session: dict, stop_requested=None) -> bool:
     return True
 
 def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller, *, timeout: float, stop_requested=None, on_turn_start=None) -> dict | None:
-    if len(session["turns"]) >= MAX_TURNS:
+    if len(session["turns"]) >= _turn_limit(session):
         session.update(status="stopped", next_step="max_turns_reached")
         return None
     if _stop_between_turns(session, stop_requested):
@@ -992,7 +1014,7 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
         if (any(item.get("source") == "user" for item in requests)
                 and purpose != "review_or_repair"
                 and not session.get("user_source_reviewed")
-                and len(session["turns"]) < MAX_TURNS):
+                and len(session["turns"]) < _turn_limit(session)):
             session["user_source_reviewed"] = True
             prompt = _compose_question(
                 session, "review_or_repair",
@@ -1022,7 +1044,7 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
                 session.update(status="waiting_user", next_step="ask_user_for_information")
                 return session
             if all_pkb:
-                if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+                if purpose != "review_or_repair" and len(session["turns"]) < _turn_limit(session):
                     prompt = _compose_question(
                         session,
                         "review_or_repair",
@@ -1052,7 +1074,7 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
             signature in session["previous_request_signatures"] for signature in signatures
         )
         if repeated:
-            if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+            if purpose != "review_or_repair" and len(session["turns"]) < _turn_limit(session):
                 prompt = _compose_question(
                     session, "review_or_repair",
                     issue="Observation追加後も前回と同じ情報要求が返った。Observation不足の具体点を示すか、別の次手へ修正する",
@@ -1070,7 +1092,7 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
             {"request_id": f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}",
              **deepcopy(item)} for i, item in enumerate(requests, 1)
         ]
-        if len(session["turns"]) >= MAX_TURNS:
+        if len(session["turns"]) >= _turn_limit(session):
             session.update(status="stopped", next_step="max_turns_reached_with_pending_information")
         elif requests and all(item.get("source") == "user" for item in requests):
             session["user_question"] = "確認したいこと: " + " / ".join(
@@ -1080,7 +1102,7 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
         else:
             session.update(status="waiting_information", next_step="review_information_requests")
     elif state == "NEED_CLARIFICATION":
-        if len(session["turns"]) >= MAX_TURNS:
+        if len(session["turns"]) >= _turn_limit(session):
             session.update(status="stopped", next_step="max_turns_reached_with_user_question")
         else:
             session["user_question"] = response.get("question_for_user")
@@ -1125,7 +1147,7 @@ def start_dialogue(
         "observations": [], "pending_requests": [], "previous_request_signatures": [],
         "conversation_context": [], "user_question": None, "magi_disagreement": None,
         "user_source_reviewed": False, "last_question_purpose": None,
-        "turns": [], "legacy_router_used": False, "tool_read_executed": False,
+        "turns": [], "turn_limit": MAX_TURNS, "legacy_router_used": False, "tool_read_executed": False,
     }
     if not session["user_raw"]:
         session.update(status="stopped", next_step="invalid_input")
@@ -1154,7 +1176,7 @@ def continue_with_observation(session: dict, observation_text: str, *,
         raise ValueError("not_waiting_for_information")
     if not isinstance(observation_text, str) or not observation_text.strip():
         raise ValueError("empty_observation")
-    if len(updated["turns"]) >= MAX_TURNS:
+    if len(updated["turns"]) >= _turn_limit(updated):
         updated.update(status="stopped", next_step="max_turns_reached")
         return updated
     updated["observations"].append({
@@ -1186,6 +1208,7 @@ def continue_with_user_clarification(session: dict, user_text: str, *,
     updated["user_question"] = None
     updated["magi_disagreement"] = None
     updated["status"] = "running"
+    _extend_turn_limit_for_user_resume(updated)
 
     if updated.get("classification") is None:
         updated["next_step"] = "classify_with_context"
