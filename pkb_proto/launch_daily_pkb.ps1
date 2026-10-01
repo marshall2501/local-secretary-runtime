@@ -41,9 +41,9 @@ if ($info.Count -ne 1 -or $info[0].State.Health.Status -ne 'healthy' -or
     $bindings[0].HostPort -ne "$port") {
     throw 'PostgreSQL health or localhost binding is not the expected runtime configuration.'
 }
-$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='018_pkb_proto_core_audit_read.sql';"
+$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='020_magi_llm_settings.sql';"
 if ($LASTEXITCODE -ne 0 -or ($count | Out-String).Trim() -ne '1') {
-    throw 'The isolated PKB database is missing migration 018. Run .\pkb_proto\run_pending_setup.ps1 first.'
+    throw 'The isolated PKB database is missing migration 020. Run .\pkb_proto\run_pending_setup.ps1 first.'
 }
 $userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
 if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
@@ -53,14 +53,31 @@ if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
 $allowedRuntimeEnv = @(
     'OPENAI_API_KEY',
     'OPENAI_BASE_URL',
+    'GEMINI_API_KEY',
+    'GEMINI_BASE_URL',
+    'OLLAMA_HOST',
     'LSA_MAGI_CLOUD_ENABLED',
-    'LSA_MAGI_CASPER_ENABLED',
+    'LSA_MAGI_MELCHIOR_PROVIDER',
+    'LSA_MAGI_MELCHIOR_MODEL',
+    'LSA_MAGI_MELCHIOR_ENDPOINT',
+    'LSA_MAGI_MELCHIOR_CREDENTIAL_ENV',
+    'LSA_MAGI_MELCHIOR_ENABLED',
+    'LSA_MAGI_MELCHIOR_WEIGHT',
+    'LSA_MAGI_MELCHIOR_TIMEOUT_SECONDS',
+    'LSA_MAGI_CASPER_PROVIDER',
     'LSA_MAGI_CASPER_MODEL',
+    'LSA_MAGI_CASPER_ENDPOINT',
+    'LSA_MAGI_CASPER_CREDENTIAL_ENV',
+    'LSA_MAGI_CASPER_ENABLED',
     'LSA_MAGI_CASPER_WEIGHT',
-    'LSA_MAGI_BALTHASAR_ENABLED',
+    'LSA_MAGI_CASPER_TIMEOUT_SECONDS',
+    'LSA_MAGI_BALTHASAR_PROVIDER',
     'LSA_MAGI_BALTHASAR_MODEL',
+    'LSA_MAGI_BALTHASAR_ENDPOINT',
+    'LSA_MAGI_BALTHASAR_CREDENTIAL_ENV',
+    'LSA_MAGI_BALTHASAR_ENABLED',
     'LSA_MAGI_BALTHASAR_WEIGHT',
-    'LSA_MAGI_MELCHIOR_WEIGHT'
+    'LSA_MAGI_BALTHASAR_TIMEOUT_SECONDS'
 )
 
 $previousRuntimeEnv = @{}

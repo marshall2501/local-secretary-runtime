@@ -17,8 +17,9 @@ $file015 = Join-Path $root 'pkb_proto\sql\015_pkb_proto_component_normalization.
 $file016 = Join-Path $root 'pkb_proto\sql\016_pkb_proto_finance.sql'
 $file017 = Join-Path $root 'pkb_proto\sql\017_pkb_proto_core_task_privileges.sql'
 $file019 = Join-Path $root 'pkb_proto\sql\019_pkb_proto_memory_intake.sql'
+$file020 = Join-Path $root 'pkb_proto\sql\020_magi_llm_settings.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -329,7 +330,35 @@ if (($has019 | Out-String).Trim() -eq '0') {
 }
 
 
-Write-Host 'PASS: PKB prototype migrations verified through 019 (Memory Intake included).'
+$has020 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='020_magi_llm_settings.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 020 schema version.' }
+if (($has020 | Out-String).Trim() -eq '0') {
+    $hash020 = (Get-FileHash -LiteralPath $file020 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql020 = [IO.File]::ReadAllText($file020).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash020)
+    $tmpName020 = 'magi-llm-settings-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp020 = Join-Path ([IO.Path]::GetTempPath()) $tmpName020
+    $remoteTmp020 = '/tmp/' + $tmpName020
+    try {
+        [IO.File]::WriteAllText($localTmp020, $sql020, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp020 ($id + ':' + $remoteTmp020) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 020 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp020
+        if ($LASTEXITCODE -ne 0) { throw '020 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp020) { Remove-Item -LiteralPath $localTmp020 }
+        & docker exec $id rm -f $remoteTmp020 | Out-Null
+    }
+} elseif (($has020 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 020 migration records.'
+}
+
+$verify020 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='020_magi_llm_settings.sql';"
+$settingsGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.llm_profiles','SELECT,INSERT,UPDATE,DELETE') AND has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.magi_member_assignments','SELECT,INSERT,UPDATE,DELETE');"
+if ($LASTEXITCODE -ne 0 -or ($verify020 | Out-String).Trim() -ne '1' -or ($settingsGrant | Out-String).Trim() -ne 't') {
+    throw 'MAGI LLM settings schema or privilege verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 020 (MAGI LLM settings included).'
 
 
 
