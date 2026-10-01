@@ -65,6 +65,8 @@ def _provider_failure(provider: str, exc: Exception) -> dict:
             "provider": provider,
             "error": error,
             "http_status": exc.status_code,
+            "provider_status": exc.provider_status,
+            "provider_message": exc.provider_message,
         }
     else:
         error = type(exc).__name__
