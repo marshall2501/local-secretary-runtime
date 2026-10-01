@@ -285,7 +285,7 @@ async def _call_gemini_guided_async(
             "maxOutputTokens": 1600,
             "responseFormat": {
                 "text": {
-                    "mimeType": "application/json",
+                    "mimeType": "APPLICATION_JSON",
                     "schema": _gemini_response_schema(schema),
                 }
             },
