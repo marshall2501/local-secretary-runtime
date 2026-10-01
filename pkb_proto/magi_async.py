@@ -685,6 +685,8 @@ async def _apply_detail_async(
                 caller=caller,
                 stop_requested=stop_requested,
                 on_turn_start=on_turn_start,
+                member_specs_override=member_specs_override,
+                context_policy=context_policy,
             )
             if reviewed is None:
                 return session
@@ -696,6 +698,8 @@ async def _apply_detail_async(
                 caller=caller,
                 stop_requested=stop_requested,
                 on_turn_start=on_turn_start,
+                member_specs_override=member_specs_override,
+                context_policy=context_policy,
             )
 
         signatures = _request_signatures(requests)
