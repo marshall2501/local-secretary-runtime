@@ -19,8 +19,9 @@ $file017 = Join-Path $root 'pkb_proto\sql\017_pkb_proto_core_task_privileges.sql
 $file019 = Join-Path $root 'pkb_proto\sql\019_pkb_proto_memory_intake.sql'
 $file020 = Join-Path $root 'pkb_proto\sql\020_magi_llm_settings.sql'
 $file021 = Join-Path $root 'pkb_proto\sql\021_ollama_context_window.sql'
+$file022 = Join-Path $root 'pkb_proto\sql\022_ollama_generation_budget.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -387,7 +388,35 @@ if ($LASTEXITCODE -ne 0 -or ($verify021 | Out-String).Trim() -ne '1' -or ($conte
     throw 'Ollama context-window migration verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 021 (Ollama context window included).'
+$has022 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='022_ollama_generation_budget.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 022 schema version.' }
+if (($has022 | Out-String).Trim() -eq '0') {
+    $hash022 = (Get-FileHash -LiteralPath $file022 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql022 = [IO.File]::ReadAllText($file022).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash022)
+    $tmpName022 = 'ollama-generation-budget-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp022 = Join-Path ([IO.Path]::GetTempPath()) $tmpName022
+    $remoteTmp022 = '/tmp/' + $tmpName022
+    try {
+        [IO.File]::WriteAllText($localTmp022, $sql022, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp022 ($id + ':' + $remoteTmp022) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 022 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp022
+        if ($LASTEXITCODE -ne 0) { throw '022 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp022) { Remove-Item -LiteralPath $localTmp022 }
+        & docker exec $id rm -f $remoteTmp022 | Out-Null
+    }
+} elseif (($has022 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 022 migration records.'
+}
+
+$verify022 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='022_ollama_generation_budget.sql';"
+$generationColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='llm_profiles' AND column_name='ollama_num_predict';"
+if ($LASTEXITCODE -ne 0 -or ($verify022 | Out-String).Trim() -ne '1' -or ($generationColumn | Out-String).Trim() -ne '1') {
+    throw 'Ollama generation-budget migration verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 022 (Ollama context + generation budget included).'
 
 
 
