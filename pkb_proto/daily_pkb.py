@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 import psycopg
 from psycopg.types.json import Jsonb
 from fastapi import HTTPException
-from nicegui import app, run, ui
+from nicegui import app, context, run, ui
 from pydantic import BaseModel, Field
 
 from .background_jobs import SerialBackgroundExecutor
@@ -86,6 +86,18 @@ from .ollama_runtime import (
     OLLAMA_NUM_PREDICT_OPTIONS,
 )
 from .daily_interpreter import interpret as interpret_daily
+
+def _notify_client(client, message: str, *, type: str) -> None:
+    """Send a notification through a stable client context.
+
+    Refreshable panels can delete the slot that originated an async callback.
+    Re-entering the captured client avoids resolving ui.notify through that
+    deleted slot after the panel has been refreshed.
+    """
+    with client:
+        ui.notify(message, type=type)
+
+
 from .entity_model_service import (
     COMPONENT_ROLE_TOKENS,
     load_entity_detail,
@@ -4574,6 +4586,7 @@ def core_page(task_id: str = ""):
                             ) -> None:
                                 if state["guided_busy"]:
                                     return
+                                notification_client = context.client
                                 stop_event = begin_guided_run(
                                     len(session["turns"]) + 1
                                 )
@@ -4625,7 +4638,8 @@ def core_page(task_id: str = ""):
                                             )
                                             if isinstance(item, dict)
                                         ]
-                                        ui.notify(
+                                        _notify_client(
+                                            notification_client,
                                             "Memory Intake結果をMAGIへ再評価し、"
                                             "RITSUKOがTaskを完了しました"
                                             + (
@@ -4636,7 +4650,8 @@ def core_page(task_id: str = ""):
                                             type="positive",
                                         )
                                     else:
-                                        ui.notify(
+                                        _notify_client(
+                                            notification_client,
                                             "回答レビューをMAGIへ再評価し、"
                                             "RITSUKOがTaskを完了しました",
                                             type="positive",
@@ -4655,7 +4670,8 @@ def core_page(task_id: str = ""):
                                         )
                                     except Exception:
                                         pass
-                                    ui.notify(
+                                    _notify_client(
+                                        notification_client,
                                         type(exc).__name__
                                         + ": "
                                         + str(exc)[:180],
