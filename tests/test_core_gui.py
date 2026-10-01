@@ -482,6 +482,14 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             }],
         }
         captured = {}
+        notifications = []
+
+        def fake_notify(client, message, *, type):
+            notifications.append({
+                'client': client,
+                'message': message,
+                'type': type,
+            })
 
         async def fake_review(task_id, decision, **kwargs):
             captured['task_id'] = str(task_id)
@@ -545,12 +553,22 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             daily, 'review_magi_proposal',
             side_effect=fake_review,
+        ), patch.object(
+            daily, '_notify_client',
+            side_effect=fake_notify,
         ):
             daily.core_page()
             await self.click('開く', 0)
             await self.click('記憶にも反映して完了')
             self.assertEqual(captured['decision'], 'remember')
             self.assertEqual(captured['memory_result'], memory_result)
+            self.assertEqual(len(notifications), 1)
+            self.assertIsNotNone(notifications[0]['client'])
+            self.assertEqual(notifications[0]['type'], 'positive')
+            self.assertIn(
+                'Memory Intake結果をMAGIへ再評価し',
+                notifications[0]['message'],
+            )
             self.assertTrue(
                 self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
             )
