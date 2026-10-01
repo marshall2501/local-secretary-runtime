@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pkb_proto.magi_task_store import (
     abort_proposal_review,
+    abort_user_resume,
     claim_proposal_review,
     claim_user_resume,
     create_task,
@@ -131,12 +132,84 @@ class MagiTaskStoreTests(unittest.TestCase):
             db,
             task_id=TASK_ID,
             reply_length=18,
+            reply_fingerprint="a" * 64,
         )
         self.assertEqual(session, saved_session)
         self.assertEqual(capability, "pkb_search")
         sql = "\n".join(call[0] for call in db.cur.calls)
         self.assertIn("SET status='running'", sql)
         self.assertIn("core.magi.user_reply_received", sql)
+
+    def test_running_user_resume_can_retry_only_same_reply(self):
+        saved_session = {
+            "task_id": str(TASK_ID),
+            "status": "waiting_user",
+            "pending_requests": [{"request_id": "REQ-1", "source": "user"}],
+        }
+        checkpoint = {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "selected_capability": "pkb_search",
+            "magi_session": saved_session,
+            "user_resume": {
+                "status": "processing",
+                "reply_length": 18,
+                "reply_fingerprint": "b" * 64,
+                "pending_request_ids": ["REQ-1"],
+            },
+        }
+        db = _DB(fetches=[("running", checkpoint)])
+        session, capability = claim_user_resume(
+            db,
+            task_id=TASK_ID,
+            reply_length=18,
+            reply_fingerprint="b" * 64,
+        )
+        self.assertEqual(session, saved_session)
+        self.assertEqual(capability, "pkb_search")
+        sql = "\n".join(call[0] for call in db.cur.calls)
+        self.assertIn("core.magi.user_reply_resumed", sql)
+        self.assertNotIn("SET status='running'", sql)
+
+        mismatch_db = _DB(fetches=[("running", checkpoint)])
+        with self.assertRaisesRegex(ValueError, "user_resume_reply_mismatch"):
+            claim_user_resume(
+                mismatch_db,
+                task_id=TASK_ID,
+                reply_length=12,
+                reply_fingerprint="c" * 64,
+            )
+
+    def test_abort_user_resume_returns_retryable_waiting_state(self):
+        checkpoint = {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "magi_session": {
+                "status": "waiting_user",
+                "user_question": "GPUモデルを教えてください",
+            },
+            "user_resume": {
+                "status": "processing",
+                "reply_length": 18,
+                "reply_fingerprint": "d" * 64,
+                "pending_request_ids": ["REQ-1"],
+            },
+        }
+        db = _DB(fetches=[("running", checkpoint)])
+        abort_user_resume(
+            db,
+            task_id=TASK_ID,
+            error="AsyncRequestTimeout",
+        )
+        update = next(
+            call for call in db.cur.calls
+            if "SET status='waiting_external'" in call[0]
+        )
+        saved = update[1][0].obj
+        self.assertEqual(saved["phase"], "awaiting_clarification")
+        self.assertEqual(saved["user_resume"]["status"], "retry_required")
+        self.assertEqual(
+            saved["final_core_decision"]["next_step"],
+            "retry_user_resume",
+        )
 
     def test_persist_verified_candidate_completes_task(self):
         db = _DB(fetches=[({"core_slice": "ritsuko_magi_observation_v1"},)])
