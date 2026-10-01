@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import anyio
 
 from .magi_async import (
+    continue_with_proposal_review_async,
     continue_with_user_clarification_async,
     continue_with_verified_observation_async,
     start_dialogue_async,
@@ -155,6 +156,61 @@ async def resume_user_answer(
             try:
                 await anyio.to_thread.run_sync(
                     fail_task_record,
+                    task_id,
+                    type(exc).__name__,
+                )
+            except Exception:
+                pass
+        raise
+
+
+
+async def review_proposal(
+    task_id: UUID,
+    decision: str,
+    *,
+    timeout: float,
+    claim_proposal_review_record: Callable,
+    finalize_proposal_review_record: Callable,
+    abort_proposal_review_record: Callable,
+    memory_result: dict | None = None,
+    stop_requested=None,
+    on_turn_start=None,
+    review_continuation=continue_with_proposal_review_async,
+) -> dict:
+    """Re-evaluate one explicit proposal-review choice, then let RITSUKO finalize."""
+    claimed = False
+    try:
+        session, selected_capability, observation, _review = (
+            await anyio.to_thread.run_sync(
+                claim_proposal_review_record,
+                task_id,
+                decision,
+                memory_result,
+            )
+        )
+        claimed = True
+        updated = await review_continuation(
+            session,
+            observation,
+            timeout=timeout,
+            stop_requested=stop_requested,
+            on_turn_start=on_turn_start,
+        )
+        if updated.get("status") != "review_evaluated":
+            raise ValueError("proposal_review_re_evaluation_failed")
+        await anyio.to_thread.run_sync(
+            finalize_proposal_review_record,
+            task_id,
+            updated,
+            selected_capability,
+        )
+        return updated
+    except Exception as exc:
+        if claimed:
+            try:
+                await anyio.to_thread.run_sync(
+                    abort_proposal_review_record,
                     task_id,
                     type(exc).__name__,
                 )
