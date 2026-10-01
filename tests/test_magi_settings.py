@@ -11,7 +11,10 @@ from pkb_proto.magi_settings import (
     provider_defaults,
     save_member_assignments,
 )
-from pkb_proto.ollama_runtime import DEFAULT_OLLAMA_CONTEXT_TOKENS
+from pkb_proto.ollama_runtime import (
+    DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
+    DEFAULT_OLLAMA_CONTEXT_TOKENS,
+)
 
 
 class MagiSettingsTests(unittest.TestCase):
@@ -63,9 +66,13 @@ class MagiSettingsTests(unittest.TestCase):
             specs = fallback_member_specs("gemma3:12b")
         by_name = {item["name"]: item for item in specs}
         self.assertEqual(DEFAULT_OLLAMA_CONTEXT_TOKENS, 65536)
+        self.assertEqual(DEFAULT_MAGI_OLLAMA_NUM_PREDICT, 4096)
         self.assertEqual(by_name["MELCHIOR"]["context_window_tokens"], 65536)
+        self.assertEqual(by_name["MELCHIOR"]["ollama_num_predict"], 4096)
         self.assertIsNone(by_name["CASPER"]["context_window_tokens"])
+        self.assertIsNone(by_name["CASPER"]["ollama_num_predict"])
         self.assertIsNone(by_name["BALTHASAR"]["context_window_tokens"])
+        self.assertIsNone(by_name["BALTHASAR"]["ollama_num_predict"])
 
     def test_ollama_context_env_override_is_used_for_bootstrap(self):
         env = {
