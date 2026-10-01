@@ -178,11 +178,27 @@ async def request_json_with_retry(
         nonlocal attempts, retry_started, wait_seconds
         while True:
             attempts += 1
-            elapsed = time.monotonic() - started
+            now = time.monotonic()
+            elapsed = now - started
             remaining_total = timeout - elapsed
             if remaining_total <= 0:
                 exc = AsyncRequestTimeout("request_deadline_exceeded")
                 raise AsyncRetryExhausted(exc, diagnostic("timeout"))
+
+            attempt_timeout = remaining_total
+            if retry_started is not None:
+                remaining_retry_budget = (
+                    retry_budget_seconds - (now - retry_started)
+                )
+                if remaining_retry_budget <= 0:
+                    exc = AsyncRequestTimeout("retry_budget_exceeded")
+                    raise AsyncRetryExhausted(
+                        exc, diagnostic("retry_budget_exceeded")
+                    )
+                attempt_timeout = min(
+                    attempt_timeout,
+                    remaining_retry_budget,
+                )
 
             try:
                 result = await request_json(
@@ -190,7 +206,7 @@ async def request_json_with_retry(
                     url,
                     headers=headers,
                     json_body=json_body,
-                    timeout=remaining_total,
+                    timeout=attempt_timeout,
                     client=active,
                 )
                 return result, diagnostic("ok")
