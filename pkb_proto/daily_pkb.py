@@ -2950,7 +2950,6 @@ def load_recent_core_tasks(limit: int = 10, offset: int = 0) -> list[dict]:
             "updated_at": row[5],
             "completed_at": row[6],
             "core_slice": checkpoint.get("core_slice"),
-            "core_slice": checkpoint.get("core_slice"),
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "action_count": row[8],
@@ -2978,7 +2977,7 @@ def load_open_core_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
                    WHERE t.requested_by='local_user'
                      AND COALESCE(t.checkpoint->>'core_slice', '') IN
                          ('daily_read_only_v1','ritsuko_magi_observation_v1')
-                     AND t.status IN ('waiting_external', 'running')
+                     AND t.status IN ('waiting_external', 'running', 'paused')
                    GROUP BY t.id
                    ORDER BY t.updated_at DESC, t.id DESC
                    LIMIT %s OFFSET %s""",
@@ -3066,7 +3065,7 @@ def core_task_selection_result(item: dict) -> dict:
     status = str(item.get("status") or "").strip()
     if not task_id:
         raise ValueError("Task ID is required")
-    if status not in {"waiting_external", "running", "completed", "failed"}:
+    if status not in {"waiting_external", "running", "paused", "completed", "failed"}:
         raise ValueError("Unsupported Task status")
     return {
         "task_id": task_id,
@@ -3121,7 +3120,7 @@ def load_core_task_trace(task_id: UUID) -> dict:
                 """SELECT event_type, occurred_at
                    FROM secretary.audit_events
                    WHERE task_id=%s
-                     AND actor='daily_core_advisor'
+                     AND actor IN ('daily_core_advisor', 'ritsuko_core')
                    ORDER BY occurred_at, id""",
                 (task_id,),
             )
@@ -4710,6 +4709,7 @@ def core_page(task_id: str = ""):
                     status_color = {
                         "waiting_external": "orange",
                         "running": "blue",
+                        "paused": "grey",
                     }.get(item["status"], "grey")
                     with ui.card().classes("w-full p-2 gap-1"):
                         with ui.row().classes("w-full items-center gap-2 no-wrap"):
@@ -4783,6 +4783,7 @@ def core_page(task_id: str = ""):
                                 "completed": "green",
                                 "waiting_external": "orange",
                                 "running": "blue",
+                                "paused": "grey",
                                 "failed": "red",
                             }.get(item["status"], "grey")
                             ui.badge(item["status"], color=status_color)
@@ -5314,6 +5315,19 @@ def core_page(task_id: str = ""):
                 def resume_panel():
                     result = state["result"] or {}
                     if result.get("status") != "waiting_external" or not result.get("task_id"):
+                        return
+
+                    if result.get("core_slice") == "ritsuko_magi_observation_v1":
+                        with ui.card().classes(
+                            "w-full border-2 border-orange-300 bg-orange-50"
+                        ):
+                            ui.label("このTaskは待機中です").classes(
+                                "font-bold text-orange-900"
+                            )
+                            ui.label(
+                                "新RITSUKO⇄MAGI経路の本人追加説明resumeは次段で接続します。"
+                                "旧経路のresumeへは流しません。"
+                            ).classes("text-sm")
                         return
 
                     with ui.card().classes(
