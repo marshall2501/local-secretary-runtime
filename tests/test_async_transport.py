@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import anyio
 import httpx
 
 from pkb_proto.async_transport import AsyncRequestTimeout, request_json
-from pkb_proto.magi_async import call_guided_panel_async, start_dialogue_async
+from pkb_proto.magi_async import (
+    _call_ollama_guided_async,
+    call_guided_panel_async,
+    start_dialogue_async,
+)
 
 
 class _SlowTransport(httpx.AsyncBaseTransport):
@@ -46,6 +50,31 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
+
+    async def test_ollama_profile_context_is_sent_as_num_ctx(self):
+        response = {
+            "message": {
+                "content": (
+                    '{"category":"INFORMATION",'
+                    '"understood_request":"GPUを知りたい",'
+                    '"reason":"情報照会",'
+                    '"confidence":"high",'
+                    '"multiple_requests":false}'
+                )
+            },
+            "done_reason": "stop",
+        }
+        mock = AsyncMock(return_value=response)
+        with patch("pkb_proto.magi_async.request_json", mock):
+            result = await _call_ollama_guided_async(
+                {"stage": "classify"},
+                model="qwen3.5:9b",
+                timeout=1,
+                context_window_tokens=32768,
+            )
+        self.assertEqual(result["status"], "ok")
+        payload = mock.await_args.kwargs["json_body"]
+        self.assertEqual(payload["options"]["num_ctx"], 32768)
 
     async def test_panel_members_execute_concurrently(self):
         active = 0
