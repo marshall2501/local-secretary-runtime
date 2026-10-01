@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .ritsuko_magi_protocol import MAGI_RESPONSE_SCHEMA, SYSTEM_INSTRUCTION, validate_analysis_result
+from .ollama_runtime import configured_context_tokens
 
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED_MODELS = ("gemma3:12b", "llama3.1:8b", "qwen3.5:9b")
@@ -53,7 +54,7 @@ def call_member(request_envelope: dict, *, member_name: str, model: str, timeout
             {"role":"system","content":SYSTEM_INSTRUCTION},
             {"role":"user","content":json.dumps(request_envelope,ensure_ascii=False)},
         ],
-        "options":{"temperature":0,"num_predict":1800},
+        "options":{"temperature":0,"num_predict":1800,"num_ctx":configured_context_tokens()},
     }
     try:
         req=Request(
