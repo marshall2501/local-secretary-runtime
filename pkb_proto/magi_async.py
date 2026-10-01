@@ -38,6 +38,7 @@ from .magi_dialogue import (
     _DETAIL_SCHEMA,
     _compose_question,
     _extract_gemini_text,
+    _gemini_response_schema,
     _extract_openai_output_text,
     _normalized_member_specs,
     _request_signatures,
@@ -283,7 +284,7 @@ async def _call_gemini_guided_async(
             "responseFormat": {
                 "text": {
                     "mimeType": "application/json",
-                    "schema": schema,
+                    "schema": _gemini_response_schema(schema),
                 }
             },
         },
