@@ -24,9 +24,17 @@ class AsyncRequestTimeout(TimeoutError):
 class AsyncHTTPStatusError(RuntimeError):
     """HTTP response completed with a non-success status."""
 
-    def __init__(self, status_code: int):
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        provider_status: str | None = None,
+        provider_message: str | None = None,
+    ):
         super().__init__(f"http_status_{status_code}")
         self.status_code = int(status_code)
+        self.provider_status = provider_status
+        self.provider_message = provider_message
 
 
 class AsyncTransportError(RuntimeError):
@@ -59,7 +67,31 @@ async def request_json(
             json=json_body,
         )
         if response.status_code < 200 or response.status_code >= 300:
-            raise AsyncHTTPStatusError(response.status_code)
+            provider_status = None
+            provider_message = None
+            try:
+                error_body = response.json()
+                error = error_body.get("error") if isinstance(error_body, dict) else None
+                if isinstance(error, dict):
+                    status = error.get("status")
+                    message = error.get("message")
+                    provider_status = (
+                        str(status).strip()[:80]
+                        if status is not None and str(status).strip()
+                        else None
+                    )
+                    provider_message = (
+                        str(message).strip()[:400]
+                        if message is not None and str(message).strip()
+                        else None
+                    )
+            except ValueError:
+                pass
+            raise AsyncHTTPStatusError(
+                response.status_code,
+                provider_status=provider_status,
+                provider_message=provider_message,
+            )
         try:
             return response.json()
         except ValueError as exc:
