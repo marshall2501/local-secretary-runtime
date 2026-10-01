@@ -16,6 +16,7 @@ import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 from uuid import UUID, uuid4
 
 import psycopg
@@ -42,12 +43,12 @@ from .magi_client import (
     list_chat_models as list_magi_models,
 )
 from .magi_dialogue import (
-    start_dialogue, continue_with_observation, continue_with_user_clarification,
-    export_dialogue,
+    MAX_TURNS, start_dialogue, continue_with_observation,
+    continue_with_user_clarification, export_dialogue,
 )
 from .magi_settings import (
-    MEMBER_NAMES, PROVIDERS, bootstrap_member_assignments, fallback_member_specs,
-    list_llm_profiles, load_member_specs, provider_defaults,
+    DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, bootstrap_member_assignments,
+    fallback_member_specs, list_llm_profiles, load_member_specs, provider_defaults,
     save_member_assignments, sync_ollama_profiles, upsert_llm_profile,
 )
 from .daily_interpreter import interpret as interpret_daily
@@ -3610,7 +3611,9 @@ def core_page(task_id: str = ""):
              "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
              "advisor_timeout": int(_UI_PREFERENCES.get("core_advisor_timeout") or 60),
              "protocol_result": None, "protocol_busy": False,
-             "guided_session": None, "guided_busy": False}
+             "guided_session": None, "guided_busy": False,
+             "guided_turn": 0, "guided_stop_event": None,
+             "guided_stop_requested": False}
 
     list_limits = {key: _UI_PREFERENCES["core"][key] for key in CORE_TASK_LIST_DEFAULTS}
     list_defaults = dict(list_limits)
@@ -3763,7 +3766,7 @@ def core_page(task_id: str = ""):
                 for member in MEMBER_NAMES:
                     spec = spec_by_member.get(member) or {
                         "profile_id": None, "enabled": False,
-                        "weight": 1.0, "timeout_seconds": 900,
+                        "weight": 1.0, "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
                     }
                     with ui.card().classes("min-w-64 grow border border-teal-200 bg-white"):
                         ui.label(member).classes("font-bold")
@@ -3782,7 +3785,7 @@ def core_page(task_id: str = ""):
                         ).classes("w-full")
                         timeout_control = ui.select(
                             options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
-                            value=int(spec.get("timeout_seconds") or 900),
+                            value=int(spec.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
                             label="Timeout（秒）",
                         ).classes("w-full")
                         guided_member_controls[member] = {
@@ -3800,7 +3803,7 @@ def core_page(task_id: str = ""):
                         "enabled": bool(guided_member_controls[member]["enabled"].value),
                         "weight": float(guided_member_controls[member]["weight"].value or 1.0),
                         "timeout_seconds": int(
-                            guided_member_controls[member]["timeout"].value or 900
+                            guided_member_controls[member]["timeout"].value or DEFAULT_TIMEOUT_SECONDS
                         ),
                     }
                     for member in MEMBER_NAMES
@@ -3835,16 +3838,55 @@ def core_page(task_id: str = ""):
             def guided_timeout_seconds(session: dict | None = None) -> float:
                 specs = (session or {}).get("member_specs") or state.get("magi_member_specs") or []
                 enabled = [
-                    int(item.get("timeout_seconds") or 900)
+                    int(item.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
                     for item in specs if item.get("enabled")
                 ]
-                return float(max(enabled) if enabled else 900)
+                return float(
+                    max(enabled) if enabled else DEFAULT_TIMEOUT_SECONDS
+                )
+
+            def begin_guided_run(next_turn: int) -> Event:
+                stop_event = Event()
+                state["guided_stop_event"] = stop_event
+                state["guided_stop_requested"] = False
+                state["guided_turn"] = min(max(1, int(next_turn)), MAX_TURNS)
+                state["guided_busy"] = True
+                return stop_event
+
+            def note_guided_turn(turn_number: int) -> None:
+                state["guided_turn"] = min(max(1, int(turn_number)), MAX_TURNS)
+
+            def request_guided_stop() -> None:
+                stop_event = state.get("guided_stop_event")
+                if not state.get("guided_busy") or stop_event is None:
+                    return
+                stop_event.set()
+                state["guided_stop_requested"] = True
+                ui.notify(
+                    "現在のTurn完了後に停止します",
+                    type="warning",
+                )
+                guided_result_panel.refresh()
 
             @ui.refreshable
             def guided_result_panel():
                 session = state.get("guided_session")
                 if state["guided_busy"]:
                     ui.label("RITSUKO ⇄ MAGI 対話中...").classes("font-bold text-teal-900")
+                    ui.label(
+                        f"Turn {int(state.get('guided_turn') or 1)} / {MAX_TURNS}"
+                    ).classes("font-mono text-sm")
+                    if state.get("guided_stop_requested"):
+                        ui.label(
+                            "停止要求済み：現在のTurnが完了したら次へ進まず停止します。"
+                        ).classes("text-sm text-orange-900")
+                    else:
+                        ui.button(
+                            "このTurnで停止",
+                            icon="stop_circle",
+                            color="orange",
+                            on_click=request_guided_stop,
+                        ).props("outline")
                     return
                 if session is None:
                     ui.label("初回はLLMに分類だけを聞き、回答に合わせて次の問いを送ります。").classes(
@@ -3931,18 +3973,22 @@ def core_page(task_id: str = ""):
                         if not str(observation_input.value or "").strip():
                             ui.notify("試験用Observationを入力してください", type="warning")
                             return
-                        state["guided_busy"] = True
+                        stop_event = begin_guided_run(len(session["turns"]) + 1)
                         guided_button.disable()
                         guided_result_panel.refresh()
                         try:
                             state["guided_session"] = await run.io_bound(
                                 continue_with_observation, session,
-                                observation_input.value, timeout=guided_timeout_seconds(session),
+                                observation_input.value,
+                                timeout=guided_timeout_seconds(session),
+                                stop_requested=stop_event.is_set,
+                                on_turn_start=note_guided_turn,
                             )
                         except Exception as exc:
                             ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
                         finally:
                             state["guided_busy"] = False
+                            state["guided_stop_event"] = None
                             guided_button.enable()
                             guided_result_panel.refresh()
 
@@ -3970,7 +4016,7 @@ def core_page(task_id: str = ""):
                         if not str(clarification_input.value or "").strip():
                             ui.notify("追加説明を入力してください", type="warning")
                             return
-                        state["guided_busy"] = True
+                        stop_event = begin_guided_run(len(session["turns"]) + 1)
                         guided_button.disable()
                         guided_result_panel.refresh()
                         try:
@@ -3978,11 +4024,14 @@ def core_page(task_id: str = ""):
                                 continue_with_user_clarification, session,
                                 clarification_input.value,
                                 timeout=guided_timeout_seconds(session),
+                                stop_requested=stop_event.is_set,
+                                on_turn_start=note_guided_turn,
                             )
                         except Exception as exc:
                             ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
                         finally:
                             state["guided_busy"] = False
+                            state["guided_stop_event"] = None
                             guided_button.enable()
                             guided_result_panel.refresh()
 
@@ -4000,7 +4049,7 @@ def core_page(task_id: str = ""):
                 specs = save_guided_assignments(notify=False)
                 if not specs:
                     return
-                state["guided_busy"] = True
+                stop_event = begin_guided_run(1)
                 state["guided_session"] = None
                 guided_button.disable()
                 guided_result_panel.refresh()
@@ -4010,11 +4059,14 @@ def core_page(task_id: str = ""):
                         guided_input.value,
                         member_specs=specs,
                         timeout=guided_timeout_seconds(),
+                        stop_requested=stop_event.is_set,
+                        on_turn_start=note_guided_turn,
                     )
                 except Exception as exc:
                     ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
                 finally:
                     state["guided_busy"] = False
+                    state["guided_stop_event"] = None
                     guided_button.enable()
                     guided_result_panel.refresh()
 
@@ -4023,6 +4075,12 @@ def core_page(task_id: str = ""):
                 color="teal", on_click=start_guided,
             )
             guided_result_panel()
+
+            def refresh_guided_progress() -> None:
+                if state.get("guided_busy"):
+                    guided_result_panel.refresh()
+
+            ui.timer(1.0, refresh_guided_progress)
 
         with ui.expansion(
             "旧 Protocol v1 全項目一括分析（比較用）",
