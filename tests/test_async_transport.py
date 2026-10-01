@@ -263,7 +263,16 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             },
             "done_reason": "stop",
         }
-        mock = AsyncMock(return_value=response)
+        retry_diagnostic = {
+            "retry_enabled": True,
+            "attempt_count": 1,
+            "retry_count": 0,
+            "retry_http_codes_seen": [],
+            "retry_wait_seconds": 0.0,
+            "retry_budget_seconds": 0.5,
+            "final_status": "ok",
+        }
+        mock = AsyncMock(return_value=(response, retry_diagnostic))
         with patch.dict(
             "os.environ",
             {"LSA_MAGI_OLLAMA_NUM_PREDICT": "2048"},
