@@ -18,6 +18,7 @@ from pkb_proto.magi_async import (
     _call_gemini_guided_async,
     _call_ollama_guided_async,
     call_guided_panel_async,
+    continue_with_user_clarification_async,
     continue_with_verified_observation_async,
     start_dialogue_async,
 )
@@ -770,6 +771,120 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["status"], "stopped")
         self.assertEqual(
             updated["next_step"], "cloud_context_gate_no_local_member"
+        )
+
+    async def test_user_resume_after_turn_four_opens_new_window_and_keeps_private_context_local(self):
+        seen = []
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen.append({
+                "turn": envelope["turn"],
+                "members": [item["name"] for item in member_specs],
+                "policy": envelope.get("context_policy"),
+                "observations": envelope.get("observations"),
+            })
+            return {
+                "status": "ok",
+                "response": {
+                    "understood_request": "メインPCのGPUモデルを知りたい。",
+                    "state": "READY",
+                    "reason": "本人回答でblocking情報が解消した。",
+                    "information_requests": [],
+                    "question_for_user": None,
+                    "answer_candidate": "メインPCのGPUモデルは Radeon RX 9070 XT です。",
+                    "knowledge_candidate": None,
+                    "action_candidate": None,
+                },
+                "errors": [],
+                "diagnostic": {},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-1",
+            "user_raw": "メインPCのGPUの種類は？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+                {"name": "CASPER", "provider": "openai", "model": "cloud",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+            ],
+            "status": "waiting_user",
+            "next_step": "ask_user_after_exhausted_pkb",
+            "classification": {
+                "category": "INFORMATION",
+                "understood_request": "GPUモデルを知りたい",
+                "reason": "情報照会",
+                "confidence": "high",
+                "multiple_requests": False,
+            },
+            "detail": {
+                "understood_request": "GPUモデルを知りたい",
+                "state": "NEED_INFORMATION",
+                "reason": "PKBでモデル未確認",
+                "information_requests": [{
+                    "source": "pkb", "what": "GPU1のモデル", "reason": "回答に必要"
+                }],
+                "question_for_user": None,
+                "answer_candidate": None,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            },
+            "observations": [{
+                "source": "pkb",
+                "verified": True,
+                "confidentiality": "private",
+                "text": "GPU1はありますがモデル属性は確認できませんでした。",
+                "responds_to": ["REQ-1"],
+            }],
+            "pending_requests": [{
+                "request_id": "REQ-2",
+                "source": "user",
+                "what": "GPU1のモデル",
+                "reason": "PKBで未確認",
+            }],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": "GPU1のモデルを教えてください",
+            "magi_disagreement": None,
+            "user_source_reviewed": True,
+            "last_question_purpose": "review_or_repair",
+            "turns": [
+                {"stage": "classify", "request_envelope": {"turn": 1}},
+                {"stage": "analyze", "request_envelope": {"turn": 2}},
+                {"stage": "analyze", "request_envelope": {"turn": 3}},
+                {"stage": "analyze", "request_envelope": {"turn": 4}},
+            ],
+            "legacy_router_used": False,
+            "tool_read_executed": True,
+        }
+
+        updated = await continue_with_user_clarification_async(
+            session,
+            "Radeon RX 9070 XT",
+            timeout=10,
+            caller=caller,
+        )
+
+        self.assertEqual(updated["status"], "candidate_ready")
+        self.assertEqual(len(updated["turns"]), 5)
+        self.assertEqual(updated["turn_limit"], 8)
+        self.assertEqual(seen[0]["turn"], 5)
+        self.assertEqual(seen[0]["members"], ["MELCHIOR"])
+        self.assertEqual(
+            seen[0]["policy"]["mode"],
+            "local_only_private_pkb",
+        )
+        self.assertTrue(any(
+            item.get("source") == "user_clarification"
+            for item in seen[0]["observations"]
+        ))
+        self.assertEqual(
+            updated["cloud_context_gate"]["withheld_members"][0]["name"],
+            "CASPER",
         )
 
     async def test_stop_request_after_current_turn_prevents_next_turn(self):
