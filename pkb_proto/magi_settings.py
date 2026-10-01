@@ -14,8 +14,11 @@ from uuid import UUID, uuid4
 
 from .magi_client import OLLAMA
 from .ollama_runtime import (
+    DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
+    configured_magi_num_predict,
     normalize_context_tokens,
+    normalize_magi_num_predict,
 )
 
 MEMBER_NAMES = ("MELCHIOR", "CASPER", "BALTHASAR")
@@ -167,6 +170,11 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
                 if provider == "ollama"
                 else None
             ),
+            "ollama_num_predict": (
+                configured_magi_num_predict()
+                if provider == "ollama"
+                else None
+            ),
             "weight": _env_float(prefix + "WEIGHT", 1.0),
             "timeout_seconds": _env_int(prefix + "TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
             "enabled": bool(enabled and model),
@@ -184,7 +192,8 @@ def _row_profile(row) -> dict:
         "endpoint": row[4],
         "credential_env": row[5],
         "context_window_tokens": row[6],
-        "enabled": bool(row[7]),
+        "ollama_num_predict": row[7],
+        "enabled": bool(row[8]),
     }
 
 
@@ -193,7 +202,7 @@ def list_llm_profiles(db, *, include_disabled: bool = False) -> list[dict]:
     with db.cursor() as cur:
         cur.execute(
             f"""SELECT id, display_name, provider, model, endpoint, credential_env,
-                       context_window_tokens, enabled
+                       context_window_tokens, ollama_num_predict, enabled
                 FROM secretary.llm_profiles
                 {where}
                 ORDER BY provider, display_name, model"""
@@ -210,6 +219,7 @@ def upsert_llm_profile(
     endpoint: str | None = None,
     credential_env: str | None = None,
     context_window_tokens: int | None = None,
+    ollama_num_predict: int | None = None,
     enabled: bool = True,
 ) -> dict:
     provider = _normalize_provider(provider)
@@ -223,13 +233,14 @@ def upsert_llm_profile(
         else str(credential_env or default_credential or "").strip() or None
     )
     requested_context = context_window_tokens
+    requested_num_predict = ollama_num_predict
     display_name = str(display_name or f"{provider} / {model}").strip()
     if not display_name:
         raise ValueError("display_name_required")
 
     with db.cursor() as cur:
         cur.execute(
-            """SELECT id, context_window_tokens
+            """SELECT id, context_window_tokens, ollama_num_predict
                FROM secretary.llm_profiles
                WHERE provider=%s AND model=%s
                  AND endpoint IS NOT DISTINCT FROM %s
@@ -244,28 +255,35 @@ def upsert_llm_profile(
                 else row[1] if row and row[1] is not None
                 else DEFAULT_OLLAMA_CONTEXT_TOKENS
             )
+            ollama_num_predict = normalize_magi_num_predict(
+                requested_num_predict if requested_num_predict is not None
+                else row[2] if row and row[2] is not None
+                else DEFAULT_MAGI_OLLAMA_NUM_PREDICT
+            )
         else:
             context_window_tokens = None
+            ollama_num_predict = None
         if row:
             cur.execute(
                 """UPDATE secretary.llm_profiles
                    SET display_name=%s, context_window_tokens=%s,
-                       enabled=%s, updated_at=now()
+                       ollama_num_predict=%s, enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
                     display_name, context_window_tokens,
-                    bool(enabled), profile_id,
+                    ollama_num_predict, bool(enabled), profile_id,
                 ),
             )
         else:
             cur.execute(
                 """INSERT INTO secretary.llm_profiles
                    (id, display_name, provider, model, endpoint, credential_env,
-                    context_window_tokens, enabled)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    context_window_tokens, ollama_num_predict, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     profile_id, display_name, provider, model, endpoint,
-                    credential_env, context_window_tokens, bool(enabled),
+                    credential_env, context_window_tokens, ollama_num_predict,
+                    bool(enabled),
                 ),
             )
     return {
@@ -276,6 +294,7 @@ def upsert_llm_profile(
         "endpoint": endpoint,
         "credential_env": credential_env,
         "context_window_tokens": context_window_tokens,
+        "ollama_num_predict": ollama_num_predict,
         "enabled": bool(enabled),
     }
 
@@ -294,6 +313,7 @@ def sync_ollama_profiles(db, models: list[str], *, endpoint: str | None = None) 
             endpoint=endpoint or DEFAULT_ENDPOINTS["ollama"],
             credential_env=None,
             context_window_tokens=None,
+            ollama_num_predict=None,
             enabled=True,
         ))
     return synced
@@ -308,6 +328,7 @@ def _profile_id_for_spec(db, spec: dict) -> str:
         endpoint=spec.get("endpoint"),
         credential_env=spec.get("credential_env"),
         context_window_tokens=spec.get("context_window_tokens"),
+        ollama_num_predict=spec.get("ollama_num_predict"),
         enabled=True,
     )
     return profile["id"]
@@ -318,6 +339,7 @@ def load_member_specs(db) -> list[dict]:
         cur.execute(
             """SELECT a.member, a.profile_id, p.display_name, p.provider, p.model,
                       p.endpoint, p.credential_env, p.context_window_tokens,
+                      p.ollama_num_predict,
                       a.weight, a.timeout_seconds, a.enabled, p.enabled
                FROM secretary.magi_member_assignments a
                JOIN secretary.llm_profiles p ON p.id=a.profile_id"""
@@ -338,9 +360,10 @@ def load_member_specs(db) -> list[dict]:
             "endpoint": row[5],
             "credential_env": row[6],
             "context_window_tokens": row[7],
-            "weight": float(row[8]),
-            "timeout_seconds": int(row[9]),
-            "enabled": bool(row[10] and row[11]),
+            "ollama_num_predict": row[8],
+            "weight": float(row[9]),
+            "timeout_seconds": int(row[10]),
+            "enabled": bool(row[11] and row[12]),
             "settings_source": "database",
         })
     return specs
