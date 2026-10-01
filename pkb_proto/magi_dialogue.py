@@ -75,6 +75,7 @@ QUESTION_PURPOSES = (
     "understand_or_disambiguate",
     "identify_missing_information",
     "evaluate_observation",
+    "evaluate_review_result",
     "formulate_answer",
     "formulate_knowledge_candidate",
     "formulate_action",
@@ -162,6 +163,13 @@ Observationから最も近い候補が一意で反証がなければ、限定表
 まだ不足する場合だけNEED_INFORMATIONを返し、前回より古い／広い履歴を漫然と掘り続けないでください。
 直前のverified PKB Observationが要求した属性を確認できなかったことを示している場合、同じPKB要求を言い換えて繰り返さないでください。別の既存情報源で解けないblocking情報ならsource=userへ切り替えてください。
 内部情報で解けないblocking曖昧さならNEED_CLARIFICATIONに切り替えてください。""",
+    "evaluate_review_result": """RITSUKOが追加したProposal Review / Memory Intake結果Observationを評価してください。
+本人が直接回答した事実と、その事実を永続記憶へ保存する処理結果は別物として扱ってください。
+Memory Intakeのdecision=pendingは「候補が確認待ちへ保存された」という意味であり、PKBの確定current factへ反映済みという意味ではありません。
+decision=auto_commit等で書込み結果が明示されている場合だけ、その保存状態を記録結果として扱ってください。
+本人の直接回答だけで元の質問へ答えられるなら、記憶状態にかかわらずanswer_candidateには元の質問への答えそのものを書いてください。
+同じMemory Intakeや同じ本人確認を再要求せず、今回のレビュー結果を踏まえた現在の判断を返してください。
+成功・登録済み・Task完了の最終判定はRITSUKOが行うため、MAGI自身は完了を宣言しないでください。""",
     "formulate_answer": """現在の根拠だけでユーザーへ直接答えられるかを判断してください。
 答えられるなら検索予定ではなく答えそのものをREADYのanswer_candidateへ返してください。
 答えに未取得の事実が必要ならNEED_INFORMATIONへ切り替えてください。""",
