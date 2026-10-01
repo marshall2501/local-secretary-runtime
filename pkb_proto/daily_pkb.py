@@ -46,13 +46,18 @@ from .magi_dialogue import MAX_TURNS, export_dialogue
 from .magi_async import (
     continue_with_observation_async,
 )
-from .magi_observation_loop import run_pkb_observation_loop, resume_user_answer
+from .magi_observation_loop import (
+    review_proposal as review_magi_proposal,
+    run_pkb_observation_loop,
+    resume_user_answer,
+)
 from .magi_task_store import (
+    abort_proposal_review as abort_magi_proposal_review,
+    claim_proposal_review as claim_magi_proposal_review,
     claim_user_resume as claim_magi_user_resume,
-    complete_answer_only as complete_magi_answer_only,
-    complete_memory_review as complete_magi_memory_review,
     create_task as create_magi_core_task,
     fail_task as fail_magi_core_task,
+    finalize_proposal_review as finalize_magi_proposal_review,
     persist_session as persist_magi_core_session,
     prepare_memory_intake as prepare_magi_memory_intake,
     record_pkb_read as record_magi_pkb_read,
@@ -1593,26 +1598,49 @@ def _claim_magi_user_resume_record(
         )
 
 
-def _complete_magi_answer_only_record(task_id: UUID) -> dict:
+def _claim_magi_proposal_review_record(
+    task_id: UUID,
+    decision: str,
+    memory_result: dict | None,
+) -> tuple[dict, str | None, dict, dict]:
     with connection() as db:
-        return complete_magi_answer_only(db, task_id=task_id)
+        return claim_magi_proposal_review(
+            db,
+            task_id=task_id,
+            decision=decision,
+            memory_result=memory_result,
+        )
+
+
+def _finalize_magi_proposal_review_record(
+    task_id: UUID,
+    session: dict,
+    selected_capability: str | None,
+) -> dict:
+    with connection() as db:
+        return finalize_magi_proposal_review(
+            db,
+            task_id=task_id,
+            session=session,
+            selected_capability=selected_capability,
+        )
+
+
+def _abort_magi_proposal_review_record(
+    task_id: UUID,
+    error_type: str,
+) -> None:
+    with connection() as db:
+        abort_magi_proposal_review(
+            db,
+            task_id=task_id,
+            error=error_type,
+        )
 
 
 def _prepare_magi_memory_intake_record(task_id: UUID) -> MemoryIntake:
     with connection() as db:
         return prepare_magi_memory_intake(db, task_id=task_id)
-
-
-def _complete_magi_memory_review_record(
-    task_id: UUID,
-    memory_result: dict,
-) -> dict:
-    with connection() as db:
-        return complete_magi_memory_review(
-            db,
-            task_id=task_id,
-            memory_result=memory_result,
-        )
 
 
 def _persist_magi_core_session_record(
