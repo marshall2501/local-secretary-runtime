@@ -13,6 +13,10 @@ import os
 from uuid import UUID, uuid4
 
 from .magi_client import OLLAMA
+from .ollama_runtime import (
+    DEFAULT_OLLAMA_CONTEXT_TOKENS,
+    normalize_context_tokens,
+)
 
 MEMBER_NAMES = ("MELCHIOR", "CASPER", "BALTHASAR")
 PROVIDERS = ("ollama", "openai", "gemini")
@@ -140,6 +144,11 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
             os.environ.get(prefix + "CREDENTIAL_ENV")
             or credential_default
         )
+        configured_context = normalize_context_tokens(
+            os.environ.get(prefix + "CONTEXT_TOKENS")
+            or os.environ.get("LSA_OLLAMA_CONTEXT_TOKENS")
+            or DEFAULT_OLLAMA_CONTEXT_TOKENS
+        )
         enabled_default = legacy_enabled[member]
         enabled = _env_bool(prefix + "ENABLED", enabled_default)
         if provider != "ollama" and prefix + "PROVIDER" not in os.environ:
@@ -153,6 +162,11 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
             "model": model,
             "endpoint": endpoint,
             "credential_env": credential_env,
+            "context_window_tokens": (
+                configured_context
+                if provider == "ollama"
+                else None
+            ),
             "weight": _env_float(prefix + "WEIGHT", 1.0),
             "timeout_seconds": _env_int(prefix + "TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
             "enabled": bool(enabled and model),
@@ -169,7 +183,8 @@ def _row_profile(row) -> dict:
         "model": row[3],
         "endpoint": row[4],
         "credential_env": row[5],
-        "enabled": bool(row[6]),
+        "context_window_tokens": row[6],
+        "enabled": bool(row[7]),
     }
 
 
@@ -177,7 +192,8 @@ def list_llm_profiles(db, *, include_disabled: bool = False) -> list[dict]:
     where = "" if include_disabled else "WHERE enabled"
     with db.cursor() as cur:
         cur.execute(
-            f"""SELECT id, display_name, provider, model, endpoint, credential_env, enabled
+            f"""SELECT id, display_name, provider, model, endpoint, credential_env,
+                       context_window_tokens, enabled
                 FROM secretary.llm_profiles
                 {where}
                 ORDER BY provider, display_name, model"""
@@ -193,6 +209,7 @@ def upsert_llm_profile(
     display_name: str | None = None,
     endpoint: str | None = None,
     credential_env: str | None = None,
+    context_window_tokens: int | None = None,
     enabled: bool = True,
 ) -> dict:
     provider = _normalize_provider(provider)
@@ -205,13 +222,14 @@ def upsert_llm_profile(
         None if provider == "ollama"
         else str(credential_env or default_credential or "").strip() or None
     )
+    requested_context = context_window_tokens
     display_name = str(display_name or f"{provider} / {model}").strip()
     if not display_name:
         raise ValueError("display_name_required")
 
     with db.cursor() as cur:
         cur.execute(
-            """SELECT id
+            """SELECT id, context_window_tokens
                FROM secretary.llm_profiles
                WHERE provider=%s AND model=%s
                  AND endpoint IS NOT DISTINCT FROM %s
@@ -220,21 +238,34 @@ def upsert_llm_profile(
         )
         row = cur.fetchone()
         profile_id = row[0] if row else uuid4()
+        if provider == "ollama":
+            context_window_tokens = normalize_context_tokens(
+                requested_context if requested_context is not None
+                else row[1] if row and row[1] is not None
+                else DEFAULT_OLLAMA_CONTEXT_TOKENS
+            )
+        else:
+            context_window_tokens = None
         if row:
             cur.execute(
                 """UPDATE secretary.llm_profiles
-                   SET display_name=%s, enabled=%s, updated_at=now()
+                   SET display_name=%s, context_window_tokens=%s,
+                       enabled=%s, updated_at=now()
                    WHERE id=%s""",
-                (display_name, bool(enabled), profile_id),
+                (
+                    display_name, context_window_tokens,
+                    bool(enabled), profile_id,
+                ),
             )
         else:
             cur.execute(
                 """INSERT INTO secretary.llm_profiles
-                   (id, display_name, provider, model, endpoint, credential_env, enabled)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                   (id, display_name, provider, model, endpoint, credential_env,
+                    context_window_tokens, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     profile_id, display_name, provider, model, endpoint,
-                    credential_env, bool(enabled),
+                    credential_env, context_window_tokens, bool(enabled),
                 ),
             )
     return {
@@ -244,6 +275,7 @@ def upsert_llm_profile(
         "model": model,
         "endpoint": endpoint,
         "credential_env": credential_env,
+        "context_window_tokens": context_window_tokens,
         "enabled": bool(enabled),
     }
 
@@ -261,6 +293,7 @@ def sync_ollama_profiles(db, models: list[str], *, endpoint: str | None = None) 
             display_name="Ollama / " + model,
             endpoint=endpoint or DEFAULT_ENDPOINTS["ollama"],
             credential_env=None,
+            context_window_tokens=None,
             enabled=True,
         ))
     return synced
@@ -274,6 +307,7 @@ def _profile_id_for_spec(db, spec: dict) -> str:
         display_name=spec.get("profile_label"),
         endpoint=spec.get("endpoint"),
         credential_env=spec.get("credential_env"),
+        context_window_tokens=spec.get("context_window_tokens"),
         enabled=True,
     )
     return profile["id"]
@@ -283,8 +317,8 @@ def load_member_specs(db) -> list[dict]:
     with db.cursor() as cur:
         cur.execute(
             """SELECT a.member, a.profile_id, p.display_name, p.provider, p.model,
-                      p.endpoint, p.credential_env, a.weight, a.timeout_seconds,
-                      a.enabled, p.enabled
+                      p.endpoint, p.credential_env, p.context_window_tokens,
+                      a.weight, a.timeout_seconds, a.enabled, p.enabled
                FROM secretary.magi_member_assignments a
                JOIN secretary.llm_profiles p ON p.id=a.profile_id"""
         )
@@ -303,9 +337,10 @@ def load_member_specs(db) -> list[dict]:
             "model": row[4],
             "endpoint": row[5],
             "credential_env": row[6],
-            "weight": float(row[7]),
-            "timeout_seconds": int(row[8]),
-            "enabled": bool(row[9] and row[10]),
+            "context_window_tokens": row[7],
+            "weight": float(row[8]),
+            "timeout_seconds": int(row[9]),
+            "enabled": bool(row[10] and row[11]),
             "settings_source": "database",
         })
     return specs
