@@ -46,6 +46,7 @@ from .magi_dialogue import (
     validate_turn,
 )
 from .magi_settings import DEFAULT_TIMEOUT_SECONDS
+from .ollama_runtime import normalize_context_tokens
 from .ritsuko_magi_protocol import default_resource_catalog
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -80,6 +81,7 @@ async def _call_ollama_guided_async(
     model: str,
     timeout: float,
     base_url: str | None = None,
+    context_window_tokens: int | None = None,
 ) -> dict:
     stage = envelope["stage"]
     schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
@@ -91,7 +93,11 @@ async def _call_ollama_guided_async(
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": json.dumps(envelope, ensure_ascii=False)},
         ],
-        "options": {"temperature": 0, "num_predict": 1150},
+        "options": {
+            "temperature": 0,
+            "num_predict": 1150,
+            "num_ctx": normalize_context_tokens(context_window_tokens),
+        },
     }
     endpoint = str(base_url or OLLAMA).strip().rstrip("/")
     try:
@@ -347,6 +353,7 @@ async def _call_panel_member_async(
             model=spec["model"],
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
+            context_window_tokens=spec.get("context_window_tokens"),
         )
     elif provider == "openai":
         result = await _call_openai_guided_async(
@@ -440,6 +447,7 @@ async def call_guided_panel_async(
                     "model": spec["model"],
                     "weight": spec["weight"],
                     "timeout_seconds": spec["timeout_seconds"],
+                    "context_window_tokens": spec.get("context_window_tokens"),
                 }
                 for spec in specs
             ],
