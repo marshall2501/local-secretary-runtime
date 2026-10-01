@@ -17,6 +17,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import os
+import time
 from urllib.parse import quote
 
 import anyio
@@ -346,6 +347,7 @@ async def _call_panel_member_async(
     member_envelope["magi_member"] = spec["name"]
     member_timeout = float(spec.get("timeout_seconds") or timeout)
     provider = spec["provider"]
+    started = time.perf_counter()
 
     if provider == "ollama":
         result = await _call_ollama_guided_async(
@@ -387,6 +389,7 @@ async def _call_panel_member_async(
         "weight": spec["weight"],
         "timeout_seconds": spec.get("timeout_seconds"),
         "context_window_tokens": spec.get("context_window_tokens"),
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
         "errors": list(result.get("errors") or []),
