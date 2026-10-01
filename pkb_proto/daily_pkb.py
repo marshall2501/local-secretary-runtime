@@ -5146,8 +5146,8 @@ def settings_page():
 
     with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
         _portal_header(
-            "表示設定",
-            "日常用GUIの表示・初期状態を変更。サーバー再起動は不要です。",
+            "設定",
+            "MAGI LLM構成と日常用GUIの表示・初期状態を変更します。",
         )
         ui.label(
             "「表示」はブロック自体の表示/非表示を設定します。"
@@ -5160,6 +5160,115 @@ def settings_page():
             "PKBの本人データとは分離しています。"
         ).classes("text-sm text-grey-7")
 
+        with ui.card().classes("w-full border-2 border-teal-200 bg-teal-50"):
+            ui.label("MAGI — LLM profile").classes("text-lg font-bold text-teal-900")
+            ui.label(
+                "MELCHIOR / CASPER / BALTHASARはLLMの席名です。"
+                "ここでprovider/model profileを登録し、RITSUKO画面で各席へ自由に割り当てます。"
+            ).classes("text-sm")
+            ui.label(
+                "通常設定はPostgreSQLが正本です。API Secret値はこの設定テーブルへ保存せず、"
+                "credential_envにはSecretを読む環境変数名だけを保存します。"
+            ).classes("text-xs text-grey-7")
+
+            @ui.refreshable
+            def llm_profiles_panel():
+                try:
+                    with connection() as db:
+                        profiles = list_llm_profiles(db, include_disabled=True)
+                except Exception as exc:
+                    ui.label(
+                        "LLM profileを取得できません: " + str(exc)[:200]
+                    ).classes("text-red-700")
+                    return
+                if not profiles:
+                    ui.label("登録済みprofileはありません。").classes("text-sm text-grey-7")
+                    return
+                with ui.column().classes("w-full gap-1"):
+                    for item in profiles:
+                        state_label = "有効" if item["enabled"] else "無効"
+                        credential = item.get("credential_env") or "不要"
+                        ui.label(
+                            f"{item['display_name']} / provider={item['provider']} "
+                            f"/ model={item['model']} / credential={credential} / {state_label}"
+                        ).classes("font-mono text-xs")
+
+            llm_profiles_panel()
+
+            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+                profile_provider = ui.select(
+                    options=list(PROVIDERS),
+                    value="ollama",
+                    label="Provider",
+                ).classes("min-w-40")
+                profile_model = ui.input(
+                    "Model",
+                    placeholder="例: gemma3:12b / gpt-5.6-sol / gemini-...",
+                ).classes("min-w-64 grow")
+                profile_display = ui.input(
+                    "表示名（任意）",
+                    placeholder="未指定なら provider / model",
+                ).classes("min-w-64")
+            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+                profile_endpoint = ui.input(
+                    "Endpoint（任意）",
+                    placeholder="未指定ならprovider既定値",
+                ).classes("min-w-80 grow")
+                profile_credential = ui.input(
+                    "Credential環境変数名（cloudのみ・任意）",
+                    placeholder="OPENAI_API_KEY / GEMINI_API_KEY",
+                ).classes("min-w-72")
+
+                def fill_provider_defaults():
+                    try:
+                        endpoint, credential = provider_defaults(
+                            str(profile_provider.value or "")
+                        )
+                    except Exception:
+                        return
+                    profile_endpoint.value = endpoint
+                    profile_credential.value = credential or ""
+                    profile_endpoint.update()
+                    profile_credential.update()
+
+                ui.button(
+                    "既定値を入れる",
+                    icon="auto_fix_high",
+                    on_click=fill_provider_defaults,
+                ).props("flat dense")
+
+            def add_llm_profile():
+                try:
+                    saved = _register_magi_profile(
+                        provider=str(profile_provider.value or ""),
+                        model=str(profile_model.value or ""),
+                        display_name=str(profile_display.value or "").strip() or None,
+                        endpoint=str(profile_endpoint.value or "").strip() or None,
+                        credential_env=str(profile_credential.value or "").strip() or None,
+                    )
+                    ui.notify(
+                        "LLM profileを保存しました: " + saved["display_name"],
+                        type="positive",
+                    )
+                    llm_profiles_panel.refresh()
+                except Exception as exc:
+                    ui.notify(
+                        "LLM profileを保存できません: " + str(exc)[:200],
+                        type="negative",
+                    )
+
+            with ui.row().classes("gap-2"):
+                ui.button(
+                    "LLM profileを追加/更新",
+                    icon="add",
+                    color="teal",
+                    on_click=add_llm_profile,
+                )
+                ui.label(
+                    "Ollamaのインストール済みmodelはRITSUKO画面を開いたとき自動でprofile同期されます。"
+                ).classes("text-xs text-grey-7 self-center")
+
+        ui.separator()
         pkb_open_controls = {}
         pkb_visible_controls = {}
         with ui.card().classes("w-full border-2 border-green-200 bg-green-50"):
