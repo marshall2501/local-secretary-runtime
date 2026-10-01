@@ -5243,8 +5243,11 @@ def settings_page():
             "PKBの本人データとは分離しています。"
         ).classes("text-sm text-grey-7")
 
-        with ui.card().classes("w-full border-2 border-teal-200 bg-teal-50"):
-            ui.label("MAGI — LLM profile").classes("text-lg font-bold text-teal-900")
+        with ui.expansion(
+            "MAGI — LLM profile",
+            value=False,
+            icon="tune",
+        ).classes("w-full border-2 border-teal-200 bg-teal-50"):
             ui.label(
                 "MELCHIOR / CASPER / BALTHASARはLLMの席名です。"
                 "ここでprovider/model profileを登録し、RITSUKO画面で各席へ自由に割り当てます。"
@@ -5253,42 +5256,7 @@ def settings_page():
                 "通常設定はPostgreSQLが正本です。API Secret値はこの設定テーブルへ保存せず、"
                 "credential_envにはSecretを読む環境変数名だけを保存します。"
             ).classes("text-xs text-grey-7")
-
-            @ui.refreshable
-            def llm_profiles_panel():
-                try:
-                    with connection() as db:
-                        profiles = list_llm_profiles(db, include_disabled=True)
-                except Exception as exc:
-                    ui.label(
-                        "LLM profileを取得できません: " + str(exc)[:200]
-                    ).classes("text-red-700")
-                    return
-                if not profiles:
-                    ui.label("登録済みprofileはありません。").classes("text-sm text-grey-7")
-                    return
-                with ui.column().classes("w-full gap-1"):
-                    for item in profiles:
-                        state_label = "有効" if item["enabled"] else "無効"
-                        credential = item.get("credential_env") or "不要"
-                        context_label = (
-                            str(item.get("context_window_tokens")) + " tokens"
-                            if item["provider"] == "ollama"
-                            else "provider管理"
-                        )
-                        generation_label = (
-                            str(item.get("ollama_num_predict")) + " tokens"
-                            if item["provider"] == "ollama"
-                            else "provider管理"
-                        )
-                        ui.label(
-                            f"{item['display_name']} / provider={item['provider']} "
-                            f"/ model={item['model']} / context={context_label} "
-                            f"/ generation={generation_label} "
-                            f"/ credential={credential} / {state_label}"
-                        ).classes("font-mono text-xs")
-
-            llm_profiles_panel()
+            ui.separator()
 
             try:
                 with connection() as db:
@@ -5310,7 +5278,11 @@ def settings_page():
                 label="既存LLM profileを編集（未選択なら新規）",
             ).props("clearable").classes("w-full")
 
-            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+            ui.separator()
+
+            with ui.row().classes(
+                "w-full gap-2 items-end flex-wrap border-b border-teal-200 pb-3"
+            ):
                 profile_provider = ui.select(
                     options=list(PROVIDERS),
                     value="ollama",
@@ -5324,7 +5296,10 @@ def settings_page():
                     "表示名（任意）",
                     placeholder="未指定なら provider / model",
                 ).classes("min-w-64")
-            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+
+            with ui.row().classes(
+                "w-full gap-2 items-end flex-wrap border-b border-teal-200 py-3"
+            ):
                 profile_endpoint = ui.input(
                     "Endpoint（任意）",
                     placeholder="未指定ならprovider既定値",
@@ -5350,42 +5325,35 @@ def settings_page():
                     label="Generation Budget（Ollamaのみ）",
                 ).classes("min-w-56")
 
-                def fill_provider_defaults():
-                    try:
-                        endpoint, credential = provider_defaults(
-                            str(profile_provider.value or "")
-                        )
-                    except Exception:
-                        return
-                    provider = str(profile_provider.value or "")
-                    profile_endpoint.value = endpoint
-                    profile_credential.value = credential or ""
-                    profile_context.value = (
-                        DEFAULT_OLLAMA_CONTEXT_TOKENS
-                        if provider == "ollama"
-                        else None
+            def fill_provider_defaults():
+                try:
+                    endpoint, credential = provider_defaults(
+                        str(profile_provider.value or "")
                     )
-                    profile_generation.value = (
-                        DEFAULT_MAGI_OLLAMA_NUM_PREDICT
-                        if provider == "ollama"
-                        else None
-                    )
-                    profile_endpoint.update()
-                    profile_credential.update()
-                    profile_context.update()
-                    profile_generation.update()
+                except Exception:
+                    return
+                provider = str(profile_provider.value or "")
+                profile_endpoint.value = endpoint
+                profile_credential.value = credential or ""
+                profile_context.value = (
+                    DEFAULT_OLLAMA_CONTEXT_TOKENS
+                    if provider == "ollama"
+                    else None
+                )
+                profile_generation.value = (
+                    DEFAULT_MAGI_OLLAMA_NUM_PREDICT
+                    if provider == "ollama"
+                    else None
+                )
+                profile_endpoint.update()
+                profile_credential.update()
+                profile_context.update()
+                profile_generation.update()
 
-                ui.button(
-                    "既定値を入れる",
-                    icon="auto_fix_high",
-                    on_click=fill_provider_defaults,
-                ).props("flat dense")
-
-            def load_existing_profile():
+            def apply_selected_profile(_event=None):
                 profile_id = str(profile_edit_target.value or "").strip()
                 item = editable_profile_by_id.get(profile_id)
                 if item is None:
-                    ui.notify("編集する既存LLM profileを選択してください", type="warning")
                     return
                 profile_provider.value = item["provider"]
                 profile_model.value = item["model"]
@@ -5400,19 +5368,18 @@ def settings_page():
                     profile_context, profile_generation,
                 ):
                     control.update()
-                ui.notify(
-                    "編集欄へ読み込みました: " + item["display_name"],
-                    type="positive",
-                )
 
-            with ui.row().classes("w-full gap-2 items-center"):
+            profile_edit_target.on_value_change(apply_selected_profile)
+
+            with ui.row().classes("w-full gap-2 items-center pt-1"):
                 ui.button(
-                    "選択したprofileを編集欄へ読み込む",
-                    icon="edit",
-                    on_click=load_existing_profile,
-                ).props("outline dense")
+                    "既定値を入れる",
+                    icon="auto_fix_high",
+                    on_click=fill_provider_defaults,
+                ).props("flat dense")
                 ui.label(
-                    "既存profileを選択して読み込み、値を変更して下の保存ボタンを押すと同じprofileを更新します。"
+                    "既存profileは上のリストで選択すると編集欄へ自動反映されます。"
+                    "未選択なら新規profileとして保存します。"
                 ).classes("text-xs text-grey-7")
 
             def add_llm_profile():
@@ -5441,11 +5408,17 @@ def settings_page():
                             else None
                         ),
                     )
+                    editable_profile_by_id[saved["id"]] = saved
+                    profile_edit_target.options[saved["id"]] = (
+                        saved["display_name"]
+                        + f" [{saved['provider']} / {saved['model']}]"
+                    )
+                    profile_edit_target.value = saved["id"]
+                    profile_edit_target.update()
                     ui.notify(
                         "LLM profileを保存しました: " + saved["display_name"],
                         type="positive",
                     )
-                    llm_profiles_panel.refresh()
                 except Exception as exc:
                     ui.notify(
                         "LLM profileを保存できません: " + str(exc)[:200],
@@ -5469,7 +5442,7 @@ def settings_page():
         with ui.card().classes("w-full border-2 border-green-200 bg-green-50"):
             ui.label("PKB").classes("text-lg font-bold text-green-900")
             for key, label in pkb_labels.items():
-                with ui.row().classes("w-full items-center gap-4"):
+                with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                     ui.label(label).classes("grow")
                     pkb_visible_controls[key] = ui.switch(
                         "表示",
@@ -5495,7 +5468,7 @@ def settings_page():
             ).classes("text-sm text-grey-7")
 
             for key in ENTITY_TAB_ORDER:
-                with ui.row().classes("w-full items-center gap-4"):
+                with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                     ui.label(ENTITY_TAB_LABELS[key]).classes("grow")
                     entity_visible_controls[key] = ui.switch(
                         "表示",
@@ -5516,7 +5489,7 @@ def settings_page():
         with ui.card().classes("w-full border-2 border-blue-200 bg-blue-50"):
             ui.label("家計・資産").classes("text-lg font-bold text-blue-900")
             for key, label in finance_labels.items():
-                with ui.row().classes("w-full items-center gap-4"):
+                with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                     ui.label(label).classes("grow")
                     finance_visible_controls[key] = ui.switch(
                         "表示",
@@ -5554,7 +5527,7 @@ def settings_page():
                 "主操作の依頼ブロックは常時表示。検証・補足ブロックだけ非表示にできます。"
             ).classes("text-sm text-grey-7")
             for key, label in core_labels.items():
-                with ui.row().classes("w-full items-center gap-4"):
+                with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                     ui.label(label).classes("grow")
                     core_visible_controls[key] = ui.switch(
                         "表示",
