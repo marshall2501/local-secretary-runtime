@@ -87,17 +87,6 @@ from .ollama_runtime import (
 )
 from .daily_interpreter import interpret as interpret_daily
 
-def _notify_client(client, message: str, *, type: str) -> None:
-    """Send a notification through a stable client context.
-
-    Refreshable panels can delete the slot that originated an async callback.
-    Re-entering the captured client avoids resolving ui.notify through that
-    deleted slot after the panel has been refreshed.
-    """
-    with client:
-        ui.notify(message, type=type)
-
-
 from .entity_model_service import (
     COMPONENT_ROLE_TOKENS,
     load_entity_detail,
@@ -118,6 +107,17 @@ from .web_research import research_web
 from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
 from .provider_usage import ProviderUsageError, read_openai_month_usage
+
+def _notify_client(client, message: str, *, type: str) -> None:
+    """Send a notification through a stable client context.
+
+    Refreshable panels can delete the slot that originated an async callback.
+    Re-entering the captured client avoids resolving ui.notify through that
+    deleted slot after the panel has been refreshed.
+    """
+    with client:
+        ui.notify(message, type=type)
+
 
 DBNAME = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
@@ -4560,7 +4560,7 @@ def core_page(task_id: str = ""):
                                     "回答だけ経路へは戻しません。"
                                 ).classes("text-xs text-blue-800")
 
-                            async def refresh_after_proposal_review() -> None:
+                            async def load_after_proposal_review() -> None:
                                 saved_trace = await run.io_bound(
                                     load_core_task_trace,
                                     UUID(session["task_id"]),
@@ -4574,12 +4574,6 @@ def core_page(task_id: str = ""):
                                     or session
                                 )
                                 state["guided_history_read_only"] = True
-                                guided_result_panel.refresh()
-                                open_tasks_panel.refresh()
-                                completed_tasks_panel.refresh()
-                                core_result.refresh()
-                                trace_panel.refresh()
-                                resume_panel.refresh()
 
                             async def execute_proposal_review(
                                 decision: str,
@@ -4587,6 +4581,8 @@ def core_page(task_id: str = ""):
                                 if state["guided_busy"]:
                                     return
                                 notification_client = context.client
+                                notification_message = None
+                                notification_type = None
                                 stop_event = begin_guided_run(
                                     len(session["turns"]) + 1
                                 )
@@ -4626,7 +4622,7 @@ def core_page(task_id: str = ""):
                                             on_turn_start=note_guided_turn,
                                         )
                                     )
-                                    await refresh_after_proposal_review()
+                                    await load_after_proposal_review()
                                     if decision == "remember":
                                         decisions = [
                                             str(item.get("decision") or "-")
@@ -4638,24 +4634,21 @@ def core_page(task_id: str = ""):
                                             )
                                             if isinstance(item, dict)
                                         ]
-                                        _notify_client(
-                                            notification_client,
+                                        notification_message = (
                                             "Memory Intake結果をMAGIへ再評価し、"
                                             "RITSUKOがTaskを完了しました"
                                             + (
                                                 " (" + ", ".join(decisions) + ")"
                                                 if decisions
                                                 else ""
-                                            ),
-                                            type="positive",
+                                            )
                                         )
                                     else:
-                                        _notify_client(
-                                            notification_client,
+                                        notification_message = (
                                             "回答レビューをMAGIへ再評価し、"
-                                            "RITSUKOがTaskを完了しました",
-                                            type="positive",
+                                            "RITSUKOがTaskを完了しました"
                                         )
+                                    notification_type = "positive"
                                 except Exception as exc:
                                     try:
                                         saved_trace = await run.io_bound(
@@ -4670,13 +4663,12 @@ def core_page(task_id: str = ""):
                                         )
                                     except Exception:
                                         pass
-                                    _notify_client(
-                                        notification_client,
+                                    notification_message = (
                                         type(exc).__name__
                                         + ": "
-                                        + str(exc)[:180],
-                                        type="negative",
+                                        + str(exc)[:180]
                                     )
+                                    notification_type = "negative"
                                 finally:
                                     state["guided_busy"] = False
                                     state["guided_stop_event"] = None
@@ -4687,6 +4679,12 @@ def core_page(task_id: str = ""):
                                     core_result.refresh()
                                     trace_panel.refresh()
                                     resume_panel.refresh()
+                                if notification_message and notification_type:
+                                    _notify_client(
+                                        notification_client,
+                                        notification_message,
+                                        type=notification_type,
+                                    )
 
                             async def complete_answer_only():
                                 await execute_proposal_review("answer_only")
