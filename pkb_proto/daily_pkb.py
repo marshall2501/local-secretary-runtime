@@ -3805,7 +3805,8 @@ def core_page(task_id: str = ""):
              "protocol_result": None, "protocol_busy": False,
              "guided_session": None, "guided_busy": False,
              "guided_turn": 0, "guided_stop_event": None,
-             "guided_stop_requested": False}
+             "guided_stop_requested": False,
+             "guided_history_read_only": False}
 
     list_limits = {key: _UI_PREFERENCES["core"][key] for key in CORE_TASK_LIST_DEFAULTS}
     list_defaults = dict(list_limits)
@@ -4107,6 +4108,17 @@ def core_page(task_id: str = ""):
                         "text-sm text-grey-7"
                     )
                     return
+                if state.get("guided_history_read_only"):
+                    saved_task = (state.get("trace") or {}).get("task") or {}
+                    ui.label("保存済みTaskのMAGI対話を閲覧中（read-only）").classes(
+                        "font-bold text-blue-grey-800"
+                    )
+                    ui.label(
+                        "Task status="
+                        + str(saved_task.get("status") or "-")
+                        + " / MAGI session status="
+                        + str(session.get("status") or "-")
+                    ).classes("font-mono text-xs text-grey-7")
                 ui.label(
                     f"Task: {session['task_id']} / status={session['status']}"
                     f" / RITSUKO next={session['next_step']}"
@@ -4179,7 +4191,10 @@ def core_page(task_id: str = ""):
                             json.dumps(turn["diagnostic"], ensure_ascii=False, indent=2),
                             language="json",
                         ).classes("w-full")
-                if session["status"] == "waiting_information":
+                if (
+                    not state.get("guided_history_read_only")
+                    and session["status"] == "waiting_information"
+                ):
                     ui.label(
                         "未解決の情報要求（自動PKB read対象外または追加情報が必要）"
                     ).classes("font-bold text-orange-900")
@@ -4220,7 +4235,10 @@ def core_page(task_id: str = ""):
                         "手動Observationで継続（開発用）",
                         icon="refresh", on_click=continue_guided,
                     ).props("outline")
-                elif session["status"] == "waiting_user":
+                elif (
+                    not state.get("guided_history_read_only")
+                    and session["status"] == "waiting_user"
+                ):
                     ui.label("RITSUKOが本人への確認を必要とする状態です。").classes(
                         "text-orange-900"
                     )
@@ -4276,6 +4294,7 @@ def core_page(task_id: str = ""):
                     return
                 stop_event = begin_guided_run(1)
                 state["guided_session"] = None
+                state["guided_history_read_only"] = False
                 guided_button.disable()
                 guided_result_panel.refresh()
                 try:
@@ -4601,10 +4620,23 @@ def core_page(task_id: str = ""):
                     return
                 state["result"] = core_task_selection_result(item)
                 load_current_trace()
+                saved_task = (state.get("trace") or {}).get("task") or {}
+                if saved_task.get("core_slice") == "ritsuko_magi_observation_v1":
+                    saved_session = saved_task.get("magi_session")
+                    if isinstance(saved_session, dict):
+                        state["guided_session"] = saved_session
+                        state["guided_history_read_only"] = True
+                    else:
+                        state["guided_session"] = None
+                        state["guided_history_read_only"] = False
+                else:
+                    state["guided_session"] = None
+                    state["guided_history_read_only"] = False
                 ooda_bar.refresh()
                 core_result.refresh()
                 resume_panel.refresh()
                 trace_panel.refresh()
+                guided_result_panel.refresh()
 
             @ui.refreshable
             def completed_tasks_panel():
