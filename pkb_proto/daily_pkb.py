@@ -46,7 +46,14 @@ from .magi_dialogue import MAX_TURNS, export_dialogue
 from .magi_async import (
     start_dialogue_async,
     continue_with_observation_async,
+    continue_with_verified_observation_async,
     continue_with_user_clarification_async,
+)
+from .magi_core_bridge import pending_pkb_request, verified_pkb_observation
+from .magi_task_store import (
+    create_task as create_magi_core_task,
+    persist_session as persist_magi_core_session,
+    record_pkb_read as record_magi_pkb_read,
 )
 from .magi_settings import (
     DEFAULT_RETRY_HTTP_CODES,
@@ -71,7 +78,12 @@ from .ollama_runtime import (
     OLLAMA_NUM_PREDICT_OPTIONS,
 )
 from .daily_interpreter import interpret as interpret_daily
-from .entity_model_service import load_entity_detail, list_components, resolve_component_reference
+from .entity_model_service import (
+    COMPONENT_ROLE_TOKENS,
+    load_entity_detail,
+    list_components,
+    resolve_component_reference,
+)
 from .finance_preview import analyze_moneyforward_csv
 from .finance_import import (
     commit_import,
@@ -1458,6 +1470,99 @@ def _execute_cooperative_local_probe(
         }
 
     return _execute_core_read("pkb_search", text)
+
+
+def _execute_magi_pkb_request(
+    user_raw: str,
+    pending_request: dict,
+) -> dict:
+    """Execute one deterministic bounded PKB read requested by MAGI.
+
+    MAGI chooses the information source and describes the needed fact.
+    RITSUKO resolves only already-modelled Entity/component identifiers and
+    performs the actual local read. It does not invent a new semantic route.
+    """
+    requested = str(pending_request.get("what") or "").strip()
+    combined = (user_raw.strip() + "\n" + requested).strip()
+
+    with connection() as db:
+        entities = _entity_map(db)
+        parents = [
+            row for name, row in sorted(
+                entities.items(), key=lambda item: len(item[0]), reverse=True
+            )
+            if name and name in combined and row.get("entity_type") == "computer"
+        ]
+        roles = [token for token in COMPONENT_ROLE_TOKENS if token in combined]
+
+        if len(parents) == 1 and len(roles) == 1:
+            parent = parents[0]
+            component = resolve_component_reference(
+                db, parent["name"], roles[0]
+            )
+            if component is not None:
+                detail = _json_safe(
+                    load_entity_detail(db, component["id"]) or {}
+                )
+                current = [
+                    item for item in (detail.get("current") or [])
+                    if item.get("valid_to") is None
+                ][:20]
+                values = {
+                    str(item.get("predicate")): item.get("value")
+                    for item in current
+                    if item.get("predicate")
+                }
+                manufacturer = str(values.get("manufacturer") or "").strip()
+                model = str(values.get("model") or "").strip()
+                driver = str(values.get("current_driver") or "").strip()
+                identity = model or component.get("name") or roles[0]
+                if manufacturer and manufacturer.lower() not in identity.lower():
+                    identity = manufacturer + " " + identity
+                answer = (
+                    f"PKBの記録では、{parent['name']}の{roles[0]}は {identity} です。"
+                    if model
+                    else (
+                        f"PKBには{parent['name']}の{roles[0]} Entity "
+                        f"{component.get('name')}がありますが、モデル属性は確認できませんでした。"
+                    )
+                )
+                if driver:
+                    answer += f" 現在ドライバーは {driver} です。"
+                result = {
+                    "status": "ok",
+                    "result_kind": "entity_detail",
+                    "total": len(current),
+                    "entity": detail.get("entity"),
+                    "parent": {
+                        "id": parent.get("id"),
+                        "name": parent.get("name"),
+                    },
+                    "component_role": component.get("relation_role"),
+                    "current": current,
+                    "relations": (detail.get("relations") or [])[:12],
+                    "events": (detail.get("events") or [])[:12],
+                }
+                return {
+                    "capability": "pkb_search",
+                    "result": result,
+                    "answer": answer,
+                    "total": len(current),
+                    "tool": "pkb",
+                    "operation": "entity_detail",
+                    "source_slug": "pkb-entity-detail",
+                    "citation": "RITSUKO bounded PKB Entity detail",
+                    "verified_by": "deterministic_pkb_query",
+                    "source_metadata": {
+                        "parent_entity_id": str(parent.get("id") or ""),
+                        "parent_entity_name": parent.get("name"),
+                        "component_entity_id": component.get("id"),
+                        "component_entity_name": component.get("name"),
+                        "relation_role": component.get("relation_role"),
+                    },
+                }
+
+    return _execute_core_read("pkb_search", requested or user_raw)
 
 
 def _execute_core_read(capability: str, text: str) -> dict:
