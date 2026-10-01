@@ -5290,6 +5290,26 @@ def settings_page():
 
             llm_profiles_panel()
 
+            try:
+                with connection() as db:
+                    editable_profiles = list_llm_profiles(db, include_disabled=True)
+            except Exception:
+                editable_profiles = []
+            editable_profile_by_id = {
+                item["id"]: item for item in editable_profiles
+            }
+            profile_edit_target = ui.select(
+                options={
+                    item["id"]: (
+                        item["display_name"]
+                        + f" [{item['provider']} / {item['model']}]"
+                    )
+                    for item in editable_profiles
+                },
+                value=None,
+                label="既存LLM profileを編集（未選択なら新規）",
+            ).props("clearable").classes("w-full")
+
             with ui.row().classes("w-full gap-2 items-end flex-wrap"):
                 profile_provider = ui.select(
                     options=list(PROVIDERS),
@@ -5361,6 +5381,40 @@ def settings_page():
                     on_click=fill_provider_defaults,
                 ).props("flat dense")
 
+            def load_existing_profile():
+                profile_id = str(profile_edit_target.value or "").strip()
+                item = editable_profile_by_id.get(profile_id)
+                if item is None:
+                    ui.notify("編集する既存LLM profileを選択してください", type="warning")
+                    return
+                profile_provider.value = item["provider"]
+                profile_model.value = item["model"]
+                profile_display.value = item["display_name"]
+                profile_endpoint.value = item["endpoint"]
+                profile_credential.value = item.get("credential_env") or ""
+                profile_context.value = item.get("context_window_tokens")
+                profile_generation.value = item.get("ollama_num_predict")
+                for control in (
+                    profile_provider, profile_model, profile_display,
+                    profile_endpoint, profile_credential,
+                    profile_context, profile_generation,
+                ):
+                    control.update()
+                ui.notify(
+                    "編集欄へ読み込みました: " + item["display_name"],
+                    type="positive",
+                )
+
+            with ui.row().classes("w-full gap-2 items-center"):
+                ui.button(
+                    "選択したprofileを編集欄へ読み込む",
+                    icon="edit",
+                    on_click=load_existing_profile,
+                ).props("outline dense")
+                ui.label(
+                    "既存profileを選択して読み込み、値を変更して下の保存ボタンを押すと同じprofileを更新します。"
+                ).classes("text-xs text-grey-7")
+
             def add_llm_profile():
                 try:
                     saved = _register_magi_profile(
@@ -5381,6 +5435,11 @@ def settings_page():
                             and profile_generation.value is not None
                             else None
                         ),
+                        profile_id=(
+                            str(profile_edit_target.value)
+                            if profile_edit_target.value
+                            else None
+                        ),
                     )
                     ui.notify(
                         "LLM profileを保存しました: " + saved["display_name"],
@@ -5395,8 +5454,8 @@ def settings_page():
 
             with ui.row().classes("gap-2"):
                 ui.button(
-                    "LLM profileを追加/更新",
-                    icon="add",
+                    "LLM profileを保存",
+                    icon="save",
                     color="teal",
                     on_click=add_llm_profile,
                 )
