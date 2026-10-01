@@ -221,6 +221,7 @@ def upsert_llm_profile(
     context_window_tokens: int | None = None,
     ollama_num_predict: int | None = None,
     enabled: bool = True,
+    profile_id: str | None = None,
 ) -> dict:
     provider = _normalize_provider(provider)
     model = str(model or "").strip()
@@ -239,16 +240,32 @@ def upsert_llm_profile(
         raise ValueError("display_name_required")
 
     with db.cursor() as cur:
-        cur.execute(
-            """SELECT id, context_window_tokens, ollama_num_predict
-               FROM secretary.llm_profiles
-               WHERE provider=%s AND model=%s
-                 AND endpoint IS NOT DISTINCT FROM %s
-                 AND credential_env IS NOT DISTINCT FROM %s""",
-            (provider, model, endpoint, credential_env),
-        )
-        row = cur.fetchone()
-        profile_id = row[0] if row else uuid4()
+        if profile_id:
+            try:
+                requested_profile_id = UUID(str(profile_id))
+            except ValueError as exc:
+                raise ValueError("invalid_profile_id") from exc
+            cur.execute(
+                """SELECT id, context_window_tokens, ollama_num_predict
+                   FROM secretary.llm_profiles
+                   WHERE id=%s""",
+                (requested_profile_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError("unknown_profile")
+            profile_uuid = row[0]
+        else:
+            cur.execute(
+                """SELECT id, context_window_tokens, ollama_num_predict
+                   FROM secretary.llm_profiles
+                   WHERE provider=%s AND model=%s
+                     AND endpoint IS NOT DISTINCT FROM %s
+                     AND credential_env IS NOT DISTINCT FROM %s""",
+                (provider, model, endpoint, credential_env),
+            )
+            row = cur.fetchone()
+            profile_uuid = row[0] if row else uuid4()
         if provider == "ollama":
             context_window_tokens = normalize_context_tokens(
                 requested_context if requested_context is not None
@@ -266,12 +283,14 @@ def upsert_llm_profile(
         if row:
             cur.execute(
                 """UPDATE secretary.llm_profiles
-                   SET display_name=%s, context_window_tokens=%s,
+                   SET display_name=%s, provider=%s, model=%s, endpoint=%s,
+                       credential_env=%s, context_window_tokens=%s,
                        ollama_num_predict=%s, enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
-                    display_name, context_window_tokens,
-                    ollama_num_predict, bool(enabled), profile_id,
+                    display_name, provider, model, endpoint, credential_env,
+                    context_window_tokens, ollama_num_predict,
+                    bool(enabled), profile_uuid,
                 ),
             )
         else:
@@ -281,13 +300,13 @@ def upsert_llm_profile(
                     context_window_tokens, ollama_num_predict, enabled)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    profile_id, display_name, provider, model, endpoint,
+                    profile_uuid, display_name, provider, model, endpoint,
                     credential_env, context_window_tokens, ollama_num_predict,
                     bool(enabled),
                 ),
             )
     return {
-        "id": str(profile_id),
+        "id": str(profile_uuid),
         "display_name": display_name,
         "provider": provider,
         "model": model,
