@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 import json
 import os
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -620,6 +621,7 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
     member_envelope["magi_member"] = spec["name"]
     member_timeout = float(spec.get("timeout_seconds") or timeout)
     provider = spec["provider"]
+    started = time.perf_counter()
     if provider == "ollama":
         result = _call_ollama_guided(
             member_envelope,
@@ -657,6 +659,7 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
         "weight": spec["weight"],
         "timeout_seconds": spec.get("timeout_seconds"),
         "context_window_tokens": spec.get("context_window_tokens"),
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
         "errors": list(result.get("errors") or []),
