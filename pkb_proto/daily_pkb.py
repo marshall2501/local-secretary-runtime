@@ -4464,9 +4464,8 @@ def core_page(task_id: str = ""):
                             trace_panel.refresh()
                             resume_panel.refresh()
 
-                        async def run_proposal_review(
+                        async def execute_proposal_review(
                             decision: str,
-                            memory_result: dict | None = None,
                         ) -> None:
                             if state["guided_busy"]:
                                 return
@@ -4475,7 +4474,17 @@ def core_page(task_id: str = ""):
                             remember_button.disable()
                             guided_button.disable()
                             guided_result_panel.refresh()
+                            memory_result = None
                             try:
+                                if decision == "remember":
+                                    intake = await run.io_bound(
+                                        _prepare_magi_memory_intake_record,
+                                        UUID(session["task_id"]),
+                                    )
+                                    memory_result = await run.io_bound(
+                                        register_memory_intake,
+                                        intake,
+                                    )
                                 state["guided_session"] = await review_magi_proposal(
                                     UUID(session["task_id"]),
                                     decision,
@@ -4494,82 +4503,63 @@ def core_page(task_id: str = ""):
                                     on_turn_start=note_guided_turn,
                                 )
                                 await refresh_after_proposal_review()
+                                if decision == "remember":
+                                    decisions = [
+                                        str(item.get("decision") or "-")
+                                        for item in (
+                                            (memory_result or {}).get("candidates") or []
+                                        )
+                                        if isinstance(item, dict)
+                                    ]
+                                    ui.notify(
+                                        "Memory Intake結果をMAGIへ再評価し、"
+                                        "RITSUKOがTaskを完了しました"
+                                        + (
+                                            " (" + ", ".join(decisions) + ")"
+                                            if decisions else ""
+                                        ),
+                                        type="positive",
+                                    )
+                                else:
+                                    ui.notify(
+                                        "回答レビューをMAGIへ再評価し、"
+                                        "RITSUKOがTaskを完了しました",
+                                        type="positive",
+                                    )
+                            except Exception as exc:
+                                try:
+                                    saved_trace = await run.io_bound(
+                                        load_core_task_trace,
+                                        UUID(session["task_id"]),
+                                    )
+                                    state["trace"] = saved_trace
+                                    state["result"] = core_task_selection_result(
+                                        saved_trace["task"]
+                                    )
+                                except Exception:
+                                    pass
+                                ui.notify(
+                                    type(exc).__name__ + ": " + str(exc)[:180],
+                                    type="negative",
+                                )
                             finally:
                                 state["guided_busy"] = False
                                 state["guided_stop_event"] = None
                                 guided_button.enable()
+                                answer_only_button.enable()
+                                remember_button.enable()
                                 guided_result_panel.refresh()
                                 open_tasks_panel.refresh()
                                 completed_tasks_panel.refresh()
+                                core_result.refresh()
+                                trace_panel.refresh()
+                                resume_panel.refresh()
 
                         async def complete_answer_only():
-                            try:
-                                await run_proposal_review("answer_only")
-                                ui.notify(
-                                    "回答レビューを再評価し、Taskを完了しました",
-                                    type="positive",
-                                )
-                            except Exception as exc:
-                                answer_only_button.enable()
-                                remember_button.enable()
-                                try:
-                                    saved_trace = await run.io_bound(
-                                        load_core_task_trace,
-                                        UUID(session["task_id"]),
-                                    )
-                                    state["trace"] = saved_trace
-                                except Exception:
-                                    pass
-                                ui.notify(
-                                    type(exc).__name__ + ": " + str(exc)[:180],
-                                    type="negative",
-                                )
+                            await execute_proposal_review("answer_only")
 
                         async def remember_and_complete():
-                            answer_only_button.disable()
-                            remember_button.disable()
-                            try:
-                                intake = await run.io_bound(
-                                    _prepare_magi_memory_intake_record,
-                                    UUID(session["task_id"]),
-                                )
-                                memory_result = await run.io_bound(
-                                    register_memory_intake,
-                                    intake,
-                                )
-                                await run_proposal_review(
-                                    "remember",
-                                    memory_result,
-                                )
-                                decisions = [
-                                    str(item.get("decision") or "-")
-                                    for item in (memory_result.get("candidates") or [])
-                                    if isinstance(item, dict)
-                                ]
-                                ui.notify(
-                                    "Memory Intake結果をMAGIへ再評価し、"
-                                    "RITSUKOがTaskを完了しました"
-                                    + (
-                                        " (" + ", ".join(decisions) + ")"
-                                        if decisions else ""
-                                    ),
-                                    type="positive",
-                                )
-                            except Exception as exc:
-                                answer_only_button.enable()
-                                remember_button.enable()
-                                try:
-                                    saved_trace = await run.io_bound(
-                                        load_core_task_trace,
-                                        UUID(session["task_id"]),
-                                    )
-                                    state["trace"] = saved_trace
-                                except Exception:
-                                    pass
-                                ui.notify(
-                                    type(exc).__name__ + ": " + str(exc)[:180],
-                                    type="negative",
-                                )
+                            await execute_proposal_review("remember")
 
                         with ui.row().classes("gap-2 flex-wrap"):
                             answer_label = (
