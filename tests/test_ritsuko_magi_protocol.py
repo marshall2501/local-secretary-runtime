@@ -513,7 +513,7 @@ class GuidedDialogueTests(unittest.TestCase):
         request=mocked.call_args.args[0]
         payload=json.loads(request.data.decode("utf-8"))
         response_format=payload["generationConfig"]["responseFormat"]
-        self.assertEqual(response_format["text"]["mimeType"],"application/json")
+        self.assertEqual(response_format["text"]["mimeType"],"APPLICATION_JSON")
         self.assertIn("schema",response_format["text"])
         gemini_schema=response_format["text"]["schema"]
         self.assertNotIn("minLength",gemini_schema["properties"]["understood_request"])
