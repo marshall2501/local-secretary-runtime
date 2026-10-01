@@ -58,6 +58,55 @@ def verified_pkb_observation(execution: dict, pending_request: dict) -> dict:
     }
 
 
+def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
+    """Return a deterministic review payload for a user-grounded knowledge proposal.
+
+    This is intentionally conservative: the proposal must come from the D-23
+    PKB→user fallback path, and the user's literal clarification must appear in
+    both the answer and knowledge candidate.  MAGI cannot make the Task complete
+    by itself.
+    """
+    if session.get("status") != "proposal_ready":
+        return None
+    detail = session.get("detail") or {}
+    if detail.get("state") != "KNOWLEDGE_CANDIDATE":
+        return None
+    if session.get("tool_read_executed") is not True:
+        return None
+    if not any(
+        isinstance(item, dict)
+        and item.get("source") == "pkb"
+        and item.get("verified") is True
+        for item in (session.get("observations") or [])
+    ):
+        return None
+
+    user_observations = [
+        item for item in (session.get("observations") or [])
+        if isinstance(item, dict)
+        and item.get("source") == "user_clarification"
+        and str(item.get("text") or "").strip()
+        and list(item.get("responds_to") or [])
+    ]
+    if not user_observations:
+        return None
+    latest = user_observations[-1]
+    literal = str(latest.get("text") or "").strip()
+    answer = str(detail.get("answer_candidate") or "").strip()
+    knowledge = str(detail.get("knowledge_candidate") or "").strip()
+    if not answer or not knowledge:
+        return None
+    folded = literal.casefold()
+    if folded not in answer.casefold() or folded not in knowledge.casefold():
+        return None
+    return {
+        "answer": answer,
+        "knowledge_candidate": knowledge,
+        "user_text": literal,
+        "responds_to": [str(x) for x in (latest.get("responds_to") or [])][:20],
+    }
+
+
 def task_projection(session: dict) -> dict:
     """Map one dialogue state to the deterministic Task state RITSUKO owns."""
     detail = session.get("detail") or {}
