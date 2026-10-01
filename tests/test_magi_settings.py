@@ -162,6 +162,61 @@ class MagiSettingsTests(unittest.TestCase):
         self.assertEqual(update_params[6], 8192)
         self.assertEqual(update_params[7], [429, 503])
 
+    def test_member_retry_toggle_is_persisted(self):
+        class Context:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class Cursor(Context):
+            def __init__(self):
+                self.calls = []
+                self.last_sql = ""
+
+            def execute(self, sql, params):
+                self.last_sql = sql
+                self.calls.append((sql, params))
+
+            def fetchone(self):
+                return (True,)
+
+        class DB:
+            def __init__(self):
+                self.cur = Cursor()
+
+            def cursor(self):
+                return self.cur
+
+            def transaction(self):
+                return Context()
+
+        db = DB()
+        assignments = [
+            {
+                "name": name,
+                "profile_id": f"11111111-1111-1111-1111-11111111111{index}",
+                "enabled": True,
+                "weight": 1.0,
+                "timeout_seconds": 120,
+                "retry_within_turn": name != "BALTHASAR",
+            }
+            for index, name in enumerate(MEMBER_NAMES, start=1)
+        ]
+        with patch(
+            "pkb_proto.magi_settings.load_member_specs",
+            return_value=assignments,
+        ):
+            save_member_assignments(db, assignments)
+
+        writes = [
+            params for sql, params in db.cur.calls
+            if "INSERT INTO secretary.magi_member_assignments" in sql
+        ]
+        self.assertEqual(len(writes), 3)
+        self.assertEqual([params[-1] for params in writes], [True, True, False])
+
     def test_assignment_validation_requires_all_three_slots(self):
         with self.assertRaisesRegex(ValueError, "all_magi_members_required"):
             save_member_assignments(
