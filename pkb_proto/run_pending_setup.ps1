@@ -20,8 +20,9 @@ $file019 = Join-Path $root 'pkb_proto\sql\019_pkb_proto_memory_intake.sql'
 $file020 = Join-Path $root 'pkb_proto\sql\020_magi_llm_settings.sql'
 $file021 = Join-Path $root 'pkb_proto\sql\021_ollama_context_window.sql'
 $file022 = Join-Path $root 'pkb_proto\sql\022_ollama_generation_budget.sql'
+$file023 = Join-Path $root 'pkb_proto\sql\023_magi_retry_policy.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -416,7 +417,36 @@ if ($LASTEXITCODE -ne 0 -or ($verify022 | Out-String).Trim() -ne '1' -or ($gener
     throw 'Ollama generation-budget migration verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 022 (Ollama context + generation budget included).'
+$has023 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='023_magi_retry_policy.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 023 schema version.' }
+if (($has023 | Out-String).Trim() -eq '0') {
+    $hash023 = (Get-FileHash -LiteralPath $file023 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql023 = [IO.File]::ReadAllText($file023).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash023)
+    $tmpName023 = 'magi-retry-policy-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp023 = Join-Path ([IO.Path]::GetTempPath()) $tmpName023
+    $remoteTmp023 = '/tmp/' + $tmpName023
+    try {
+        [IO.File]::WriteAllText($localTmp023, $sql023, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp023 ($id + ':' + $remoteTmp023) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 023 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp023
+        if ($LASTEXITCODE -ne 0) { throw '023 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp023) { Remove-Item -LiteralPath $localTmp023 }
+        & docker exec $id rm -f $remoteTmp023 | Out-Null
+    }
+} elseif (($has023 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 023 migration records.'
+}
+
+$verify023 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='023_magi_retry_policy.sql';"
+$retryProfileColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='llm_profiles' AND column_name='retry_http_codes';"
+$retryMemberColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='magi_member_assignments' AND column_name='retry_within_turn';"
+if ($LASTEXITCODE -ne 0 -or ($verify023 | Out-String).Trim() -ne '1' -or ($retryProfileColumn | Out-String).Trim() -ne '1' -or ($retryMemberColumn | Out-String).Trim() -ne '1') {
+    throw 'MAGI retry-policy migration verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 023 (MAGI retry policy included).'
 
 
 
