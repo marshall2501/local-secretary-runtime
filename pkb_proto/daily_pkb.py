@@ -3050,6 +3050,7 @@ def load_completed_core_tasks(limit: int = 8, offset: int = 0) -> list[dict]:
             "phase": checkpoint.get("phase"),
             "selected_capability": checkpoint.get("selected_capability"),
             "question": checkpoint.get("question"),
+            "message": checkpoint.get("message"),
             "effective_request": checkpoint.get("effective_request"),
             "user_replies": list(checkpoint.get("user_replies") or []),
             "comparison": checkpoint.get("comparison"),
