@@ -59,6 +59,10 @@ class MagiCoreBridgeTests(unittest.TestCase):
         projection = task_projection({
             "status": "candidate_ready",
             "next_step": "review_answer_candidate",
+            "tool_read_executed": True,
+            "observations": [
+                {"source": "pkb", "verified": True, "text": "verified"}
+            ],
             "detail": {
                 "answer_candidate": "メインPCのGPUは Radeon RX 9070 XT です。"
             },
@@ -66,6 +70,32 @@ class MagiCoreBridgeTests(unittest.TestCase):
         self.assertEqual(projection["task_status"], "completed")
         self.assertEqual(projection["next_step"], "respond")
         self.assertIn("Radeon RX 9070 XT", projection["message"])
+
+    def test_unverified_answer_candidate_does_not_complete_task(self):
+        projection = task_projection({
+            "status": "candidate_ready",
+            "next_step": "review_answer_candidate",
+            "tool_read_executed": False,
+            "observations": [
+                {"source": "manual_test_input", "verified": False, "text": "guess"}
+            ],
+            "detail": {"answer_candidate": "GPUは何かです。"},
+        })
+        self.assertEqual(projection["task_status"], "waiting_external")
+        self.assertEqual(projection["next_step"], "review_answer_candidate")
+        self.assertEqual(
+            projection["reason"],
+            "answer_candidate_not_grounded_by_verified_pkb_observation",
+        )
+
+    def test_user_stop_projects_to_paused_not_failed(self):
+        projection = task_projection({
+            "status": "stopped",
+            "next_step": "user_requested_stop",
+            "detail": {},
+        })
+        self.assertEqual(projection["task_status"], "paused")
+        self.assertEqual(projection["phase"], "paused")
 
 
 if __name__ == "__main__":
