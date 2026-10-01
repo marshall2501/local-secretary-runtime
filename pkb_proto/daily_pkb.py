@@ -4415,9 +4415,34 @@ def core_page(task_id: str = ""):
                         ui.label(
                             "「回答だけで完了」はPKBへ新規記憶を書きません。"
                             "「記憶にも反映」は表示中の記憶候補を本人が確認した内容として"
-                            "Memory IntakeのGrounding / WriteDecisionへ渡します。"
+                            "Memory IntakeのGrounding / WriteDecisionへ渡し、"
+                            "その結果をObservationとしてMAGIへ再評価してからRITSUKOが完了判定します。"
                             "MAGIが直接PKBを書き換えることはありません。"
                         ).classes("text-xs text-grey-7")
+                        active_review = saved_task.get("proposal_review")
+                        prepared_intake = saved_task.get("proposal_memory_intake")
+                        active_review_status = (
+                            active_review.get("status")
+                            if isinstance(active_review, dict)
+                            else None
+                        )
+                        active_review_decision = (
+                            active_review.get("decision")
+                            if isinstance(active_review, dict)
+                            else None
+                        )
+                        if active_review_status in {"processing", "retry_required"}:
+                            ui.label(
+                                "前回のProposal review: "
+                                + str(active_review_decision or "-")
+                                + " / " + str(active_review_status)
+                                + "。同じTaskで再評価を再試行できます。"
+                            ).classes("text-xs text-orange-800")
+                        if isinstance(prepared_intake, dict):
+                            ui.label(
+                                "Memory Intakeは開始済みです。"
+                                "同じinput_idで再送・再評価し、回答だけ経路へは戻しません。"
+                            ).classes("text-xs text-blue-800")
 
                         async def refresh_after_proposal_review() -> None:
                             saved_trace = await run.io_bound(
@@ -4547,18 +4572,45 @@ def core_page(task_id: str = ""):
                                 )
 
                         with ui.row().classes("gap-2 flex-wrap"):
+                            answer_label = (
+                                "回答レビューを再試行"
+                                if (
+                                    active_review_decision == "answer_only"
+                                    and active_review_status
+                                    in {"processing", "retry_required"}
+                                )
+                                else "回答だけで完了"
+                            )
+                            remember_label = (
+                                "記憶結果の再評価を再試行"
+                                if (
+                                    isinstance(prepared_intake, dict)
+                                    or active_review_decision == "remember"
+                                )
+                                else "記憶にも反映して完了"
+                            )
                             answer_only_button = ui.button(
-                                "回答だけで完了",
+                                answer_label,
                                 icon="done",
                                 color="green",
                                 on_click=complete_answer_only,
                             )
                             remember_button = ui.button(
-                                "記憶にも反映して完了",
+                                remember_label,
                                 icon="save",
                                 color="blue",
                                 on_click=remember_and_complete,
                             )
+                            if isinstance(prepared_intake, dict) or (
+                                active_review_status == "processing"
+                                and active_review_decision == "remember"
+                            ):
+                                answer_only_button.disable()
+                            if (
+                                active_review_status == "processing"
+                                and active_review_decision == "answer_only"
+                            ):
+                                remember_button.disable()
                     else:
                         ui.label(
                             "このProposal種別の実行経路はまだ接続していません。"
