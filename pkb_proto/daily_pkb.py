@@ -45,10 +45,10 @@ from .magi_client import (
 from .magi_dialogue import MAX_TURNS, export_dialogue
 from .magi_async import (
     continue_with_observation_async,
-    continue_with_user_clarification_async,
 )
-from .magi_observation_loop import run_pkb_observation_loop
+from .magi_observation_loop import run_pkb_observation_loop, resume_user_answer
 from .magi_task_store import (
+    claim_user_resume as claim_magi_user_resume,
     create_task as create_magi_core_task,
     fail_task as fail_magi_core_task,
     persist_session as persist_magi_core_session,
@@ -1575,6 +1575,18 @@ def _create_magi_core_task_record(
             task_id=task_id,
             request=request,
             member_specs=member_specs,
+        )
+
+
+def _claim_magi_user_resume_record(
+    task_id: UUID,
+    reply_length: int,
+) -> tuple[dict, str | None]:
+    with connection() as db:
+        return claim_magi_user_resume(
+            db,
+            task_id=task_id,
+            reply_length=reply_length,
         )
 
 
@@ -4064,12 +4076,12 @@ def core_page(task_id: str = ""):
                 stop_event = Event()
                 state["guided_stop_event"] = stop_event
                 state["guided_stop_requested"] = False
-                state["guided_turn"] = min(max(1, int(next_turn)), MAX_TURNS)
+                state["guided_turn"] = max(1, int(next_turn))
                 state["guided_busy"] = True
                 return stop_event
 
             def note_guided_turn(turn_number: int) -> None:
-                state["guided_turn"] = min(max(1, int(turn_number)), MAX_TURNS)
+                state["guided_turn"] = max(1, int(turn_number))
 
             def request_guided_stop() -> None:
                 stop_event = state.get("guided_stop_event")
@@ -4089,7 +4101,8 @@ def core_page(task_id: str = ""):
                 if state["guided_busy"]:
                     ui.label("RITSUKO ⇄ MAGI 対話中...").classes("font-bold text-teal-900")
                     ui.label(
-                        f"Turn {int(state.get('guided_turn') or 1)} / {MAX_TURNS}"
+                        f"Turn {int(state.get('guided_turn') or 1)}"
+                        f"（各resume cycle最大{MAX_TURNS} Turn）"
                     ).classes("font-mono text-sm")
                     if state.get("guided_stop_requested"):
                         ui.label(
@@ -4262,10 +4275,13 @@ def core_page(task_id: str = ""):
                         guided_button.disable()
                         guided_result_panel.refresh()
                         try:
-                            state["guided_session"] = await continue_with_user_clarification_async(
-                                session,
+                            state["guided_session"] = await resume_user_answer(
+                                UUID(session["task_id"]),
                                 clarification_input.value,
                                 timeout=guided_timeout_seconds(session),
+                                claim_user_resume_record=_claim_magi_user_resume_record,
+                                persist_session_record=_persist_magi_core_session_record,
+                                fail_task_record=_fail_magi_core_task_record,
                                 stop_requested=stop_event.is_set,
                                 on_turn_start=note_guided_turn,
                             )
@@ -4275,10 +4291,27 @@ def core_page(task_id: str = ""):
                             state["guided_busy"] = False
                             state["guided_stop_event"] = None
                             guided_button.enable()
+                            try:
+                                saved_trace = load_core_task_trace(UUID(session["task_id"]))
+                                if (
+                                    (state.get("result") or {}).get("task_id")
+                                    == session["task_id"]
+                                ):
+                                    state["result"] = core_task_selection_result(
+                                        saved_trace["task"]
+                                    )
+                                    state["trace"] = saved_trace
+                            except Exception:
+                                pass
                             guided_result_panel.refresh()
+                            open_tasks_panel.refresh()
+                            completed_tasks_panel.refresh()
+                            core_result.refresh()
+                            trace_panel.refresh()
+                            resume_panel.refresh()
 
                     ui.button(
-                        "追加説明を渡して対話継続（試験）",
+                        "追加説明を渡して対話継続",
                         icon="chat", on_click=continue_with_user,
                     ).props("outline")
 
@@ -4625,7 +4658,9 @@ def core_page(task_id: str = ""):
                     saved_session = saved_task.get("magi_session")
                     if isinstance(saved_session, dict):
                         state["guided_session"] = saved_session
-                        state["guided_history_read_only"] = True
+                        state["guided_history_read_only"] = (
+                            saved_task.get("status") == "completed"
+                        )
                     else:
                         state["guided_session"] = None
                         state["guided_history_read_only"] = False
