@@ -137,7 +137,9 @@ Observationから最も近い候補が一意で反証がなければ、限定表
     "evaluate_observation": """新しく追加されたObservationを前回の不足情報と照合してください。
 不足が解消したなら、現在の根拠から回答候補・記録候補・Action候補へ進んでください。
 曖昧参照で一意の強い候補が得られたなら、限定表現付きで参照解決することを検討してください。
-まだ不足する場合だけNEED_INFORMATIONを返し、前回より古い／広い履歴を漫然と掘り続けないでください。内部情報で解けないblocking曖昧さならNEED_CLARIFICATIONに切り替えてください。""",
+まだ不足する場合だけNEED_INFORMATIONを返し、前回より古い／広い履歴を漫然と掘り続けないでください。
+直前のverified PKB Observationが要求した属性を確認できなかったことを示している場合、同じPKB要求を言い換えて繰り返さないでください。別の既存情報源で解けないblocking情報ならsource=userへ切り替えてください。
+内部情報で解けないblocking曖昧さならNEED_CLARIFICATIONに切り替えてください。""",
     "formulate_answer": """現在の根拠だけでユーザーへ直接答えられるかを判断してください。
 答えられるなら検索予定ではなく答えそのものをREADYのanswer_candidateへ返してください。
 答えに未取得の事実が必要ならNEED_INFORMATIONへ切り替えてください。""",
@@ -933,6 +935,41 @@ def _request_signatures(items: list[dict]) -> list[str]:
         for item in items
     ]
 
+def _latest_verified_pkb_observation(session: dict) -> dict | None:
+    for item in reversed(session.get("observations") or []):
+        if (
+            isinstance(item, dict)
+            and item.get("source") == "pkb"
+            and item.get("verified") is True
+        ):
+            return item
+    return None
+
+
+def _wait_for_user_after_exhausted_pkb(session: dict, requests: list[dict]) -> dict:
+    session["pending_requests"] = [
+        {
+            "request_id": (
+                f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}"
+            ),
+            "source": "user",
+            "what": str(item.get("what") or "").strip(),
+            "reason": (
+                "verified PKB readで解決できなかったblocking情報を本人へ確認する: "
+                + str(item.get("reason") or "").strip()
+            ).strip(),
+        }
+        for i, item in enumerate(requests, 1)
+        if str(item.get("what") or "").strip()
+    ]
+    session["user_question"] = (
+        "PKBでは確認できませんでした。確認したいこと: "
+        + " / ".join(item["what"] for item in session["pending_requests"])
+    )
+    session.update(status="waiting_user", next_step="ask_user_after_exhausted_pkb")
+    return session
+
+
 def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purpose: str, stop_requested=None, on_turn_start=None) -> dict:
     session["detail"] = deepcopy(response)
     session["user_question"] = None
@@ -965,6 +1002,51 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
             if reviewed is None:
                 return session
             return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair", stop_requested=stop_requested, on_turn_start=on_turn_start)
+        latest_verified_pkb = _latest_verified_pkb_observation(session)
+        if latest_verified_pkb is not None and requests:
+            all_pkb = all(item.get("source") == "pkb" for item in requests)
+            all_user = all(item.get("source") == "user" for item in requests)
+            if purpose == "review_or_repair" and all_user:
+                session["pending_requests"] = [
+                    {
+                        "request_id": (
+                            f"REQ-{session['task_id'][:8]}-{len(session['turns']):02d}-{i:02d}"
+                        ),
+                        **deepcopy(item),
+                    }
+                    for i, item in enumerate(requests, 1)
+                ]
+                session["user_question"] = "確認したいこと: " + " / ".join(
+                    item["what"] for item in requests
+                )
+                session.update(status="waiting_user", next_step="ask_user_for_information")
+                return session
+            if all_pkb:
+                if purpose != "review_or_repair" and len(session["turns"]) < MAX_TURNS:
+                    prompt = _compose_question(
+                        session,
+                        "review_or_repair",
+                        issue=(
+                            "verified PKB Observation直後に同じPKB sourceが再要求された。"
+                            "言い換えで同一事実を再読しない。直前のreadで未確認だったblocking事実なら"
+                            "source=userへ切り替え、別の事実なら何が異なるかを明確にする"
+                        ),
+                    )
+                    reviewed = _send(
+                        session, "analyze", "review_or_repair", prompt, caller,
+                        timeout=timeout, stop_requested=stop_requested,
+                        on_turn_start=on_turn_start,
+                    )
+                    if reviewed is None:
+                        return session
+                    return _apply_detail(
+                        session, reviewed, caller, timeout=timeout,
+                        purpose="review_or_repair",
+                        stop_requested=stop_requested,
+                        on_turn_start=on_turn_start,
+                    )
+                return _wait_for_user_after_exhausted_pkb(session, requests)
+
         signatures = _request_signatures(requests)
         repeated = bool(session["observations"]) and bool(signatures) and all(
             signature in session["previous_request_signatures"] for signature in signatures
