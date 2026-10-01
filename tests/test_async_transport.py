@@ -18,6 +18,7 @@ from pkb_proto.magi_async import (
     _call_gemini_guided_async,
     _call_ollama_guided_async,
     call_guided_panel_async,
+    continue_with_proposal_review_async,
     continue_with_user_clarification_async,
     continue_with_verified_observation_async,
     start_dialogue_async,
@@ -885,6 +886,149 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             updated["cloud_context_gate"]["withheld_members"][0]["name"],
             "CASPER",
+        )
+
+    async def test_proposal_review_re_evaluation_is_local_and_records_memory_observation(self):
+        seen = []
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen.append({
+                "turn": envelope["turn"],
+                "purpose": envelope["question_purpose"],
+                "members": [item["name"] for item in member_specs],
+                "policy": envelope.get("context_policy"),
+                "observations": envelope.get("observations"),
+            })
+            return {
+                "status": "ok",
+                "response": {
+                    "understood_request": "メインPCのGPUモデルを知りたい。",
+                    "state": "READY",
+                    "reason": "本人回答で元質問には回答可能。Memory Intakeはpending。",
+                    "information_requests": [],
+                    "question_for_user": None,
+                    "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
+                    "knowledge_candidate": None,
+                    "action_candidate": None,
+                },
+                "errors": [],
+                "diagnostic": {},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-1",
+            "user_raw": "メインPCのGPUの種類は？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {
+                    "name": "MELCHIOR",
+                    "provider": "ollama",
+                    "model": "local",
+                    "enabled": True,
+                    "weight": 1.0,
+                    "timeout_seconds": 10,
+                },
+                {
+                    "name": "CASPER",
+                    "provider": "openai",
+                    "model": "cloud",
+                    "enabled": True,
+                    "weight": 2.0,
+                    "timeout_seconds": 10,
+                },
+            ],
+            "status": "proposal_ready",
+            "next_step": "review_proposal",
+            "classification": {
+                "category": "INFORMATION",
+                "understood_request": "GPUモデルを知りたい",
+            },
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "reason": "本人回答で不足情報が解消した",
+                "answer_candidate": "メインPCのGPUはRadeon RX 9070 XTです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            },
+            "observations": [
+                {
+                    "source": "pkb",
+                    "verified": True,
+                    "confidentiality": "private",
+                    "text": "GPU1はあるがmodel未確認",
+                },
+                {
+                    "source": "user_clarification",
+                    "verified": False,
+                    "text": "Radeon RX 9070 XT",
+                    "responds_to": ["REQ-1"],
+                },
+            ],
+            "pending_requests": [],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "evaluate_observation",
+            "turns": [
+                {"stage": "classify", "request_envelope": {"turn": 1}},
+                {"stage": "analyze", "request_envelope": {"turn": 2}},
+                {"stage": "analyze", "request_envelope": {"turn": 3}},
+                {"stage": "analyze", "request_envelope": {"turn": 4}},
+                {"stage": "analyze", "request_envelope": {"turn": 5}},
+            ],
+            "turn_limit": 8,
+            "legacy_router_used": False,
+            "tool_read_executed": True,
+        }
+        observation = {
+            "source": "memory_intake",
+            "verified": True,
+            "confidentiality": "private",
+            "text": (
+                "本人が記憶反映を選択し、Memory Intakeがcommittedで完了した。"
+                "WriteDecision=pending。pendingは確定PKB current factではない。"
+            ),
+            "review_decision": "remember",
+            "answer": "メインPCのGPUはRadeon RX 9070 XTです。",
+            "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            "user_text": "Radeon RX 9070 XT",
+            "responds_to": ["REQ-1"],
+            "memory_intake": {
+                "input_id": "input-1",
+                "status": "committed",
+                "receipts": [{"decision": "pending"}],
+            },
+        }
+
+        updated = await continue_with_proposal_review_async(
+            session,
+            observation,
+            timeout=10,
+            caller=caller,
+        )
+
+        self.assertEqual(updated["status"], "review_evaluated")
+        self.assertEqual(updated["next_step"], "ritsuko_finalize_review")
+        self.assertEqual(updated["turn_limit"], 9)
+        self.assertEqual(len(updated["turns"]), 6)
+        self.assertEqual(seen[0]["turn"], 6)
+        self.assertEqual(seen[0]["purpose"], "evaluate_review_result")
+        self.assertEqual(seen[0]["members"], ["MELCHIOR"])
+        self.assertEqual(
+            seen[0]["policy"]["mode"],
+            "local_only_private_pkb",
+        )
+        self.assertEqual(
+            seen[0]["observations"][-1]["source"],
+            "memory_intake",
+        )
+        self.assertEqual(
+            updated["post_review_evaluation"]["state"],
+            "READY",
         )
 
     async def test_stop_request_after_current_turn_prevents_next_turn(self):
