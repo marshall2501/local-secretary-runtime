@@ -70,8 +70,16 @@ def claim_user_resume(
     *,
     task_id: UUID,
     reply_length: int,
+    reply_fingerprint: str,
 ) -> tuple[dict, str | None]:
-    """Atomically claim one waiting MAGI Task before a user-resume LLM turn."""
+    """Atomically claim or resume one waiting MAGI Task for a user reply."""
+    fingerprint = str(reply_fingerprint or "").strip().lower()
+    if (
+        len(fingerprint) != 64
+        or any(ch not in "0123456789abcdef" for ch in fingerprint)
+    ):
+        raise ValueError("invalid_user_reply_fingerprint")
+
     with db.transaction(), db.cursor() as cur:
         cur.execute(
             """SELECT status, checkpoint
@@ -84,8 +92,6 @@ def claim_user_resume(
         if row is None:
             raise ValueError("unknown_task")
         status, checkpoint = row[0], row[1] or {}
-        if status != "waiting_external":
-            raise ValueError("task_not_waiting_external")
         if checkpoint.get("core_slice") != CORE_SLICE:
             raise ValueError("not_magi_observation_task")
         session = checkpoint.get("magi_session")
@@ -97,11 +103,50 @@ def claim_user_resume(
             for item in (session.get("pending_requests") or [])
             if isinstance(item, dict) and item.get("request_id")
         ][:20]
+        resume = checkpoint.get("user_resume")
+        if status == "running":
+            if (
+                not isinstance(resume, dict)
+                or resume.get("status") != "processing"
+            ):
+                raise ValueError("task_not_waiting_external")
+            if resume.get("reply_fingerprint") != fingerprint:
+                raise ValueError("user_resume_reply_mismatch")
+            cur.execute(
+                """INSERT INTO secretary.audit_events
+                   (actor, event_type, task_id, object_type, object_id, details)
+                   VALUES ('ritsuko_core', 'core.magi.user_reply_resumed',
+                           %s, 'task', %s, %s)""",
+                (
+                    task_id,
+                    task_id,
+                    Jsonb({
+                        "reply_length": max(0, int(reply_length)),
+                        "pending_request_ids": pending_ids,
+                    }),
+                ),
+            )
+            return deepcopy(session), checkpoint.get("selected_capability")
+
+        if status != "waiting_external":
+            raise ValueError("task_not_waiting_external")
+        if isinstance(resume, dict) and resume.get("status") == "retry_required":
+            prior_fingerprint = str(resume.get("reply_fingerprint") or "")
+            if prior_fingerprint and prior_fingerprint != fingerprint:
+                raise ValueError("user_resume_reply_mismatch")
+
+        user_resume = {
+            "status": "processing",
+            "reply_length": max(0, int(reply_length)),
+            "reply_fingerprint": fingerprint,
+            "pending_request_ids": pending_ids,
+        }
         next_checkpoint = {
             **checkpoint,
             "phase": "orient",
             "question": None,
             "reason": "user_reply_received",
+            "user_resume": user_resume,
         }
         cur.execute(
             """UPDATE secretary.tasks
@@ -124,6 +169,66 @@ def claim_user_resume(
             ),
         )
         return deepcopy(session), checkpoint.get("selected_capability")
+
+
+def abort_user_resume(
+    db,
+    *,
+    task_id: UUID,
+    error: str,
+) -> None:
+    """Return an interrupted user-resume turn to a retryable waiting state."""
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, checkpoint
+               FROM secretary.tasks
+               WHERE id=%s
+               FOR UPDATE""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return
+        status, checkpoint = row[0], row[1] or {}
+        resume = checkpoint.get("user_resume")
+        if (
+            status != "running"
+            or not isinstance(resume, dict)
+            or resume.get("status") != "processing"
+        ):
+            return
+        resume["status"] = "retry_required"
+        resume["last_error_type"] = str(error)[:160]
+        checkpoint.update({
+            "phase": "awaiting_clarification",
+            "question": (
+                (checkpoint.get("magi_session") or {}).get("user_question")
+            ),
+            "reason": "user_resume_failed",
+            "user_resume": resume,
+            "final_core_decision": {
+                "next_step": "retry_user_resume",
+                "reason": "user_resume_failed",
+                "task_status": "waiting_external",
+            },
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='waiting_external', checkpoint=%s, completed_at=NULL
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.user_reply_retry_required',
+                       %s, 'task', %s, %s)""",
+            (
+                task_id,
+                task_id,
+                Jsonb({"error_type": str(error)[:160]}),
+            ),
+        )
 
 
 def persist_session(
@@ -157,6 +262,11 @@ def persist_session(
             raise ValueError("unknown_task")
         checkpoint = row[0] or {}
         checkpoint.update(checkpoint_patch)
+        user_resume = checkpoint.get("user_resume")
+        if isinstance(user_resume, dict) and user_resume.get("status") == "processing":
+            user_resume["status"] = "completed"
+            user_resume.pop("last_error_type", None)
+            checkpoint["user_resume"] = user_resume
         cur.execute(
             """UPDATE secretary.tasks
                SET status=%s, checkpoint=%s,
