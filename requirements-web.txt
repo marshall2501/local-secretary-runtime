@@ -2,6 +2,8 @@
 # Production API requirements remain separate.
 nicegui>=3.0,<4
 psycopg[binary]>=3.2,<4
+httpx>=0.27,<1
+anyio>=4.6,<5
 
 # Read-only metasearch/extraction adapter used by daily Secretary Core.
 ddgs>=9.16,<10
