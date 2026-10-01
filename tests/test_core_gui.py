@@ -72,8 +72,9 @@ class CoreGuiTests(TestCase):
                 self.assertIn('LIMIT %s OFFSET %s', sql)
                 self.assertEqual(params, (6, 60))
                 self.assertIn("daily_read_only_v1", sql)
+                self.assertIn("ritsuko_magi_observation_v1", sql)
                 if name == 'open':
-                    self.assertIn("'waiting_external', 'running'", sql)
+                    self.assertIn("'waiting_external', 'running', 'paused'", sql)
                 elif name == 'completed':
                     self.assertIn("t.status='completed'", sql)
                 else:
@@ -221,21 +222,25 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             }],
         }
         async def fake_bound(fn, *args, **kwargs):
-            return fixture
+            return None
+        async def fake_start(*args, **kwargs):
+            return deepcopy(fixture)
         with self.client, patch.object(
             daily, 'list_magi_models', return_value=['gemma3:12b']
         ), patch.object(daily, 'choose_magi_model', return_value='gemma3:12b'), \
+             patch.object(daily, 'start_dialogue_async', side_effect=fake_start), \
+             patch.object(daily, 'pending_pkb_request', return_value=None), \
              patch.object(daily.run, 'io_bound', side_effect=fake_bound):
             daily.core_page()
             old = next(e for e in self.client.elements.values()
                        if isinstance(e, ui.expansion)
                        and e._props.get('label') == '旧 Protocol v1 全項目一括分析（比較用）')
             self.assertFalse(old.value)
-            self.assertTrue(self.elements('分類から対話を開始'))
-            await self.click('分類から対話を開始')
+            self.assertTrue(self.elements('RITSUKOへ依頼'))
+            await self.click('RITSUKOへ依頼')
             self.assertTrue(self.elements('対話結果を一括コピー'))
-            self.assertTrue(self.elements('Observationを渡して対話継続（試験）'))
-            self.assertTrue(self.elements('RITSUKOが検討すべき情報要求（まだ実読取していません）'))
+            self.assertTrue(self.elements('手動Observationで継続（開発用）'))
+            self.assertTrue(self.elements('未解決の情報要求（自動PKB read対象外または追加情報が必要）'))
 
     async def test_protocol_slots_and_legacy_flow_layout(self):
         with self.client, patch.object(
@@ -281,7 +286,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(old_flow.value)
             elements = list(self.client.elements.values())
             self.assertGreater(elements.index(legacy), elements.index(protocol_button))
-            self.assertTrue(self.elements('既存Task（旧経路）'))
+            self.assertTrue(self.elements('既存Task'))
 
     async def test_protocol_invalid_json_shows_diagnostics_and_copy_controls(self):
         probe = {
