@@ -246,6 +246,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('MELCHIOR'))
             self.assertTrue(self.elements('BALTHASAR'))
             self.assertTrue(self.elements('CASPER'))
+            self.assertEqual(len(self.elements('Turn内リトライ')), 3)
             controls = {
                 label: next(e for e in self.client.elements.values()
                             if e._props.get('label') == label)
@@ -398,6 +399,11 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 return element
             counts = self.elements('RITSUKO — Task表示件数')[0]
             limits = self.elements('この縦断でまだ行わないこと')[0]
+            retry_codes = next(
+                e for e in self.client.elements.values()
+                if e._props.get('label') == 'Retry HTTP codes'
+            )
+            self.assertIsNotNone(retry_codes)
             self.assertIsNot(expansion_for(counts), expansion_for(limits))
             for label in ('進行中・確認待ち 初期表示件数', '完了済み 初期表示件数'):
                 control = next(e for e in self.client.elements.values() if e._props.get('label') == label)
