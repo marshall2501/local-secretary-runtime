@@ -17,7 +17,9 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from .magi_client import OLLAMA
-from .magi_settings import MEMBER_NAMES, PROVIDERS, fallback_member_specs
+from .magi_settings import (
+    DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, fallback_member_specs,
+)
 from .ritsuko_magi_protocol import default_resource_catalog
 
 CATEGORIES = (
@@ -279,7 +281,7 @@ def _call_ollama_guided(
                 "diagnostic": {"provider": "ollama", "error": type(exc).__name__}}
 
 
-def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) -> dict:
+def call_guided_member(envelope: dict, *, model: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict:
     """Backward-compatible local Ollama entry point used by isolated tests."""
     return _call_ollama_guided(
         envelope, model=model, timeout=timeout, base_url=OLLAMA
@@ -514,7 +516,7 @@ def _normalized_member_specs(
                 str(raw.get("credential_env") or "").strip() or None
             ),
             "weight": float(raw.get("weight") or 1.0),
-            "timeout_seconds": int(raw.get("timeout_seconds") or 900),
+            "timeout_seconds": int(raw.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
             "enabled": bool(raw.get("enabled") and model),
             "settings_source": raw.get("settings_source") or "explicit",
         }
@@ -649,7 +651,7 @@ def call_guided_panel(
     envelope: dict,
     *,
     model: str = "",
-    timeout: float = 900.0,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
     member_specs: list[dict] | None = None,
 ) -> dict:
     """Run enabled provider-independent MAGI slots concurrently."""
@@ -744,14 +746,24 @@ def _select_question_purpose(session: dict) -> str:
         return "formulate_answer"
     return "identify_missing_information"
 
-def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller, *, timeout: float) -> dict | None:
+def _stop_between_turns(session: dict, stop_requested=None) -> bool:
+    """Honor a user stop request only at a safe boundary between LLM turns."""
+    if stop_requested is None or not stop_requested():
+        return False
+    session.update(status="stopped", next_step="user_requested_stop")
+    return True
+
+def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller, *, timeout: float, stop_requested=None, on_turn_start=None) -> dict | None:
     if len(session["turns"]) >= MAX_TURNS:
         session.update(status="stopped", next_step="max_turns_reached")
         return None
+    if _stop_between_turns(session, stop_requested):
+        return None
+    turn_number = len(session["turns"]) + 1
     envelope = {
         "protocol_variant": "state_driven_question_experiment",
         "prompt_version": session["prompt_version"],
-        "task_id": session["task_id"], "turn": len(session["turns"]) + 1,
+        "task_id": session["task_id"], "turn": turn_number,
         "magi_member": "MAGI_PANEL", "stage": stage,
         "question_purpose": question_purpose,
         "question_from_ritsuko": prompt,
@@ -769,6 +781,8 @@ def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller,
             },
             "observations": deepcopy(session["observations"]),
         })
+    if on_turn_start is not None:
+        on_turn_start(turn_number)
     if caller is call_guided_panel:
         result = caller(
             envelope,
@@ -816,20 +830,22 @@ def _request_signatures(items: list[dict]) -> list[str]:
         for item in items
     ]
 
-def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purpose: str) -> dict:
+def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purpose: str, stop_requested=None, on_turn_start=None) -> dict:
     session["detail"] = deepcopy(response)
     session["user_question"] = None
     state = response["state"]
+    if _stop_between_turns(session, stop_requested):
+        return session
 
     if state == "READY" and not session["observations"] and purpose != "review_or_repair":
         prompt = _compose_question(
             session, "review_or_repair",
             issue="新しいObservationがないのにREADYとなったため、answer_candidateが実回答か作業予定かを再確認する",
         )
-        reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout)
+        reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
         if reviewed is None:
             return session
-        return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair")
+        return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair", stop_requested=stop_requested, on_turn_start=on_turn_start)
 
     if state == "NEED_INFORMATION":
         requests = response["information_requests"]
@@ -842,10 +858,10 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
                 session, "review_or_repair",
                 issue="source=userが提案された。既存のPKB / task_history / files / web等で代替できないblocking情報だけuser要求として残す",
             )
-            reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout)
+            reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
             if reviewed is None:
                 return session
-            return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair")
+            return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair", stop_requested=stop_requested, on_turn_start=on_turn_start)
         signatures = _request_signatures(requests)
         repeated = bool(session["observations"]) and bool(signatures) and all(
             signature in session["previous_request_signatures"] for signature in signatures
@@ -856,10 +872,10 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
                     session, "review_or_repair",
                     issue="Observation追加後も前回と同じ情報要求が返った。Observation不足の具体点を示すか、別の次手へ修正する",
                 )
-                reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout)
+                reviewed = _send(session, "analyze", "review_or_repair", prompt, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
                 if reviewed is None:
                     return session
-                return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair")
+                return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair", stop_requested=stop_requested, on_turn_start=on_turn_start)
             session.update(status="stopped", next_step="repeated_request_without_progress")
             return session
         for signature in signatures:
@@ -892,21 +908,25 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
         session.update(status="stopped", next_step="unable")
     return session
 
-def _advance(session: dict, caller, *, timeout: float) -> dict:
+def _advance(session: dict, caller, *, timeout: float, stop_requested=None, on_turn_start=None) -> dict:
+    if _stop_between_turns(session, stop_requested):
+        return session
     purpose = _select_question_purpose(session)
     prompt = _compose_question(session, purpose)
-    response = _send(session, "analyze", purpose, prompt, caller, timeout=timeout)
+    response = _send(session, "analyze", purpose, prompt, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
     if response is None:
         return session
-    return _apply_detail(session, response, caller, timeout=timeout, purpose=purpose)
+    return _apply_detail(session, response, caller, timeout=timeout, purpose=purpose, stop_requested=stop_requested, on_turn_start=on_turn_start)
 
 def start_dialogue(
     user_raw: str,
     *,
     model: str = "",
     member_specs: list[dict] | None = None,
-    timeout: float = 900.0,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
     caller=call_guided_panel,
+    stop_requested=None,
+    on_turn_start=None,
 ) -> dict:
     specs = _normalized_member_specs(member_specs, model) if caller is call_guided_panel else (
         deepcopy(member_specs) if member_specs is not None else []
@@ -929,7 +949,8 @@ def start_dialogue(
         session.update(status="stopped", next_step="no_magi_member")
         return session
     classification = _send(
-        session, "classify", "classify", CLASSIFY_QUESTION, caller, timeout=timeout
+        session, "classify", "classify", CLASSIFY_QUESTION, caller, timeout=timeout,
+        stop_requested=stop_requested, on_turn_start=on_turn_start,
     )
     if classification is None:
         return session
@@ -937,10 +958,11 @@ def start_dialogue(
     if classification["multiple_requests"]:
         session.update(status="stopped", next_step="multiple_requests_detected")
         return session
-    return _advance(session, caller, timeout=timeout)
+    return _advance(session, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
 
 def continue_with_observation(session: dict, observation_text: str, *,
-                              timeout: float = 900.0, caller=call_guided_panel) -> dict:
+                              timeout: float = DEFAULT_TIMEOUT_SECONDS, caller=call_guided_panel,
+                              stop_requested=None, on_turn_start=None) -> dict:
     """Dev-only injection; not an actual PKB/Web read nor an authenticated source."""
     updated = deepcopy(session)
     if updated.get("status") != "waiting_information":
@@ -958,11 +980,12 @@ def continue_with_observation(session: dict, observation_text: str, *,
     updated["pending_requests"] = []
     updated["status"] = "running"
     updated["next_step"] = "evaluate_observation"
-    return _advance(updated, caller, timeout=timeout)
+    return _advance(updated, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
 
 def continue_with_user_clarification(session: dict, user_text: str, *,
-                                     timeout: float = 900.0,
-                                     caller=call_guided_panel) -> dict:
+                                     timeout: float = DEFAULT_TIMEOUT_SECONDS,
+                                     caller=call_guided_panel,
+                                     stop_requested=None, on_turn_start=None) -> dict:
     """Continue a waiting_user session without exposing internal pattern names."""
     updated = deepcopy(session)
     if updated.get("status") != "waiting_user":
@@ -983,7 +1006,8 @@ def continue_with_user_clarification(session: dict, user_text: str, *,
         updated["next_step"] = "classify_with_context"
         classification = _send(
             updated, "classify", "classify", CLASSIFY_QUESTION,
-            caller, timeout=timeout,
+            caller, timeout=timeout, stop_requested=stop_requested,
+            on_turn_start=on_turn_start,
         )
         if classification is None:
             return updated
@@ -991,7 +1015,7 @@ def continue_with_user_clarification(session: dict, user_text: str, *,
         if classification["multiple_requests"]:
             updated.update(status="stopped", next_step="multiple_requests_detected")
             return updated
-        return _advance(updated, caller, timeout=timeout)
+        return _advance(updated, caller, timeout=timeout, stop_requested=stop_requested, on_turn_start=on_turn_start)
 
     responds_to = [
         item["request_id"] for item in updated.get("pending_requests") or []
@@ -1008,13 +1032,15 @@ def continue_with_user_clarification(session: dict, user_text: str, *,
     prompt = _compose_question(updated, "evaluate_observation")
     response = _send(
         updated, "analyze", "evaluate_observation", prompt,
-        caller, timeout=timeout,
+        caller, timeout=timeout, stop_requested=stop_requested,
+        on_turn_start=on_turn_start,
     )
     if response is None:
         return updated
     return _apply_detail(
         updated, response, caller, timeout=timeout,
-        purpose="evaluate_observation",
+        purpose="evaluate_observation", stop_requested=stop_requested,
+        on_turn_start=on_turn_start,
     )
 
 
