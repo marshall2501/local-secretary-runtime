@@ -468,7 +468,9 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 for e in self.client.elements.values()
             ))
             self.assertFalse(self.elements('手動Observationで継続（開発用）'))
-            self.assertFalse(self.elements('追加説明を渡して対話継続（試験）'))
+            self.assertFalse(self.elements('追加説明を渡して対話継続'))
+            self.assertFalse(self.elements('回答だけで完了'))
+            self.assertFalse(self.elements('記憶にも反映して完了'))
 
     async def test_protocol_slots_and_legacy_flow_layout(self):
         with self.client, patch.object(
