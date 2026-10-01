@@ -4546,8 +4546,6 @@ def core_page(task_id: str = ""):
                                 state["guided_busy"] = False
                                 state["guided_stop_event"] = None
                                 guided_button.enable()
-                                answer_only_button.enable()
-                                remember_button.enable()
                                 guided_result_panel.refresh()
                                 open_tasks_panel.refresh()
                                 completed_tasks_panel.refresh()
