@@ -280,8 +280,12 @@ async def _call_gemini_guided_async(
         }],
         "generationConfig": {
             "maxOutputTokens": 1600,
-            "responseMimeType": "application/json",
-            "responseSchema": schema,
+            "responseFormat": {
+                "text": {
+                    "mimeType": "application/json",
+                    "schema": schema,
+                }
+            },
         },
     }
     try:
