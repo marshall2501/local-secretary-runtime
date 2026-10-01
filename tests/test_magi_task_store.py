@@ -248,6 +248,73 @@ class MagiTaskStoreTests(unittest.TestCase):
             "pending",
         )
 
+    def test_processing_review_can_resume_same_decision_after_restart(self):
+        checkpoint = self.review_checkpoint()
+        checkpoint.update({
+            "proposal_memory_intake": {
+                "input_id": "input-1",
+                "raw_text": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            },
+            "proposal_review": {
+                "decision": "remember",
+                "status": "processing",
+                "answer": "メインPCのGPUはRadeon RX 9070 XTです。",
+                "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+                "user_text": "Radeon RX 9070 XT",
+                "responds_to": ["REQ-1"],
+                "memory_intake": {
+                    "input_id": "input-1",
+                    "status": "committed",
+                    "source_id": str(SOURCE_ID),
+                    "receipts": [{"decision": "pending"}],
+                },
+            },
+        })
+        db = _DB(fetches=[("running", checkpoint)])
+        _session, capability, observation, review = claim_proposal_review(
+            db,
+            task_id=TASK_ID,
+            decision="remember",
+            memory_result={
+                "status": "replayed",
+                "input_id": "input-1",
+                "source_id": str(SOURCE_ID),
+                "candidates": [{"decision": "pending"}],
+            },
+        )
+        self.assertEqual(capability, "pkb_search")
+        self.assertEqual(review["status"], "processing")
+        self.assertEqual(observation["source"], "memory_intake")
+        sql = "\n".join(call[0] for call in db.cur.calls)
+        self.assertIn("core.magi.proposal_review_resumed", sql)
+        self.assertNotIn("SET status='running'", sql)
+
+    def test_processing_review_rejects_switching_decision(self):
+        checkpoint = self.review_checkpoint()
+        checkpoint["proposal_review"] = {
+            "decision": "answer_only",
+            "status": "processing",
+            "answer": "メインPCのGPUはRadeon RX 9070 XTです。",
+            "knowledge_candidate": "メインPCのGPUモデル名: Radeon RX 9070 XT",
+            "user_text": "Radeon RX 9070 XT",
+            "responds_to": ["REQ-1"],
+            "memory_intake": None,
+        }
+        db = _DB(fetches=[("running", checkpoint)])
+        with self.assertRaisesRegex(
+            ValueError,
+            "proposal_review_already_processing",
+        ):
+            claim_proposal_review(
+                db,
+                task_id=TASK_ID,
+                decision="remember",
+                memory_result={
+                    "status": "committed",
+                    "input_id": "input-1",
+                },
+            )
+
     def test_finalize_review_requires_ok_review_turn_and_completes_task(self):
         checkpoint = self.review_checkpoint()
         checkpoint["proposal_review"] = {
