@@ -42,9 +42,11 @@ from .magi_client import (
     choose_model as choose_magi_model,
     list_chat_models as list_magi_models,
 )
-from .magi_dialogue import (
-    MAX_TURNS, start_dialogue, continue_with_observation,
-    continue_with_user_clarification, export_dialogue,
+from .magi_dialogue import MAX_TURNS, export_dialogue
+from .magi_async import (
+    start_dialogue_async,
+    continue_with_observation_async,
+    continue_with_user_clarification_async,
 )
 from .magi_settings import (
     DEFAULT_TIMEOUT_SECONDS, MEMBER_NAMES, PROVIDERS, bootstrap_member_assignments,
@@ -3977,8 +3979,8 @@ def core_page(task_id: str = ""):
                         guided_button.disable()
                         guided_result_panel.refresh()
                         try:
-                            state["guided_session"] = await run.io_bound(
-                                continue_with_observation, session,
+                            state["guided_session"] = await continue_with_observation_async(
+                                session,
                                 observation_input.value,
                                 timeout=guided_timeout_seconds(session),
                                 stop_requested=stop_event.is_set,
@@ -4020,8 +4022,8 @@ def core_page(task_id: str = ""):
                         guided_button.disable()
                         guided_result_panel.refresh()
                         try:
-                            state["guided_session"] = await run.io_bound(
-                                continue_with_user_clarification, session,
+                            state["guided_session"] = await continue_with_user_clarification_async(
+                                session,
                                 clarification_input.value,
                                 timeout=guided_timeout_seconds(session),
                                 stop_requested=stop_event.is_set,
@@ -4054,8 +4056,7 @@ def core_page(task_id: str = ""):
                 guided_button.disable()
                 guided_result_panel.refresh()
                 try:
-                    state["guided_session"] = await run.io_bound(
-                        start_dialogue,
+                    state["guided_session"] = await start_dialogue_async(
                         guided_input.value,
                         member_specs=specs,
                         timeout=guided_timeout_seconds(),
