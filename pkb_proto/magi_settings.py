@@ -26,7 +26,7 @@ DEFAULT_CREDENTIAL_ENVS = {
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
 }
-DEFAULT_TIMEOUT_SECONDS = 900
+DEFAULT_TIMEOUT_SECONDS = 120
 
 
 def _env_bool(name: str, default: bool) -> bool:
