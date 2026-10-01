@@ -514,6 +514,7 @@ class GuidedDialogueTests(unittest.TestCase):
         payload=json.loads(request.data.decode("utf-8"))
         self.assertEqual(payload["generationConfig"]["responseMimeType"],"application/json")
         self.assertIn("responseSchema",payload["generationConfig"])
+        self.assertNotIn("temperature",payload["generationConfig"])
         self.assertNotIn("gemini-test-key",json.dumps(result))
 
     def test_panel_accepts_arbitrary_provider_assignment_per_member(self):
