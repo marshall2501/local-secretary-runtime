@@ -65,6 +65,7 @@ class DiagnosticCasesTests(unittest.TestCase):
         self.assertEqual(payload["format"], "json")
         self.assertIs(payload["think"], False)
         self.assertEqual(payload["options"]["num_predict"], 1100)
+        self.assertEqual(payload["options"]["num_ctx"], 65536)
         self.assertIn(EP["text"], payload["messages"][1]["content"])
         self.assertNotIn("expected", json.dumps(payload))
 
