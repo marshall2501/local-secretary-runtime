@@ -25,8 +25,9 @@ import anyio
 from .async_transport import (
     AsyncHTTPStatusError,
     AsyncRequestTimeout,
+    AsyncRetryExhausted,
     AsyncTransportError,
-    request_json,
+    request_json_with_retry,
 )
 from .magi_client import OLLAMA
 from .magi_dialogue import (
@@ -47,7 +48,11 @@ from .magi_dialogue import (
     select_weighted_consensus,
     validate_turn,
 )
-from .magi_settings import DEFAULT_TIMEOUT_SECONDS
+from .magi_settings import (
+    DEFAULT_RETRY_HTTP_CODES,
+    DEFAULT_RETRY_WITHIN_TURN,
+    DEFAULT_TIMEOUT_SECONDS,
+)
 from .ollama_runtime import configured_magi_num_predict, normalize_context_tokens, normalize_magi_num_predict
 from .ritsuko_magi_protocol import default_resource_catalog
 
@@ -56,21 +61,28 @@ GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
 def _provider_failure(provider: str, exc: Exception) -> dict:
-    if isinstance(exc, AsyncRequestTimeout):
+    retry_diagnostic = {}
+    cause = exc
+    if isinstance(exc, AsyncRetryExhausted):
+        retry_diagnostic = dict(exc.diagnostic)
+        cause = exc.cause
+
+    if isinstance(cause, AsyncRequestTimeout):
         error = "timeout"
         diagnostic = {"provider": provider, "error": error}
-    elif isinstance(exc, AsyncHTTPStatusError):
+    elif isinstance(cause, AsyncHTTPStatusError):
         error = "HTTPError"
         diagnostic = {
             "provider": provider,
             "error": error,
-            "http_status": exc.status_code,
-            "provider_status": exc.provider_status,
-            "provider_message": exc.provider_message,
+            "http_status": cause.status_code,
+            "provider_status": cause.provider_status,
+            "provider_message": cause.provider_message,
         }
     else:
-        error = type(exc).__name__
+        error = type(cause).__name__
         diagnostic = {"provider": provider, "error": error}
+    diagnostic.update(retry_diagnostic)
     return {
         "status": "unavailable",
         "response": None,
@@ -87,6 +99,8 @@ async def _call_ollama_guided_async(
     base_url: str | None = None,
     context_window_tokens: int | None = None,
     ollama_num_predict: int | None = None,
+    retry_within_turn: bool = DEFAULT_RETRY_WITHIN_TURN,
+    retry_http_codes: tuple[int, ...] | list[int] = DEFAULT_RETRY_HTTP_CODES,
 ) -> dict:
     stage = envelope["stage"]
     schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
@@ -110,12 +124,14 @@ async def _call_ollama_guided_async(
     }
     endpoint = str(base_url or OLLAMA).strip().rstrip("/")
     try:
-        outer = await request_json(
+        outer, retry_diagnostic = await request_json_with_retry(
             "POST",
             endpoint + "/api/chat",
             headers={"Content-Type": "application/json"},
             json_body=payload,
             timeout=timeout,
+            retry_enabled=retry_within_turn,
+            retry_http_codes=retry_http_codes,
         )
         msg = outer.get("message") if isinstance(outer, dict) else None
         raw = msg.get("content") if isinstance(msg, dict) else None
@@ -127,6 +143,7 @@ async def _call_ollama_guided_async(
             "done_reason": outer.get("done_reason") if isinstance(outer, dict) else None,
             "eval_count": outer.get("eval_count") if isinstance(outer, dict) else None,
             "num_predict": payload["options"]["num_predict"],
+            **retry_diagnostic,
         }
         if not isinstance(raw, str):
             return {
@@ -152,9 +169,7 @@ async def _call_ollama_guided_async(
             "diagnostic": diagnostic,
         }
     except (
-        AsyncRequestTimeout,
-        AsyncHTTPStatusError,
-        AsyncTransportError,
+        AsyncRetryExhausted,
         OSError,
         ValueError,
     ) as exc:
@@ -168,6 +183,8 @@ async def _call_openai_guided_async(
     timeout: float,
     base_url: str | None = None,
     credential_env: str | None = None,
+    retry_within_turn: bool = DEFAULT_RETRY_WITHIN_TURN,
+    retry_http_codes: tuple[int, ...] | list[int] = DEFAULT_RETRY_HTTP_CODES,
 ) -> dict:
     credential_name = credential_env or "OPENAI_API_KEY"
     api_key = os.environ.get(credential_name, "").strip()
@@ -203,7 +220,7 @@ async def _call_openai_guided_async(
         },
     }
     try:
-        outer = await request_json(
+        outer, retry_diagnostic = await request_json_with_retry(
             "POST",
             endpoint + "/responses",
             headers={
@@ -212,6 +229,8 @@ async def _call_openai_guided_async(
             },
             json_body=payload,
             timeout=timeout,
+            retry_enabled=retry_within_turn,
+            retry_http_codes=retry_http_codes,
         )
         raw = _extract_openai_output_text(outer)
         usage = outer.get("usage") if isinstance(outer, dict) else None
@@ -221,6 +240,7 @@ async def _call_openai_guided_async(
             "response_id": outer.get("id") if isinstance(outer, dict) else None,
             "input_tokens": usage.get("input_tokens") if isinstance(usage, dict) else None,
             "output_tokens": usage.get("output_tokens") if isinstance(usage, dict) else None,
+            **retry_diagnostic,
         }
         if not isinstance(raw, str):
             return {
@@ -246,9 +266,7 @@ async def _call_openai_guided_async(
             "diagnostic": diagnostic,
         }
     except (
-        AsyncRequestTimeout,
-        AsyncHTTPStatusError,
-        AsyncTransportError,
+        AsyncRetryExhausted,
         OSError,
         ValueError,
     ) as exc:
@@ -262,6 +280,8 @@ async def _call_gemini_guided_async(
     timeout: float,
     base_url: str | None = None,
     credential_env: str | None = None,
+    retry_within_turn: bool = DEFAULT_RETRY_WITHIN_TURN,
+    retry_http_codes: tuple[int, ...] | list[int] = DEFAULT_RETRY_HTTP_CODES,
 ) -> dict:
     credential_name = credential_env or "GEMINI_API_KEY"
     api_key = os.environ.get(credential_name, "").strip()
@@ -298,7 +318,7 @@ async def _call_gemini_guided_async(
         },
     }
     try:
-        outer = await request_json(
+        outer, retry_diagnostic = await request_json_with_retry(
             "POST",
             endpoint + "/models/" + quote(model, safe="") + ":generateContent",
             headers={
@@ -307,6 +327,8 @@ async def _call_gemini_guided_async(
             },
             json_body=payload,
             timeout=timeout,
+            retry_enabled=retry_within_turn,
+            retry_http_codes=retry_http_codes,
         )
         raw = _extract_gemini_text(outer)
         usage = outer.get("usageMetadata") if isinstance(outer, dict) else None
@@ -315,6 +337,7 @@ async def _call_gemini_guided_async(
             "prompt_tokens": usage.get("promptTokenCount") if isinstance(usage, dict) else None,
             "candidate_tokens": usage.get("candidatesTokenCount") if isinstance(usage, dict) else None,
             "total_tokens": usage.get("totalTokenCount") if isinstance(usage, dict) else None,
+            **retry_diagnostic,
         }
         if not isinstance(raw, str):
             return {
@@ -340,9 +363,7 @@ async def _call_gemini_guided_async(
             "diagnostic": diagnostic,
         }
     except (
-        AsyncRequestTimeout,
-        AsyncHTTPStatusError,
-        AsyncTransportError,
+        AsyncRetryExhausted,
         OSError,
         ValueError,
     ) as exc:
@@ -369,6 +390,8 @@ async def _call_panel_member_async(
             base_url=spec.get("endpoint"),
             context_window_tokens=spec.get("context_window_tokens"),
             ollama_num_predict=spec.get("ollama_num_predict"),
+            retry_within_turn=bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
+            retry_http_codes=spec.get("retry_http_codes") or DEFAULT_RETRY_HTTP_CODES,
         )
     elif provider == "openai":
         result = await _call_openai_guided_async(
@@ -377,6 +400,8 @@ async def _call_panel_member_async(
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
             credential_env=spec.get("credential_env"),
+            retry_within_turn=bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
+            retry_http_codes=spec.get("retry_http_codes") or DEFAULT_RETRY_HTTP_CODES,
         )
     elif provider == "gemini":
         result = await _call_gemini_guided_async(
@@ -385,6 +410,8 @@ async def _call_panel_member_async(
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
             credential_env=spec.get("credential_env"),
+            retry_within_turn=bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
+            retry_http_codes=spec.get("retry_http_codes") or DEFAULT_RETRY_HTTP_CODES,
         )
     else:
         result = {
@@ -403,6 +430,8 @@ async def _call_panel_member_async(
         "timeout_seconds": spec.get("timeout_seconds"),
         "context_window_tokens": spec.get("context_window_tokens"),
         "ollama_num_predict": spec.get("ollama_num_predict"),
+        "retry_http_codes": list(spec.get("retry_http_codes") or []),
+        "retry_within_turn": bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
@@ -440,6 +469,8 @@ async def call_guided_panel_async(
                 "timeout_seconds": spec.get("timeout_seconds"),
                 "context_window_tokens": spec.get("context_window_tokens"),
                 "ollama_num_predict": spec.get("ollama_num_predict"),
+                "retry_http_codes": list(spec.get("retry_http_codes") or []),
+                "retry_within_turn": bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
                 "status": "unavailable",
                 "response": None,
                 "errors": [type(exc).__name__],
@@ -469,6 +500,8 @@ async def call_guided_panel_async(
                     "timeout_seconds": spec["timeout_seconds"],
                     "context_window_tokens": spec.get("context_window_tokens"),
                     "ollama_num_predict": spec.get("ollama_num_predict"),
+                    "retry_http_codes": list(spec.get("retry_http_codes") or []),
+                    "retry_within_turn": bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
                 }
                 for spec in specs
             ],
