@@ -3764,7 +3764,10 @@ def core_page(task_id: str = ""):
                     f"{item['display_name']}  [{item['provider']} / {item['model']}]"
                     + (
                         f" [ctx={int(item['context_window_tokens']) // 1024}K]"
-                        if item["provider"] == "ollama" and item.get("context_window_tokens")
+                        f" [gen={int(item['ollama_num_predict'])}]"
+                        if item["provider"] == "ollama"
+                        and item.get("context_window_tokens")
+                        and item.get("ollama_num_predict")
                         else ""
                     )
                 )
