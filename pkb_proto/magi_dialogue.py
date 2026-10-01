@@ -7,8 +7,10 @@ actions. The old full-contract Protocol v1 remains a separate comparison.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 import json
+import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -29,7 +31,7 @@ SOURCES = (
     "external_service", "pc_observation", "user",
 )
 MAX_TURNS = 4
-PROMPT_VERSION = "d19-state-driven-v3"
+PROMPT_VERSION = "d19-state-driven-v4"
 QUESTION_PURPOSES = (
     "understand_or_disambiguate",
     "identify_missing_information",
@@ -39,6 +41,11 @@ QUESTION_PURPOSES = (
     "formulate_action",
     "review_or_repair",
 )
+
+OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_CASPER_MODEL = "gpt-5.6-sol"
+DEFAULT_BALTHASAR_MODEL = "gpt-5.6-terra"
+_MEMBER_PRIORITY = {"MELCHIOR": 0, "CASPER": 1, "BALTHASAR": 2}
 
 PREREQUISITE_KNOWLEDGE = """前提知識：
 このシステムは、現在の依頼と取得済み情報で判断し、必要な事実が不足する場合は情報を取得し、その結果をObservationとして後続の判断へ渡しながら処理を進めます。
@@ -261,6 +268,277 @@ def call_guided_member(envelope: dict, *, model: str, timeout: float = 900.0) ->
                 "errors": [type(exc).__name__],
                 "diagnostic": {"error": type(exc).__name__}}
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_weight(name: str, default: float = 1.0) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def panel_member_specs(local_model: str) -> list[dict]:
+    """Return safe member configuration; secrets are never included."""
+    cloud_enabled = _env_bool("LSA_MAGI_CLOUD_ENABLED", False)
+    return [
+        {
+            "name": "MELCHIOR",
+            "provider": "ollama",
+            "model": local_model,
+            "weight": _env_weight("LSA_MAGI_MELCHIOR_WEIGHT", 1.0),
+            "enabled": True,
+        },
+        {
+            "name": "CASPER",
+            "provider": "openai",
+            "model": os.environ.get("LSA_MAGI_CASPER_MODEL", DEFAULT_CASPER_MODEL).strip()
+                     or DEFAULT_CASPER_MODEL,
+            "weight": _env_weight("LSA_MAGI_CASPER_WEIGHT", 1.0),
+            "enabled": cloud_enabled and _env_bool("LSA_MAGI_CASPER_ENABLED", True),
+        },
+        {
+            "name": "BALTHASAR",
+            "provider": "openai",
+            "model": os.environ.get("LSA_MAGI_BALTHASAR_MODEL", DEFAULT_BALTHASAR_MODEL).strip()
+                     or DEFAULT_BALTHASAR_MODEL,
+            "weight": _env_weight("LSA_MAGI_BALTHASAR_WEIGHT", 1.0),
+            "enabled": cloud_enabled and _env_bool("LSA_MAGI_BALTHASAR_ENABLED", True),
+        },
+    ]
+
+
+def _extract_openai_output_text(outer: object) -> str | None:
+    if not isinstance(outer, dict):
+        return None
+    parts = []
+    for item in outer.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for content in item.get("content") or []:
+            if isinstance(content, dict) and content.get("type") == "output_text":
+                value = content.get("text")
+                if isinstance(value, str):
+                    parts.append(value)
+    return "".join(parts) if parts else None
+
+
+def _call_openai_guided(envelope: dict, *, model: str, timeout: float) -> dict:
+    """Responses API adapter. No API key or raw reasoning is returned in diagnostics."""
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return {
+            "status": "unavailable", "response": None,
+            "errors": ["missing_openai_api_key"],
+            "diagnostic": {"provider": "openai", "error": "missing_openai_api_key"},
+        }
+    stage = envelope["stage"]
+    schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
+    base_url = os.environ.get("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL).strip().rstrip("/")
+    payload = {
+        "model": model,
+        "store": False,
+        "instructions": SYSTEM,
+        "input": json.dumps(envelope, ensure_ascii=False),
+        "max_output_tokens": 1600,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "magi_" + stage,
+                "strict": True,
+                "schema": schema,
+            }
+        },
+    }
+    try:
+        req = Request(
+            base_url + "/responses",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + api_key,
+            },
+            method="POST",
+        )
+        with urlopen(req, timeout=timeout) as resp:
+            outer = json.load(resp)
+        raw = _extract_openai_output_text(outer)
+        usage = outer.get("usage") if isinstance(outer, dict) else None
+        diagnostic = {
+            "provider": "openai",
+            "response_status": outer.get("status") if isinstance(outer, dict) else None,
+            "response_id": outer.get("id") if isinstance(outer, dict) else None,
+            "input_tokens": usage.get("input_tokens") if isinstance(usage, dict) else None,
+            "output_tokens": usage.get("output_tokens") if isinstance(usage, dict) else None,
+        }
+        if not isinstance(raw, str):
+            return {"status": "invalid", "response": None,
+                    "errors": ["missing_content"], "diagnostic": diagnostic}
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return {"status": "invalid", "response": None,
+                    "errors": ["invalid_json"], "diagnostic": diagnostic}
+        errors = validate_turn(stage, data)
+        return {"status": "ok" if not errors else "invalid", "response": data,
+                "errors": errors, "diagnostic": diagnostic}
+    except HTTPError as exc:
+        return {"status": "unavailable", "response": None,
+                "errors": ["HTTPError"],
+                "diagnostic": {"provider": "openai", "http_status": exc.code}}
+    except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return {"status": "unavailable", "response": None,
+                "errors": [type(exc).__name__],
+                "diagnostic": {"provider": "openai", "error": type(exc).__name__}}
+
+
+def _decision_signature(stage: str, response: dict) -> str:
+    if stage == "classify":
+        return (
+            "category=" + str(response.get("category"))
+            + ";multiple_requests=" + str(bool(response.get("multiple_requests"))).lower()
+        )
+    state = str(response.get("state"))
+    if state == "NEED_INFORMATION":
+        sources = sorted({
+            str(item.get("source"))
+            for item in (response.get("information_requests") or [])
+            if isinstance(item, dict) and item.get("source")
+        })
+        return "state=NEED_INFORMATION;sources=" + ",".join(sources)
+    return "state=" + state
+
+
+def select_weighted_consensus(stage: str, member_results: list[dict]) -> dict:
+    """Choose a structured MAGI result by weighted vote over validated decisions."""
+    valid = [
+        item for item in member_results
+        if item.get("status") == "ok"
+        and isinstance(item.get("response"), dict)
+        and float(item.get("weight") or 0) > 0
+    ]
+    if not valid:
+        return {
+            "status": "unavailable", "response": None,
+            "reason": "no_valid_member", "votes": {},
+            "selected_member": None, "decision_signature": None,
+        }
+
+    votes: dict[str, float] = {}
+    for item in valid:
+        signature = _decision_signature(stage, item["response"])
+        votes[signature] = votes.get(signature, 0.0) + float(item["weight"])
+
+    best_score = max(votes.values())
+    winners = [
+        signature for signature, score in votes.items()
+        if abs(score - best_score) < 1e-9
+    ]
+    if len(winners) != 1:
+        return {
+            "status": "disagreement", "response": None,
+            "reason": "weighted_vote_tie", "votes": votes,
+            "selected_member": None, "decision_signature": None,
+        }
+
+    winner = winners[0]
+    agreeing = [
+        item for item in valid
+        if _decision_signature(stage, item["response"]) == winner
+    ]
+    representative = max(
+        agreeing,
+        key=lambda item: (
+            float(item["weight"]),
+            -_MEMBER_PRIORITY.get(str(item.get("name")), 99),
+        ),
+    )
+    return {
+        "status": "ok",
+        "response": deepcopy(representative["response"]),
+        "reason": "weighted_vote",
+        "votes": votes,
+        "selected_member": representative.get("name"),
+        "decision_signature": winner,
+        "valid_members": [item.get("name") for item in valid],
+    }
+
+
+def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
+    member_envelope = deepcopy(envelope)
+    member_envelope["magi_member"] = spec["name"]
+    if spec["provider"] == "ollama":
+        result = call_guided_member(
+            member_envelope, model=spec["model"], timeout=timeout
+        )
+    elif spec["provider"] == "openai":
+        result = _call_openai_guided(
+            member_envelope, model=spec["model"], timeout=timeout
+        )
+    else:
+        result = {
+            "status": "unavailable", "response": None,
+            "errors": ["unsupported_provider"], "diagnostic": {},
+        }
+    return {
+        "name": spec["name"],
+        "provider": spec["provider"],
+        "model": spec["model"],
+        "weight": spec["weight"],
+        "status": result.get("status"),
+        "response": deepcopy(result.get("response")),
+        "errors": list(result.get("errors") or []),
+        "diagnostic": deepcopy(result.get("diagnostic") or {}),
+    }
+
+
+def call_guided_panel(envelope: dict, *, model: str, timeout: float = 900.0) -> dict:
+    """Run enabled MAGI members concurrently and return weighted structured consensus."""
+    specs = [spec for spec in panel_member_specs(model) if spec["enabled"]]
+    member_results: list[dict | None] = [None] * len(specs)
+    with ThreadPoolExecutor(max_workers=max(1, len(specs))) as executor:
+        future_to_index = {
+            executor.submit(_call_panel_member, spec, envelope, timeout=timeout): index
+            for index, spec in enumerate(specs)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            try:
+                member_results[index] = future.result()
+            except Exception as exc:  # defensive isolation between MAGI members
+                spec = specs[index]
+                member_results[index] = {
+                    "name": spec["name"], "provider": spec["provider"],
+                    "model": spec["model"], "weight": spec["weight"],
+                    "status": "unavailable", "response": None,
+                    "errors": [type(exc).__name__],
+                    "diagnostic": {"error": type(exc).__name__},
+                }
+
+    completed = [item for item in member_results if isinstance(item, dict)]
+    consensus = select_weighted_consensus(envelope["stage"], completed)
+    status = consensus["status"]
+    return {
+        "status": status,
+        "response": deepcopy(consensus.get("response")),
+        "errors": [] if status == "ok" else [str(consensus.get("reason") or status)],
+        "diagnostic": {
+            "mode": "weighted_panel",
+            "enabled_members": [spec["name"] for spec in specs],
+            "valid_members": list(consensus.get("valid_members") or []),
+        },
+        "member_results": completed,
+        "consensus": consensus,
+    }
+
 def _compose_question(session: dict, purpose: str, *, issue: str | None = None) -> str:
     if purpose not in QUESTION_PURPOSES:
         raise ValueError("unknown_question_purpose")
@@ -305,11 +583,13 @@ def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller,
         "protocol_variant": "state_driven_question_experiment",
         "prompt_version": session["prompt_version"],
         "task_id": session["task_id"], "turn": len(session["turns"]) + 1,
-        "magi_member": "MELCHIOR", "stage": stage,
+        "magi_member": "MAGI_PANEL", "stage": stage,
         "question_purpose": question_purpose,
         "question_from_ritsuko": prompt,
         "user_input": {"raw": session["user_raw"]},
     }
+    if stage == "classify" and session.get("conversation_context"):
+        envelope["conversation_context"] = deepcopy(session["conversation_context"][-4:])
     if stage != "classify":
         envelope.update({
             "resource_catalog": default_resource_catalog(),
@@ -317,35 +597,39 @@ def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller,
                 "classification": deepcopy(session.get("classification")),
                 "previous_detail": deepcopy(session.get("detail")),
                 "pending_information_requests": deepcopy(session.get("pending_requests") or []),
-                "previous_turns": [
-                    {
-                        "stage": turn["stage"],
-                        "question_purpose": turn.get("question_purpose"),
-                        "response": deepcopy(turn.get("response")),
-                    }
-                    for turn in session["turns"]
-                ],
             },
             "observations": deepcopy(session["observations"]),
         })
     result = caller(envelope, model=session["model"], timeout=timeout)
     response = result.get("response")
     errors = list(result.get("errors") or [])
-    if result.get("status") == "ok":
+    result_status = result.get("status")
+    if result_status == "ok":
         errors += validate_turn(stage, response)
-    status = "ok" if result.get("status") == "ok" and not errors else (
-        "unavailable" if result.get("status") == "unavailable" else "invalid"
+    status = "ok" if result_status == "ok" and not errors else (
+        "disagreement" if result_status == "disagreement" else
+        "unavailable" if result_status == "unavailable" else "invalid"
     )
     session["turns"].append({
         "stage": stage, "question_purpose": question_purpose,
         "request_envelope": envelope, "status": status,
         "response": deepcopy(response), "errors": errors,
         "diagnostic": deepcopy(result.get("diagnostic") or {}),
+        "member_results": deepcopy(result.get("member_results") or []),
+        "consensus": deepcopy(result.get("consensus")),
     })
     session["last_question_purpose"] = question_purpose
+    if status == "disagreement":
+        session["magi_disagreement"] = deepcopy(result.get("consensus"))
+        session["user_question"] = (
+            "複数のMAGI解釈が分かれました。求めている結果をもう少し具体的に教えてください。"
+        )
+        session.update(status="waiting_user", next_step="magi_disagreement_requires_clarification")
+        return None
     if status != "ok":
         session.update(status="stopped", next_step="magi_" + status)
         return None
+    session["magi_disagreement"] = None
     return response
 
 def _request_signatures(items: list[dict]) -> list[str]:
@@ -357,6 +641,7 @@ def _request_signatures(items: list[dict]) -> list[str]:
 
 def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purpose: str) -> dict:
     session["detail"] = deepcopy(response)
+    session["user_question"] = None
     state = response["state"]
 
     if state == "READY" and not session["observations"] and purpose != "review_or_repair":
@@ -410,6 +695,9 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
         if len(session["turns"]) >= MAX_TURNS:
             session.update(status="stopped", next_step="max_turns_reached_with_pending_information")
         elif requests and all(item.get("source") == "user" for item in requests):
+            session["user_question"] = "確認したいこと: " + " / ".join(
+                item["what"] for item in requests
+            )
             session.update(status="waiting_user", next_step="ask_user_for_information")
         else:
             session.update(status="waiting_information", next_step="review_information_requests")
@@ -417,6 +705,7 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
         if len(session["turns"]) >= MAX_TURNS:
             session.update(status="stopped", next_step="max_turns_reached_with_user_question")
         else:
+            session["user_question"] = response.get("question_for_user")
             session.update(status="waiting_user", next_step="consider_user_question")
     elif state in {"ACTION_PROPOSAL", "KNOWLEDGE_CANDIDATE"}:
         session.update(status="proposal_ready", next_step="review_proposal")
@@ -435,13 +724,14 @@ def _advance(session: dict, caller, *, timeout: float) -> dict:
     return _apply_detail(session, response, caller, timeout=timeout, purpose=purpose)
 
 def start_dialogue(user_raw: str, *, model: str, timeout: float = 900.0,
-                   caller=call_guided_member) -> dict:
+                   caller=call_guided_panel) -> dict:
     session = {
         "task_id": str(uuid4()), "user_raw": user_raw.strip(), "model": model,
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": PROMPT_VERSION, "magi_mode": "weighted_panel",
         "status": "running", "next_step": "classify",
         "classification": None, "detail": None,
         "observations": [], "pending_requests": [], "previous_request_signatures": [],
+        "conversation_context": [], "user_question": None, "magi_disagreement": None,
         "user_source_reviewed": False, "last_question_purpose": None,
         "turns": [], "legacy_router_used": False, "tool_read_executed": False,
     }
@@ -460,7 +750,7 @@ def start_dialogue(user_raw: str, *, model: str, timeout: float = 900.0,
     return _advance(session, caller, timeout=timeout)
 
 def continue_with_observation(session: dict, observation_text: str, *,
-                              timeout: float = 900.0, caller=call_guided_member) -> dict:
+                              timeout: float = 900.0, caller=call_guided_panel) -> dict:
     """Dev-only injection; not an actual PKB/Web read nor an authenticated source."""
     updated = deepcopy(session)
     if updated.get("status") != "waiting_information":
@@ -479,6 +769,64 @@ def continue_with_observation(session: dict, observation_text: str, *,
     updated["status"] = "running"
     updated["next_step"] = "evaluate_observation"
     return _advance(updated, caller, timeout=timeout)
+
+def continue_with_user_clarification(session: dict, user_text: str, *,
+                                     timeout: float = 900.0,
+                                     caller=call_guided_panel) -> dict:
+    """Continue a waiting_user session without exposing internal pattern names."""
+    updated = deepcopy(session)
+    if updated.get("status") != "waiting_user":
+        raise ValueError("not_waiting_for_user")
+    if not isinstance(user_text, str) or not user_text.strip():
+        raise ValueError("empty_user_clarification")
+
+    text = user_text.strip()[:4000]
+    updated.setdefault("conversation_context", []).append({
+        "role": "user", "text": text,
+    })
+    updated["conversation_context"] = updated["conversation_context"][-4:]
+    updated["user_question"] = None
+    updated["magi_disagreement"] = None
+    updated["status"] = "running"
+
+    if updated.get("classification") is None:
+        updated["next_step"] = "classify_with_context"
+        classification = _send(
+            updated, "classify", "classify", CLASSIFY_QUESTION,
+            caller, timeout=timeout,
+        )
+        if classification is None:
+            return updated
+        updated["classification"] = deepcopy(classification)
+        if classification["multiple_requests"]:
+            updated.update(status="stopped", next_step="multiple_requests_detected")
+            return updated
+        return _advance(updated, caller, timeout=timeout)
+
+    responds_to = [
+        item["request_id"] for item in updated.get("pending_requests") or []
+        if isinstance(item, dict) and item.get("request_id")
+    ]
+    updated["observations"].append({
+        "source": "user_clarification",
+        "verified": False,
+        "text": text,
+        "responds_to": responds_to,
+    })
+    updated["pending_requests"] = []
+    updated["next_step"] = "evaluate_user_clarification"
+    prompt = _compose_question(updated, "evaluate_observation")
+    response = _send(
+        updated, "analyze", "evaluate_observation", prompt,
+        caller, timeout=timeout,
+    )
+    if response is None:
+        return updated
+    return _apply_detail(
+        updated, response, caller, timeout=timeout,
+        purpose="evaluate_observation",
+    )
+
 
 def export_dialogue(session: dict) -> dict:
     """No model Thinking text and no Ollama raw response bytes."""
