@@ -9,8 +9,8 @@ from pkb_proto.magi_client import call_member, choose_model
 from pkb_proto.magi_dialogue import (
     CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation,
     continue_with_user_clarification, panel_member_specs,
-    select_weighted_consensus, validate_turn, _call_openai_guided,
-    _call_gemini_guided, call_guided_panel,
+    select_weighted_consensus, validate_turn, _call_ollama_guided,
+    _call_openai_guided, _call_gemini_guided, call_guided_panel,
 )
 
 from pkb_proto.ritsuko_magi_protocol import (
@@ -144,6 +144,35 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
         self.assertEqual(catalog["pkb"]["access"],"read_only_via_ritsuko")
         self.assertEqual(catalog["web"]["access"],"read_only_via_ritsuko")
         self.assertEqual(catalog["user"]["access"],"ask_user")
+
+    def test_sync_ollama_guided_disables_thinking(self):
+        outer = {
+            "message": {
+                "content": json.dumps({
+                    "category": "INFORMATION",
+                    "understood_request": "GPUを知りたい",
+                    "reason": "情報照会",
+                    "confidence": "high",
+                    "multiple_requests": False,
+                }, ensure_ascii=False)
+            },
+            "done_reason": "stop",
+        }
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            captured["payload"] = json.loads(req.data.decode("utf-8"))
+            return BytesIO(json.dumps(outer, ensure_ascii=False).encode("utf-8"))
+
+        with patch("pkb_proto.magi_dialogue.urlopen", side_effect=fake_urlopen):
+            result = _call_ollama_guided(
+                {"stage": "classify"},
+                model="qwen3.5:4b",
+                timeout=1,
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIs(captured["payload"]["think"], False)
 
 class GuidedDialogueTests(unittest.TestCase):
     def scripted(self, *responses):
