@@ -7,6 +7,7 @@ not take over the event loop.
 from __future__ import annotations
 
 from collections.abc import Callable
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import anyio
@@ -119,7 +120,8 @@ async def resume_user_answer(
     timeout: float,
     claim_user_resume_record: Callable,
     persist_session_record: Callable,
-    fail_task_record: Callable,
+    abort_user_resume_record: Callable,
+    fail_task_record: Callable | None = None,
     stop_requested=None,
     on_turn_start=None,
     user_continuation=continue_with_user_clarification_async,
@@ -135,6 +137,7 @@ async def resume_user_answer(
             claim_user_resume_record,
             task_id,
             len(text),
+            sha256(text.encode("utf-8")).hexdigest(),
         )
         claimed = True
         updated = await user_continuation(
@@ -155,7 +158,7 @@ async def resume_user_answer(
         if claimed:
             try:
                 await anyio.to_thread.run_sync(
-                    fail_task_record,
+                    abort_user_resume_record,
                     task_id,
                     type(exc).__name__,
                 )
