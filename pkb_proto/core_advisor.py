@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .core_capabilities import CAPABILITY_REGISTRY
+from .ollama_runtime import configured_context_tokens
 
 
 OLLAMA = "http://127.0.0.1:11434"
@@ -243,7 +244,7 @@ def advise(
             "stream": False,
             "format": "json",
             "messages": _messages(context),
-            "options": {"temperature": 0, "num_predict": 500},
+            "options": {"temperature": 0, "num_predict": 500, "num_ctx": configured_context_tokens()},
         }
         req = Request(
             OLLAMA + "/api/chat",
