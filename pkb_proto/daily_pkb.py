@@ -49,9 +49,12 @@ from .magi_async import (
 from .magi_observation_loop import run_pkb_observation_loop, resume_user_answer
 from .magi_task_store import (
     claim_user_resume as claim_magi_user_resume,
+    complete_answer_only as complete_magi_answer_only,
+    complete_memory_review as complete_magi_memory_review,
     create_task as create_magi_core_task,
     fail_task as fail_magi_core_task,
     persist_session as persist_magi_core_session,
+    prepare_memory_intake as prepare_magi_memory_intake,
     record_pkb_read as record_magi_pkb_read,
 )
 from .magi_settings import (
@@ -1587,6 +1590,28 @@ def _claim_magi_user_resume_record(
             db,
             task_id=task_id,
             reply_length=reply_length,
+        )
+
+
+def _complete_magi_answer_only_record(task_id: UUID) -> dict:
+    with connection() as db:
+        return complete_magi_answer_only(db, task_id=task_id)
+
+
+def _prepare_magi_memory_intake_record(task_id: UUID) -> MemoryIntake:
+    with connection() as db:
+        return prepare_magi_memory_intake(db, task_id=task_id)
+
+
+def _complete_magi_memory_review_record(
+    task_id: UUID,
+    memory_result: dict,
+) -> dict:
+    with connection() as db:
+        return complete_magi_memory_review(
+            db,
+            task_id=task_id,
+            memory_result=memory_result,
         )
 
 
@@ -3168,6 +3193,8 @@ def load_core_task_trace(task_id: UUID) -> dict:
             "final_core_decision": checkpoint.get("final_core_decision"),
             "result_count": checkpoint.get("result_count"),
             "magi_session": checkpoint.get("magi_session"),
+            "proposal_review": checkpoint.get("proposal_review"),
+            "proposal_memory_intake": checkpoint.get("proposal_memory_intake"),
         },
         "actions": [
             {
