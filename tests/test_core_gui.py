@@ -241,6 +241,86 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('手動Observationで継続（開発用）'))
             self.assertTrue(self.elements('未解決の情報要求（自動PKB read対象外または追加情報が必要）'))
 
+    async def test_completed_magi_task_open_restores_saved_dialogue_read_only(self):
+        saved_session = {
+            'task_id': self.done[0]['id'],
+            'user_raw': 'メインPCのGPUの現在のドライバーは？',
+            'model': '',
+            'prompt_version': 'd19-state-driven-v4',
+            'status': 'candidate_ready',
+            'next_step': 'review_answer_candidate',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': '現在のGPUドライバーを知りたい',
+            },
+            'detail': {
+                'state': 'READY',
+                'reason': 'PKB Observationで現在値を確認した',
+                'answer_candidate': '現在のドライバーは DRV-G3 です。',
+            },
+            'pending_requests': [],
+            'observations': [
+                {
+                    'source': 'pkb',
+                    'verified': True,
+                    'confidentiality': 'private',
+                    'text': '現在ドライバーは DRV-G3 です。',
+                }
+            ],
+            'previous_request_signatures': [],
+            'legacy_router_used': False,
+            'tool_read_executed': True,
+            'cloud_context_gate': {
+                'status': 'applied',
+                'mode': 'local_only_private_pkb',
+            },
+            'last_question_purpose': 'evaluate_observation',
+            'turns': [{
+                'stage': 'analyze',
+                'question_purpose': 'evaluate_observation',
+                'request_envelope': {
+                    'turn': 3,
+                    'question_purpose': 'evaluate_observation',
+                },
+                'status': 'ok',
+                'response': {
+                    'state': 'READY',
+                    'answer_candidate': '現在のドライバーは DRV-G3 です。',
+                },
+                'errors': [],
+                'diagnostic': {},
+                'member_results': [],
+                'consensus': None,
+            }],
+        }
+        self.done[0].update({
+            'core_slice': 'ritsuko_magi_observation_v1',
+            'selected_capability': 'pkb_search',
+            'message': '現在のドライバーは DRV-G3 です。',
+            'magi_session': saved_session,
+        })
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=[]
+        ):
+            daily.core_page()
+            # Default list order is 5 open tasks followed by 5 completed tasks.
+            await self.click('開く', 5)
+            self.assertTrue(
+                self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
+            )
+            self.assertTrue(
+                self.elements(
+                    'Task status=completed / MAGI session status=candidate_ready'
+                )
+            )
+            self.assertTrue(self.elements('対話結果を一括コピー'))
+            self.assertTrue(any(
+                'DRV-G3' in getattr(e, 'text', '')
+                for e in self.client.elements.values()
+            ))
+            self.assertFalse(self.elements('手動Observationで継続（開発用）'))
+            self.assertFalse(self.elements('追加説明を渡して対話継続（試験）'))
+
     async def test_protocol_slots_and_legacy_flow_layout(self):
         with self.client, patch.object(
             daily, 'list_magi_models', return_value=['qwen3.5:9b', 'gemma3:12b']
