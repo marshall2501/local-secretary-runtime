@@ -327,6 +327,55 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("abort", [item[0] for item in calls])
 
 
+    async def test_user_resume_stopped_model_result_aborts_instead_of_persisting_failure(self):
+        calls = []
+        task_id = __import__("uuid").UUID(
+            "11111111-1111-4111-8111-111111111111"
+        )
+
+        def claim(claimed_id, reply_length, reply_fingerprint):
+            calls.append(("claim",))
+            return (
+                {
+                    "task_id": str(task_id),
+                    "status": "waiting_user",
+                    "pending_requests": [{"request_id": "REQ-1"}],
+                    "turns": [{}, {}, {}, {}],
+                },
+                "pkb_search",
+            )
+
+        async def stopped_continue(*args, **kwargs):
+            return {
+                "task_id": str(task_id),
+                "status": "stopped",
+                "next_step": "magi_unavailable",
+            }
+
+        def persist(*args):
+            calls.append(("persist",))
+
+        def abort(saved_id, error_type):
+            calls.append(("abort", error_type))
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "user_resume_re_evaluation_failed",
+        ):
+            from pkb_proto.magi_observation_loop import resume_user_answer
+            await resume_user_answer(
+                task_id,
+                "Radeon RX 9070 XT",
+                timeout=10,
+                claim_user_resume_record=claim,
+                persist_session_record=persist,
+                abort_user_resume_record=abort,
+                user_continuation=stopped_continue,
+            )
+
+        self.assertEqual([item[0] for item in calls], ["claim", "abort"])
+        self.assertEqual(calls[-1][1], "ValueError")
+
     async def test_user_resume_failure_aborts_to_retryable_state(self):
         calls = []
         task_id = __import__("uuid").UUID(
