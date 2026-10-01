@@ -25,6 +25,7 @@ from .ollama_runtime import (
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
     configured_magi_num_predict,
     normalize_context_tokens,
+    normalize_magi_num_predict,
 )
 from .ritsuko_magi_protocol import default_resource_catalog
 
@@ -239,6 +240,7 @@ def validate_turn(stage: str, output: object) -> list[str]:
 def _call_ollama_guided(
     envelope: dict, *, model: str, timeout: float, base_url: str | None = None,
     context_window_tokens: int | None = None,
+    ollama_num_predict: int | None = None,
 ) -> dict:
     """Ollama transport only; no semantic routing or tool access."""
     stage = envelope["stage"]
@@ -251,7 +253,11 @@ def _call_ollama_guided(
         ],
         "options": {
             "temperature": 0,
-            "num_predict": configured_magi_num_predict(),
+            "num_predict": normalize_magi_num_predict(
+                ollama_num_predict
+                if ollama_num_predict is not None
+                else configured_magi_num_predict()
+            ),
             "num_ctx": normalize_context_tokens(context_window_tokens),
         },
     }
@@ -573,6 +579,15 @@ def _normalized_member_specs(
                 if provider == "ollama"
                 else None
             ),
+            "ollama_num_predict": (
+                normalize_magi_num_predict(
+                    raw.get("ollama_num_predict")
+                    if raw.get("ollama_num_predict") is not None
+                    else configured_magi_num_predict()
+                )
+                if provider == "ollama"
+                else None
+            ),
             "weight": float(raw.get("weight") or 1.0),
             "timeout_seconds": int(raw.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
             "enabled": bool(raw.get("enabled") and model),
@@ -671,6 +686,7 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
             context_window_tokens=spec.get("context_window_tokens"),
+            ollama_num_predict=spec.get("ollama_num_predict"),
         )
     elif provider == "openai":
         result = _call_openai_guided(
@@ -701,6 +717,7 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
         "weight": spec["weight"],
         "timeout_seconds": spec.get("timeout_seconds"),
         "context_window_tokens": spec.get("context_window_tokens"),
+        "ollama_num_predict": spec.get("ollama_num_predict"),
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "status": result.get("status"),
         "response": deepcopy(result.get("response")),
@@ -741,6 +758,7 @@ def call_guided_panel(
                     "weight": spec["weight"],
                     "timeout_seconds": spec.get("timeout_seconds"),
                     "context_window_tokens": spec.get("context_window_tokens"),
+                    "ollama_num_predict": spec.get("ollama_num_predict"),
                     "status": "unavailable", "response": None,
                     "errors": [type(exc).__name__],
                     "diagnostic": {"error": type(exc).__name__},
@@ -763,6 +781,8 @@ def call_guided_panel(
                     "model": spec["model"],
                     "weight": spec["weight"],
                     "timeout_seconds": spec["timeout_seconds"],
+                    "context_window_tokens": spec.get("context_window_tokens"),
+                    "ollama_num_predict": spec.get("ollama_num_predict"),
                 }
                 for spec in specs
             ],
