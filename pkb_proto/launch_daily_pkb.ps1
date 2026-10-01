@@ -50,10 +50,7 @@ if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
     throw 'Dedicated isolated PKB writer role is missing.'
 }
 
-$allowedRuntimeEnv = [System.Collections.Generic.HashSet[string]]::new(
-    [System.StringComparer]::Ordinal
-)
-@(
+$allowedRuntimeEnv = @(
     'OPENAI_API_KEY',
     'OPENAI_BASE_URL',
     'LSA_MAGI_CLOUD_ENABLED',
@@ -64,13 +61,11 @@ $allowedRuntimeEnv = [System.Collections.Generic.HashSet[string]]::new(
     'LSA_MAGI_BALTHASAR_MODEL',
     'LSA_MAGI_BALTHASAR_WEIGHT',
     'LSA_MAGI_MELCHIOR_WEIGHT'
-) | ForEach-Object { [void]$allowedRuntimeEnv.Add($_) }
+)
 
 $previousRuntimeEnv = @{}
 $loadedRuntimeEnv = [System.Collections.Generic.List[string]]::new()
-$seenRuntimeEnv = [System.Collections.Generic.HashSet[string]]::new(
-    [System.StringComparer]::Ordinal
-)
+$seenRuntimeEnv = @{}
 $locationPushed = $false
 
 try {
@@ -78,51 +73,18 @@ try {
         foreach ($rawLine in Get-Content -LiteralPath $runtimeEnvFile) {
             $line = $rawLine.Trim()
             if (-not $line -or $line.StartsWith('#')) { continue }
-            if ($line -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=(.*)) { continue }
 
-            $name = $Matches[1]
-            if (-not $allowedRuntimeEnv.Contains($name)) { continue }
-            if (-not $seenRuntimeEnv.Add($name)) {
+            $separator = $line.IndexOf('=')
+            if ($separator -lt 1) { continue }
+
+            $name = $line.Substring(0, $separator).Trim()
+            if ($allowedRuntimeEnv -notcontains $name) { continue }
+            if ($seenRuntimeEnv.ContainsKey($name)) {
                 throw "Duplicate allowed runtime environment variable in .env: $name"
             }
+            $seenRuntimeEnv[$name] = $true
 
-            $value = $Matches[2]
-            if (($value -match '^"(.*)"
-            $previousRuntimeEnv[$name] = [Environment]::GetEnvironmentVariable(
-                $name, [EnvironmentVariableTarget]::Process
-            )
-            [Environment]::SetEnvironmentVariable(
-                $name, $value, [EnvironmentVariableTarget]::Process
-            )
-            $loadedRuntimeEnv.Add($name)
-        }
-    }
-
-    $env:LSA_PKB_DAILY_PORT = "$port"
-    $env:LSA_PKB_DAILY_SECRET = $secret
-    Push-Location $root
-    $locationPushed = $true
-
-    & $python -m pkb_proto.daily_pkb
-    if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
-} finally {
-    Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
-    Remove-Item Env:LSA_PKB_DAILY_SECRET -ErrorAction SilentlyContinue
-
-    foreach ($name in $loadedRuntimeEnv) {
-        [Environment]::SetEnvironmentVariable(
-            $name, $previousRuntimeEnv[$name], [EnvironmentVariableTarget]::Process
-        )
-    }
-
-    if ($locationPushed) {
-        Pop-Location
-    }
-}
-) -or ($value -match "^'(.*)'$")) {
-                $value = $Matches[1]
-            }
-
+            $value = $line.Substring($separator + 1).Trim()
             $previousRuntimeEnv[$name] = [Environment]::GetEnvironmentVariable(
                 $name, [EnvironmentVariableTarget]::Process
             )
