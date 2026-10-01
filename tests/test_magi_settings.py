@@ -6,9 +6,12 @@ from uuid import UUID
 from unittest.mock import patch
 
 from pkb_proto.magi_settings import (
+    DEFAULT_RETRY_HTTP_CODES,
+    DEFAULT_RETRY_WITHIN_TURN,
     DEFAULT_TIMEOUT_SECONDS,
     MEMBER_NAMES,
     fallback_member_specs,
+    normalize_retry_http_codes,
     provider_defaults,
     save_member_assignments,
     upsert_llm_profile,
@@ -89,6 +92,23 @@ class MagiSettingsTests(unittest.TestCase):
             specs = fallback_member_specs("gemma3:12b")
         self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 120)
         self.assertTrue(all(item["timeout_seconds"] == 120 for item in specs))
+        self.assertTrue(all(
+            item["retry_within_turn"] is DEFAULT_RETRY_WITHIN_TURN
+            for item in specs
+        ))
+        self.assertTrue(all(
+            item["retry_http_codes"] == list(DEFAULT_RETRY_HTTP_CODES)
+            for item in specs
+        ))
+
+    def test_retry_http_codes_are_configurable_and_validated(self):
+        self.assertEqual(
+            normalize_retry_http_codes("503,429,503,504"),
+            (503, 429, 504),
+        )
+        self.assertEqual(normalize_retry_http_codes(""), ())
+        with self.assertRaisesRegex(ValueError, "invalid_retry_http_codes"):
+            normalize_retry_http_codes("200,503")
 
     def test_existing_profile_can_be_updated_by_id(self):
         profile_id = UUID("11111111-1111-1111-1111-111111111111")
@@ -107,7 +127,12 @@ class MagiSettingsTests(unittest.TestCase):
                 self.calls.append((sql, params))
 
             def fetchone(self):
-                return (profile_id, 65536, 4096)
+                return (
+                    profile_id,
+                    65536,
+                    4096,
+                    list(DEFAULT_RETRY_HTTP_CODES),
+                )
 
         class DB:
             def __init__(self):
@@ -125,14 +150,17 @@ class MagiSettingsTests(unittest.TestCase):
             endpoint="http://127.0.0.1:11434",
             context_window_tokens=65536,
             ollama_num_predict=8192,
+            retry_http_codes="429,503",
             profile_id=str(profile_id),
         )
         self.assertEqual(saved["id"], str(profile_id))
         self.assertEqual(saved["ollama_num_predict"], 8192)
+        self.assertEqual(saved["retry_http_codes"], [429, 503])
         update_sql, update_params = db.cur.calls[-1]
         self.assertIn("UPDATE secretary.llm_profiles", update_sql)
         self.assertEqual(update_params[-1], profile_id)
         self.assertEqual(update_params[6], 8192)
+        self.assertEqual(update_params[7], [429, 503])
 
     def test_assignment_validation_requires_all_three_slots(self):
         with self.assertRaisesRegex(ValueError, "all_magi_members_required"):
