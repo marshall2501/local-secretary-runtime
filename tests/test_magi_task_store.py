@@ -183,6 +183,7 @@ class MagiTaskStoreTests(unittest.TestCase):
             intake.raw_text,
             "メインPCのGPUモデル名: Radeon RX 9070 XT",
         )
+        self.assertIn(str(TASK_ID), intake.source_ref)
         prepared_update = next(
             call for call in db.cur.calls
             if "UPDATE secretary.tasks SET checkpoint" in call[0]
