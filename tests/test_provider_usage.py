@@ -31,7 +31,7 @@ class ProviderUsageTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(
                 ProviderUsageError,
-                "credential reference",
+                "connection credential",
             ):
                 read_openai_month_usage(
                     openai_connection(),
