@@ -21,8 +21,9 @@ $file020 = Join-Path $root 'pkb_proto\sql\020_magi_llm_settings.sql'
 $file021 = Join-Path $root 'pkb_proto\sql\021_ollama_context_window.sql'
 $file022 = Join-Path $root 'pkb_proto\sql\022_ollama_generation_budget.sql'
 $file023 = Join-Path $root 'pkb_proto\sql\023_magi_retry_policy.sql'
+$file024 = Join-Path $root 'pkb_proto\sql\024_service_connections.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023, $file024)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -446,7 +447,38 @@ if ($LASTEXITCODE -ne 0 -or ($verify023 | Out-String).Trim() -ne '1' -or ($retry
     throw 'MAGI retry-policy migration verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 023 (MAGI retry policy included).'
+$has024 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='024_service_connections.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 024 schema version.' }
+if (($has024 | Out-String).Trim() -eq '0') {
+    $hash024 = (Get-FileHash -LiteralPath $file024 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql024 = [IO.File]::ReadAllText($file024).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash024)
+    $tmpName024 = 'service-connections-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp024 = Join-Path ([IO.Path]::GetTempPath()) $tmpName024
+    $remoteTmp024 = '/tmp/' + $tmpName024
+    try {
+        [IO.File]::WriteAllText($localTmp024, $sql024, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp024 ($id + ':' + $remoteTmp024) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 024 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp024
+        if ($LASTEXITCODE -ne 0) { throw '024 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp024) { Remove-Item -LiteralPath $localTmp024 }
+        & docker exec $id rm -f $remoteTmp024 | Out-Null
+    }
+} elseif (($has024 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 024 migration records.'
+}
+
+$verify024 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='024_service_connections.sql';"
+$connectionTable = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='secretary' AND table_name='service_connections';"
+$connectionColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='llm_profiles' AND column_name='connection_id';"
+$connectionGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.service_connections','SELECT,INSERT,UPDATE,DELETE');"
+$unlinkedProfiles = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.llm_profiles WHERE connection_id IS NULL;"
+if ($LASTEXITCODE -ne 0 -or ($verify024 | Out-String).Trim() -ne '1' -or ($connectionTable | Out-String).Trim() -ne '1' -or ($connectionColumn | Out-String).Trim() -ne '1' -or ($connectionGrant | Out-String).Trim() -ne 't' -or ($unlinkedProfiles | Out-String).Trim() -ne '0') {
+    throw 'Service Connection migration verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 024 (Service Connection Registry included).'
 
 
 
