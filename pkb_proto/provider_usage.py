@@ -7,7 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .credential_resolver import CredentialResolutionError, resolve_credential
+from .credential_resolver import CredentialResolutionError, resolve_connection_credential
 from .service_connections import PROVIDER_USAGE_READ
 
 
@@ -100,7 +100,7 @@ def _month_start_epoch(now: datetime) -> int:
     )
 
 
-def _validate_usage_connection(connection: dict) -> tuple[str, str, str]:
+def _validate_usage_connection(connection: dict) -> tuple[str, str, str | None, str]:
     if not isinstance(connection, dict):
         raise ProviderUsageError("Service Connectionが指定されていません。")
     if not connection.get("enabled"):
@@ -112,10 +112,11 @@ def _validate_usage_connection(connection: dict) -> tuple[str, str, str]:
         )
     adapter = str(connection.get("adapter_key") or "").strip().lower()
     endpoint = str(connection.get("endpoint") or "").strip()
-    credential_ref = str(connection.get("credential_ref") or "").strip()
-    if not adapter or not endpoint or not credential_ref:
+    credential_ref = str(connection.get("credential_ref") or "").strip() or None
+    connection_id = str(connection.get("id") or "").strip()
+    if not adapter or not endpoint or not connection_id:
         raise ProviderUsageError("Service Connectionの接続情報が不足しています。")
-    return adapter, endpoint, credential_ref
+    return adapter, endpoint, credential_ref, connection_id
 
 
 def read_openai_month_usage(
@@ -123,13 +124,13 @@ def read_openai_month_usage(
     now: datetime | None = None,
 ) -> dict:
     """Return current UTC-month OpenAI usage through one Service Connection."""
-    adapter, endpoint, credential_ref = _validate_usage_connection(connection)
+    adapter, endpoint, credential_ref, connection_id = _validate_usage_connection(connection)
     if adapter != "openai":
         raise ProviderUsageError(
             "OpenAI Usage readerにOpenAI以外のConnectionが指定されました。"
         )
     try:
-        api_key = resolve_credential(credential_ref)
+        api_key = resolve_connection_credential(connection_id, credential_ref)
     except CredentialResolutionError as exc:
         raise ProviderUsageError(str(exc)) from exc
     if not api_key:
@@ -212,7 +213,7 @@ def read_openai_month_usage(
             timezone.utc,
         ).isoformat(),
         "fetched_at": fetched.astimezone(timezone.utc).isoformat(),
-        "credential_ref": credential_ref,
+        "credential_source": "service_connection",
         "usage": {
             "status": "known",
             "totals": totals,
