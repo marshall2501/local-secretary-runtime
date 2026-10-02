@@ -3875,47 +3875,39 @@ def api_usage_page():
         "result": None,
         "error": None,
         "busy": False,
-        "connections": [],
+        "profiles": [],
+        "connections": {},
     }
 
     try:
         with connection() as db:
-            if (
-                os.environ.get("OPENAI_ADMIN_KEY", "").strip()
-                or os.environ.get("OPENAI_API_KEY", "").strip()
-            ):
-                ensure_openai_usage_connection(
-                    db,
-                    prefer_admin=bool(
-                        os.environ.get("OPENAI_ADMIN_KEY", "").strip()
-                    ),
+            bootstrap_connection_auth_from_env(db)
+            bootstrap_openai_usage_profile(db)
+            state["profiles"] = list_provider_usage_profiles(db)
+            for profile in state["profiles"]:
+                state["connections"][profile["connection_id"]] = (
+                    get_service_connection(db, profile["connection_id"])
                 )
-            state["connections"] = list_service_connections(
-                db,
-                capability=PROVIDER_USAGE_READ,
-            )
     except Exception as exc:
-        state["error"] = "Service Connectionを読み込めません: " + str(exc)[:180]
+        state["error"] = "API利用状況設定を読み込めません: " + str(exc)[:180]
 
-    connection_by_id = {
-        item["id"]: item for item in state["connections"]
-    }
-    connection_options = {
+    profile_by_id = {item["id"]: item for item in state["profiles"]}
+    profile_options = {
         item["id"]: (
             item["display_name"]
+            + " → "
+            + item["connection_name"]
             + " ["
             + item["adapter_key"]
-            + " / "
-            + str(item.get("credential_ref") or "-")
             + "]"
         )
-        for item in state["connections"]
+        for item in state["profiles"]
     }
 
     with ui.column().classes("w-full max-w-6xl mx-auto gap-4 p-4"):
         _portal_header(
             "API利用状況",
-            "共通Service Connection経由で外部Providerの利用実績を読取表示します。",
+            "用途設定が明示的に選んだService Connection経由で利用実績を読取表示します。",
         )
 
         with ui.card().classes("w-full border-2 border-indigo-200"):
@@ -3924,23 +3916,27 @@ def api_usage_page():
                 "usage / costs / limits / creditsを別概念として扱い、"
                 "取得できない値を0とはみなしません。現在のadapter実装はOpenAIです。"
             ).classes("text-sm text-grey-7")
+            ui.label(
+                "接続先・認証情報は設定画面のService Connectionで管理し、"
+                "API利用状況はProvider Usage Profileのconnection_idだけを使用します。"
+            ).classes("text-xs text-grey-7")
 
-            connection_select = ui.select(
-                options=connection_options,
+            profile_select = ui.select(
+                options=profile_options,
                 value=(
-                    state["connections"][0]["id"]
-                    if state["connections"]
+                    state["profiles"][0]["id"]
+                    if state["profiles"]
                     else None
                 ),
-                label="Service Connection",
+                label="Provider Usage Profile",
             ).classes("w-full")
 
             with ui.row().classes("w-full items-center justify-between gap-3"):
                 status = ui.label(
                     state["error"] or (
                         "未取得"
-                        if state["connections"]
-                        else "provider_usage_read Connectionがありません"
+                        if state["profiles"]
+                        else "Provider Usage Profileがありません。設定画面でConnectionを割り当ててください。"
                     )
                 ).classes(
                     "text-sm text-red-700"
@@ -3952,7 +3948,7 @@ def api_usage_page():
                     icon="refresh",
                     color="indigo",
                 )
-                if not state["connections"]:
+                if not state["profiles"]:
                     refresh_button.disable()
 
             metrics = ui.row().classes("w-full gap-3 flex-wrap")
@@ -3975,8 +3971,6 @@ def api_usage_page():
                     + str(result.get("fetched_at") or "-")
                     + " / connection: "
                     + str(result.get("connection_name") or "-")
-                    + " / credential: "
-                    + str(result.get("credential_ref") or "-")
                 )
                 usage = result.get("usage") or {}
                 totals = usage.get("totals") or {}
@@ -4067,19 +4061,28 @@ def api_usage_page():
             async def refresh():
                 if state["busy"]:
                     return
-                selected_id = str(connection_select.value or "").strip()
-                selected = connection_by_id.get(selected_id)
+                profile_id = str(profile_select.value or "").strip()
+                profile = profile_by_id.get(profile_id)
+                if profile is None:
+                    ui.notify(
+                        "Provider Usage Profileを選択してください",
+                        type="warning",
+                    )
+                    return
+                selected = state["connections"].get(profile["connection_id"])
                 if selected is None:
                     ui.notify(
-                        "Service Connectionを選択してください",
-                        type="warning",
+                        "割り当てられたService Connectionを読み込めません",
+                        type="negative",
                     )
                     return
                 state["busy"] = True
                 refresh_button.disable()
                 status.set_text(
-                    str(selected.get("display_name") or "Provider")
-                    + "から取得中..."
+                    str(profile.get("display_name") or "Provider Usage")
+                    + " / "
+                    + str(selected.get("display_name") or "Connection")
+                    + " から取得中..."
                 )
                 try:
                     result = await run.io_bound(
@@ -4104,8 +4107,8 @@ def api_usage_page():
             refresh_button.on_click(refresh)
 
         ui.label(
-            "この画面は現在値の確認用です。Usage値をConnection設定へ保存せず、"
-            "残高・利用上限は取得できない限りunknownとして扱います。"
+            "Usage値はConnection設定へ保存しません。残高・利用上限は取得できない限り"
+            "unknownとして扱います。接続先の変更は設定画面のProfile→Connection割当で行います。"
         ).classes("text-xs text-grey-7")
 
 
