@@ -77,10 +77,8 @@ def resolve_connection_credential(
     if connection_text and _CONNECTION_LOADER is not None:
         try:
             secret = _CONNECTION_LOADER(connection_text)
-        except Exception as exc:
-            raise CredentialResolutionError(
-                "connection credential could not be loaded: " + connection_text
-            ) from exc
+        except Exception:
+            secret = None
         if secret:
             return secret
 
