@@ -45,6 +45,115 @@ $count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERR
 if ($LASTEXITCODE -ne 0 -or ($count | Out-String).Trim() -ne '1') {
     throw 'The isolated PKB database is missing migration 025. Run .\pkb_proto\run_pending_setup.ps1 first.'
 }
+
+$migrationSummary = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || COALESCE((SELECT version FROM secretary.schema_migrations ORDER BY applied_at DESC, version DESC LIMIT 1), '');"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Cannot read isolated PKB migration summary.'
+}
+$migrationParts = (($migrationSummary | Out-String).Trim()) -split '\\|', 2
+if ($migrationParts.Count -ne 2 -or $migrationParts[0] -notmatch '^[0-9]+$userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
+if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
+    throw 'Dedicated isolated PKB writer role is missing.'
+}
+
+$allowedRuntimeEnv = @(
+    'OPENAI_API_KEY',
+    'OPENAI_ADMIN_KEY',
+    'OPENAI_BASE_URL',
+    'GEMINI_API_KEY',
+    'GEMINI_BASE_URL',
+    'OLLAMA_HOST',
+    'LSA_OLLAMA_CONTEXT_TOKENS',
+    'LSA_MAGI_OLLAMA_NUM_PREDICT',
+    'LSA_MAGI_CLOUD_ENABLED',
+    'LSA_MAGI_MELCHIOR_PROVIDER',
+    'LSA_MAGI_MELCHIOR_MODEL',
+    'LSA_MAGI_MELCHIOR_ENDPOINT',
+    'LSA_MAGI_MELCHIOR_CREDENTIAL_ENV',
+    'LSA_MAGI_MELCHIOR_ENABLED',
+    'LSA_MAGI_MELCHIOR_WEIGHT',
+    'LSA_MAGI_MELCHIOR_TIMEOUT_SECONDS',
+    'LSA_MAGI_MELCHIOR_CONTEXT_TOKENS',
+    'LSA_MAGI_CASPER_PROVIDER',
+    'LSA_MAGI_CASPER_MODEL',
+    'LSA_MAGI_CASPER_ENDPOINT',
+    'LSA_MAGI_CASPER_CREDENTIAL_ENV',
+    'LSA_MAGI_CASPER_ENABLED',
+    'LSA_MAGI_CASPER_WEIGHT',
+    'LSA_MAGI_CASPER_TIMEOUT_SECONDS',
+    'LSA_MAGI_CASPER_CONTEXT_TOKENS',
+    'LSA_MAGI_BALTHASAR_PROVIDER',
+    'LSA_MAGI_BALTHASAR_MODEL',
+    'LSA_MAGI_BALTHASAR_ENDPOINT',
+    'LSA_MAGI_BALTHASAR_CREDENTIAL_ENV',
+    'LSA_MAGI_BALTHASAR_ENABLED',
+    'LSA_MAGI_BALTHASAR_WEIGHT',
+    'LSA_MAGI_BALTHASAR_TIMEOUT_SECONDS',
+    'LSA_MAGI_BALTHASAR_CONTEXT_TOKENS'
+)
+
+$previousRuntimeEnv = @{}
+$loadedRuntimeEnv = [System.Collections.Generic.List[string]]::new()
+$seenRuntimeEnv = @{}
+$locationPushed = $false
+
+try {
+    if (Test-Path -LiteralPath $runtimeEnvFile -PathType Leaf) {
+        foreach ($rawLine in Get-Content -LiteralPath $runtimeEnvFile) {
+            $line = $rawLine.Trim()
+            if (-not $line -or $line.StartsWith('#')) { continue }
+
+            $separator = $line.IndexOf('=')
+            if ($separator -lt 1) { continue }
+
+            $name = $line.Substring(0, $separator).Trim()
+            if ($allowedRuntimeEnv -notcontains $name) { continue }
+            if ($seenRuntimeEnv.ContainsKey($name)) {
+                throw "Duplicate allowed runtime environment variable in .env: $name"
+            }
+            $seenRuntimeEnv[$name] = $true
+
+            $value = $line.Substring($separator + 1).Trim()
+            $previousRuntimeEnv[$name] = [Environment]::GetEnvironmentVariable(
+                $name, [EnvironmentVariableTarget]::Process
+            )
+            [Environment]::SetEnvironmentVariable(
+                $name, $value, [EnvironmentVariableTarget]::Process
+            )
+            $loadedRuntimeEnv.Add($name)
+        }
+    }
+
+    $env:LSA_PKB_DAILY_PORT = "$port"
+    $env:LSA_PKB_DAILY_SECRET = $secret
+    $env:LSA_PKB_DAILY_MIGRATION_COUNT = $migrationCount
+    $env:LSA_PKB_DAILY_LATEST_MIGRATION = $latestMigration
+    Push-Location $root
+    $locationPushed = $true
+
+    & $python -m pkb_proto.daily_pkb
+    if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
+} finally {
+    Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
+    Remove-Item Env:LSA_PKB_DAILY_SECRET -ErrorAction SilentlyContinue
+    Remove-Item Env:LSA_PKB_DAILY_MIGRATION_COUNT -ErrorAction SilentlyContinue
+    Remove-Item Env:LSA_PKB_DAILY_LATEST_MIGRATION -ErrorAction SilentlyContinue
+
+    foreach ($name in $loadedRuntimeEnv) {
+        [Environment]::SetEnvironmentVariable(
+            $name, $previousRuntimeEnv[$name], [EnvironmentVariableTarget]::Process
+        )
+    }
+
+    if ($locationPushed) {
+        Pop-Location
+    }
+}
+ -or -not $migrationParts[1]) {
+    throw 'Invalid isolated PKB migration summary.'
+}
+$migrationCount = $migrationParts[0]
+$latestMigration = $migrationParts[1]
 $userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
 if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
     throw 'Dedicated isolated PKB writer role is missing.'
