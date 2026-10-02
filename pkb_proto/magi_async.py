@@ -22,6 +22,11 @@ from urllib.parse import quote
 
 import anyio
 
+from .credential_resolver import (
+    CredentialResolutionError,
+    env_name_to_credential_ref,
+    resolve_credential,
+)
 from .async_transport import (
     AsyncHTTPStatusError,
     AsyncRequestTimeout,
@@ -187,13 +192,17 @@ async def _call_openai_guided_async(
     model: str,
     timeout: float,
     base_url: str | None = None,
+    credential_ref: str | None = None,
     credential_env: str | None = None,
     retry_within_turn: bool = DEFAULT_RETRY_WITHIN_TURN,
     retry_http_codes: tuple[int, ...] | list[int] = DEFAULT_RETRY_HTTP_CODES,
 ) -> dict:
-    credential_name = credential_env or "OPENAI_API_KEY"
-    api_key = os.environ.get(credential_name, "").strip()
-    if not api_key:
+    resolved_ref = credential_ref or env_name_to_credential_ref(
+        credential_env or "OPENAI_API_KEY"
+    )
+    try:
+        api_key = resolve_credential(resolved_ref)
+    except CredentialResolutionError:
         return {
             "status": "unavailable",
             "response": None,
@@ -201,7 +210,7 @@ async def _call_openai_guided_async(
             "diagnostic": {
                 "provider": "openai",
                 "error": "missing_provider_credential",
-                "credential_env": credential_name,
+                "credential_ref": resolved_ref,
             },
         }
     stage = envelope["stage"]
@@ -284,13 +293,17 @@ async def _call_gemini_guided_async(
     model: str,
     timeout: float,
     base_url: str | None = None,
+    credential_ref: str | None = None,
     credential_env: str | None = None,
     retry_within_turn: bool = DEFAULT_RETRY_WITHIN_TURN,
     retry_http_codes: tuple[int, ...] | list[int] = DEFAULT_RETRY_HTTP_CODES,
 ) -> dict:
-    credential_name = credential_env or "GEMINI_API_KEY"
-    api_key = os.environ.get(credential_name, "").strip()
-    if not api_key:
+    resolved_ref = credential_ref or env_name_to_credential_ref(
+        credential_env or "GEMINI_API_KEY"
+    )
+    try:
+        api_key = resolve_credential(resolved_ref)
+    except CredentialResolutionError:
         return {
             "status": "unavailable",
             "response": None,
@@ -298,7 +311,7 @@ async def _call_gemini_guided_async(
             "diagnostic": {
                 "provider": "gemini",
                 "error": "missing_provider_credential",
-                "credential_env": credential_name,
+                "credential_ref": resolved_ref,
             },
         }
     stage = envelope["stage"]
@@ -404,6 +417,7 @@ async def _call_panel_member_async(
             model=spec["model"],
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
+            credential_ref=spec.get("credential_ref"),
             credential_env=spec.get("credential_env"),
             retry_within_turn=bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
             retry_http_codes=spec.get("retry_http_codes") or DEFAULT_RETRY_HTTP_CODES,
@@ -414,6 +428,7 @@ async def _call_panel_member_async(
             model=spec["model"],
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
+            credential_ref=spec.get("credential_ref"),
             credential_env=spec.get("credential_env"),
             retry_within_turn=bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
             retry_http_codes=spec.get("retry_http_codes") or DEFAULT_RETRY_HTTP_CODES,
@@ -429,6 +444,7 @@ async def _call_panel_member_async(
     return {
         "name": spec["name"],
         "profile_id": spec.get("profile_id"),
+        "connection_id": spec.get("connection_id"),
         "provider": provider,
         "model": spec["model"],
         "weight": spec["weight"],
@@ -468,6 +484,7 @@ async def call_guided_panel_async(
             member_results[index] = {
                 "name": spec["name"],
                 "profile_id": spec.get("profile_id"),
+                "connection_id": spec.get("connection_id"),
                 "provider": spec["provider"],
                 "model": spec["model"],
                 "weight": spec["weight"],
@@ -499,6 +516,8 @@ async def call_guided_panel_async(
             "assignments": [
                 {
                     "name": spec["name"],
+                    "profile_id": spec.get("profile_id"),
+                    "connection_id": spec.get("connection_id"),
                     "provider": spec["provider"],
                     "model": spec["model"],
                     "weight": spec["weight"],
