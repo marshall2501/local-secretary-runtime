@@ -20,6 +20,10 @@ from .ollama_runtime import (
     normalize_context_tokens,
     normalize_magi_num_predict,
 )
+from .service_connections import (
+    ensure_llm_connection,
+    legacy_credential_env,
+)
 
 MEMBER_NAMES = ("MELCHIOR", "CASPER", "BALTHASAR")
 PROVIDERS = ("ollama", "openai", "gemini")
@@ -178,6 +182,7 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
         specs.append({
             "name": member,
             "profile_id": None,
+            "connection_id": None,
             "profile_label": f"{provider} / {model or '-'}",
             "provider": provider,
             "model": model,
@@ -198,30 +203,37 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
 
 
 def _row_profile(row) -> dict:
+    connection = {"credential_ref": row[5]}
     return {
         "id": str(row[0]),
         "display_name": row[1],
         "provider": row[2],
         "model": row[3],
         "endpoint": row[4],
-        "credential_env": row[5],
+        "credential_env": legacy_credential_env(connection),
         "context_window_tokens": row[6],
         "ollama_num_predict": row[7],
         "retry_http_codes": list(row[8] or []),
-        "enabled": bool(row[9]),
+        "enabled": bool(row[9] and row[12]),
+        "connection_id": str(row[10]),
+        "connection_display_name": row[11],
+        "connection_enabled": bool(row[12]),
     }
 
 
 def list_llm_profiles(db, *, include_disabled: bool = False) -> list[dict]:
-    where = "" if include_disabled else "WHERE enabled"
+    where = "" if include_disabled else "WHERE p.enabled AND c.enabled"
     with db.cursor() as cur:
         cur.execute(
-            f"""SELECT id, display_name, provider, model, endpoint, credential_env,
-                       context_window_tokens, ollama_num_predict,
-                       retry_http_codes, enabled
-                FROM secretary.llm_profiles
+            f"""SELECT p.id, p.display_name, c.adapter_key, p.model,
+                       c.endpoint, c.credential_ref,
+                       p.context_window_tokens, p.ollama_num_predict,
+                       p.retry_http_codes, p.enabled,
+                       c.id, c.display_name, c.enabled
+                FROM secretary.llm_profiles p
+                JOIN secretary.service_connections c ON c.id=p.connection_id
                 {where}
-                ORDER BY provider, display_name, model"""
+                ORDER BY c.adapter_key, p.display_name, p.model"""
         )
         return [_row_profile(row) for row in cur.fetchall()]
 
@@ -244,12 +256,23 @@ def upsert_llm_profile(
     model = str(model or "").strip()
     if not model:
         raise ValueError("model_required")
+
     default_endpoint, default_credential = provider_defaults(provider)
-    endpoint = str(endpoint or default_endpoint).strip()
-    credential_env = (
-        None if provider == "ollama"
-        else str(credential_env or default_credential or "").strip() or None
+    connection = ensure_llm_connection(
+        db,
+        provider=provider,
+        endpoint=str(endpoint or default_endpoint).strip(),
+        credential_env=(
+            None
+            if provider == "ollama"
+            else str(credential_env or default_credential or "").strip() or None
+        ),
     )
+    provider = connection["adapter_key"]
+    endpoint = connection["endpoint"]
+    credential_env = legacy_credential_env(connection)
+    connection_id = UUID(connection["id"])
+
     requested_context = context_window_tokens
     requested_num_predict = ollama_num_predict
     requested_retry_codes = retry_http_codes
@@ -277,10 +300,8 @@ def upsert_llm_profile(
             cur.execute(
                 """SELECT id, context_window_tokens, ollama_num_predict, retry_http_codes
                    FROM secretary.llm_profiles
-                   WHERE provider=%s AND model=%s
-                     AND endpoint IS NOT DISTINCT FROM %s
-                     AND credential_env IS NOT DISTINCT FROM %s""",
-                (provider, model, endpoint, credential_env),
+                   WHERE connection_id=%s AND model=%s""",
+                (connection_id, model),
             )
             row = cur.fetchone()
             profile_uuid = row[0] if row else uuid4()
@@ -310,13 +331,12 @@ def upsert_llm_profile(
         if row:
             cur.execute(
                 """UPDATE secretary.llm_profiles
-                   SET display_name=%s, provider=%s, model=%s, endpoint=%s,
-                       credential_env=%s, context_window_tokens=%s,
-                       ollama_num_predict=%s, retry_http_codes=%s,
-                       enabled=%s, updated_at=now()
+                   SET display_name=%s, connection_id=%s, model=%s,
+                       context_window_tokens=%s, ollama_num_predict=%s,
+                       retry_http_codes=%s, enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
-                    display_name, provider, model, endpoint, credential_env,
+                    display_name, connection_id, model,
                     context_window_tokens, ollama_num_predict,
                     list(retry_http_codes), bool(enabled), profile_uuid,
                 ),
@@ -324,12 +344,13 @@ def upsert_llm_profile(
         else:
             cur.execute(
                 """INSERT INTO secretary.llm_profiles
-                   (id, display_name, provider, model, endpoint, credential_env,
-                    context_window_tokens, ollama_num_predict, retry_http_codes, enabled)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   (id, display_name, connection_id, model,
+                    context_window_tokens, ollama_num_predict,
+                    retry_http_codes, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    profile_uuid, display_name, provider, model, endpoint,
-                    credential_env, context_window_tokens, ollama_num_predict,
+                    profile_uuid, display_name, connection_id, model,
+                    context_window_tokens, ollama_num_predict,
                     list(retry_http_codes), bool(enabled),
                 ),
             )
@@ -344,9 +365,11 @@ def upsert_llm_profile(
         "context_window_tokens": context_window_tokens,
         "ollama_num_predict": ollama_num_predict,
         "retry_http_codes": list(retry_http_codes),
-        "enabled": bool(enabled),
+        "enabled": bool(enabled and connection["enabled"]),
+        "connection_id": connection["id"],
+        "connection_display_name": connection["display_name"],
+        "connection_enabled": bool(connection["enabled"]),
     }
-
 
 def sync_ollama_profiles(db, models: list[str], *, endpoint: str | None = None) -> list[dict]:
     synced = []
@@ -388,13 +411,14 @@ def _profile_id_for_spec(db, spec: dict) -> str:
 def load_member_specs(db) -> list[dict]:
     with db.cursor() as cur:
         cur.execute(
-            """SELECT a.member, a.profile_id, p.display_name, p.provider, p.model,
-                      p.endpoint, p.credential_env, p.context_window_tokens,
+            """SELECT a.member, a.profile_id, p.display_name, c.adapter_key, p.model,
+                      c.endpoint, c.credential_ref, p.context_window_tokens,
                       p.ollama_num_predict, p.retry_http_codes,
                       a.weight, a.timeout_seconds, a.retry_within_turn,
-                      a.enabled, p.enabled
+                      a.enabled, p.enabled, c.enabled, c.id, c.display_name
                FROM secretary.magi_member_assignments a
-               JOIN secretary.llm_profiles p ON p.id=a.profile_id"""
+               JOIN secretary.llm_profiles p ON p.id=a.profile_id
+               JOIN secretary.service_connections c ON c.id=p.connection_id"""
         )
         rows = {row[0]: row for row in cur.fetchall()}
 
@@ -406,18 +430,20 @@ def load_member_specs(db) -> list[dict]:
         specs.append({
             "name": member,
             "profile_id": str(row[1]),
+            "connection_id": str(row[16]),
+            "connection_display_name": row[17],
             "profile_label": row[2],
             "provider": row[3],
             "model": row[4],
             "endpoint": row[5],
-            "credential_env": row[6],
+            "credential_env": legacy_credential_env({"credential_ref": row[6]}),
             "context_window_tokens": row[7],
             "ollama_num_predict": row[8],
             "retry_http_codes": list(row[9] or []),
             "weight": float(row[10]),
             "timeout_seconds": int(row[11]),
             "retry_within_turn": bool(row[12]),
-            "enabled": bool(row[13] and row[14]),
+            "enabled": bool(row[13] and row[14] and row[15]),
             "settings_source": "database",
         })
     return specs
@@ -459,7 +485,10 @@ def save_member_assignments(db, assignments: list[dict]) -> list[dict]:
             for member in MEMBER_NAMES:
                 item = by_member[member]
                 cur.execute(
-                    "SELECT enabled FROM secretary.llm_profiles WHERE id=%s",
+                    """SELECT p.enabled AND c.enabled
+                       FROM secretary.llm_profiles p
+                       JOIN secretary.service_connections c ON c.id=p.connection_id
+                       WHERE p.id=%s""",
                     (item["profile_id"],),
                 )
                 profile = cur.fetchone()
