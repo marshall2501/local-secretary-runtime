@@ -58,7 +58,7 @@ def _get(path: str, params: dict[str, Any]) -> Any:
 
 
 @mcp.tool()
-def tasks(status: str | None = None, limit: int = 20) -> dict[str, Any]:
+def tasks(status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """List Secretary tasks. Read-only."""
     if not 1 <= limit <= 200:
         raise ValueError("limit must be between 1 and 200")
