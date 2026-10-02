@@ -3883,7 +3883,7 @@ def api_usage_page():
             + " ["
             + item["adapter_key"]
             + " / "
-            + item["credential_ref"]
+            + str(item.get("credential_ref") or "-")
             + "]"
         )
         for item in state["connections"]
