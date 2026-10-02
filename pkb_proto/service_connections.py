@@ -24,16 +24,19 @@ ADAPTER_DEFAULTS = {
         "endpoint": "http://127.0.0.1:11434",
         "credential_ref": None,
         "capabilities": (LLM_INFERENCE,),
+        "supported_capabilities": (LLM_INFERENCE,),
     },
     "openai": {
         "endpoint": "https://api.openai.com/v1",
         "credential_ref": "env:OPENAI_API_KEY",
         "capabilities": (LLM_INFERENCE,),
+        "supported_capabilities": (LLM_INFERENCE, PROVIDER_USAGE_READ),
     },
     "gemini": {
         "endpoint": "https://generativelanguage.googleapis.com/v1beta",
         "credential_ref": "env:GEMINI_API_KEY",
         "capabilities": (LLM_INFERENCE,),
+        "supported_capabilities": (LLM_INFERENCE,),
     },
 }
 
@@ -77,6 +80,7 @@ def adapter_defaults(adapter_key: str) -> dict:
         "endpoint": defaults["endpoint"],
         "credential_ref": defaults["credential_ref"],
         "capabilities": list(defaults["capabilities"]),
+        "supported_capabilities": list(defaults["supported_capabilities"]),
     }
 
 
@@ -154,7 +158,9 @@ def upsert_service_connection(
     connection_id: str | None = None,
 ) -> dict:
     key = normalize_adapter_key(adapter_key)
-    defaults = ADAPTER_DEFAULTS.get(key) or {}
+    defaults = ADAPTER_DEFAULTS.get(key)
+    if defaults is None:
+        raise ValueError("unsupported_adapter")
     endpoint_value = str(endpoint or defaults.get("endpoint") or "").strip()
     if not endpoint_value or len(endpoint_value) > 500:
         raise ValueError("endpoint_required")
@@ -167,6 +173,9 @@ def upsert_service_connection(
     caps = normalize_capabilities(
         capabilities if capabilities is not None else defaults.get("capabilities", ())
     )
+    supported = set(defaults.get("supported_capabilities", ()))
+    if any(capability not in supported for capability in caps):
+        raise ValueError("unsupported_adapter_capability")
 
     with db.cursor() as cur:
         row = None
