@@ -14,9 +14,11 @@ services:
       LSA_API_CONTAINER_MODE: "1"
       LSA_API_DB_PASSWORD_FILE: /run/secrets/secretary_api_db_password
       LSA_API_TOKEN_FILE: /run/secrets/secretary_api_token
+      LSA_EXTERNAL_READ_TOKEN_FILE: /run/secrets/secretary_external_read_token
     secrets:
       - secretary_api_db_password
       - secretary_api_token
+      - secretary_external_read_token
     ports:
       - "127.0.0.1:${LSA_API_PORT:-8010}:8010"
     networks: [secretary_db]
@@ -39,3 +41,5 @@ secrets:
     file: ../secrets/secretary-api-db-password.txt
   secretary_api_token:
     file: ../secrets/secretary-api-token.txt
+  secretary_external_read_token:
+    file: ../secrets/secretary-external-read-token.txt
