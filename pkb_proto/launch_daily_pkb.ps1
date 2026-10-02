@@ -52,6 +52,7 @@ if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
 
 $allowedRuntimeEnv = @(
     'OPENAI_API_KEY',
+    'OPENAI_ADMIN_KEY',
     'OPENAI_BASE_URL',
     'GEMINI_API_KEY',
     'GEMINI_BASE_URL',
