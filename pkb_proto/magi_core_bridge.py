@@ -86,15 +86,27 @@ def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
         return None
     latest = user_observations[-1]
     literal = str(latest.get("text") or "").strip()
-    answer = str(detail.get("answer_candidate") or "").strip()
+    explicit_answer = str(detail.get("answer_candidate") or "").strip()
     knowledge = str(detail.get("knowledge_candidate") or "").strip()
-    if not answer or not knowledge:
+    if not knowledge:
         return None
     folded = literal.casefold()
-    if folded not in answer.casefold() or folded not in knowledge.casefold():
+    if folded not in knowledge.casefold():
         return None
+    if explicit_answer:
+        if folded not in explicit_answer.casefold():
+            return None
+        answer = explicit_answer
+        answer_source = "answer_candidate"
+    else:
+        # KNOWLEDGE_CANDIDATE legitimately permits answer_candidate=null.
+        # The user-grounded knowledge candidate is a deterministic fallback so
+        # proposal review can still present and return the exact accepted fact.
+        answer = knowledge
+        answer_source = "knowledge_candidate_fallback"
     return {
         "answer": answer,
+        "answer_source": answer_source,
         "knowledge_candidate": knowledge,
         "user_text": literal,
         "responds_to": [str(x) for x in (latest.get("responds_to") or [])][:20],
@@ -116,6 +128,9 @@ def proposal_review_observation(
         "confidentiality": "private",
         "review_decision": decision,
         "answer": str(proposal.get("answer") or "").strip()[:4000],
+        "answer_source": str(
+            proposal.get("answer_source") or "answer_candidate"
+        )[:80],
         "knowledge_candidate": str(
             proposal.get("knowledge_candidate") or ""
         ).strip()[:4000],
