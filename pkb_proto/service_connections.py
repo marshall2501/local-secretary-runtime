@@ -150,7 +150,7 @@ def upsert_service_connection(
     account_label: str | None = None,
     capabilities: object | None = None,
     nonsecret_config: dict | None = None,
-    enabled: bool = True,
+    enabled: bool | None = None,
     connection_id: str | None = None,
 ) -> dict:
     key = normalize_adapter_key(adapter_key)
@@ -167,12 +167,6 @@ def upsert_service_connection(
     caps = normalize_capabilities(
         capabilities if capabilities is not None else defaults.get("capabilities", ())
     )
-    config = dict(nonsecret_config or {})
-    if len(json.dumps(config, ensure_ascii=False)) > 20000:
-        raise ValueError("nonsecret_config_too_large")
-    name = str(display_name or f"{key} / {account_value or endpoint_value}").strip()
-    if not name or len(name) > 200:
-        raise ValueError("display_name_required")
 
     with db.cursor() as cur:
         row = None
@@ -182,7 +176,7 @@ def upsert_service_connection(
             except ValueError as exc:
                 raise ValueError("invalid_connection_id") from exc
             cur.execute(
-                """SELECT id, capabilities
+                """SELECT id, capabilities, display_name, enabled, nonsecret_config
                    FROM secretary.service_connections
                    WHERE id=%s""",
                 (connection_uuid,),
@@ -192,7 +186,7 @@ def upsert_service_connection(
                 raise ValueError("unknown_connection")
         else:
             cur.execute(
-                """SELECT id, capabilities
+                """SELECT id, capabilities, display_name, enabled, nonsecret_config
                    FROM secretary.service_connections
                    WHERE adapter_key=%s
                      AND endpoint=%s
@@ -202,6 +196,26 @@ def upsert_service_connection(
             )
             row = cur.fetchone()
             connection_uuid = row[0] if row else uuid4()
+
+        existing_name = str(row[2]).strip() if row else ""
+        name = str(
+            display_name
+            or existing_name
+            or f"{key} / {account_value or credential_value or endpoint_value}"
+        ).strip()
+        if not name or len(name) > 200:
+            raise ValueError("display_name_required")
+
+        if row and nonsecret_config is None:
+            config = dict(row[4] or {})
+        else:
+            config = dict(nonsecret_config or {})
+        if len(json.dumps(config, ensure_ascii=False)) > 20000:
+            raise ValueError("nonsecret_config_too_large")
+
+        enabled_value = bool(row[3]) if row and enabled is None else (
+            True if enabled is None else bool(enabled)
+        )
 
         if row:
             merged_caps = normalize_capabilities([*(row[1] or []), *caps])
@@ -215,7 +229,7 @@ def upsert_service_connection(
                     name, key, endpoint_value, credential_value, account_value,
                     list(merged_caps),
                     json.dumps(config, ensure_ascii=False),
-                    bool(enabled), connection_uuid,
+                    enabled_value, connection_uuid,
                 ),
             )
             caps = merged_caps
@@ -228,7 +242,7 @@ def upsert_service_connection(
                 (
                     connection_uuid, name, key, endpoint_value, credential_value,
                     account_value, list(caps),
-                    json.dumps(config, ensure_ascii=False), bool(enabled),
+                    json.dumps(config, ensure_ascii=False), enabled_value,
                 ),
             )
 
@@ -241,9 +255,8 @@ def upsert_service_connection(
         "account_label": account_value,
         "capabilities": list(caps),
         "nonsecret_config": config,
-        "enabled": bool(enabled),
+        "enabled": enabled_value,
     }
-
 
 def ensure_llm_connection(
     db,
@@ -265,7 +278,7 @@ def ensure_llm_connection(
             else defaults["credential_ref"]
         ),
         capabilities=[LLM_INFERENCE],
-        enabled=True,
+        enabled=None,
     )
 
 
@@ -274,11 +287,11 @@ def ensure_openai_usage_connection(db, *, prefer_admin: bool = True) -> dict:
     return upsert_service_connection(
         db,
         adapter_key="openai",
-        display_name="OpenAI Usage / Costs",
+        display_name=None,
         endpoint=ADAPTER_DEFAULTS["openai"]["endpoint"],
         credential_ref=env_name_to_credential_ref(credential_env),
         capabilities=[PROVIDER_USAGE_READ],
-        enabled=True,
+        enabled=None,
     )
 
 
