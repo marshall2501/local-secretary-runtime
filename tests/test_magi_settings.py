@@ -112,6 +112,7 @@ class MagiSettingsTests(unittest.TestCase):
 
     def test_existing_profile_can_be_updated_by_id(self):
         profile_id = UUID("11111111-1111-1111-1111-111111111111")
+        connection_id = UUID("22222222-2222-2222-2222-222222222222")
 
         class Cursor:
             def __init__(self):
@@ -142,25 +143,38 @@ class MagiSettingsTests(unittest.TestCase):
                 return self.cur
 
         db = DB()
-        saved = upsert_llm_profile(
-            db,
-            provider="ollama",
-            model="qwen3.5:9b",
-            display_name="Ollama / qwen3.5:9b",
-            endpoint="http://127.0.0.1:11434",
-            context_window_tokens=65536,
-            ollama_num_predict=8192,
-            retry_http_codes="429,503",
-            profile_id=str(profile_id),
-        )
+        connection = {
+            "id": str(connection_id),
+            "display_name": "ollama / LLM",
+            "adapter_key": "ollama",
+            "endpoint": "http://127.0.0.1:11434",
+            "credential_ref": None,
+            "enabled": True,
+        }
+        with patch(
+            "pkb_proto.magi_settings.ensure_llm_connection",
+            return_value=connection,
+        ):
+            saved = upsert_llm_profile(
+                db,
+                provider="ollama",
+                model="qwen3.5:9b",
+                display_name="Ollama / qwen3.5:9b",
+                endpoint="http://127.0.0.1:11434",
+                context_window_tokens=65536,
+                ollama_num_predict=8192,
+                retry_http_codes="429,503",
+                profile_id=str(profile_id),
+            )
         self.assertEqual(saved["id"], str(profile_id))
+        self.assertEqual(saved["connection_id"], str(connection_id))
         self.assertEqual(saved["ollama_num_predict"], 8192)
         self.assertEqual(saved["retry_http_codes"], [429, 503])
         update_sql, update_params = db.cur.calls[-1]
         self.assertIn("UPDATE secretary.llm_profiles", update_sql)
         self.assertEqual(update_params[-1], profile_id)
-        self.assertEqual(update_params[6], 8192)
-        self.assertEqual(update_params[7], [429, 503])
+        self.assertEqual(update_params[4], 8192)
+        self.assertEqual(update_params[5], [429, 503])
 
     def test_member_retry_toggle_is_persisted(self):
         class Context:
