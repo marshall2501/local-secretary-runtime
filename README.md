@@ -19,6 +19,7 @@ Personal Local Secretary AI の実装リポジトリです。PC専用Botでは�
 - **MAGI**: MELCHIOR / BALTHASAR / CASPER の最大3スロットに、ローカルまたはクラウドLLMを割り当てて意味理解・分析・提案を行う交換可能な判断層。
 - **PKB**: PostgreSQLを構造化記憶の正本とし、SQL-firstの検索、Memory Intake、訂正、履歴、Pending例外処理を実装。
 - **API / UI**: FastAPI、NiceGUI、開発Workbench、日常用ポータル。
+- **Service Connections**: LLM Providerや将来の外部／ローカルServiceについて、adapter / endpoint / credential参照 / 技術Capabilityを共通管理。Secret値そのものやRITSUKOの操作承認は別境界。
 - **Runtime**: Docker、PowerShell、設定、診断、バックアップ・復元、テスト。
 
 LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定的なゲートが根拠・状態・権限・実行結果を検査します。明確な低リスク本人申告は条件を満たせばMemory Intakeから自動登録でき、曖昧さ・競合・高影響などはPendingへ送ります。外部操作の承認は記憶登録とは別です。
@@ -27,6 +28,7 @@ LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定
 
 - `pkb_proto/daily_pkb.py` / `pkb_proto/launch_daily_pkb.ps1` — localhostの日常用ポータル。現在のランチャーは隔離PKB DBと専用writerを明示的に検査します。
 - `pkb_proto/magi_async.py` — state-driven MAGI通信と各provider adapter。
+- `pkb_proto/service_connections.py` / `pkb_proto/credential_resolver.py` — 共通Service Connection RegistryとSecret非保持の資格情報参照境界。
 - `pkb_proto/magi_core_bridge.py` / `pkb_proto/magi_task_store.py` — RITSUKO側のObservation、Task永続化、resume/review境界。
 - `pkb_proto/memory_intake.py` / `pkb_proto/ingestion_gate.py` — Memory Intakeと決定的な書込み判断境界。
 - `pkb_proto/pending_service.py` — 例外Pendingの保存・確認処理。
