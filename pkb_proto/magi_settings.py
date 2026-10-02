@@ -5,13 +5,15 @@ are independent assignments. PostgreSQL is the normal settings source; env
 values are bootstrap/fallback defaults when no DB assignments exist yet.
 
 API secret values are deliberately not stored in these configuration tables.
-Profiles store only the environment-variable name used to obtain a credential.
+Service Connections are the runtime source of endpoint and credential references;
+LLM Profiles keep only model/runtime settings plus the Connection reference.
 """
 from __future__ import annotations
 
 import os
 from uuid import UUID, uuid4
 
+from .credential_resolver import env_name_to_credential_ref
 from .magi_client import OLLAMA
 from .ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
@@ -188,6 +190,7 @@ def fallback_member_specs(local_model: str | None = None) -> list[dict]:
             "model": model,
             "endpoint": endpoint,
             "credential_env": credential_env,
+            "credential_ref": env_name_to_credential_ref(credential_env),
             "context_window_tokens": configured_context if provider == "ollama" else None,
             "ollama_num_predict": (
                 configured_magi_num_predict() if provider == "ollama" else None
@@ -211,6 +214,7 @@ def _row_profile(row) -> dict:
         "model": row[3],
         "endpoint": row[4],
         "credential_env": legacy_credential_env(connection),
+        "credential_ref": row[5],
         "context_window_tokens": row[6],
         "ollama_num_predict": row[7],
         "retry_http_codes": list(row[8] or []),
@@ -362,6 +366,7 @@ def upsert_llm_profile(
         "model": model,
         "endpoint": endpoint,
         "credential_env": credential_env,
+        "credential_ref": connection.get("credential_ref"),
         "context_window_tokens": context_window_tokens,
         "ollama_num_predict": ollama_num_predict,
         "retry_http_codes": list(retry_http_codes),
@@ -437,6 +442,7 @@ def load_member_specs(db) -> list[dict]:
             "model": row[4],
             "endpoint": row[5],
             "credential_env": legacy_credential_env({"credential_ref": row[6]}),
+            "credential_ref": row[6],
             "context_window_tokens": row[7],
             "ollama_num_predict": row[8],
             "retry_http_codes": list(row[9] or []),
