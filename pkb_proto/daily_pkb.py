@@ -617,12 +617,21 @@ def connection():
     return db
 
 
+def _connection_credential_loader(connection_id: str) -> str | None:
+    with connection() as db:
+        return get_connection_auth_value(db, connection_id, "api_key")
+
+
+register_connection_credential_loader(_connection_credential_loader)
+
+
 def _load_magi_configuration(
     installed_ollama_models: list[str],
     default_local_model: str | None,
 ) -> tuple[list[dict], list[dict]]:
     """Load DB settings, importing env defaults only when DB has no assignments."""
     with connection() as db:
+        bootstrap_connection_auth_from_env(db)
         sync_ollama_profiles(
             db,
             installed_ollama_models,
@@ -641,8 +650,9 @@ def _save_magi_assignments(assignments: list[dict]) -> list[dict]:
 
 def _register_magi_profile(
     *,
-    provider: str,
     model: str,
+    connection_id: str | None = None,
+    provider: str | None = None,
     display_name: str | None = None,
     endpoint: str | None = None,
     credential_env: str | None = None,
@@ -654,8 +664,9 @@ def _register_magi_profile(
     with connection() as db:
         return upsert_llm_profile(
             db,
-            provider=provider,
             model=model,
+            connection_id=connection_id,
+            provider=provider,
             display_name=display_name,
             endpoint=endpoint,
             credential_env=credential_env,
