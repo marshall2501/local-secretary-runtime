@@ -33,11 +33,14 @@ class ApiContainerConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             external = Path(folder) / "external"
             external.write_text("r" * 48)
+            password = Path(folder) / "password"
+            password.write_text("not-a-real-password")
             env = {
                 "LSA_API_DSN": "host=secretary-postgres port=5432 "
                                "dbname=secretary user=secretary_api",
-                "LSA_API_TOKEN": "t" * 48,
                 "LSA_API_CONTAINER_MODE": "1",
+                "LSA_API_TOKEN": "t" * 48,
+                "LSA_API_DB_PASSWORD_FILE": str(password),
                 "LSA_EXTERNAL_READ_TOKEN_FILE": str(external),
             }
             with patch.dict(os.environ, env, clear=True):
