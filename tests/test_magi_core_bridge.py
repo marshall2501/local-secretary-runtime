@@ -80,6 +80,20 @@ class MagiCoreBridgeTests(unittest.TestCase):
         self.assertEqual(review["user_text"], "Radeon RX 9070 XT")
         self.assertEqual(review["responds_to"], ["REQ-1"])
 
+    def test_missing_answer_candidate_falls_back_to_grounded_knowledge(self):
+        session = self.proposal_session()
+        session["detail"]["answer_candidate"] = None
+        review = reviewable_user_knowledge_proposal(session)
+        self.assertIsNotNone(review)
+        self.assertEqual(
+            review["answer"],
+            "メインPCのGPUモデル名: Radeon RX 9070 XT",
+        )
+        self.assertEqual(
+            review["answer_source"],
+            "knowledge_candidate_fallback",
+        )
+
     def test_model_only_or_missing_user_proposal_is_not_reviewable(self):
         session = self.proposal_session()
         session["detail"]["answer_candidate"] = "メインPCのGPUは別モデルです。"
@@ -99,6 +113,7 @@ class MagiCoreBridgeTests(unittest.TestCase):
         self.assertTrue(observation["verified"])
         self.assertEqual(observation["confidentiality"], "private")
         self.assertEqual(observation["review_decision"], "answer_only")
+        self.assertEqual(observation["answer_source"], "answer_candidate")
         self.assertIsNone(observation["memory_intake"])
 
     def test_memory_review_observation_preserves_pending_semantics(self):
