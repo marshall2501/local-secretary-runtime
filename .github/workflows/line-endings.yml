@@ -1,7 +1,9 @@
 name: Line ending integrity
 
 on:
-  workflow_dispatch:
+  push:
+  pull_request:
+
 jobs:
   verify-line-endings:
     runs-on: ubuntu-latest

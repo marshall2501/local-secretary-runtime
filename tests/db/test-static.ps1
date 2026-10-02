@@ -1,9 +1,19 @@
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $errorsFound = @()
-Get-ChildItem (Join-Path $root 'scripts'),(Join-Path $root 'tests') -Recurse -Filter '*.ps1' | ForEach-Object {
-    $tokens = $null; $parseErrors = $null
-    $null = [Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parseErrors)
+$scriptRoots = @(
+    (Join-Path $root 'scripts'),
+    (Join-Path $root 'tests'),
+    (Join-Path $root 'pkb_proto')
+)
+Get-ChildItem -Path $scriptRoots -Recurse -Filter '*.ps1' -File | ForEach-Object {
+    $tokens = $null
+    $parseErrors = $null
+    $null = [Management.Automation.Language.Parser]::ParseFile(
+        $_.FullName,
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
     $errorsFound += $parseErrors
 }
 if ($errorsFound.Count) { throw ($errorsFound | Out-String) }
@@ -16,4 +26,4 @@ try {
     git diff --check
     if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }
 } finally { Pop-Location }
-Write-Host 'PASS: PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
+Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
