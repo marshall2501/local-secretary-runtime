@@ -1,12 +1,17 @@
 """Shared connection registry for local and external service adapters.
 
-A Service Connection describes how the runtime reaches one service endpoint and
-which technical capabilities that connection can provide. Secret values are not
-stored here: only credential references such as env:OPENAI_API_KEY.
+A Service Connection is the single DB record for connection + authentication
+settings. Consumer definitions (LLM Profile, Provider Usage, future Calendar /
+Finance definitions) explicitly reference a connection_id.
+
+Secret values are local DB data in auth_data. credential_ref remains only as a
+bootstrap/fallback compatibility field while existing env configuration is
+migrated into the DB.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 from uuid import UUID, uuid4
 
@@ -14,27 +19,33 @@ from .credential_resolver import (
     credential_ref_to_env_name,
     env_name_to_credential_ref,
     normalize_credential_ref,
+    resolve_credential,
 )
 
 LLM_INFERENCE = "llm_inference"
 PROVIDER_USAGE_READ = "provider_usage_read"
 
+CONNECTION_TYPES = ("none", "api_key", "username_password", "oauth2")
+
 ADAPTER_DEFAULTS = {
     "ollama": {
         "endpoint": "http://127.0.0.1:11434",
         "credential_ref": None,
+        "connection_type": "none",
         "capabilities": (LLM_INFERENCE,),
         "supported_capabilities": (LLM_INFERENCE,),
     },
     "openai": {
         "endpoint": "https://api.openai.com/v1",
         "credential_ref": "env:OPENAI_API_KEY",
+        "connection_type": "api_key",
         "capabilities": (LLM_INFERENCE,),
         "supported_capabilities": (LLM_INFERENCE, PROVIDER_USAGE_READ),
     },
     "gemini": {
         "endpoint": "https://generativelanguage.googleapis.com/v1beta",
         "credential_ref": "env:GEMINI_API_KEY",
+        "connection_type": "api_key",
         "capabilities": (LLM_INFERENCE,),
         "supported_capabilities": (LLM_INFERENCE,),
     },
@@ -48,6 +59,22 @@ def normalize_adapter_key(value: object) -> str:
     if not _TOKEN.fullmatch(key):
         raise ValueError("invalid_adapter_key")
     return key
+
+
+def normalize_connection_type(value: object | None) -> str:
+    kind = str(value or "").strip().lower()
+    if kind not in CONNECTION_TYPES:
+        raise ValueError("invalid_connection_type")
+    return kind
+
+
+def normalize_connection_role(value: object | None) -> str | None:
+    role = str(value or "").strip().lower()
+    if not role:
+        return None
+    if not _TOKEN.fullmatch(role):
+        raise ValueError("invalid_connection_role")
+    return role
 
 
 def normalize_capabilities(value: object | None) -> tuple[str, ...]:
@@ -70,6 +97,17 @@ def normalize_capabilities(value: object | None) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _normalize_json_object(value: object | None, *, field: str) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(field + "_must_be_object")
+    result = dict(value)
+    if len(json.dumps(result, ensure_ascii=False)) > 20000:
+        raise ValueError(field + "_too_large")
+    return result
+
+
 def adapter_defaults(adapter_key: str) -> dict:
     key = normalize_adapter_key(adapter_key)
     defaults = ADAPTER_DEFAULTS.get(key)
@@ -79,12 +117,14 @@ def adapter_defaults(adapter_key: str) -> dict:
         "adapter_key": key,
         "endpoint": defaults["endpoint"],
         "credential_ref": defaults["credential_ref"],
+        "connection_type": defaults["connection_type"],
         "capabilities": list(defaults["capabilities"]),
         "supported_capabilities": list(defaults["supported_capabilities"]),
     }
 
 
 def _row_connection(row) -> dict:
+    auth_data = dict(row[11] or {})
     return {
         "id": str(row[0]),
         "display_name": row[1],
@@ -93,9 +133,19 @@ def _row_connection(row) -> dict:
         "credential_ref": row[4],
         "account_label": row[5],
         "capabilities": list(row[6] or []),
+        "config_data": dict(row[7] or {}),
         "nonsecret_config": dict(row[7] or {}),
         "enabled": bool(row[8]),
+        "connection_type": row[9],
+        "connection_role": row[10],
+        "auth_configured": bool(auth_data),
+        "auth_fields": sorted(auth_data.keys()),
     }
+
+
+_CONNECTION_COLUMNS = """id, display_name, adapter_key, endpoint, credential_ref,
+                        account_label, capabilities, nonsecret_config, enabled,
+                        connection_type, connection_role, auth_data"""
 
 
 def list_service_connections(
@@ -115,8 +165,7 @@ def list_service_connections(
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with db.cursor() as cur:
         cur.execute(
-            f"""SELECT id, display_name, adapter_key, endpoint, credential_ref,
-                       account_label, capabilities, nonsecret_config, enabled
+            f"""SELECT {_CONNECTION_COLUMNS}
                 FROM secretary.service_connections
                 {where}
                 ORDER BY adapter_key, display_name, id""",
@@ -132,10 +181,9 @@ def get_service_connection(db, connection_id: str) -> dict:
         raise ValueError("invalid_connection_id") from exc
     with db.cursor() as cur:
         cur.execute(
-            """SELECT id, display_name, adapter_key, endpoint, credential_ref,
-                      account_label, capabilities, nonsecret_config, enabled
-               FROM secretary.service_connections
-               WHERE id=%s""",
+            f"""SELECT {_CONNECTION_COLUMNS}
+                FROM secretary.service_connections
+                WHERE id=%s""",
             (connection_uuid,),
         )
         row = cur.fetchone()
@@ -144,16 +192,49 @@ def get_service_connection(db, connection_id: str) -> dict:
     return _row_connection(row)
 
 
+def get_connection_auth_value(
+    db,
+    connection_id: str,
+    field: str = "api_key",
+) -> str | None:
+    try:
+        connection_uuid = UUID(str(connection_id))
+    except ValueError as exc:
+        raise ValueError("invalid_connection_id") from exc
+    key = str(field or "").strip()
+    if not key or len(key) > 100:
+        raise ValueError("invalid_auth_field")
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT auth_data
+               FROM secretary.service_connections
+               WHERE id=%s AND enabled""",
+            (connection_uuid,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    value = (dict(row[0] or {})).get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def upsert_service_connection(
     db,
     *,
     adapter_key: str,
-    display_name: str | None = None,
+    display_name: str,
     endpoint: str | None = None,
     credential_ref: str | None = None,
     account_label: str | None = None,
     capabilities: object | None = None,
+    config_data: dict | None = None,
     nonsecret_config: dict | None = None,
+    auth_data: dict | None = None,
+    connection_type: str | None = None,
+    connection_role: str | None = None,
     enabled: bool | None = None,
     connection_id: str | None = None,
 ) -> dict:
@@ -161,21 +242,33 @@ def upsert_service_connection(
     defaults = ADAPTER_DEFAULTS.get(key)
     if defaults is None:
         raise ValueError("unsupported_adapter")
+
+    name = str(display_name or "").strip()
+    if not name or len(name) > 200:
+        raise ValueError("display_name_required")
     endpoint_value = str(endpoint or defaults.get("endpoint") or "").strip()
     if not endpoint_value or len(endpoint_value) > 500:
         raise ValueError("endpoint_required")
+
+    kind = normalize_connection_type(
+        connection_type or defaults.get("connection_type")
+    )
+    role = normalize_connection_role(connection_role)
     credential_value = normalize_credential_ref(
         credential_ref if credential_ref is not None else defaults.get("credential_ref")
     )
     account_value = str(account_label or "").strip() or None
     if account_value and len(account_value) > 200:
         raise ValueError("account_label_too_long")
-    caps = normalize_capabilities(
-        capabilities if capabilities is not None else defaults.get("capabilities", ())
+
+    requested_caps = (
+        None if capabilities is None else normalize_capabilities(capabilities)
     )
     supported = set(defaults.get("supported_capabilities", ()))
-    if any(capability not in supported for capability in caps):
+    if requested_caps is not None and any(cap not in supported for cap in requested_caps):
         raise ValueError("unsupported_adapter_capability")
+
+    requested_config = config_data if config_data is not None else nonsecret_config
 
     with db.cursor() as cur:
         row = None
@@ -185,7 +278,7 @@ def upsert_service_connection(
             except ValueError as exc:
                 raise ValueError("invalid_connection_id") from exc
             cur.execute(
-                """SELECT id, capabilities, display_name, enabled, nonsecret_config
+                """SELECT id, capabilities, nonsecret_config, auth_data, enabled
                    FROM secretary.service_connections
                    WHERE id=%s""",
                 (connection_uuid,),
@@ -195,77 +288,115 @@ def upsert_service_connection(
                 raise ValueError("unknown_connection")
         else:
             cur.execute(
-                """SELECT id, capabilities, display_name, enabled, nonsecret_config
+                """SELECT id, capabilities, nonsecret_config, auth_data, enabled
                    FROM secretary.service_connections
-                   WHERE adapter_key=%s
-                     AND endpoint=%s
-                     AND credential_ref IS NOT DISTINCT FROM %s
-                     AND account_label IS NOT DISTINCT FROM %s""",
-                (key, endpoint_value, credential_value, account_value),
+                   WHERE lower(display_name)=lower(%s)""",
+                (name,),
             )
             row = cur.fetchone()
             connection_uuid = row[0] if row else uuid4()
 
-        existing_name = str(row[2]).strip() if row else ""
-        name = str(
-            display_name
-            or existing_name
-            or f"{key} / {account_value or credential_value or endpoint_value}"
-        ).strip()
-        if not name or len(name) > 200:
-            raise ValueError("display_name_required")
-
-        if row and nonsecret_config is None:
-            config = dict(row[4] or {})
-        else:
-            config = dict(nonsecret_config or {})
-        if len(json.dumps(config, ensure_ascii=False)) > 20000:
-            raise ValueError("nonsecret_config_too_large")
-
-        enabled_value = bool(row[3]) if row and enabled is None else (
-            True if enabled is None else bool(enabled)
+        caps = (
+            normalize_capabilities(row[1] or [])
+            if row and requested_caps is None
+            else requested_caps
+            if requested_caps is not None
+            else normalize_capabilities(defaults.get("capabilities", ()))
+        )
+        config = (
+            dict(row[2] or {})
+            if row and requested_config is None
+            else _normalize_json_object(requested_config, field="config_data")
+        )
+        auth = (
+            dict(row[3] or {})
+            if row and auth_data is None
+            else _normalize_json_object(auth_data, field="auth_data")
+        )
+        enabled_value = (
+            bool(row[4])
+            if row and enabled is None
+            else True if enabled is None else bool(enabled)
         )
 
+        if kind == "none":
+            auth = {}
+        elif kind == "api_key" and auth and not str(auth.get("api_key") or "").strip():
+            raise ValueError("api_key_required")
+        elif kind == "username_password" and auth:
+            if not str(auth.get("username") or "").strip() or not str(auth.get("password") or "").strip():
+                raise ValueError("username_password_required")
+        elif kind == "oauth2" and auth:
+            if not str(auth.get("client_id") or "").strip():
+                raise ValueError("oauth2_client_id_required")
+
         if row:
-            merged_caps = normalize_capabilities([*(row[1] or []), *caps])
             cur.execute(
                 """UPDATE secretary.service_connections
                    SET display_name=%s, adapter_key=%s, endpoint=%s,
                        credential_ref=%s, account_label=%s, capabilities=%s,
-                       nonsecret_config=%s::jsonb, enabled=%s, updated_at=now()
+                       nonsecret_config=%s::jsonb, auth_data=%s::jsonb,
+                       connection_type=%s, connection_role=%s,
+                       enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
                     name, key, endpoint_value, credential_value, account_value,
-                    list(merged_caps),
-                    json.dumps(config, ensure_ascii=False),
+                    list(caps), json.dumps(config, ensure_ascii=False),
+                    json.dumps(auth, ensure_ascii=False), kind, role,
                     enabled_value, connection_uuid,
                 ),
             )
-            caps = merged_caps
         else:
             cur.execute(
                 """INSERT INTO secretary.service_connections
                    (id, display_name, adapter_key, endpoint, credential_ref,
-                    account_label, capabilities, nonsecret_config, enabled)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
+                    account_label, capabilities, nonsecret_config, auth_data,
+                    connection_type, connection_role, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s)""",
                 (
                     connection_uuid, name, key, endpoint_value, credential_value,
                     account_value, list(caps),
-                    json.dumps(config, ensure_ascii=False), enabled_value,
+                    json.dumps(config, ensure_ascii=False),
+                    json.dumps(auth, ensure_ascii=False),
+                    kind, role, enabled_value,
                 ),
             )
 
-    return {
-        "id": str(connection_uuid),
-        "display_name": name,
-        "adapter_key": key,
-        "endpoint": endpoint_value,
-        "credential_ref": credential_value,
-        "account_label": account_value,
-        "capabilities": list(caps),
-        "nonsecret_config": config,
-        "enabled": enabled_value,
-    }
+    return get_service_connection(db, str(connection_uuid))
+
+
+def bootstrap_connection_auth_from_env(db) -> int:
+    """Copy legacy env-backed secrets into DB only when auth_data is empty."""
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT id, credential_ref, connection_type
+               FROM secretary.service_connections
+               WHERE enabled
+                 AND auth_data='{}'::jsonb
+                 AND credential_ref LIKE 'env:%'"""
+        )
+        rows = cur.fetchall()
+
+    updated = 0
+    for connection_id, credential_ref, connection_type in rows:
+        if connection_type != "api_key":
+            continue
+        try:
+            value = resolve_credential(credential_ref)
+        except Exception:
+            continue
+        if not value:
+            continue
+        with db.cursor() as cur:
+            cur.execute(
+                """UPDATE secretary.service_connections
+                   SET auth_data=%s::jsonb, updated_at=now()
+                   WHERE id=%s AND auth_data='{}'::jsonb""",
+                (json.dumps({"api_key": value}), connection_id),
+            )
+        updated += 1
+    return updated
+
 
 def ensure_llm_connection(
     db,
@@ -276,30 +407,44 @@ def ensure_llm_connection(
 ) -> dict:
     key = normalize_adapter_key(provider)
     defaults = adapter_defaults(key)
+    credential_name = str(credential_env or "").strip() or None
+    credential_ref = (
+        env_name_to_credential_ref(credential_name)
+        if credential_name
+        else defaults["credential_ref"]
+    )
+    auth_data = None
+    if defaults["connection_type"] == "api_key":
+        env_name = credential_name or credential_ref_to_env_name(credential_ref)
+        secret = os.environ.get(env_name or "", "").strip() if env_name else ""
+        if secret:
+            auth_data = {"api_key": secret}
     return upsert_service_connection(
         db,
         adapter_key=key,
         display_name=f"{key} / LLM",
         endpoint=endpoint or defaults["endpoint"],
-        credential_ref=(
-            env_name_to_credential_ref(credential_env)
-            if credential_env
-            else defaults["credential_ref"]
-        ),
+        credential_ref=credential_ref,
         capabilities=[LLM_INFERENCE],
+        auth_data=auth_data,
+        connection_type=defaults["connection_type"],
+        connection_role="llm",
         enabled=None,
     )
 
 
-def ensure_openai_usage_connection(db, *, prefer_admin: bool = True) -> dict:
-    credential_env = "OPENAI_ADMIN_KEY" if prefer_admin else "OPENAI_API_KEY"
+def ensure_openai_usage_connection(db) -> dict:
+    secret = os.environ.get("OPENAI_ADMIN_KEY", "").strip()
     return upsert_service_connection(
         db,
         adapter_key="openai",
-        display_name=None,
+        display_name="OpenAI Admin",
         endpoint=ADAPTER_DEFAULTS["openai"]["endpoint"],
-        credential_ref=env_name_to_credential_ref(credential_env),
+        credential_ref=env_name_to_credential_ref("OPENAI_ADMIN_KEY"),
         capabilities=[PROVIDER_USAGE_READ],
+        auth_data={"api_key": secret} if secret else None,
+        connection_type="api_key",
+        connection_role="provider_usage",
         enabled=None,
     )
 
