@@ -491,6 +491,7 @@ def claim_proposal_review(
             "decision": decision,
             "status": "processing",
             "answer": proposal["answer"],
+            "answer_source": proposal.get("answer_source", "answer_candidate"),
             "knowledge_candidate": proposal["knowledge_candidate"],
             "user_text": proposal["user_text"],
             "responds_to": list(proposal["responds_to"]),
@@ -524,6 +525,9 @@ def claim_proposal_review(
                 task_id,
                 Jsonb({
                     "decision": decision,
+                    "answer_source": proposal.get(
+                        "answer_source", "answer_candidate"
+                    ),
                     "memory_status": (
                         memory_summary.get("status")
                         if isinstance(memory_summary, dict)
