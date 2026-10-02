@@ -13,6 +13,7 @@ from pkb_proto.service_connections import (
     LLM_INFERENCE,
     PROVIDER_USAGE_READ,
     adapter_defaults,
+    ensure_llm_connection,
     normalize_capabilities,
 )
 
@@ -61,6 +62,50 @@ class ServiceConnectionContractTests(unittest.TestCase):
                 "env:OPENAI_API_KEY",
             ):
                 resolve_credential("env:OPENAI_API_KEY")
+
+    def test_reusing_connection_does_not_reenable_disabled_connection(self):
+        connection_id = "22222222-2222-2222-2222-222222222222"
+
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, sql, params):
+                self.calls.append((sql, params))
+
+            def fetchone(self):
+                return (
+                    connection_id,
+                    [LLM_INFERENCE],
+                    "OpenAI primary",
+                    False,
+                    {},
+                )
+
+        class DB:
+            def __init__(self):
+                self.cur = Cursor()
+
+            def cursor(self):
+                return self.cur
+
+        db = DB()
+        saved = ensure_llm_connection(
+            db,
+            provider="openai",
+            endpoint="https://api.openai.com/v1",
+            credential_env="OPENAI_API_KEY",
+        )
+        self.assertFalse(saved["enabled"])
+        update_sql, update_params = db.cur.calls[-1]
+        self.assertIn("UPDATE secretary.service_connections", update_sql)
+        self.assertFalse(update_params[7])
 
     def test_invalid_credential_reference_is_rejected(self):
         with self.assertRaisesRegex(
