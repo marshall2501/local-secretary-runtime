@@ -6229,15 +6229,16 @@ def settings_page():
             icon="hub",
         ).classes("w-full border-2 border-indigo-200 bg-indigo-50"):
             ui.label(
-                "外部・ローカルサービスへの接続方法を共通管理します。"
-                "Secret値は保存せずcredential_refだけを保持します。"
+                "接続先と認証情報を1つのService ConnectionとしてPostgreSQLで共通管理します。"
+                "各機能は使用するconnection_idを明示的に選択します。"
             ).classes("text-sm")
             ui.label(
-                "Capabilityは技術的に利用できる機能を示すだけで、"
-                "RITSUKOの実行許可・承認とは別です。"
+                "connection_role / Capabilityは分類・技術情報であり、自動選択やRITSUKOの実行許可には使いません。"
             ).classes("text-xs text-grey-7")
             try:
                 with connection() as db:
+                    bootstrap_connection_auth_from_env(db)
+                    bootstrap_openai_usage_profile(db)
                     connection_rows = list_service_connections(
                         db,
                         include_disabled=True,
@@ -6247,53 +6248,29 @@ def settings_page():
                 ui.label(
                     "Service Connectionを読み込めません: " + str(exc)[:180]
                 ).classes("text-sm text-red-700")
+
+            connection_by_id = {
+                item["id"]: item for item in connection_rows
+            }
+
             if connection_rows:
                 ui.table(
                     columns=[
-                        {
-                            "name": "display_name",
-                            "label": "Connection",
-                            "field": "display_name",
-                            "align": "left",
-                        },
-                        {
-                            "name": "adapter_key",
-                            "label": "Adapter",
-                            "field": "adapter_key",
-                            "align": "left",
-                        },
-                        {
-                            "name": "endpoint",
-                            "label": "Endpoint",
-                            "field": "endpoint",
-                            "align": "left",
-                        },
-                        {
-                            "name": "credential_ref",
-                            "label": "Credential Ref",
-                            "field": "credential_ref",
-                            "align": "left",
-                        },
-                        {
-                            "name": "capabilities_text",
-                            "label": "Capabilities",
-                            "field": "capabilities_text",
-                            "align": "left",
-                        },
-                        {
-                            "name": "enabled_text",
-                            "label": "Enabled",
-                            "field": "enabled_text",
-                            "align": "center",
-                        },
+                        {"name": "display_name", "label": "Connection", "field": "display_name", "align": "left"},
+                        {"name": "adapter_key", "label": "Adapter", "field": "adapter_key", "align": "left"},
+                        {"name": "connection_type", "label": "Type", "field": "connection_type", "align": "left"},
+                        {"name": "endpoint", "label": "Endpoint", "field": "endpoint", "align": "left"},
+                        {"name": "auth_text", "label": "Auth", "field": "auth_text", "align": "center"},
+                        {"name": "role_text", "label": "Role", "field": "role_text", "align": "left"},
+                        {"name": "capabilities_text", "label": "Capabilities", "field": "capabilities_text", "align": "left"},
+                        {"name": "enabled_text", "label": "Enabled", "field": "enabled_text", "align": "center"},
                     ],
                     rows=[
                         {
                             **item,
-                            "credential_ref": item.get("credential_ref") or "-",
-                            "capabilities_text": ", ".join(
-                                item.get("capabilities") or []
-                            ),
+                            "auth_text": "SET" if item.get("auth_configured") else "-",
+                            "role_text": item.get("connection_role") or "-",
+                            "capabilities_text": ", ".join(item.get("capabilities") or []),
                             "enabled_text": "ON" if item.get("enabled") else "OFF",
                         }
                         for item in connection_rows
@@ -6301,9 +6278,367 @@ def settings_page():
                     row_key="id",
                 ).classes("w-full")
             else:
+                ui.label("登録済みService Connectionはありません。").classes(
+                    "text-sm text-grey-7"
+                )
+
+            connection_edit_target = ui.select(
+                options={
+                    item["id"]: item["display_name"]
+                    + f" [{item['adapter_key']} / {item['connection_type']}]"
+                    for item in connection_rows
+                },
+                value=None,
+                label="既存Connectionを編集（未選択なら新規）",
+            ).props("clearable").classes("w-full")
+
+            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+                connection_name = ui.input(
+                    "接続名",
+                    placeholder="例: OpenAI 通常API / OpenAI Admin / Ollama SubPC",
+                ).classes("min-w-64 grow")
+                connection_adapter = ui.select(
+                    options=list(PROVIDERS),
+                    value="openai",
+                    label="Adapter",
+                ).classes("min-w-40")
+                connection_type = ui.select(
+                    options=list(CONNECTION_TYPES),
+                    value="api_key",
+                    label="Connection Type",
+                ).classes("min-w-48")
+                connection_enabled = ui.switch("Enabled", value=True)
+
+            with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+                connection_endpoint = ui.input(
+                    "Endpoint",
+                    placeholder="https://api.openai.com/v1",
+                ).classes("min-w-96 grow")
+                connection_role = ui.input(
+                    "Role（任意・分類表示用）",
+                    placeholder="llm / provider_usage など",
+                ).classes("min-w-56")
+                connection_config = ui.textarea(
+                    "Config JSON（非認証の接続固有設定）",
+                    value="{}",
+                ).classes("min-w-80 grow")
+
+            with ui.row().classes("w-full gap-4 items-center flex-wrap"):
+                connection_cap_llm = ui.checkbox(
+                    "LLM inference",
+                    value=True,
+                )
+                connection_cap_usage = ui.checkbox(
+                    "Provider usage read",
+                    value=False,
+                )
+
+            auth_api_key = ui.input(
+                "API Key（登録済みの場合は空欄で維持）"
+            ).props("type=password autocomplete=new-password").classes("w-full")
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                auth_username = ui.input(
+                    "Login ID / Username（空欄で維持）"
+                ).classes("min-w-64 grow")
+                auth_password = ui.input(
+                    "Password（空欄で維持）"
+                ).props("type=password autocomplete=new-password").classes("min-w-64 grow")
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                auth_client_id = ui.input(
+                    "OAuth Client ID（空欄で維持）"
+                ).classes("min-w-64 grow")
+                auth_client_secret = ui.input(
+                    "OAuth Client Secret（空欄で維持）"
+                ).props("type=password autocomplete=new-password").classes("min-w-64 grow")
+                auth_refresh_token = ui.input(
+                    "OAuth Refresh Token（空欄で維持）"
+                ).props("type=password autocomplete=new-password").classes("min-w-64 grow")
+
+            def update_auth_field_visibility(_event=None):
+                kind = str(connection_type.value or "")
+                auth_api_key.set_visibility(kind == "api_key")
+                auth_username.set_visibility(kind == "username_password")
+                auth_password.set_visibility(kind == "username_password")
+                auth_client_id.set_visibility(kind == "oauth2")
+                auth_client_secret.set_visibility(kind == "oauth2")
+                auth_refresh_token.set_visibility(kind == "oauth2")
+
+            def fill_connection_defaults(_event=None):
+                try:
+                    defaults = connection_adapter_defaults(
+                        str(connection_adapter.value or "")
+                    )
+                except Exception:
+                    return
+                connection_endpoint.value = defaults["endpoint"]
+                connection_type.value = defaults["connection_type"]
+                default_caps = set(defaults["capabilities"])
+                connection_cap_llm.value = LLM_INFERENCE in default_caps
+                connection_cap_usage.value = PROVIDER_USAGE_READ in default_caps
+                for control in (
+                    connection_endpoint,
+                    connection_type,
+                    connection_cap_llm,
+                    connection_cap_usage,
+                ):
+                    control.update()
+                update_auth_field_visibility()
+
+            def apply_selected_connection(_event=None):
+                connection_id = str(connection_edit_target.value or "").strip()
+                item = connection_by_id.get(connection_id)
+                if item is None:
+                    return
+                connection_name.value = item["display_name"]
+                connection_adapter.value = item["adapter_key"]
+                connection_type.value = item["connection_type"]
+                connection_endpoint.value = item["endpoint"]
+                connection_role.value = item.get("connection_role") or ""
+                connection_enabled.value = bool(item.get("enabled"))
+                connection_config.value = json.dumps(
+                    item.get("config_data") or {},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                caps = set(item.get("capabilities") or [])
+                connection_cap_llm.value = LLM_INFERENCE in caps
+                connection_cap_usage.value = PROVIDER_USAGE_READ in caps
+                auth_api_key.value = ""
+                auth_username.value = ""
+                auth_password.value = ""
+                auth_client_id.value = ""
+                auth_client_secret.value = ""
+                auth_refresh_token.value = ""
+                for control in (
+                    connection_name, connection_adapter, connection_type,
+                    connection_endpoint, connection_role, connection_enabled,
+                    connection_config, connection_cap_llm, connection_cap_usage,
+                    auth_api_key, auth_username, auth_password,
+                    auth_client_id, auth_client_secret, auth_refresh_token,
+                ):
+                    control.update()
+                update_auth_field_visibility()
+
+            connection_type.on_value_change(update_auth_field_visibility)
+            connection_adapter.on_value_change(fill_connection_defaults)
+            connection_edit_target.on_value_change(apply_selected_connection)
+            fill_connection_defaults()
+
+            def save_service_connection_from_ui():
+                try:
+                    config_value = json.loads(
+                        str(connection_config.value or "{}")
+                    )
+                    if not isinstance(config_value, dict):
+                        raise ValueError("Config JSONはobjectにしてください")
+                    kind = str(connection_type.value or "")
+                    editing_id = str(connection_edit_target.value or "").strip() or None
+                    existing = connection_by_id.get(editing_id or "")
+                    auth_data = None
+                    if kind == "none":
+                        auth_data = {}
+                    elif kind == "api_key":
+                        secret = str(auth_api_key.value or "").strip()
+                        if secret:
+                            auth_data = {"api_key": secret}
+                        elif existing is None:
+                            auth_data = {}
+                    elif kind == "username_password":
+                        username = str(auth_username.value or "").strip()
+                        password_value = str(auth_password.value or "").strip()
+                        if username or password_value:
+                            if not username or not password_value:
+                                raise ValueError("IDとPasswordは両方入力してください")
+                            auth_data = {
+                                "username": username,
+                                "password": password_value,
+                            }
+                        elif existing is None:
+                            auth_data = {}
+                    elif kind == "oauth2":
+                        client_id = str(auth_client_id.value or "").strip()
+                        client_secret = str(auth_client_secret.value or "").strip()
+                        refresh_token = str(auth_refresh_token.value or "").strip()
+                        if client_id or client_secret or refresh_token:
+                            if not client_id:
+                                raise ValueError("OAuth Client IDが必要です")
+                            auth_data = {
+                                "client_id": client_id,
+                                "client_secret": client_secret,
+                                "refresh_token": refresh_token,
+                            }
+                        elif existing is None:
+                            auth_data = {}
+
+                    capabilities = []
+                    if connection_cap_llm.value:
+                        capabilities.append(LLM_INFERENCE)
+                    if connection_cap_usage.value:
+                        capabilities.append(PROVIDER_USAGE_READ)
+
+                    with connection() as db:
+                        saved = upsert_service_connection(
+                            db,
+                            adapter_key=str(connection_adapter.value or ""),
+                            display_name=str(connection_name.value or "").strip(),
+                            endpoint=str(connection_endpoint.value or "").strip(),
+                            credential_ref="",
+                            capabilities=capabilities,
+                            config_data=config_value,
+                            auth_data=auth_data,
+                            connection_type=kind,
+                            connection_role=(
+                                str(connection_role.value or "").strip() or None
+                            ),
+                            enabled=bool(connection_enabled.value),
+                            connection_id=editing_id,
+                        )
+                    connection_by_id[saved["id"]] = saved
+                    connection_edit_target.options[saved["id"]] = (
+                        saved["display_name"]
+                        + f" [{saved['adapter_key']} / {saved['connection_type']}]"
+                    )
+                    connection_edit_target.value = saved["id"]
+                    connection_edit_target.update()
+                    ui.notify(
+                        "Service Connectionを保存しました。新規接続を他設定で選ぶ場合はこのページを再読み込みしてください。",
+                        type="positive",
+                    )
+                except Exception as exc:
+                    ui.notify(
+                        "Service Connectionを保存できません: " + str(exc)[:220],
+                        type="negative",
+                    )
+
+            with ui.row().classes("gap-2"):
+                ui.button(
+                    "Connectionを保存",
+                    icon="save",
+                    color="indigo",
+                    on_click=save_service_connection_from_ui,
+                )
+                ui.button(
+                    "Adapter既定値",
+                    icon="auto_fix_high",
+                    on_click=fill_connection_defaults,
+                ).props("flat")
+            ui.label(
+                "認証情報はこのローカルDBのauth_dataへ保存します。Prompt / Task / Audit / Gitには出しません。"
+            ).classes("text-xs text-grey-7")
+
+        with ui.expansion(
+            "API利用状況 — 接続割当",
+            value=False,
+            icon="query_stats",
+        ).classes("w-full border-2 border-indigo-200 bg-indigo-50"):
+            ui.label(
+                "API利用状況の定義が使用するConnectionを明示的に選びます。"
+                "ConnectionのRoleやCapabilityから自動選択しません。"
+            ).classes("text-sm")
+            try:
+                with connection() as db:
+                    usage_profiles = list_provider_usage_profiles(
+                        db,
+                        include_disabled=True,
+                    )
+                    usage_connections = list_service_connections(
+                        db,
+                        include_disabled=True,
+                        capability=PROVIDER_USAGE_READ,
+                    )
+            except Exception as exc:
+                usage_profiles = []
+                usage_connections = []
                 ui.label(
-                    "登録済みService Connectionはありません。"
-                ).classes("text-sm text-grey-7")
+                    "Provider Usage設定を読み込めません: " + str(exc)[:180]
+                ).classes("text-sm text-red-700")
+
+            usage_profile_by_id = {
+                item["id"]: item for item in usage_profiles
+            }
+            usage_profile_edit = ui.select(
+                options={
+                    item["id"]: item["display_name"]
+                    + " → "
+                    + item["connection_name"]
+                    for item in usage_profiles
+                },
+                value=None,
+                label="既存Provider Usage Profileを編集（未選択なら新規）",
+            ).props("clearable").classes("w-full")
+            usage_profile_name = ui.input(
+                "表示名",
+                value="OpenAI Usage",
+            ).classes("w-full")
+            usage_connection = ui.select(
+                options={
+                    item["id"]: item["display_name"]
+                    + f" [{item['adapter_key']}]"
+                    for item in usage_connections
+                },
+                value=None,
+                label="使用するService Connection",
+            ).classes("w-full")
+            usage_profile_enabled = ui.switch("Enabled", value=True)
+
+            def apply_usage_profile(_event=None):
+                item = usage_profile_by_id.get(
+                    str(usage_profile_edit.value or "")
+                )
+                if item is None:
+                    return
+                usage_profile_name.value = item["display_name"]
+                usage_connection.value = item["connection_id"]
+                usage_profile_enabled.value = bool(item.get("enabled"))
+                usage_profile_name.update()
+                usage_connection.update()
+                usage_profile_enabled.update()
+
+            usage_profile_edit.on_value_change(apply_usage_profile)
+
+            def save_usage_profile():
+                try:
+                    with connection() as db:
+                        saved = upsert_provider_usage_profile(
+                            db,
+                            display_name=str(
+                                usage_profile_name.value or ""
+                            ).strip(),
+                            connection_id=str(
+                                usage_connection.value or ""
+                            ).strip(),
+                            enabled=bool(usage_profile_enabled.value),
+                            profile_id=(
+                                str(usage_profile_edit.value)
+                                if usage_profile_edit.value
+                                else None
+                            ),
+                        )
+                    usage_profile_by_id[saved["id"]] = saved
+                    usage_profile_edit.options[saved["id"]] = (
+                        saved["display_name"]
+                        + " → "
+                        + saved["connection_name"]
+                    )
+                    usage_profile_edit.value = saved["id"]
+                    usage_profile_edit.update()
+                    ui.notify(
+                        "Provider Usage Profileを保存しました",
+                        type="positive",
+                    )
+                except Exception as exc:
+                    ui.notify(
+                        "Provider Usage Profileを保存できません: "
+                        + str(exc)[:220],
+                        type="negative",
+                    )
+
+            ui.button(
+                "API利用状況の接続割当を保存",
+                icon="save",
+                color="indigo",
+                on_click=save_usage_profile,
+            )
 
         with ui.expansion(
             "MAGI — LLM profile",
@@ -6312,23 +6647,31 @@ def settings_page():
         ).classes("w-full border-2 border-teal-200 bg-teal-50"):
             ui.label(
                 "MELCHIOR / CASPER / BALTHASARはLLMの席名です。"
-                "ここでprovider/model profileを登録し、RITSUKO画面で各席へ自由に割り当てます。"
+                "LLM Profileはmodel/runtime条件だけを持ち、接続・認証はService Connectionを参照します。"
             ).classes("text-sm")
-            ui.label(
-                "通常設定はPostgreSQLが正本です。接続先・credential参照は"
-                "Service Connectionが正本で、LLM Profileはmodel/runtime条件を保持します。"
-                "下のProvider/Endpoint/Credential入力はConnectionを作成・再利用するための値で、"
-                "API Secret値そのものは保存しません。"
-            ).classes("text-xs text-grey-7")
-            ui.separator()
-
             try:
                 with connection() as db:
-                    editable_profiles = list_llm_profiles(db, include_disabled=True)
-            except Exception:
+                    editable_profiles = list_llm_profiles(
+                        db,
+                        include_disabled=True,
+                    )
+                    llm_connections = list_service_connections(
+                        db,
+                        include_disabled=True,
+                        capability=LLM_INFERENCE,
+                    )
+            except Exception as exc:
                 editable_profiles = []
+                llm_connections = []
+                ui.label(
+                    "LLM Profile設定を読み込めません: " + str(exc)[:180]
+                ).classes("text-sm text-red-700")
+
             editable_profile_by_id = {
                 item["id"]: item for item in editable_profiles
+            }
+            llm_connection_by_id = {
+                item["id"]: item for item in llm_connections
             }
             profile_edit_target = ui.select(
                 options={
@@ -6342,36 +6685,33 @@ def settings_page():
                 label="既存LLM profileを編集（未選択なら新規）",
             ).props("clearable").classes("w-full")
 
-            ui.separator()
+            profile_connection = ui.select(
+                options={
+                    item["id"]: (
+                        item["display_name"]
+                        + f" [{item['adapter_key']} / {item['connection_type']}]"
+                    )
+                    for item in llm_connections
+                },
+                value=None,
+                label="使用するService Connection",
+            ).classes("w-full")
 
             with ui.row().classes(
                 "w-full gap-2 items-end flex-wrap border-b border-teal-200 pb-3"
             ):
-                profile_provider = ui.select(
-                    options=list(PROVIDERS),
-                    value="ollama",
-                    label="Provider",
-                ).classes("min-w-40")
                 profile_model = ui.input(
                     "Model",
-                    placeholder="例: gemma3:12b / gpt-5.6-sol / gemini-...",
+                    placeholder="例: gemma4:12b / gpt-5.6-sol / gemini-...",
                 ).classes("min-w-64 grow")
                 profile_display = ui.input(
                     "表示名（任意）",
-                    placeholder="未指定なら provider / model",
+                    placeholder="未指定なら adapter / model",
                 ).classes("min-w-64")
 
             with ui.row().classes(
                 "w-full gap-2 items-end flex-wrap border-b border-teal-200 py-3"
             ):
-                profile_endpoint = ui.input(
-                    "Endpoint（任意）",
-                    placeholder="未指定ならprovider既定値",
-                ).classes("min-w-80 grow")
-                profile_credential = ui.input(
-                    "Credential環境変数名（cloudのみ・任意）",
-                    placeholder="OPENAI_API_KEY / GEMINI_API_KEY",
-                ).classes("min-w-72")
                 profile_context = ui.select(
                     options={
                         value: f"{value // 1024}K ({value})"
@@ -6394,88 +6734,52 @@ def settings_page():
                     placeholder="429,500,502,503,504",
                 ).classes("min-w-64 grow")
 
-            def fill_provider_defaults():
-                try:
-                    endpoint, credential = provider_defaults(
-                        str(profile_provider.value or "")
-                    )
-                except Exception:
-                    return
-                provider = str(profile_provider.value or "")
-                profile_endpoint.value = endpoint
-                profile_credential.value = credential or ""
-                profile_context.value = (
-                    DEFAULT_OLLAMA_CONTEXT_TOKENS
-                    if provider == "ollama"
-                    else None
-                )
-                profile_generation.value = (
-                    DEFAULT_MAGI_OLLAMA_NUM_PREDICT
-                    if provider == "ollama"
-                    else None
-                )
-                profile_retry_codes.value = ",".join(
-                    str(code) for code in DEFAULT_RETRY_HTTP_CODES
-                )
-                profile_endpoint.update()
-                profile_credential.update()
-                profile_context.update()
-                profile_generation.update()
-                profile_retry_codes.update()
-
             def apply_selected_profile(_event=None):
                 profile_id = str(profile_edit_target.value or "").strip()
                 item = editable_profile_by_id.get(profile_id)
                 if item is None:
                     return
-                profile_provider.value = item["provider"]
+                profile_connection.value = item["connection_id"]
                 profile_model.value = item["model"]
                 profile_display.value = item["display_name"]
-                profile_endpoint.value = item["endpoint"]
-                profile_credential.value = item.get("credential_env") or ""
                 profile_context.value = item.get("context_window_tokens")
                 profile_generation.value = item.get("ollama_num_predict")
                 profile_retry_codes.value = ",".join(
                     str(code) for code in item.get("retry_http_codes") or []
                 )
                 for control in (
-                    profile_provider, profile_model, profile_display,
-                    profile_endpoint, profile_credential,
+                    profile_connection, profile_model, profile_display,
                     profile_context, profile_generation, profile_retry_codes,
                 ):
                     control.update()
 
             profile_edit_target.on_value_change(apply_selected_profile)
 
-            with ui.row().classes("w-full gap-2 items-center pt-1"):
-                ui.button(
-                    "既定値を入れる",
-                    icon="auto_fix_high",
-                    on_click=fill_provider_defaults,
-                ).props("flat dense")
-                ui.label(
-                    "既存profileは上のリストで選択すると編集欄へ自動反映されます。"
-                    "未選択なら新規profileとして保存します。"
-                ).classes("text-xs text-grey-7")
-
             def add_llm_profile():
                 try:
+                    selected_connection_id = str(
+                        profile_connection.value or ""
+                    ).strip()
+                    selected_connection = llm_connection_by_id.get(
+                        selected_connection_id
+                    )
+                    if selected_connection is None:
+                        raise ValueError("Service Connectionを選択してください")
+                    is_ollama = selected_connection["adapter_key"] == "ollama"
                     saved = _register_magi_profile(
-                        provider=str(profile_provider.value or ""),
+                        connection_id=selected_connection_id,
                         model=str(profile_model.value or ""),
-                        display_name=str(profile_display.value or "").strip() or None,
-                        endpoint=str(profile_endpoint.value or "").strip() or None,
-                        credential_env=str(profile_credential.value or "").strip() or None,
+                        display_name=(
+                            str(profile_display.value or "").strip() or None
+                        ),
                         context_window_tokens=(
                             int(profile_context.value)
-                            if str(profile_provider.value or "") == "ollama"
-                            and profile_context.value is not None
+                            if is_ollama and profile_context.value is not None
                             else None
                         ),
                         ollama_num_predict=(
                             int(profile_generation.value)
-                            if str(profile_provider.value or "") == "ollama"
-                            and profile_generation.value is not None
+                            if is_ollama and profile_generation.value is not None
                             else None
                         ),
                         retry_http_codes=normalize_retry_http_codes(
@@ -6504,16 +6808,15 @@ def settings_page():
                         type="negative",
                     )
 
-            with ui.row().classes("gap-2"):
-                ui.button(
-                    "LLM profileを保存",
-                    icon="save",
-                    color="teal",
-                    on_click=add_llm_profile,
-                )
-                ui.label(
-                    "Ollamaのインストール済みmodelはRITSUKO画面を開いたとき自動でprofile同期されます。"
-                ).classes("text-xs text-grey-7 self-center")
+            ui.button(
+                "LLM profileを保存",
+                icon="save",
+                color="teal",
+                on_click=add_llm_profile,
+            )
+            ui.label(
+                "Ollamaのインストール済みmodelはRITSUKO画面を開いたとき自動でprofile同期されます。"
+            ).classes("text-xs text-grey-7")
 
         ui.separator()
         pkb_open_controls = {}
