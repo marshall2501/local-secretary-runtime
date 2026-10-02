@@ -605,10 +605,15 @@ def _normalized_member_specs(
         item = {
             "name": name,
             "profile_id": raw.get("profile_id"),
+            "connection_id": raw.get("connection_id"),
+            "connection_display_name": raw.get("connection_display_name"),
             "profile_label": raw.get("profile_label") or f"{provider} / {model or '-'}",
             "provider": provider,
             "model": model,
             "endpoint": str(raw.get("endpoint") or "").strip() or None,
+            "credential_ref": (
+                str(raw.get("credential_ref") or "").strip() or None
+            ),
             "credential_env": (
                 str(raw.get("credential_env") or "").strip() or None
             ),
@@ -758,6 +763,7 @@ def _call_panel_member(spec: dict, envelope: dict, *, timeout: float) -> dict:
     return {
         "name": spec["name"],
         "profile_id": spec.get("profile_id"),
+        "connection_id": spec.get("connection_id"),
         "provider": provider,
         "model": spec["model"],
         "weight": spec["weight"],
@@ -801,6 +807,7 @@ def call_guided_panel(
                 member_results[index] = {
                     "name": spec["name"],
                     "profile_id": spec.get("profile_id"),
+                    "connection_id": spec.get("connection_id"),
                     "provider": spec["provider"],
                     "model": spec["model"],
                     "weight": spec["weight"],
@@ -827,6 +834,8 @@ def call_guided_panel(
             "assignments": [
                 {
                     "name": spec["name"],
+                    "profile_id": spec.get("profile_id"),
+                    "connection_id": spec.get("connection_id"),
                     "provider": spec["provider"],
                     "model": spec["model"],
                     "weight": spec["weight"],
