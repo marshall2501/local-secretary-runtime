@@ -11,6 +11,7 @@ from pkb_proto.magi_dialogue import (
     continue_with_user_clarification, panel_member_specs,
     select_weighted_consensus, validate_turn, _call_ollama_guided,
     _call_openai_guided, _call_gemini_guided, call_guided_panel,
+    _normalized_member_specs,
 )
 
 from pkb_proto.ritsuko_magi_protocol import (
@@ -552,6 +553,31 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertNotIn("responseSchema",payload["generationConfig"])
         self.assertNotIn("temperature",payload["generationConfig"])
         self.assertNotIn("gemini-test-key",json.dumps(result))
+
+    def test_normalized_member_specs_preserve_connection_snapshot(self):
+        specs = _normalized_member_specs([{
+            "name": "MELCHIOR",
+            "profile_id": "11111111-1111-1111-1111-111111111111",
+            "connection_id": "22222222-2222-2222-2222-222222222222",
+            "connection_display_name": "OpenAI primary",
+            "provider": "openai",
+            "model": "cloud-a",
+            "endpoint": "https://example.invalid/v1",
+            "credential_ref": "env:KEY_A",
+            "credential_env": "KEY_A",
+            "weight": 1.0,
+            "timeout_seconds": 30,
+            "enabled": True,
+        }], "")
+        self.assertEqual(
+            specs[0]["connection_id"],
+            "22222222-2222-2222-2222-222222222222",
+        )
+        self.assertEqual(specs[0]["credential_ref"], "env:KEY_A")
+        self.assertEqual(
+            specs[0]["connection_display_name"],
+            "OpenAI primary",
+        )
 
     def test_panel_accepts_arbitrary_provider_assignment_per_member(self):
         specs=[
