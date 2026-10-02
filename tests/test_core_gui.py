@@ -317,6 +317,99 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertLess(clarification.id, turn.id)
 
+    async def test_new_guided_task_does_not_show_previous_task_review_state(self):
+        previous_session = {
+            'task_id': self.waiting[0]['id'],
+            'user_raw': '前の依頼',
+            'model': '',
+            'prompt_version': 'd19-state-driven-v4',
+            'status': 'waiting_user',
+            'next_step': 'ask_user_after_exhausted_pkb',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': '前の依頼',
+            },
+            'detail': {
+                'state': 'NEED_INFORMATION',
+                'reason': '本人確認が必要',
+            },
+            'pending_requests': [],
+            'observations': [],
+            'previous_request_signatures': [],
+            'conversation_context': [],
+            'user_question': '確認してください',
+            'magi_disagreement': None,
+            'user_source_reviewed': False,
+            'last_question_purpose': 'review_or_repair',
+            'turns': [{
+                'stage': 'analyze',
+                'question_purpose': 'review_or_repair',
+                'request_envelope': {'turn': 2},
+                'status': 'ok',
+                'response': {'state': 'NEED_INFORMATION'},
+                'errors': [],
+                'diagnostic': {},
+                'member_results': [],
+                'consensus': None,
+            }],
+            'legacy_router_used': False,
+            'tool_read_executed': False,
+        }
+        self.waiting[0].update({
+            'core_slice': 'ritsuko_magi_observation_v1',
+            'magi_session': previous_session,
+            'proposal_review': {
+                'decision': 'remember',
+                'status': 'completed',
+                'memory_intake': {
+                    'status': 'committed',
+                    'receipts': [{'decision': 'pending'}],
+                },
+                'magi_evaluation': {'state': 'READY'},
+            },
+        })
+        new_session = deepcopy(previous_session)
+        new_session.update({
+            'task_id': str(UUID(int=999)),
+            'user_raw': '新しい依頼',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': '新しい依頼',
+            },
+            'user_question': '新しいTaskの確認です',
+        })
+
+        async def fake_loop(*args, **kwargs):
+            return deepcopy(new_session)
+
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=[]
+        ), patch.object(
+            daily, '_save_magi_assignments',
+            side_effect=lambda assignments: deepcopy(assignments),
+        ), patch.object(
+            daily, 'run_pkb_observation_loop',
+            side_effect=fake_loop,
+        ):
+            daily.core_page()
+            await self.click('開く', 0)
+            self.assertTrue(self.elements('Proposal review: remember / completed'))
+            self.assertTrue(self.elements('Post-review MAGI: READY'))
+            self.assertTrue(self.elements('Memory Intake: committed / pending'))
+
+            await self.click('RITSUKOへ依頼')
+
+            self.assertTrue(self.elements(
+                'Task: ' + new_session['task_id']
+                + ' / status=waiting_user'
+                + ' / RITSUKO next=ask_user_after_exhausted_pkb'
+            ))
+            self.assertFalse(
+                self.elements('Proposal review: remember / completed')
+            )
+            self.assertFalse(self.elements('Post-review MAGI: READY'))
+            self.assertFalse(self.elements('Memory Intake: committed / pending'))
+
     async def test_proposal_ready_magi_task_offers_answer_only_and_memory_choices(self):
         saved_session = {
             'task_id': self.waiting[0]['id'],
