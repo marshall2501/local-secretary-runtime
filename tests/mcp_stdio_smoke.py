@@ -24,13 +24,13 @@ async def main() -> None:
             result = await session.list_tools()
             task_result = await session.call_tool("tasks", {"limit": 1})
 
-    if task_result.isError:
+    if task_result.is_error:
         raise RuntimeError(f"tasks MCP call failed: {task_result.content!r}")
-    if not task_result.structuredContent:
+    if not task_result.structured_content:
         raise RuntimeError(f"tasks MCP call returned no structured content: {task_result.content!r}")
-    value = task_result.structuredContent.get("value")
+    value = task_result.structured_content.get("value")
     if not isinstance(value, list):
-        raise RuntimeError(f"unexpected tasks payload: {task_result.structuredContent!r}")
+        raise RuntimeError(f"unexpected tasks payload: {task_result.structured_content!r}")
 
     names = [tool.name for tool in result.tools]
     expected = ["memory_search", "tasks"]
