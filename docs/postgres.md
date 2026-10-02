@@ -1,56 +1,22 @@
-# PostgreSQL 基盤（M0 / M1 / 永続タスク用スキーマ）
+# PostgreSQL runtime operations
 
-## 参照した設計
+この文書は `local-secretary-runtime` のPostgreSQL構築・migration・バックアップ・復元・安全境界を扱います。製品設計や実装済み範囲の正本ではありません。設計は `local-secretary-ai` の [`ARCHITECTURE`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/ARCHITECTURE.md)、実証済み現在地は [`STATUS`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を確認してください。
 
-設計リポジトリのコミット `f9fe00f4fda56864f73e16f62b3d272658afffe8` を基準に実装しています。
+## 通常構成
 
-- [SecretaryCore-vNext](https://github.com/marshall2501/local-secretary-ai/blob/f9fe00f4fda56864f73e16f62b3d272658afffe8/docs/01_Architecture/SecretaryCore-vNext.md)
-- [Memory-vNext](https://github.com/marshall2501/local-secretary-ai/blob/f9fe00f4fda56864f73e16f62b3d272658afffe8/docs/02_Database/Memory-vNext.md)
-- [PrototypeVerticalSlice](https://github.com/marshall2501/local-secretary-ai/blob/f9fe00f4fda56864f73e16f62b3d272658afffe8/docs/03_Workflows/PrototypeVerticalSlice.md)
-
-今回の実装範囲は、データの保存基盤とその構築・運用手順です。自律型秘書や Memory API はまだ完成していません。
-設計で未確定だった具体的な型や状態については、ドメインに依存しない初期定義を採用しました。
-
-| 設計上の要件 | 初期実装 |
+| 項目 | 値 |
 | --- | --- |
-| 構造化データの正本と原本アーカイブ | `entities`、`sources` に URI・ハッシュ・出典・取得時刻・機密区分を保持。原本ファイルは DB と Git の外に保存 |
-| 事実・観測・属性と推測の区別 | 種別付きの `claims` と、独立した `pending_claims`、`hypotheses`。根拠と出典を必須化 |
-| 有効時点と記録時点の区別 | `valid_from/to`、`recorded_at`、`supersedes_id`、撤回情報。`current_claims` から期限切れ・置換済みの版を除外 |
-| AI 抽出候補のレビュー | 候補を追加できる列を制限し、承認済み候補との一致をトリガーで確認。AI に正本の直接書き込み権限を与えない |
-| 問題・仮説・判断 | 個別テーブル、出典への参照、判断の変更履歴 |
-| 永続タスク管理の基盤 | UUID のタスク・手順、依存関係、チェックポイント、期限・次回実行・再試行時刻、版番号、承認待ち状態 |
-| 記憶更新と外部操作の承認の分離 | `approval_kind`、対象の制約、承認範囲、判断者、有効期限。アプリからの承認書き込み権限は未付与 |
-| 操作と検証の履歴 | 操作・結果に根拠、エラー、実施者、引数、再実行キー、取り消し可否を保持 |
-| 監査 | 関連情報を結び付ける `audit_events`。監査ロールは追加のみ可能。参照・提案・実行のイベント記録処理は今後サービス側に実装 |
+| Compose project | `local-secretary-runtime-db` |
+| service | `secretary-postgres` |
+| volume | `local-secretary-runtime-db_secretary_pgdata` |
+| network | `local-secretary-runtime-db_secretary_db` |
+| host接続 | `127.0.0.1:55432` 既定 |
+| DB / 管理用user | `secretary` / `secretary_admin` |
+| image | `postgres:17-bookworm` |
 
-`current_claims` は現在有効な記録を返します。すべてが検証済みの事実とは限らないため、呼び出し側で
-`verification_status` を絞り込み、不確実性を保持してください。後継の版の `valid_from` 以降は旧版を現在値から除外します。
-後継の版がその後期限切れになっても、旧版は自動的に現在値へ戻りません。
-属性には複数の値を許容します。値の曖昧さを解消する判断は、このスキーマには含めていません。
-過去の時点を検索する場合は、有効期間と `recorded_at` の両方を指定し、その時点までに記録された後継版だけを考慮してください。
-これらの列は版の保持に使えますが、有効時点と記録時点の履歴を自動管理する仕組みは未実装です。
-信頼された書き込みサービスが、旧値を上書きせず、訂正版の追加と有効期間の終了を同一トランザクションで処理する必要があります。
+通常運用先はサブPC、メインPCは手動復旧先です。ポート等の実値は `.env.postgres` と起動中containerを正本として確認してください。
 
-`simple` 辞書を使った全文検索用 GIN 索引は、基本的なトークン検索に対応します。日本語の形態素解析には対応していません。
-SQL による厳密な条件検索や全件列挙は独立して利用でき、ベクトル DB やクラウド LLM は不要です。
-
-## ローカルリポジトリへの反映と起動（Windows）
-
-実装の取得先は **`D:\AI\projects\local-secretary-runtime`** です。
-`D:\AI` はプロジェクト・データ・モデルなどを置く親フォルダーであり、Git リポジトリそのものではありません。
-GitHub の `main` にマージされた変更は、実装リポジトリ内で取得します。
-
-```powershell
-cd D:\AI\projects\local-secretary-runtime
-git pull --ff-only origin main
-```
-
-上記はローカルリポジトリが `main` ブランチの場合の手順です。別ブランチで作業している場合は、
-作業内容を確認してから `main` に切り替えてください。変更の取得だけでは、コンテナの起動や DB の更新は行われません。
-
-必要環境は PowerShell 5.1 以降、Git、**Linux コンテナ**を実行する Docker Desktop、`up --wait` 対応の Docker Compose です。
-運用する実装リポジトリ内で次を実行してください。DB スクリプトは自身の配置からリポジトリを特定します。
-従来の環境全体用 `doctor.ps1` は、引き続き固定の `D:\AI` 配下を確認します。
+## Setup / Start / Migrate / Doctor
 
 ```powershell
 cd D:\AI\projects\local-secretary-runtime
@@ -58,129 +24,63 @@ cd D:\AI\projects\local-secretary-runtime
 .\scripts\db\postgres.ps1 -Action Start
 .\scripts\db\postgres.ps1 -Action Migrate
 .\scripts\db\postgres.ps1 -Action Doctor
-# 環境全体と DB をまとめて確認する場合：
-.\scripts\doctor\doctor.ps1 -Postgres
 ```
 
-Setup は、Git 除外対象の `.env.postgres`（ポート設定）と `secrets/postgres-password.txt`
-（暗号学的乱数で生成したパスワード）を、存在しない場合に作成します。既存の `.env`、設定、秘密情報は保持します。
-パスワードは Compose secret としてマウントし、Compose の YAML やコマンド引数には含めません。
-秘密情報のフォルダーは、利用者本人だけがアクセスできる NTFS 権限で保護してください。
-Compose secret はローカルファイルのマウントであり、保存時の暗号化を提供するものではありません。
-パスワードは安全な場所に別途バックアップしてください。環境ファイルの展開結果、秘密情報、個人データを含む DB 出力を Issue に貼り付けないでください。
+`Setup` は不足している `.env.postgres` と `secrets/postgres-password.txt` を作成しますが、既存設定やSecretを上書きしません。SecretをGit、Issue、チャットへ貼らず、ローカルファイルのACLも保護してください。
 
-既定値は次のとおりです。
+`Start` は専用project・service・portの所有関係を確認し、競合時に別ポートへ勝手に変更したり他プロセスを停止したりしません。通常はComposeを直接操作せず `postgres.ps1` を使います。
 
-| 項目 | 値 |
-| --- | --- |
-| Compose プロジェクト | `local-secretary-runtime-db` |
-| サービス | `secretary-postgres` |
-| ボリューム | `local-secretary-runtime-db_secretary_pgdata` |
-| ネットワーク | `local-secretary-runtime-db_secretary_db` |
-| ホスト側の接続先 | `127.0.0.1:55432` のみ |
-| DB / 構築用ユーザー | `secretary` / `secretary_admin` |
-| PostgreSQL イメージ | `postgres:17-bookworm`（メジャーバージョン固定。マイナー更新・セキュリティ更新を取得可能） |
+`Doctor` はhealth、localhost binding、認証、migration履歴等を検査します。migration前に失敗する項目がある場合は `Start → Migrate → Doctor` の順で確認します。
 
-`container_name`、外部・共有ボリュームやネットワーク、既存プロジェクトへの依存、Docker 全体の一括削除は使用しません。
-スクリプトはプロジェクト名、Compose ファイル、専用の環境ファイルを毎回明示します。
-DB 操作前に、既存コンテナのプロジェクト・配置先・サービスのラベルと、ボリューム・ネットワークのラベルを確認します。
-対応するコンテナがないボリュームやネットワークがある場合は、処理を停止します。
-所有関係を手動で確認し、不明な場合は信頼できるバックアップから新しい環境へ復旧してください。
-Compose の直接実行ではこれらの確認を通らないため、通常はスクリプトを利用してください。
+## Migration
 
-Start は起動前にループバックのポートを一時確保して利用可能か確認します。
-使用できない場合は停止し、別のポートへの自動変更や、ポートを使用中のプロセスの停止は行いません。
-初回設定では、必要に応じて `-Action Setup -Port 55433` を指定できます。
-設定済みの場合は、初回起動前に Git 除外対象の `.env.postgres` の `LSA_DB_PORT=55433` を変更してください。
-起動済みサービスのポート変更と再作成は自動では行わないため、別途再起動を計画してください。
-事前確認と Docker の起動の間にポートが使用された場合も、Docker 側で起動が失敗します。
+`Migrate` は `db/migrations/NNN_*.sql` を順番に適用し、適用履歴とSHA-256を確認します。適用済みmigrationを編集しないでください。変更は新しいmigrationとして追加します。
 
-起動確認には `pg_isready` を使用します。Doctor はさらに localhost の実際の接続設定、TCP パスワード認証、
-マイグレーション履歴を確認します。マイグレーション前の Doctor は失敗する仕様です。Start、Migrate の順に実行してください。
-初期化後に秘密情報のファイルを書き換えても、既存 DB のパスワードは変わりません。
-不一致は Doctor で検出します。PostgreSQL 側のパスワード変更とローカルの秘密情報の更新を計画して実施してください。
-認証を直す目的でボリュームを削除しないでください。管理者資格情報は LLM や将来のアプリに渡さないでください。
+失敗した未適用migrationはトランザクション境界で扱い、既存の適用済み履歴を書き換えて帳尻を合わせません。スキーマ変更前は影響に応じてバックアップ・復元可能性を確認してください。
 
-## マイグレーション・権限・今後のサービス実装
+`pkb_proto/sql` は隔離PKB試験用であり、運用 `secretary` DBのmigrationディレクトリではありません。
 
-Migrate は `db/migrations/NNN_*.sql` を順番に適用します。
-アドバイザリートランザクションロック、単一トランザクション、`ON_ERROR_STOP`、SHA-256 の履歴を使用します。
-適用済みの SQL は再実行しません。適用済みファイルが変更されていれば失敗するため、変更は新しいマイグレーションとして追加してください。
-失敗時は今回の未適用マイグレーションと適用履歴をまとめてロールバックします。
-SQL の適用はコンテナの初回初期化から独立しており、既存ボリュームにも適用できます。
-ユーザーデータを削除する逆方向のマイグレーションや、自動的な巻き戻しは用意していません。スキーマ変更前にバックアップしてください。
+## 権限
 
-読み取り、候補追加、記憶更新、タスク更新、監査追加の 5 種類の NOLOGIN グループロールを作成します。
-アプリ用のログインユーザーやパスワードはまだ作成しません。
-候補追加ロールは未レビューの候補の追加だけが可能です。記憶更新ロールは信頼されたサービス用です。
-タスク更新ロールは承認を決定できず、監査追加ロールは履歴を編集・削除できません。
-構築用アカウントはスーパーユーザーであり、通常のアプリ実行用には使えません。
-複数利用者のデータを行単位で分離する仕組みも未実装です。信頼できないコードを管理者権限で接続しないでください。
+DBには読み取り、候補、記憶更新、Task更新、監査等の責務を分離したroleがあります。通常アプリへ `secretary_admin` を渡さず、用途に必要な最小権限のloginを使います。
 
-自律的な操作を有効にする前に、次を実装・検証する必要があります。
+記憶書込みの可否、Pending確認、外部操作の承認は別の責務です。DB roleが存在するだけで、LLM出力や外部Actionの実行許可が成立するわけではありません。
 
-- **Memory Write Service**：スキーマ、根拠、重複・訂正ルール、レビュー者の権限、承認範囲・期限を検証し、監査記録とともにトランザクションで反映します。レビューの受理だけで書き込み権限が成立するわけではありません。本人の明示的な訂正には別のポリシーを適用します。
-- **Policy / Executor**：承認を具体的な操作・引数・実施者・危険度・期限・取り消し状態に結び付け、外部操作の直前に再確認します。承認の外部キーや高リスク操作の承認参照が存在するだけでは、実行許可にはなりません。今回の段階では外部操作を実行しません。
-- **Task Manager**：状態遷移の検証、依存関係の循環検出、実行担当の排他的な取得と期限管理、版番号による競合検出、再試行方針、完了確認を実装します。一意な再実行キーは操作記録の重複を防ぎますが、障害後も外部操作が必ず一度だけ実行されることまでは保証しません。
-- **監査・原本・削除**：読み取りアクセスの監査、機密引数の秘匿、原本の取り込みとハッシュ検証、外部キーの関係を考慮した個人情報の削除、上書きしない訂正履歴をサービス側で実装します。
+`current_claims` は現在有効な記録を表しますが、すべてがverifiedであることを意味しません。有効時点、記録時点、supersedes、verification等を失わず扱ってください。
 
-## バックアップと復元訓練
+## Backup
 
 ```powershell
 .\scripts\db\postgres.ps1 -Action Backup
-# Backup が表示した実際のパスに置き換え、復元先 DB 名は毎回新しい名前にしてください：
-.\scripts\db\postgres.ps1 -Action Restore -BackupPath 'D:\AI\data\backup\example.dump' -RestoreDatabase secretary_restore_drill1
 ```
 
-既定では、このリポジトリ内の Git 除外対象 `backups/` に保存します。
-外部のデータフォルダーへ保存する場合は、Backup に `-BackupPath 'D:\AI\data\backup\secretary-YYYYMMDD.dump'` を指定してください。
-既存ファイルは上書きしません。`pg_dump --format=custom` で整合性のある DB スナップショットを作成します。
-バイナリは `docker cp` で転送し、Windows PowerShell 5.1 の出力リダイレクトによる破損を避けます。
-ダンプには個人データが含まれ得るため、Git に登録せず、保存先の暗号化・アクセス保護、保存期間、別機器への退避方針を決めてください。
+既定ではGit除外対象の `backups/` を使用します。外部保存先を指定する場合は、例:
 
-Restore は、専用サービス内の新規 `secretary_restore_*` DB だけを対象にします。
-単一トランザクションで復元し、`--clean`、既存 DB の上書き、運用 DB への直接復元は行いません。
-失敗時に空の検証用 DB が残る場合がありますが、自動削除はしません。
-DB アーカイブには実行可能な SQL が含まれるため、信頼できるダンプだけを復元してください。運用中の `secretary` は変更しません。
+```powershell
+.\scripts\db\postgres.ps1 -Action Backup -BackupPath 'D:\AI\data\backup\secretary-YYYYMMDD.dump'
+```
 
-復元後は、マイグレーションの版、entity・source・claim・task の件数、原本のハッシュと存在、
-代表的な Task ID・状態・チェックポイント・承認情報を復元元と比較してください。
-バックアップを運用に頼る前に復元訓練を行ってください。運用 DB の切り替えは別の手順として実施します。
-ダンプには所有者・アクセス権限とクラスタ共通のロールを含めないため、復元した検証用 DB は管理者専用です。
-新しいクラスタへ復旧する場合は、空の `secretary` DB にこの版を初期構築してグループロールを作成した後、
-新規の検証用 DB へ復元します。運用先を切り替える前に、確認済みの権限を明示的に設定してください。
-秘密情報、原本アーカイブ、ローカル設定は DB と対応が取れるよう別途バックアップします。
-`pg_dump` にはタスク状態は含まれますが、それらのファイルや Docker 設定は含まれません。
-原本と DB の厳密な整合性が必要な場合は、アプリの書き込みを停止してください。
-稼働中の PostgreSQL データディレクトリをコピーして論理バックアップの代わりにしないでください。
+`pg_dump --format=custom` の論理バックアップを使用します。ダンプには個人データが含まれ得るため、暗号化・アクセス制御・保存期間・別機器への退避を必要に応じて管理してください。稼働中のPostgreSQLデータディレクトリの単純コピーを論理バックアップの代用にしません。
 
-## 検証方法と実施結果
+## Restore drill
+
+復元は既存運用DBを上書きせず、新しい `secretary_restore_*` DBへ行います。
+
+```powershell
+.\scripts\db\postgres.ps1 -Action Restore `
+  -BackupPath 'D:\AI\data\backup\example.dump' `
+  -RestoreDatabase secretary_restore_drill1
+```
+
+復元後はmigration版、主要テーブル件数、代表Task/Claim、必要なSource/原本との対応を復元元と照合します。新PCへ復旧する場合、クラスタ共通role・login・Secretはダンプだけでは完結しないため別途再構築・照合します。
+
+## Tests
+
+DB基盤の静的・隔離統合テスト入口:
 
 ```powershell
 .\tests\db\test-static.ps1
-# 設定済みのポートを使用するため、運用サービスなどが使用していない状態で実行してください：
 .\tests\db\test-integration.ps1
 ```
 
-統合テストは、ランダムな名前の `local-secretary-test-*` プロジェクト、架空データ、専用リソースを使用します。
-使用中ポートと適用済みマイグレーションのチェックサム不一致の拒否、SQL の適用・再適用、
-未レビュー候補の正本への反映拒否、不正な有効期間、別タスクの手順参照、高リスク操作の承認参照不足、ロール権限を確認します。
-再起動とバイナリバックアップ・復元を通じた承認待ちタスク状態の保持、既存復元先の拒否も確認します。
-終了時には、そのテスト専用プロジェクトのコンテナ・ボリューム・ネットワークだけを削除し、
-その他のコンテナの ID・状態・起動時刻・再起動回数を実行前と比較します。
-架空データのダンプは Git 除外対象としてローカルに残し、ダウンロードした PostgreSQL イメージも残します。
-テスト中に、別コンテナの起動・停止などを並行して行わないでください。
-
-2026-09-26 のローカル検証では、Windows PowerShell 5.1 と PowerShell 7.6.5 で静的検証に成功しました。
-Windows 上の Docker Desktop（Linux コンテナ）で統合テストに成功し、
-ポート競合とチェックサム不一致の確認を追加した最終版も Windows PowerShell 5.1 で成功しました。
-検証場所は独立した Codex 作業コピーであり、`D:\AI\projects\local-secretary-runtime` ではありません。
-テスト用コンテナ・ボリューム・ネットワークは削除済みで、既存 `yt-topic-search` のコンテナ ID・稼働状態・起動時刻・再起動回数は変わっていません。
-ダウンロードしたイメージと Git 除外対象の架空データダンプは、ローカルのテスト用保存先に残っています。
-運用用リポジトリへの変更の取得や、運用用秘書 DB の構築は、この検証では実施していません。
-
-[PR #2 の GitHub Actions](https://github.com/marshall2501/local-secretary-runtime/actions/runs/36217034600) でも、
-Linux の PostgreSQL 統合テストと Windows の静的検証の両方が成功しています。
-
-参考資料：[Docker Compose の秘密情報管理](https://docs.docker.com/compose/how-tos/use-secrets/)、
-[PostgreSQL の pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)。
+隔離統合テストは専用projectと架空データを使い、所有権、migration、権限、再起動、backup/restore等の回帰を検査します。テスト成功は運用DBやサブPC統合の成功と同義ではありません。実機検証の現在地は設計repo `STATUS` に記録します。

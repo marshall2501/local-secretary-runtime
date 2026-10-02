@@ -1,19 +1,41 @@
 # Agent instructions — Personal Local Secretary AI runtime
 
 ## Read before acting
-Fetch the design repository's current [START_HERE](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/00_Project/START_HERE.md), [Vision](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/00_Project/Vision.md), [target architecture](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/SecretaryCore-vNext.md), and [adaptive acceptance plan](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/03_Workflows/PrototypeVerticalSlice.md) before choosing coding, tooling, migrations, or user operations. Reassess latest goal, priority and real-machine status at each handoff.
 
-## Goal and work-unit gate
-Build a useful, domain-neutral personal secretary that can use past experience and new observations to select its next action, research, plan, ask, safely execute, verify, record and continue. Game/PC troubleshooting is only one illustration. For each work unit explain its contribution to the ultimate goal, why it takes priority now, and the concrete new user-facing capability. Then identify the behavioral change, failure condition, sub-PC test and what new result would change the agent's subsequent action. A deterministic sequence that records a simulated result is evidence of a component, not evidence of an adaptive Secretary Core.
+新しい主要作業や作業選定時は、設計repo `local-secretary-ai/main` の現行 [`START_HERE`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/START_HERE.md) を入口に、`PROJECT → ARCHITECTURE → STATUS → PLAN` を確認する。必要な個別設計、DesignDecisions、DevelopmentKnowledgeは今回の作業に関係する部分だけ追加確認する。
 
-## Adaptive choices and safety
-Treat a past failure as evidence bound to its conditions, not a permanent global ban. Reconsider when environment, user goals or evidence change. Prefer rules phrased as desired capabilities, decision criteria and permitted action conditions. Check for low-risk repetition without progress. Maintain execution-time boundaries through restricted credentials, approval for consequential operations, protected secrets/private originals, recoverable data and isolated services; keep the independent yt-topic-search untouched.
+読了順は判断上の優先順位ではない。本人の最新指示とPROJECTの目的・要件、採用中のARCHITECTURE、安全条件、STATUSの実測を照合して作業を選ぶ。PLANや古いREADME、過去の「次の操作」を自動実行命令として扱わない。
 
-## Technology choice
-Current PostgreSQL, FastAPI, Python, Qwen, Docker and own-agent code are candidates. When the user requests comparison or delegates a technical decision, examine current options including new LLMs, MCP and agent frameworks. No monthly review or automation is requested. Reuse existing memory when useful; converters or a clean rebuild are possible. Preserve backups and a single authoritative source during migration.
+## Product boundary
 
-## Known implementation boundary (2026-09-26)
-On the sub-PC: Qwen3:8b reads a limited SQL memory result and answers with provenance; migration 004 and the fixed simulated task/result path have been independently exercised against the actual database. Adaptive retrieval/research/action choices, actual external tool use, automatic memory write and durable integrated continuation have not been demonstrated. The new `scripts/secretary/adaptive_probe.py` is an **unverified standalone experiment** using local fictional research fixtures, permitted read-only memory search, simulated tools and a local checkpoint. It is not a DB Task, live Web adapter, policy-verified real executor or complete Secretary Core. Run offline tests and a sub-PC model trial before making capability claims.
+最終目標は、PC・ゲーム・RC・スマホ・健康・買い物・生活・予定・各種プロジェクトを横断し、自然言語の依頼から記憶・調査・計画・権限内の安全な実行・結果検証・記録・継続対応まで行うPersonal Local Secretary AIである。独立PKBは先行して日常利用できる能力だが、統合秘書AIの完成とは区別する。
 
-## Development and reporting
-Keep coding changes coherent around a useful capability. Test against multiple domains and changed observations, including contradictions, previously attempted actions, limits and paused/resumed work. Report the difference among repository changes, passing unit tests, real sub-PC execution and integrated success. Give the user ONE local operation at a time and inspect the output before the next. Safeguard the user's secrets, data, backups and other running projects. Update the design repository's START_HERE and CurrentStatus after demonstrated progress.
+RITSUKO = Secretary Core / Orchestrator。Task、履歴、Observation、権限、利用可能な能力、Action/Result、停止・再開、最終判断を管理する。MAGIのLLMは意味理解・分析・提案を行う交換可能な部品であり、LLMの成功宣言だけで目的達成、事実化、権限付与を確定しない。
+
+## Memory and control
+
+構造化記憶の正本は現行PostgreSQL一つ。全件・厳密条件・履歴・時点検索はSQLを基本とし、RAG・グラフ・ベクトル索引は補助として扱う。明確な低リスク本人申告は決定的なMemory Intakeゲートを通して自動登録可能とし、重大な矛盾・曖昧さ・対象不明・高影響などを例外Pendingへ送る。外部操作の承認と記憶登録の判断を混同しない。
+
+## Safety and validation
+
+- GitHub反映、単体/オフラインテスト、隔離DB試験、サブPC実機、統合動作、日常利用での成功を区別する。
+- 目標図やコードの存在だけを実装済み・実証済みの証拠にしない。
+- 架空・隔離試験と運用DB・実データ・高影響操作の安全ゲートを分ける。
+- Secret、個人原本、DBダンプ、個人ログをGitHubやチャットへ登録しない。
+- `yt-topic-search` を変更・停止しない。
+- サブPCを通常の開発・稼働先、メインPCを手動復旧先として扱う。
+- ユーザーにサブPC操作を依頼する場合は、原則一度に一操作だけ提示し、結果を確認して次を選ぶ。
+
+## Development rules
+
+実装前に、目的への貢献、変更対象、期待する挙動、失敗条件、検証方法を明確にする。同じ条件で確認済みの証拠は再利用し、条件が変わった過去実験を一般化しない。
+
+技術やフレームワークを目的化しない。PostgreSQL、FastAPI、Docker、Ollama、クラウドLLM、MCP、n8n等は必要に応じて変更・置換できる手段として扱う。n8nをSecretary Coreそのものとは扱わない。
+
+適用済みmigrationは書き換えず新しいmigrationを追加する。運用DBや実データへ影響する変更では、必要なバックアップ・復元・権限・承認を確認する。
+
+## Documentation
+
+大目標・製品要件はPROJECT、採用構成はARCHITECTURE、実装・検証の現在地はSTATUS、現在選定した作業と受入条件はPLANを正本とする。runtime READMEや個別docsへ進捗履歴を重複して固定しない。
+
+意味のある実装・検証結果が出た場合も、コード変更だけでSTATUSの実機成功を宣言しない。一次証拠を確認した後、設計repoの責務に従って更新する。
