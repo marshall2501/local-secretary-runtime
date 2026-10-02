@@ -100,6 +100,10 @@ class MagiCoreBridgeTests(unittest.TestCase):
         session["detail"]["knowledge_candidate"] = "メインPCのGPUモデル名: 別モデル"
         self.assertIsNone(reviewable_user_knowledge_proposal(session))
         session = self.proposal_session()
+        session["detail"]["answer_candidate"] = None
+        session["detail"]["knowledge_candidate"] = "メインPCのGPUモデル名: 別モデル"
+        self.assertIsNone(reviewable_user_knowledge_proposal(session))
+        session = self.proposal_session()
         session["observations"] = session["observations"][:1]
         self.assertIsNone(reviewable_user_knowledge_proposal(session))
 
