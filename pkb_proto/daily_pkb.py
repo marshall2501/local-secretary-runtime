@@ -43,6 +43,7 @@ from .magi_client import (
     list_chat_models as list_magi_models,
 )
 from .magi_dialogue import MAX_TURNS, export_dialogue
+from .magi_core_bridge import reviewable_user_knowledge_proposal
 from .magi_async import (
     continue_with_observation_async,
 )
@@ -4515,11 +4516,22 @@ def core_page(task_id: str = ""):
                             ui.label("RITSUKOからの確認").classes(
                                 "font-bold text-blue-900"
                             )
+                            reviewable_proposal = (
+                                reviewable_user_knowledge_proposal(session)
+                            )
                             answer = str(
-                                detail.get("answer_candidate") or ""
+                                (
+                                    reviewable_proposal or {}
+                                ).get("answer")
+                                or detail.get("answer_candidate")
+                                or ""
                             ).strip()
                             knowledge = str(
-                                detail.get("knowledge_candidate") or ""
+                                (
+                                    reviewable_proposal or {}
+                                ).get("knowledge_candidate")
+                                or detail.get("knowledge_candidate")
+                                or ""
                             ).strip()
                             ui.label(
                                 "本人回答を根拠に、回答候補と記憶候補ができています。"
@@ -4530,6 +4542,20 @@ def core_page(task_id: str = ""):
                                 ui.label("記憶候補: " + knowledge).classes(
                                     "text-sm font-medium"
                                 )
+                            if (
+                                isinstance(reviewable_proposal, dict)
+                                and reviewable_proposal.get("answer_source")
+                                == "knowledge_candidate_fallback"
+                            ):
+                                ui.label(
+                                    "回答候補が未生成だったため、本人回答でGrounding済みの"
+                                    "記憶候補を回答文として使用します。"
+                                ).classes("text-xs text-blue-800")
+                            if reviewable_proposal is None:
+                                ui.label(
+                                    "本人回答とのGroundingを検証できないため、"
+                                    "このProposalは完了操作できません。"
+                                ).classes("text-xs text-red-700 font-medium")
                             ui.label(
                                 "「回答だけで完了」はPKBへ新規記憶を書きません。"
                                 "「記憶にも反映」は表示中の記憶候補を本人が確認した内容として"
@@ -4731,6 +4757,9 @@ def core_page(task_id: str = ""):
                                     color="blue",
                                     on_click=remember_and_complete,
                                 )
+                                if reviewable_proposal is None:
+                                    answer_only_button.disable()
+                                    remember_button.disable()
                                 if isinstance(prepared_intake, dict) or (
                                     active_review_status == "processing"
                                     and active_review_decision == "remember"
