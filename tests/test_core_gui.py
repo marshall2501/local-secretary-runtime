@@ -498,6 +498,94 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 self.elements('保存済みTaskのMAGI対話を閲覧中（read-only）')
             )
 
+    async def test_proposal_ready_missing_answer_shows_grounded_knowledge_fallback(self):
+        saved_session = {
+            'task_id': self.waiting[0]['id'],
+            'user_raw': 'メインPCのGPUの種類は？',
+            'model': '',
+            'prompt_version': 'd19-state-driven-v4',
+            'status': 'proposal_ready',
+            'next_step': 'review_proposal',
+            'classification': {
+                'category': 'INFORMATION',
+                'understood_request': 'GPUモデルを知りたい',
+            },
+            'detail': {
+                'state': 'KNOWLEDGE_CANDIDATE',
+                'reason': '本人回答で不足情報が解消した',
+                'answer_candidate': None,
+                'knowledge_candidate': (
+                    'メインPCに搭載されているGPUのモデル名は'
+                    'Radeon RX 9070 XTである。'
+                ),
+            },
+            'pending_requests': [],
+            'observations': [
+                {
+                    'source': 'pkb',
+                    'verified': True,
+                    'confidentiality': 'private',
+                    'text': 'GPU1はあるがmodel未確認',
+                },
+                {
+                    'source': 'user_clarification',
+                    'verified': False,
+                    'text': 'Radeon RX 9070 XT',
+                    'responds_to': ['REQ-1'],
+                },
+            ],
+            'previous_request_signatures': [],
+            'conversation_context': [
+                {'role': 'user', 'text': 'Radeon RX 9070 XT'},
+            ],
+            'user_question': None,
+            'magi_disagreement': None,
+            'user_source_reviewed': False,
+            'last_question_purpose': 'evaluate_observation',
+            'turns': [{
+                'stage': 'analyze',
+                'question_purpose': 'evaluate_observation',
+                'request_envelope': {'turn': 5},
+                'status': 'ok',
+                'response': {'state': 'KNOWLEDGE_CANDIDATE'},
+                'errors': [],
+                'diagnostic': {},
+                'member_results': [],
+                'consensus': None,
+            }],
+            'legacy_router_used': False,
+            'tool_read_executed': True,
+            'cloud_context_gate': {
+                'status': 'applied',
+                'mode': 'local_only_private_pkb',
+            },
+        }
+        self.waiting[0].update({
+            'core_slice': 'ritsuko_magi_observation_v1',
+            'phase': 'awaiting_review',
+            'selected_capability': 'pkb_search',
+            'magi_session': saved_session,
+        })
+        with self.client, patch.object(
+            daily, 'list_magi_models', return_value=[]
+        ):
+            daily.core_page()
+            await self.click('開く', 0)
+            self.assertTrue(self.elements('回答だけで完了'))
+            self.assertTrue(self.elements('記憶にも反映して完了'))
+            self.assertTrue(self.elements(
+                '回答候補: メインPCに搭載されているGPUのモデル名は'
+                'Radeon RX 9070 XTである。'
+            ))
+            self.assertTrue(self.elements(
+                '回答候補が未生成だったため、本人回答でGrounding済みの'
+                '記憶候補を回答文として使用します。'
+            ))
+            self.assertFalse(self.elements(
+                '本人回答とのGroundingを検証できないため、'
+                'このProposalは完了操作できません。'
+            ))
+
     async def test_memory_choice_runs_intake_then_post_review_re_evaluation(self):
         saved_session = {
             'task_id': self.waiting[0]['id'],
