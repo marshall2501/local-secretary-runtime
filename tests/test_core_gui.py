@@ -1030,6 +1030,98 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], 4)
             self.assertEqual(daily.load_ui_preferences()['core']['completed_limit'], 4)
 
+    async def test_top_has_system_debug_status_card(self):
+        summary = {
+            'status': 'ok',
+            'database': 'secretary_pkb_proto_20260927',
+            'user': 'secretary_pkb_proto_writer_20260927',
+            'host': '127.0.0.1',
+            'port': 55432,
+            'boundary_ok': True,
+            'latest_migration': '025_connection_auth_and_consumer_binding.sql',
+        }
+        with self.client, \
+             patch.object(daily, '_pending_count', return_value=0), \
+             patch.object(daily, '_debug_database_summary', return_value=summary):
+            daily.top_page()
+            self.assertTrue(self.elements('システム状態 / デバッグ'))
+            self.assertTrue(self.elements('DB OK'))
+            self.assertTrue(self.elements('DB: secretary_pkb_proto_20260927'))
+            self.assertTrue(self.elements('システム状態を開く'))
+
+    async def test_debug_page_renders_read_only_runtime_db_and_masked_environment(self):
+        snapshot = {
+            'runtime': {
+                'status': 'ok',
+                'branch': 'main',
+                'commit': '0123456789abcdef',
+                'python': '3.12.0',
+                'python_executable': 'python.exe',
+                'platform': 'Windows',
+                'pid': 123,
+                'working_directory': 'D:/runtime',
+                'runtime_root': 'D:/runtime',
+                'process_started_at': '2026-10-02T00:00:00+00:00',
+                'fetched_at': '2026-10-02T00:01:00+00:00',
+            },
+            'database': {
+                'status': 'ok',
+                'boundary_ok': True,
+                'error': None,
+                'identity': {
+                    'database': 'secretary_pkb_proto_20260927',
+                    'user': 'secretary_pkb_proto_writer_20260927',
+                    'host': '127.0.0.1',
+                    'port': 55432,
+                    'server_version': '17.0',
+                    'database_size': '10 MB',
+                    'backend_pid': 456,
+                    'database_connections': 2,
+                },
+                'migration': {
+                    'latest': '025_connection_auth_and_consumer_binding.sql',
+                    'count': 25,
+                    'source': 'launcher preflight',
+                },
+                'counts': [
+                    {
+                        'label': 'Entities',
+                        'relation': 'secretary.entities',
+                        'count': 4,
+                        'status': 'ok',
+                    }
+                ],
+                'relations': [
+                    {'name': 'entities', 'type': 'BASE TABLE'},
+                ],
+            },
+            'environment': [
+                {
+                    'name': 'OPENAI_API_KEY',
+                    'value': 'SET',
+                    'secret': True,
+                },
+                {
+                    'name': 'OLLAMA_HOST',
+                    'value': 'http://127.0.0.1:11434',
+                    'secret': False,
+                },
+            ],
+        }
+        with self.client, patch.object(
+            daily, '_load_system_debug_snapshot', return_value=snapshot
+        ):
+            daily.debug_page()
+            for label in (
+                'システム状態 / デバッグ',
+                'DB主要データ件数',
+                'DB Relation一覧',
+                'Environment',
+                '最新状態を再取得',
+            ):
+                self.assertTrue(self.elements(label), label)
+            self.assertFalse(self.elements('must-never-appear'))
+
     async def test_settings_group_connections_and_layout_actions(self):
         with self.client:
             daily.settings_page()
