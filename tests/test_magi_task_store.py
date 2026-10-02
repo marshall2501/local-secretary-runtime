@@ -421,6 +421,72 @@ class MagiTaskStoreTests(unittest.TestCase):
                 },
             )
 
+    def test_finalize_answer_only_uses_fallback_answer_end_to_end(self):
+        checkpoint = self.review_checkpoint()
+        checkpoint["magi_session"]["detail"]["answer_candidate"] = None
+        claim_db = _DB(fetches=[("waiting_external", checkpoint)])
+        session, capability, observation, review = claim_proposal_review(
+            claim_db,
+            task_id=TASK_ID,
+            decision="answer_only",
+        )
+        self.assertEqual(
+            review["answer"],
+            "メインPCのGPUモデル名: Radeon RX 9070 XT",
+        )
+
+        processing_checkpoint = self.review_checkpoint()
+        processing_checkpoint["magi_session"]["detail"]["answer_candidate"] = None
+        processing_checkpoint["proposal_review"] = review
+        evaluation = {
+            "state": "READY",
+            "reason": "本人回答だけで元質問へ回答可能",
+            "answer_candidate": review["answer"],
+        }
+        reviewed_session = dict(session)
+        reviewed_session.update({
+            "status": "review_evaluated",
+            "next_step": "ritsuko_finalize_review",
+            "post_review_evaluation": evaluation,
+            "observations": [
+                *session["observations"],
+                observation,
+            ],
+            "turns": [
+                *session["turns"],
+                {
+                    "question_purpose": "evaluate_review_result",
+                    "status": "ok",
+                    "request_envelope": {
+                        "task_id": str(TASK_ID),
+                        "question_purpose": "evaluate_review_result",
+                    },
+                    "response": evaluation,
+                },
+            ],
+        })
+        finalize_db = _DB(fetches=[("running", processing_checkpoint)])
+        completed = finalize_proposal_review(
+            finalize_db,
+            task_id=TASK_ID,
+            session=reviewed_session,
+            selected_capability=capability,
+        )
+        self.assertEqual(completed["status"], "completed")
+        update = next(
+            call for call in finalize_db.cur.calls
+            if "SET status='completed'" in call[0]
+        )
+        saved = update[1][0].obj
+        self.assertEqual(
+            saved["message"],
+            "メインPCのGPUモデル名: Radeon RX 9070 XT",
+        )
+        self.assertEqual(
+            saved["final_core_decision"]["reason"],
+            "proposal_review_evaluated_answer_only",
+        )
+
     def test_finalize_review_requires_ok_review_turn_and_completes_task(self):
         checkpoint = self.review_checkpoint()
         checkpoint["proposal_review"] = {
