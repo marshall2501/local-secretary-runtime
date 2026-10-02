@@ -22,8 +22,9 @@ $file021 = Join-Path $root 'pkb_proto\sql\021_ollama_context_window.sql'
 $file022 = Join-Path $root 'pkb_proto\sql\022_ollama_generation_budget.sql'
 $file023 = Join-Path $root 'pkb_proto\sql\023_magi_retry_policy.sql'
 $file024 = Join-Path $root 'pkb_proto\sql\024_service_connections.sql'
+$file025 = Join-Path $root 'pkb_proto\sql\025_connection_auth_and_consumer_binding.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023, $file024)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023, $file024, $file025)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -478,7 +479,38 @@ if ($LASTEXITCODE -ne 0 -or ($verify024 | Out-String).Trim() -ne '1' -or ($conne
     throw 'Service Connection migration verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 024 (Service Connection Registry included).'
+$has025 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='025_connection_auth_and_consumer_binding.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 025 schema version.' }
+if (($has025 | Out-String).Trim() -eq '0') {
+    $hash025 = (Get-FileHash -LiteralPath $file025 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql025 = [IO.File]::ReadAllText($file025).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash025)
+    $tmpName025 = 'connection-auth-binding-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp025 = Join-Path ([IO.Path]::GetTempPath()) $tmpName025
+    $remoteTmp025 = '/tmp/' + $tmpName025
+    try {
+        [IO.File]::WriteAllText($localTmp025, $sql025, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp025 ($id + ':' + $remoteTmp025) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 025 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp025
+        if ($LASTEXITCODE -ne 0) { throw '025 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp025) { Remove-Item -LiteralPath $localTmp025 }
+        & docker exec $id rm -f $remoteTmp025 | Out-Null
+    }
+} elseif (($has025 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 025 migration records.'
+}
+
+$verify025 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='025_connection_auth_and_consumer_binding.sql';"
+$connectionTypeColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='service_connections' AND column_name='connection_type';"
+$connectionAuthColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='service_connections' AND column_name='auth_data';"
+$usageProfileTable = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='secretary' AND table_name='provider_usage_profiles';"
+$usageProfileGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.provider_usage_profiles','SELECT,INSERT,UPDATE,DELETE');"
+if ($LASTEXITCODE -ne 0 -or ($verify025 | Out-String).Trim() -ne '1' -or ($connectionTypeColumn | Out-String).Trim() -ne '1' -or ($connectionAuthColumn | Out-String).Trim() -ne '1' -or ($usageProfileTable | Out-String).Trim() -ne '1' -or ($usageProfileGrant | Out-String).Trim() -ne 't') {
+    throw 'Connection auth / consumer binding migration verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 025 (Connection auth + explicit consumer binding included).'
 
 
 
