@@ -91,8 +91,8 @@ class ProviderUsageTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            result["credential_ref"],
-            "env:OPENAI_ADMIN_KEY",
+            result["credential_source"],
+            "service_connection",
         )
         self.assertEqual(
             result["usage"]["by_model"][0]["model"],
@@ -115,8 +115,8 @@ class ProviderUsageTests(unittest.TestCase):
                 datetime(2026, 10, 2, tzinfo=timezone.utc),
             )
         self.assertEqual(
-            result["credential_ref"],
-            "env:OPENAI_API_KEY",
+            result["credential_source"],
+            "service_connection",
         )
         self.assertNotIn("fallback-secret", str(result))
 
