@@ -21,6 +21,9 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, StringConstraints
 
+from secretary.read_repository import MEMORY_KINDS, PostgresReadRepository, memory_search_sql
+from secretary.read_service import ReadService
+
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -147,6 +150,11 @@ def connect() -> psycopg.Connection:
     return psycopg.connect(dsn, row_factory=dict_row, connect_timeout=5)
 
 
+def read_service() -> ReadService:
+    """Build the shared read service without coupling it to FastAPI."""
+    return ReadService(PostgresReadRepository(connect))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Fail closed at startup; do not offer an API backed by an admin connection.
@@ -241,16 +249,7 @@ def entities(
     domain: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=100),
 ):
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT id, name, entity_type, domain, created_at, retired_at
-                   FROM secretary.entities
-                   WHERE (%s::text IS NULL OR domain = %s)
-                   ORDER BY created_at DESC, id DESC LIMIT %s""",
-                (domain, domain, limit),
-            )
-            return cur.fetchall()
+    return read_service().list_entities(domain=domain, limit=limit)
 
 
 @app.get("/claims/current", dependencies=[Depends(read_authenticated)])
@@ -259,19 +258,9 @@ def current_claims(
     verified_only: bool = False,
     limit: int = Query(default=100, ge=1, le=100),
 ):
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT id, entity_id, source_id, claim_type, predicate, value,
-                          evidence, origin, verification_status, valid_from,
-                          valid_to, recorded_at
-                   FROM secretary.current_claims
-                   WHERE entity_id = %s
-                     AND (NOT %s OR verification_status = 'verified')
-                   ORDER BY recorded_at DESC, id DESC LIMIT %s""",
-                (entity_id, verified_only, limit),
-            )
-            return cur.fetchall()
+    return read_service().list_current_claims(
+        entity_id=entity_id, verified_only=verified_only, limit=limit
+    )
 
 
 @app.get("/tasks", dependencies=[Depends(read_authenticated)])
@@ -279,67 +268,7 @@ def tasks(
     task_status: TaskStatus | None = None,
     limit: int = Query(default=50, ge=1, le=100),
 ):
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT id, request, requested_by, domain, completion_criteria,
-                          status, due_at, next_run_at, checkpoint, revision,
-                          created_at, updated_at, completed_at
-                   FROM secretary.tasks
-                   WHERE (%s::text IS NULL OR status = %s)
-                   ORDER BY created_at DESC, id DESC LIMIT %s""",
-                (task_status, task_status, limit),
-            )
-            return cur.fetchall()
-
-
-# Structured SQL enumeration is the default; this endpoint does not use RAG,
-# vector similarity, LLM summarization or a top-k approximation.
-MEMORY_KINDS = ("claim", "issue", "hypothesis", "source")
-
-
-def memory_search_sql(include_history: bool) -> str:
-    # Only our own constant relation names may be substituted into SQL.
-    claim_relation = "secretary.claims" if include_history else "secretary.current_claims"
-    return f"""
-        WITH memory_records AS (
-          SELECT c.id, 'claim'::text AS kind, e.domain, e.name AS entity_name,
-                 c.predicate AS title, c.value::text AS value_text,
-                 c.evidence AS evidence, c.verification_status AS state,
-                 s.id AS source_id, s.citation AS source_citation, s.uri AS source_uri,
-                 c.recorded_at AS recorded_at
-          FROM {claim_relation} c
-          JOIN secretary.entities e ON e.id=c.entity_id
-          JOIN secretary.sources s ON s.id=c.source_id
-          UNION ALL
-          SELECT i.id, 'issue', e.domain, e.name,
-                 i.description, NULL::text, NULL::text, i.status,
-                 s.id, s.citation, s.uri, i.recorded_at
-          FROM secretary.issues i
-          LEFT JOIN secretary.entities e ON e.id=i.entity_id
-          JOIN secretary.sources s ON s.id=i.source_id
-          UNION ALL
-          SELECT h.id, 'hypothesis', e.domain, e.name,
-                 h.statement, NULL::text, h.evidence, h.status,
-                 s.id, s.citation, s.uri, h.recorded_at
-          FROM secretary.hypotheses h
-          JOIN secretary.issues i ON i.id=h.issue_id
-          LEFT JOIN secretary.entities e ON e.id=i.entity_id
-          JOIN secretary.sources s ON s.id=h.source_id
-          UNION ALL
-          SELECT s.id, 'source', NULL::text, NULL::text,
-                 s.citation, NULL::text, NULL::text, s.source_type,
-                 s.id, s.citation, s.uri, s.recorded_at
-          FROM secretary.sources s
-        )
-        SELECT * FROM memory_records
-        WHERE (%s::text IS NULL OR domain=%s)
-          AND (%s::text IS NULL OR kind=%s)
-          AND (%s::text IS NULL OR
-               strpos(lower(concat_ws(' ', entity_name, title, value_text,
-                                      evidence, source_citation, source_uri)),
-                      lower(%s)) > 0)
-    """
+    return read_service().list_tasks(task_status=task_status, limit=limit)
 
 
 @app.get("/memory/search", dependencies=[Depends(read_authenticated)])
@@ -351,33 +280,10 @@ def search_memory(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=1000000),
 ):
-    # q omitted => unfiltered enumeration. q supplied => exact substring
-    # matching over stored data, NOT semantic similarity. Each response
-    # includes a total and a stable (within one DB snapshot) result page.
-    q = q.strip() or None if q is not None else None
-    domain = domain.strip() or None if domain is not None else None
-    filters = (domain, domain, kind, kind, q, q)
-    matching_sql = memory_search_sql(include_history)
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            cur.execute(
-                f"SELECT count(*) AS total FROM ({matching_sql}) AS matching",
-                filters,
-            )
-            total = cur.fetchone()["total"]
-            cur.execute(
-                f"""SELECT * FROM ({matching_sql}) AS matching
-                    ORDER BY recorded_at DESC, kind ASC, id DESC
-                    LIMIT %s OFFSET %s""",
-                (*filters, limit, offset),
-            )
-            items = cur.fetchall()
-    return {
-        "total": total, "limit": limit, "offset": offset,
-        "include_history": include_history, "items": items,
-    }
-
+    return read_service().search_memory(
+        q=q, domain=domain, kind=kind, include_history=include_history,
+        limit=limit, offset=offset,
+    )
 
 
 @app.get("/experience/search", dependencies=[Depends(read_authenticated)])
@@ -387,52 +293,12 @@ def search_experience(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=1000000),
 ):
-    """Read past actions and observed results with explicit target linkage.
-
-    An older task without entity_id is returned as unlinked, NEVER silently
-    attributed to an entity merely because it has the same domain. The
-    records describe actual saved operations, which may be simulated.
-    """
-    domain = domain.strip() or None if domain is not None else None
-    entity_name = entity_name.strip() or None if entity_name is not None else None
-    if entity_name and not domain:
-        raise HTTPException(status_code=422, detail="entity_name requires domain")
-    where = """
-        FROM secretary.actions a
-        JOIN secretary.tasks t ON t.id = a.task_id
-        LEFT JOIN secretary.entities e ON e.id = t.entity_id
-        LEFT JOIN secretary.results r ON r.action_id = a.id
-        LEFT JOIN secretary.sources s ON s.id = r.source_id
-        WHERE (%s::text IS NULL OR t.domain = %s)
-          AND (%s::text IS NULL OR e.name = %s)
-    """
-    filters = (domain, domain, entity_name, entity_name)
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            cur.execute("SELECT count(*) AS total " + where, filters)
-            total = cur.fetchone()["total"]
-            cur.execute(
-                """SELECT a.id AS action_id, t.id AS task_id,
-                          t.domain, t.entity_id, e.name AS entity_name,
-                          t.request AS task_request, t.status AS task_status,
-                          a.tool, a.operation, a.status AS action_status,
-                          a.parameters, a.started_at, a.finished_at,
-                          r.id AS result_id, r.outcome, r.summary, r.evidence,
-                          r.recorded_at, s.citation AS source_citation
-                """ + where + """
-                ORDER BY a.started_at DESC NULLS LAST, a.id DESC
-                LIMIT %s OFFSET %s
-                """,
-                (*filters, limit, offset),
-            )
-            items = cur.fetchall()
-    return {
-        "total": total, "limit": limit, "offset": offset,
-        "scope": "linked entity only" if entity_name else
-                 "domain-wide including unlinked tasks",
-        "items": items,
-    }
+    try:
+        return read_service().search_experience(
+            domain=domain, entity_name=entity_name, limit=limit, offset=offset
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/tasks", status_code=201)
