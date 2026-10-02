@@ -14,7 +14,6 @@ import os
 from uuid import UUID, uuid4
 
 from .credential_resolver import env_name_to_credential_ref
-from .magi_client import OLLAMA
 from .ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
@@ -23,22 +22,13 @@ from .ollama_runtime import (
     normalize_magi_num_predict,
 )
 from .service_connections import (
+    adapter_defaults as service_adapter_defaults,
     ensure_llm_connection,
     legacy_credential_env,
 )
 
 MEMBER_NAMES = ("MELCHIOR", "CASPER", "BALTHASAR")
 PROVIDERS = ("ollama", "openai", "gemini")
-DEFAULT_ENDPOINTS = {
-    "ollama": OLLAMA,
-    "openai": "https://api.openai.com/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta",
-}
-DEFAULT_CREDENTIAL_ENVS = {
-    "ollama": None,
-    "openai": "OPENAI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-}
 DEFAULT_TIMEOUT_SECONDS = 120
 DEFAULT_RETRY_HTTP_CODES = (429, 500, 502, 503, 504)
 DEFAULT_RETRY_WITHIN_TURN = True
@@ -76,7 +66,8 @@ def _env_int(name: str, default: int) -> int:
 def provider_defaults(provider: str) -> tuple[str, str | None]:
     if provider not in PROVIDERS:
         raise ValueError("unsupported_provider")
-    return DEFAULT_ENDPOINTS[provider], DEFAULT_CREDENTIAL_ENVS[provider]
+    defaults = service_adapter_defaults(provider)
+    return defaults["endpoint"], legacy_credential_env(defaults)
 
 
 def normalize_retry_http_codes(value: object | None) -> tuple[int, ...]:
@@ -387,7 +378,7 @@ def sync_ollama_profiles(db, models: list[str], *, endpoint: str | None = None) 
             provider="ollama",
             model=model,
             display_name="Ollama / " + model,
-            endpoint=endpoint or DEFAULT_ENDPOINTS["ollama"],
+            endpoint=endpoint or provider_defaults("ollama")[0],
             credential_env=None,
             context_window_tokens=None,
             ollama_num_predict=None,
