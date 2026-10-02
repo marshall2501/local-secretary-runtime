@@ -25,7 +25,7 @@ import anyio
 from .credential_resolver import (
     CredentialResolutionError,
     env_name_to_credential_ref,
-    resolve_credential,
+    resolve_connection_credential,
 )
 from .async_transport import (
     AsyncHTTPStatusError,
@@ -192,6 +192,8 @@ async def _call_openai_guided_async(
     model: str,
     timeout: float,
     base_url: str | None = None,
+    connection_id: str | None = None,
+    connection_id: str | None = None,
     credential_ref: str | None = None,
     credential_env: str | None = None,
     retry_within_turn: bool = DEFAULT_RETRY_WITHIN_TURN,
@@ -201,7 +203,7 @@ async def _call_openai_guided_async(
         credential_env or "OPENAI_API_KEY"
     )
     try:
-        api_key = resolve_credential(resolved_ref)
+        api_key = resolve_connection_credential(connection_id, resolved_ref)
     except CredentialResolutionError:
         return {
             "status": "unavailable",
@@ -302,7 +304,7 @@ async def _call_gemini_guided_async(
         credential_env or "GEMINI_API_KEY"
     )
     try:
-        api_key = resolve_credential(resolved_ref)
+        api_key = resolve_connection_credential(connection_id, resolved_ref)
     except CredentialResolutionError:
         return {
             "status": "unavailable",
@@ -417,6 +419,8 @@ async def _call_panel_member_async(
             model=spec["model"],
             timeout=member_timeout,
             base_url=spec.get("endpoint"),
+            connection_id=spec.get("connection_id"),
+            connection_id=spec.get("connection_id"),
             credential_ref=spec.get("credential_ref"),
             credential_env=spec.get("credential_env"),
             retry_within_turn=bool(spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)),
