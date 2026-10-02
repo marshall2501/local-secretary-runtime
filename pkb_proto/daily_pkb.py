@@ -108,10 +108,22 @@ from .web_research import research_web
 from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
 from .provider_usage import ProviderUsageError, read_provider_month_usage
+from .provider_usage_settings import (
+    bootstrap_openai_usage_profile,
+    list_provider_usage_profiles,
+    upsert_provider_usage_profile,
+)
+from .credential_resolver import register_connection_credential_loader
 from .service_connections import (
+    CONNECTION_TYPES,
+    LLM_INFERENCE,
     PROVIDER_USAGE_READ,
-    ensure_openai_usage_connection,
+    adapter_defaults as connection_adapter_defaults,
+    bootstrap_connection_auth_from_env,
+    get_connection_auth_value,
+    get_service_connection,
     list_service_connections,
+    upsert_service_connection,
 )
 
 def _notify_client(client, message: str, *, type: str) -> None:
