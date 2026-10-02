@@ -276,6 +276,39 @@ class MagiTaskStoreTests(unittest.TestCase):
             "processing",
         )
 
+    def test_claim_answer_only_uses_grounded_knowledge_when_answer_missing(self):
+        checkpoint = self.review_checkpoint()
+        checkpoint["magi_session"]["detail"]["answer_candidate"] = None
+        db = _DB(fetches=[("waiting_external", checkpoint)])
+        _session, _capability, observation, review = claim_proposal_review(
+            db,
+            task_id=TASK_ID,
+            decision="answer_only",
+        )
+        self.assertEqual(
+            review["answer"],
+            "メインPCのGPUモデル名: Radeon RX 9070 XT",
+        )
+        self.assertEqual(
+            review["answer_source"],
+            "knowledge_candidate_fallback",
+        )
+        self.assertEqual(observation["answer"], review["answer"])
+        self.assertEqual(
+            observation["answer_source"],
+            "knowledge_candidate_fallback",
+        )
+
+    def test_prepare_memory_intake_still_uses_knowledge_when_answer_missing(self):
+        checkpoint = self.review_checkpoint()
+        checkpoint["magi_session"]["detail"]["answer_candidate"] = None
+        db = _DB(fetches=[("waiting_external", checkpoint)])
+        intake = prepare_memory_intake(db, task_id=TASK_ID)
+        self.assertEqual(
+            intake.raw_text,
+            "メインPCのGPUモデル名: Radeon RX 9070 XT",
+        )
+
     def test_answer_only_refused_after_memory_intake_prepared(self):
         checkpoint = self.review_checkpoint()
         checkpoint["proposal_memory_intake"] = {"input_id": "already-prepared"}
