@@ -4285,6 +4285,16 @@ def core_page(task_id: str = ""):
                 )
                 guided_result_panel.refresh()
 
+            def saved_task_for_session(session: dict) -> dict:
+                trace_task = (state.get("trace") or {}).get("task") or {}
+                trace_task_id = str(
+                    trace_task.get("id") or trace_task.get("task_id") or ""
+                )
+                session_task_id = str(session.get("task_id") or "")
+                if not session_task_id or trace_task_id != session_task_id:
+                    return {}
+                return trace_task
+
             @ui.refreshable
             def guided_result_panel():
                 session = state.get("guided_session")
@@ -4311,8 +4321,8 @@ def core_page(task_id: str = ""):
                         "text-sm text-grey-7"
                     )
                     return
+                saved_task = saved_task_for_session(session)
                 if state.get("guided_history_read_only"):
-                    saved_task = (state.get("trace") or {}).get("task") or {}
                     ui.label("保存済みTaskのMAGI対話を閲覧中（read-only）").classes(
                         "font-bold text-blue-grey-800"
                     )
@@ -4336,7 +4346,6 @@ def core_page(task_id: str = ""):
                         "Cloud Context Gate: " + str(gate.get("status") or "-")
                         + " / " + str(gate.get("mode") or "-")
                     ).classes("font-mono text-xs text-purple-800")
-                saved_task = (state.get("trace") or {}).get("task") or {}
                 proposal_review = saved_task.get("proposal_review")
                 if isinstance(proposal_review, dict):
                     ui.label(
@@ -4809,6 +4818,8 @@ def core_page(task_id: str = ""):
                 stop_event = begin_guided_run(1)
                 state["guided_session"] = None
                 state["guided_history_read_only"] = False
+                state["trace"] = None
+                state["trace_error"] = None
                 guided_button.disable()
                 guided_result_panel.refresh()
                 try:
