@@ -4,9 +4,9 @@ MELCHIOR / CASPER / BALTHASAR are logical MAGI slots only. Provider and model
 are independent assignments. PostgreSQL is the normal settings source; env
 values are bootstrap/fallback defaults when no DB assignments exist yet.
 
-API secret values are deliberately not stored in these configuration tables.
-Service Connections are the runtime source of endpoint and credential references;
-LLM Profiles keep only model/runtime settings plus the Connection reference.
+Service Connections are the runtime source of endpoint and authentication
+settings; LLM Profiles keep only model/runtime settings plus the Connection
+reference. Legacy env values remain bootstrap/fallback only.
 """
 from __future__ import annotations
 
@@ -22,8 +22,10 @@ from .ollama_runtime import (
     normalize_magi_num_predict,
 )
 from .service_connections import (
+    LLM_INFERENCE,
     adapter_defaults as service_adapter_defaults,
     ensure_llm_connection,
+    get_service_connection,
     legacy_credential_env,
 )
 
@@ -236,8 +238,9 @@ def list_llm_profiles(db, *, include_disabled: bool = False) -> list[dict]:
 def upsert_llm_profile(
     db,
     *,
-    provider: str,
     model: str,
+    connection_id: str | None = None,
+    provider: str | None = None,
     display_name: str | None = None,
     endpoint: str | None = None,
     credential_env: str | None = None,
@@ -247,26 +250,33 @@ def upsert_llm_profile(
     enabled: bool = True,
     profile_id: str | None = None,
 ) -> dict:
-    provider = _normalize_provider(provider)
     model = str(model or "").strip()
     if not model:
         raise ValueError("model_required")
 
-    default_endpoint, default_credential = provider_defaults(provider)
-    connection = ensure_llm_connection(
-        db,
-        provider=provider,
-        endpoint=str(endpoint or default_endpoint).strip(),
-        credential_env=(
-            None
-            if provider == "ollama"
-            else str(credential_env or default_credential or "").strip() or None
-        ),
-    )
+    if connection_id:
+        connection = get_service_connection(db, connection_id)
+        if LLM_INFERENCE not in set(connection.get("capabilities") or []):
+            raise ValueError("connection_missing_llm_inference")
+        provider = _normalize_provider(connection["adapter_key"])
+    else:
+        provider = _normalize_provider(provider)
+        default_endpoint, default_credential = provider_defaults(provider)
+        connection = ensure_llm_connection(
+            db,
+            provider=provider,
+            endpoint=str(endpoint or default_endpoint).strip(),
+            credential_env=(
+                None
+                if provider == "ollama"
+                else str(credential_env or default_credential or "").strip() or None
+            ),
+        )
+
     provider = connection["adapter_key"]
     endpoint = connection["endpoint"]
     credential_env = legacy_credential_env(connection)
-    connection_id = UUID(connection["id"])
+    connection_uuid = UUID(connection["id"])
 
     requested_context = context_window_tokens
     requested_num_predict = ollama_num_predict
@@ -296,7 +306,7 @@ def upsert_llm_profile(
                 """SELECT id, context_window_tokens, ollama_num_predict, retry_http_codes
                    FROM secretary.llm_profiles
                    WHERE connection_id=%s AND model=%s""",
-                (connection_id, model),
+                (connection_uuid, model),
             )
             row = cur.fetchone()
             profile_uuid = row[0] if row else uuid4()
@@ -331,7 +341,7 @@ def upsert_llm_profile(
                        retry_http_codes=%s, enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
-                    display_name, connection_id, model,
+                    display_name, connection_uuid, model,
                     context_window_tokens, ollama_num_predict,
                     list(retry_http_codes), bool(enabled), profile_uuid,
                 ),
@@ -344,7 +354,7 @@ def upsert_llm_profile(
                     retry_http_codes, enabled)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    profile_uuid, display_name, connection_id, model,
+                    profile_uuid, display_name, connection_uuid, model,
                     context_window_tokens, ollama_num_predict,
                     list(retry_http_codes), bool(enabled),
                 ),
@@ -393,6 +403,7 @@ def _profile_id_for_spec(db, spec: dict) -> str:
         db,
         provider=spec["provider"],
         model=spec["model"],
+        connection_id=spec.get("connection_id"),
         display_name=spec.get("profile_label"),
         endpoint=spec.get("endpoint"),
         credential_env=spec.get("credential_env"),
