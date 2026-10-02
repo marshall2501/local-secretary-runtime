@@ -107,7 +107,12 @@ from .write_service import write_one
 from .web_research import research_web
 from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
-from .provider_usage import ProviderUsageError, read_openai_month_usage
+from .provider_usage import ProviderUsageError, read_provider_month_usage
+from .service_connections import (
+    PROVIDER_USAGE_READ,
+    ensure_openai_usage_connection,
+    list_service_connections,
+)
 
 def _notify_client(client, message: str, *, type: str) -> None:
     """Send a notification through a stable client context.
@@ -3843,24 +3848,90 @@ def top_page():
 
 @ui.page("/api-usage")
 def api_usage_page():
-    state = {"result": None, "error": None, "busy": False}
+    state = {
+        "result": None,
+        "error": None,
+        "busy": False,
+        "connections": [],
+    }
+
+    try:
+        with connection() as db:
+            if (
+                os.environ.get("OPENAI_ADMIN_KEY", "").strip()
+                or os.environ.get("OPENAI_API_KEY", "").strip()
+            ):
+                ensure_openai_usage_connection(
+                    db,
+                    prefer_admin=bool(
+                        os.environ.get("OPENAI_ADMIN_KEY", "").strip()
+                    ),
+                )
+            state["connections"] = list_service_connections(
+                db,
+                capability=PROVIDER_USAGE_READ,
+            )
+    except Exception as exc:
+        state["error"] = "Service Connectionを読み込めません: " + str(exc)[:180]
+
+    connection_by_id = {
+        item["id"]: item for item in state["connections"]
+    }
+    connection_options = {
+        item["id"]: (
+            item["display_name"]
+            + " ["
+            + item["adapter_key"]
+            + " / "
+            + item["credential_ref"]
+            + "]"
+        )
+        for item in state["connections"]
+    }
 
     with ui.column().classes("w-full max-w-6xl mx-auto gap-4 p-4"):
         _portal_header(
             "API利用状況",
-            "外部Providerの利用実績を読取表示します。初版はOpenAIのみです。",
+            "共通Service Connection経由で外部Providerの利用実績を読取表示します。",
         )
 
         with ui.card().classes("w-full border-2 border-indigo-200"):
-            with ui.row().classes("w-full items-center justify-between gap-3"):
-                with ui.column().classes("gap-0"):
-                    ui.label("OpenAI").classes("text-xl font-bold")
-                    ui.label(
-                        "今月（UTC）のOrganization Usage / Costs。PKBへの履歴保存は次段階です。"
-                    ).classes("text-sm text-grey-7")
-                refresh_button = ui.button("最新を取得", icon="refresh", color="indigo")
+            ui.label("Provider Usage").classes("text-xl font-bold")
+            ui.label(
+                "usage / costs / limits / creditsを別概念として扱い、"
+                "取得できない値を0とはみなしません。現在のadapter実装はOpenAIです。"
+            ).classes("text-sm text-grey-7")
 
-            status = ui.label("未取得").classes("text-sm text-grey-7")
+            connection_select = ui.select(
+                options=connection_options,
+                value=(
+                    state["connections"][0]["id"]
+                    if state["connections"]
+                    else None
+                ),
+                label="Service Connection",
+            ).classes("w-full")
+
+            with ui.row().classes("w-full items-center justify-between gap-3"):
+                status = ui.label(
+                    state["error"] or (
+                        "未取得"
+                        if state["connections"]
+                        else "provider_usage_read Connectionがありません"
+                    )
+                ).classes(
+                    "text-sm text-red-700"
+                    if state["error"]
+                    else "text-sm text-grey-7"
+                )
+                refresh_button = ui.button(
+                    "最新を取得",
+                    icon="refresh",
+                    color="indigo",
+                )
+                if not state["connections"]:
+                    refresh_button.disable()
+
             metrics = ui.row().classes("w-full gap-3 flex-wrap")
             model_table = ui.column().classes("w-full gap-2")
 
@@ -3877,21 +3948,55 @@ def api_usage_page():
 
                 status.classes(replace="text-sm text-grey-7")
                 status.set_text(
-                    f"取得: {result['fetched_at']} / credential: {result['credential_env']}"
+                    "取得: "
+                    + str(result.get("fetched_at") or "-")
+                    + " / connection: "
+                    + str(result.get("connection_name") or "-")
+                    + " / credential: "
+                    + str(result.get("credential_ref") or "-")
                 )
-                totals = result["totals"]
-                costs = result["costs"]
+                usage = result.get("usage") or {}
+                totals = usage.get("totals") or {}
+                costs = result.get("costs") or {}
+                cost_values = costs.get("values") or {}
                 cost_text = " / ".join(
                     f"{currency.upper()} {value:,.4f}"
-                    for currency, value in sorted(costs.items())
-                ) or "取得値なし"
+                    for currency, value in sorted(cost_values.items())
+                ) or (
+                    "0"
+                    if costs.get("status") == "known"
+                    else "unknown"
+                )
 
                 with metrics:
                     for title, value in (
                         ("今月のCost", cost_text),
-                        ("Requests", f"{totals['requests']:,}"),
-                        ("Input tokens", f"{totals['input_tokens']:,}"),
-                        ("Output tokens", f"{totals['output_tokens']:,}"),
+                        (
+                            "Requests",
+                            f"{int(totals.get('requests') or 0):,}"
+                            if usage.get("status") == "known"
+                            else "unknown",
+                        ),
+                        (
+                            "Input tokens",
+                            f"{int(totals.get('input_tokens') or 0):,}"
+                            if usage.get("status") == "known"
+                            else "unknown",
+                        ),
+                        (
+                            "Output tokens",
+                            f"{int(totals.get('output_tokens') or 0):,}"
+                            if usage.get("status") == "known"
+                            else "unknown",
+                        ),
+                        (
+                            "Limits",
+                            str((result.get("limits") or {}).get("status") or "unknown"),
+                        ),
+                        (
+                            "Credits",
+                            str((result.get("credits") or {}).get("status") or "unknown"),
+                        ),
                     ):
                         with ui.card().classes("min-w-48 bg-indigo-50"):
                             ui.label(title).classes("text-xs text-grey-7")
@@ -3899,18 +4004,38 @@ def api_usage_page():
 
                 with model_table:
                     ui.label("モデル別 Usage").classes("font-bold")
-                    rows = result.get("by_model") or []
+                    rows = usage.get("by_model") or []
                     if not rows:
-                        ui.label("この期間のcompletion usageはありません。").classes(
-                            "text-sm text-grey-7"
-                        )
+                        ui.label(
+                            "この期間のcompletion usageはありません。"
+                        ).classes("text-sm text-grey-7")
                     else:
                         ui.table(
                             columns=[
-                                {"name": "model", "label": "Model", "field": "model", "align": "left"},
-                                {"name": "requests", "label": "Requests", "field": "requests", "align": "right"},
-                                {"name": "input_tokens", "label": "Input", "field": "input_tokens", "align": "right"},
-                                {"name": "output_tokens", "label": "Output", "field": "output_tokens", "align": "right"},
+                                {
+                                    "name": "model",
+                                    "label": "Model",
+                                    "field": "model",
+                                    "align": "left",
+                                },
+                                {
+                                    "name": "requests",
+                                    "label": "Requests",
+                                    "field": "requests",
+                                    "align": "right",
+                                },
+                                {
+                                    "name": "input_tokens",
+                                    "label": "Input",
+                                    "field": "input_tokens",
+                                    "align": "right",
+                                },
+                                {
+                                    "name": "output_tokens",
+                                    "label": "Output",
+                                    "field": "output_tokens",
+                                    "align": "right",
+                                },
                             ],
                             rows=rows,
                             row_key="model",
@@ -3919,11 +4044,25 @@ def api_usage_page():
             async def refresh():
                 if state["busy"]:
                     return
+                selected_id = str(connection_select.value or "").strip()
+                selected = connection_by_id.get(selected_id)
+                if selected is None:
+                    ui.notify(
+                        "Service Connectionを選択してください",
+                        type="warning",
+                    )
+                    return
                 state["busy"] = True
                 refresh_button.disable()
-                status.set_text("OpenAIから取得中...")
+                status.set_text(
+                    str(selected.get("display_name") or "Provider")
+                    + "から取得中..."
+                )
                 try:
-                    result = await run.io_bound(read_openai_month_usage)
+                    result = await run.io_bound(
+                        read_provider_month_usage,
+                        selected,
+                    )
                     state["result"] = result
                     state["error"] = None
                     render_result(result)
@@ -3931,7 +4070,9 @@ def api_usage_page():
                     state["error"] = str(exc)
                     render_result(None, state["error"])
                 except Exception:
-                    state["error"] = "API利用状況の取得で予期しないエラーが発生しました。"
+                    state["error"] = (
+                        "API利用状況の取得で予期しないエラーが発生しました。"
+                    )
                     render_result(None, state["error"])
                 finally:
                     state["busy"] = False
@@ -3940,8 +4081,8 @@ def api_usage_page():
             refresh_button.on_click(refresh)
 
         ui.label(
-            "この画面は現在値の確認用です。残高・利用上限は推測せず、"
-            "OpenAI APIから取得できたUsage/Costsだけを表示します。"
+            "この画面は現在値の確認用です。Usage値をConnection設定へ保存せず、"
+            "残高・利用上限は取得できない限りunknownとして扱います。"
         ).classes("text-xs text-grey-7")
 
 
@@ -6057,6 +6198,88 @@ def settings_page():
         ).classes("text-sm text-grey-7")
 
         with ui.expansion(
+            "Service Connections",
+            value=False,
+            icon="hub",
+        ).classes("w-full border-2 border-indigo-200 bg-indigo-50"):
+            ui.label(
+                "外部・ローカルサービスへの接続方法を共通管理します。"
+                "Secret値は保存せずcredential_refだけを保持します。"
+            ).classes("text-sm")
+            ui.label(
+                "Capabilityは技術的に利用できる機能を示すだけで、"
+                "RITSUKOの実行許可・承認とは別です。"
+            ).classes("text-xs text-grey-7")
+            try:
+                with connection() as db:
+                    connection_rows = list_service_connections(
+                        db,
+                        include_disabled=True,
+                    )
+            except Exception as exc:
+                connection_rows = []
+                ui.label(
+                    "Service Connectionを読み込めません: " + str(exc)[:180]
+                ).classes("text-sm text-red-700")
+            if connection_rows:
+                ui.table(
+                    columns=[
+                        {
+                            "name": "display_name",
+                            "label": "Connection",
+                            "field": "display_name",
+                            "align": "left",
+                        },
+                        {
+                            "name": "adapter_key",
+                            "label": "Adapter",
+                            "field": "adapter_key",
+                            "align": "left",
+                        },
+                        {
+                            "name": "endpoint",
+                            "label": "Endpoint",
+                            "field": "endpoint",
+                            "align": "left",
+                        },
+                        {
+                            "name": "credential_ref",
+                            "label": "Credential Ref",
+                            "field": "credential_ref",
+                            "align": "left",
+                        },
+                        {
+                            "name": "capabilities_text",
+                            "label": "Capabilities",
+                            "field": "capabilities_text",
+                            "align": "left",
+                        },
+                        {
+                            "name": "enabled_text",
+                            "label": "Enabled",
+                            "field": "enabled_text",
+                            "align": "center",
+                        },
+                    ],
+                    rows=[
+                        {
+                            **item,
+                            "credential_ref": item.get("credential_ref") or "-",
+                            "capabilities_text": ", ".join(
+                                item.get("capabilities") or []
+                            ),
+                            "enabled_text": "ON" if item.get("enabled") else "OFF",
+                        }
+                        for item in connection_rows
+                    ],
+                    row_key="id",
+                ).classes("w-full")
+            else:
+                ui.label(
+                    "登録済みService Connectionはありません。"
+                ).classes("text-sm text-grey-7")
+
+        with ui.expansion(
             "MAGI — LLM profile",
             value=False,
             icon="tune",
@@ -6066,8 +6289,10 @@ def settings_page():
                 "ここでprovider/model profileを登録し、RITSUKO画面で各席へ自由に割り当てます。"
             ).classes("text-sm")
             ui.label(
-                "通常設定はPostgreSQLが正本です。API Secret値はこの設定テーブルへ保存せず、"
-                "credential_envにはSecretを読む環境変数名だけを保存します。"
+                "通常設定はPostgreSQLが正本です。接続先・credential参照は"
+                "Service Connectionが正本で、LLM Profileはmodel/runtime条件を保持します。"
+                "下のProvider/Endpoint/Credential入力はConnectionを作成・再利用するための値で、"
+                "API Secret値そのものは保存しません。"
             ).classes("text-xs text-grey-7")
             ui.separator()
 
