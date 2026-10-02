@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from psycopg.conninfo import conninfo_to_dict
 
-from api.secretary_api import api_config
+from api.secretary_api import api_config, external_read_token
 
 
 class ApiContainerConfigTests(unittest.TestCase):
@@ -28,6 +28,20 @@ class ApiContainerConfigTests(unittest.TestCase):
                 dsn, result_token = api_config()
             self.assertEqual(result_token, "t" * 48)
             self.assertEqual(conninfo_to_dict(dsn)["password"], "not-a-real-password")
+
+    def test_container_external_read_token_uses_separate_secret_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            external = Path(folder) / "external"
+            external.write_text("r" * 48)
+            env = {
+                "LSA_API_DSN": "host=secretary-postgres port=5432 "
+                               "dbname=secretary user=secretary_api",
+                "LSA_API_TOKEN": "t" * 48,
+                "LSA_API_CONTAINER_MODE": "1",
+                "LSA_EXTERNAL_READ_TOKEN_FILE": str(external),
+            }
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(external_read_token(), "r" * 48)
 
     def test_container_refuses_arbitrary_network_host(self):
         with patch.dict(os.environ, {
