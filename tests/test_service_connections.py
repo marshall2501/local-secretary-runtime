@@ -7,32 +7,41 @@ from unittest.mock import patch
 from pkb_proto.credential_resolver import (
     CredentialResolutionError,
     env_name_to_credential_ref,
+    register_connection_credential_loader,
+    resolve_connection_credential,
     resolve_credential,
 )
 from pkb_proto.service_connections import (
+    CONNECTION_TYPES,
     LLM_INFERENCE,
     PROVIDER_USAGE_READ,
     adapter_defaults,
-    ensure_llm_connection,
     normalize_capabilities,
+    normalize_connection_type,
 )
 
 
 class ServiceConnectionContractTests(unittest.TestCase):
-    def test_defaults_keep_connection_and_llm_semantics_separate(self):
-        self.assertEqual(
-            adapter_defaults("openai")["credential_ref"],
-            "env:OPENAI_API_KEY",
-        )
-        self.assertEqual(
-            adapter_defaults("gemini")["credential_ref"],
-            "env:GEMINI_API_KEY",
-        )
-        self.assertIsNone(adapter_defaults("ollama")["credential_ref"])
+    def tearDown(self):
+        register_connection_credential_loader(None)
+
+    def test_adapter_defaults_include_connection_type(self):
+        self.assertEqual(adapter_defaults("openai")["connection_type"], "api_key")
+        self.assertEqual(adapter_defaults("gemini")["connection_type"], "api_key")
+        self.assertEqual(adapter_defaults("ollama")["connection_type"], "none")
         self.assertEqual(
             adapter_defaults("openai")["capabilities"],
             [LLM_INFERENCE],
         )
+
+    def test_connection_types_are_bounded(self):
+        self.assertEqual(
+            tuple(CONNECTION_TYPES),
+            ("none", "api_key", "username_password", "oauth2"),
+        )
+        self.assertEqual(normalize_connection_type("api_key"), "api_key")
+        with self.assertRaisesRegex(ValueError, "invalid_connection_type"):
+            normalize_connection_type("mystery")
 
     def test_capabilities_are_deduplicated_and_not_permissions(self):
         self.assertEqual(
@@ -44,7 +53,7 @@ class ServiceConnectionContractTests(unittest.TestCase):
             (LLM_INFERENCE, PROVIDER_USAGE_READ),
         )
 
-    def test_env_credential_reference_never_contains_secret(self):
+    def test_env_credential_reference_is_bootstrap_fallback(self):
         ref = env_name_to_credential_ref("OPENAI_API_KEY")
         self.assertEqual(ref, "env:OPENAI_API_KEY")
         with patch.dict(
@@ -55,57 +64,51 @@ class ServiceConnectionContractTests(unittest.TestCase):
             self.assertEqual(resolve_credential(ref), "secret-value")
         self.assertNotIn("secret-value", ref)
 
+    def test_connection_credential_loader_wins_over_env_fallback(self):
+        register_connection_credential_loader(
+            lambda connection_id: (
+                "db-secret" if connection_id == "connection-1" else None
+            )
+        )
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "env-secret"},
+            clear=True,
+        ):
+            self.assertEqual(
+                resolve_connection_credential(
+                    "connection-1",
+                    "env:OPENAI_API_KEY",
+                ),
+                "db-secret",
+            )
+
+    def test_connection_credential_falls_back_to_env_during_migration(self):
+        register_connection_credential_loader(lambda _connection_id: None)
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "env-secret"},
+            clear=True,
+        ):
+            self.assertEqual(
+                resolve_connection_credential(
+                    "connection-1",
+                    "env:OPENAI_API_KEY",
+                ),
+                "env-secret",
+            )
+
     def test_missing_credential_is_explicit_without_secret(self):
+        register_connection_credential_loader(lambda _connection_id: None)
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(
                 CredentialResolutionError,
-                "env:OPENAI_API_KEY",
+                "connection credential is not configured",
             ):
-                resolve_credential("env:OPENAI_API_KEY")
-
-    def test_reusing_connection_does_not_reenable_disabled_connection(self):
-        connection_id = "22222222-2222-2222-2222-222222222222"
-
-        class Cursor:
-            def __init__(self):
-                self.calls = []
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def execute(self, sql, params):
-                self.calls.append((sql, params))
-
-            def fetchone(self):
-                return (
-                    connection_id,
-                    [LLM_INFERENCE],
-                    "OpenAI primary",
-                    False,
-                    {},
+                resolve_connection_credential(
+                    "connection-1",
+                    "env:OPENAI_API_KEY",
                 )
-
-        class DB:
-            def __init__(self):
-                self.cur = Cursor()
-
-            def cursor(self):
-                return self.cur
-
-        db = DB()
-        saved = ensure_llm_connection(
-            db,
-            provider="openai",
-            endpoint="https://api.openai.com/v1",
-            credential_env="OPENAI_API_KEY",
-        )
-        self.assertFalse(saved["enabled"])
-        update_sql, update_params = db.cur.calls[-1]
-        self.assertIn("UPDATE secretary.service_connections", update_sql)
-        self.assertFalse(update_params[7])
 
     def test_invalid_credential_reference_is_rejected(self):
         with self.assertRaisesRegex(
