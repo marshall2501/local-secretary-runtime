@@ -1030,6 +1030,78 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], 4)
             self.assertEqual(daily.load_ui_preferences()['core']['completed_limit'], 4)
 
+    async def test_settings_group_connections_and_layout_actions(self):
+        with self.client:
+            daily.settings_page()
+
+            def parent_expansions(element):
+                result = []
+                current = element
+                while getattr(current, 'parent_slot', None) is not None:
+                    current = current.parent_slot.parent
+                    if isinstance(current, ui.expansion):
+                        result.append(current)
+                return result
+
+            service = self.elements('Service Connections')[0]
+            usage = self.elements('API利用状況 — 接続割当')[0]
+            llm = self.elements('MAGI — LLM profile')[0]
+            save = self.elements('保存して反映')[0]
+            restore = self.elements('初期値に戻す')[0]
+
+            connection_group = self.elements('接続・外部サービス設定')[0]
+            layout_group = self.elements('画面レイアウト設定')[0]
+
+            for element in (service, usage, llm):
+                self.assertIn(connection_group, parent_expansions(element))
+                self.assertNotIn(layout_group, parent_expansions(element))
+
+            for element in (save, restore):
+                self.assertIn(layout_group, parent_expansions(element))
+                self.assertNotIn(connection_group, parent_expansions(element))
+
+    async def test_connection_save_refreshes_usage_and_llm_selects_without_reload(self):
+        saved_connection = {
+            'id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            'display_name': 'Shared Test',
+            'adapter_key': 'openai',
+            'endpoint': 'https://api.openai.com/v1',
+            'credential_ref': None,
+            'account_label': None,
+            'capabilities': [daily.LLM_INFERENCE, daily.PROVIDER_USAGE_READ],
+            'config_data': {},
+            'nonsecret_config': {},
+            'enabled': True,
+            'connection_type': 'api_key',
+            'connection_role': None,
+            'auth_configured': True,
+            'auth_fields': ['api_key'],
+        }
+        with self.client, \
+             patch.object(daily, 'connection'), \
+             patch.object(daily, 'bootstrap_connection_auth_from_env', return_value=0), \
+             patch.object(daily, 'bootstrap_openai_usage_profile', return_value=None), \
+             patch.object(daily, 'list_service_connections', return_value=[]), \
+             patch.object(daily, 'list_provider_usage_profiles', return_value=[]), \
+             patch.object(daily, 'list_llm_profiles', return_value=[]), \
+             patch.object(daily, 'upsert_service_connection', return_value=saved_connection):
+            daily.settings_page()
+
+            name = next(
+                e for e in self.client.elements.values()
+                if e._props.get('label') == '接続名'
+            )
+            name.value = 'Shared Test'
+            await self.click('Connectionを保存')
+
+            dependent_selects = [
+                e for e in self.client.elements.values()
+                if e._props.get('label') == '使用するService Connection'
+            ]
+            self.assertEqual(len(dependent_selects), 2)
+            for control in dependent_selects:
+                self.assertIn(saved_connection['id'], control.options)
+
     async def test_query_selection_and_final_decision_rendered_separately(self):
         self.done[0]['advisor_shadow'] = {
             'job_status': 'completed', 'cycles': [
