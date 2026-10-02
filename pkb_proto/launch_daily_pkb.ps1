@@ -50,8 +50,14 @@ $migrationSummary = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $d
 if ($LASTEXITCODE -ne 0) {
     throw 'Cannot read isolated PKB migration summary.'
 }
-$migrationParts = (($migrationSummary | Out-String).Trim()) -split '\\|', 2
-if ($migrationParts.Count -ne 2 -or $migrationParts[0] -notmatch '^[0-9]+$userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
+$migrationParts = (($migrationSummary | Out-String).Trim()) -split '\|', 2
+if ($migrationParts.Count -ne 2 -or $migrationParts[0] -notmatch '^[0-9]+$' -or -not $migrationParts[1]) {
+    throw 'Invalid isolated PKB migration summary.'
+}
+$migrationCount = $migrationParts[0]
+$latestMigration = $migrationParts[1]
+
+$userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
 if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
     throw 'Dedicated isolated PKB writer role is missing.'
 }
