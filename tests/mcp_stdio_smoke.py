@@ -28,7 +28,7 @@ async def main() -> None:
         raise RuntimeError(f"tasks MCP call failed: {task_result.content!r}")
     if not task_result.structured_content:
         raise RuntimeError(f"tasks MCP call returned no structured content: {task_result.content!r}")
-    value = task_result.structured_content.get("value")
+    value = task_result.structured_content.get("result")
     if not isinstance(value, list):
         raise RuntimeError(f"unexpected tasks payload: {task_result.structured_content!r}")
 
