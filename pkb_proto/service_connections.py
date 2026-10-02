@@ -19,10 +19,6 @@ from .credential_resolver import (
 LLM_INFERENCE = "llm_inference"
 PROVIDER_USAGE_READ = "provider_usage_read"
 
-ROLE_GENERAL = "general"
-ROLE_LLM_INFERENCE = "llm_inference"
-ROLE_PROVIDER_USAGE = "provider_usage"
-
 ADAPTER_DEFAULTS = {
     "ollama": {
         "endpoint": "http://127.0.0.1:11434",
@@ -54,13 +50,6 @@ def normalize_adapter_key(value: object) -> str:
     return key
 
 
-def normalize_connection_role(value: object | None) -> str:
-    role = str(value or ROLE_GENERAL).strip().lower()
-    if not _TOKEN.fullmatch(role):
-        raise ValueError("invalid_connection_role")
-    return role
-
-
 def normalize_capabilities(value: object | None) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -83,7 +72,6 @@ def normalize_capabilities(value: object | None) -> tuple[str, ...]:
 
 def adapter_defaults(adapter_key: str) -> dict:
     key = normalize_adapter_key(adapter_key)
-    role = normalize_connection_role(connection_role)
     defaults = ADAPTER_DEFAULTS.get(key)
     if defaults is None:
         raise ValueError("unsupported_adapter")
@@ -107,7 +95,6 @@ def _row_connection(row) -> dict:
         "capabilities": list(row[6] or []),
         "nonsecret_config": dict(row[7] or {}),
         "enabled": bool(row[8]),
-        "connection_role": row[9],
     }
 
 
@@ -116,7 +103,6 @@ def list_service_connections(
     *,
     include_disabled: bool = False,
     capability: str | None = None,
-    connection_role: str | None = None,
 ) -> list[dict]:
     clauses = []
     params: list[object] = []
@@ -126,16 +112,11 @@ def list_service_connections(
         cap = normalize_capabilities([capability])[0]
         clauses.append("%s = ANY(capabilities)")
         params.append(cap)
-    if connection_role:
-        role = normalize_connection_role(connection_role)
-        clauses.append("connection_role=%s")
-        params.append(role)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with db.cursor() as cur:
         cur.execute(
             f"""SELECT id, display_name, adapter_key, endpoint, credential_ref,
-                       account_label, capabilities, nonsecret_config, enabled,
-                       connection_role
+                       account_label, capabilities, nonsecret_config, enabled
                 FROM secretary.service_connections
                 {where}
                 ORDER BY adapter_key, display_name, id""",
@@ -152,8 +133,7 @@ def get_service_connection(db, connection_id: str) -> dict:
     with db.cursor() as cur:
         cur.execute(
             """SELECT id, display_name, adapter_key, endpoint, credential_ref,
-                      account_label, capabilities, nonsecret_config, enabled,
-                      connection_role
+                      account_label, capabilities, nonsecret_config, enabled
                FROM secretary.service_connections
                WHERE id=%s""",
             (connection_uuid,),
@@ -175,7 +155,6 @@ def upsert_service_connection(
     capabilities: object | None = None,
     nonsecret_config: dict | None = None,
     enabled: bool | None = None,
-    connection_role: str = ROLE_GENERAL,
     connection_id: str | None = None,
 ) -> dict:
     key = normalize_adapter_key(adapter_key)
@@ -206,8 +185,7 @@ def upsert_service_connection(
             except ValueError as exc:
                 raise ValueError("invalid_connection_id") from exc
             cur.execute(
-                """SELECT id, capabilities, display_name, enabled, nonsecret_config,
-                          connection_role
+                """SELECT id, capabilities, display_name, enabled, nonsecret_config
                    FROM secretary.service_connections
                    WHERE id=%s""",
                 (connection_uuid,),
@@ -217,15 +195,13 @@ def upsert_service_connection(
                 raise ValueError("unknown_connection")
         else:
             cur.execute(
-                """SELECT id, capabilities, display_name, enabled, nonsecret_config,
-                          connection_role
+                """SELECT id, capabilities, display_name, enabled, nonsecret_config
                    FROM secretary.service_connections
                    WHERE adapter_key=%s
                      AND endpoint=%s
                      AND credential_ref IS NOT DISTINCT FROM %s
-                     AND account_label IS NOT DISTINCT FROM %s
-                     AND connection_role=%s""",
-                (key, endpoint_value, credential_value, account_value, role),
+                     AND account_label IS NOT DISTINCT FROM %s""",
+                (key, endpoint_value, credential_value, account_value),
             )
             row = cur.fetchone()
             connection_uuid = row[0] if row else uuid4()
@@ -256,14 +232,13 @@ def upsert_service_connection(
                 """UPDATE secretary.service_connections
                    SET display_name=%s, adapter_key=%s, endpoint=%s,
                        credential_ref=%s, account_label=%s, capabilities=%s,
-                       nonsecret_config=%s::jsonb, enabled=%s,
-                       connection_role=%s, updated_at=now()
+                       nonsecret_config=%s::jsonb, enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (
                     name, key, endpoint_value, credential_value, account_value,
                     list(merged_caps),
                     json.dumps(config, ensure_ascii=False),
-                    enabled_value, role, connection_uuid,
+                    enabled_value, connection_uuid,
                 ),
             )
             caps = merged_caps
@@ -271,13 +246,12 @@ def upsert_service_connection(
             cur.execute(
                 """INSERT INTO secretary.service_connections
                    (id, display_name, adapter_key, endpoint, credential_ref,
-                    account_label, capabilities, nonsecret_config, enabled,
-                    connection_role)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
+                    account_label, capabilities, nonsecret_config, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
                 (
                     connection_uuid, name, key, endpoint_value, credential_value,
                     account_value, list(caps),
-                    json.dumps(config, ensure_ascii=False), enabled_value, role,
+                    json.dumps(config, ensure_ascii=False), enabled_value,
                 ),
             )
 
@@ -291,7 +265,6 @@ def upsert_service_connection(
         "capabilities": list(caps),
         "nonsecret_config": config,
         "enabled": enabled_value,
-        "connection_role": role,
     }
 
 def ensure_llm_connection(
@@ -315,20 +288,19 @@ def ensure_llm_connection(
         ),
         capabilities=[LLM_INFERENCE],
         enabled=None,
-        connection_role=ROLE_LLM_INFERENCE,
     )
 
 
-def ensure_openai_usage_connection(db) -> dict:
+def ensure_openai_usage_connection(db, *, prefer_admin: bool = True) -> dict:
+    credential_env = "OPENAI_ADMIN_KEY" if prefer_admin else "OPENAI_API_KEY"
     return upsert_service_connection(
         db,
         adapter_key="openai",
-        display_name="OpenAI Usage / Costs",
+        display_name=None,
         endpoint=ADAPTER_DEFAULTS["openai"]["endpoint"],
-        credential_ref=env_name_to_credential_ref("OPENAI_ADMIN_KEY"),
+        credential_ref=env_name_to_credential_ref(credential_env),
         capabilities=[PROVIDER_USAGE_READ],
         enabled=None,
-        connection_role=ROLE_PROVIDER_USAGE,
     )
 
 
