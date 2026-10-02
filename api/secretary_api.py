@@ -110,6 +110,38 @@ def api_config() -> tuple[str, str]:
     return dsn, token
 
 
+def external_read_token() -> str | None:
+    """Return the optional read-only external credential.
+
+    Keeping this separate from api_config preserves the existing local API
+    configuration contract. When absent, external-read access is disabled.
+    """
+    token = os.getenv("LSA_EXTERNAL_READ_TOKEN", "")
+    token_file = os.getenv("LSA_EXTERNAL_READ_TOKEN_FILE", "")
+    container_mode = os.getenv("LSA_API_CONTAINER_MODE", "") == "1"
+    if token_file:
+        if not container_mode or token:
+            raise RuntimeError(
+                "External token file requires container mode without inline token."
+            )
+        try:
+            token = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError("Unable to read external-read token secret file.") from exc
+    else:
+        token = token.strip()
+    if not token:
+        return None
+    if len(token) < 32:
+        raise RuntimeError(
+            "Set LSA_EXTERNAL_READ_TOKEN to at least 32 characters when enabled."
+        )
+    _, local_token = api_config()
+    if hmac.compare_digest(token, local_token):
+        raise RuntimeError("External-read token must differ from the local API token.")
+    return token
+
+
 def connect() -> psycopg.Connection:
     dsn, _ = api_config()
     return psycopg.connect(dsn, row_factory=dict_row, connect_timeout=5)
@@ -179,6 +211,22 @@ def authenticated(authorization: Annotated[str | None, Header()] = None) -> str:
     return "local_user"
 
 
+def read_authenticated(authorization: Annotated[str | None, Header()] = None) -> str:
+    """Accept the normal credential or the optional external read-only one."""
+    candidate = authorization or ""
+    _, local_token = api_config()
+    if hmac.compare_digest(candidate, f"Bearer {local_token}"):
+        return "local_user"
+    external_token = external_read_token()
+    if external_token and hmac.compare_digest(candidate, f"Bearer {external_token}"):
+        return "external_reader"
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid API token.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 @app.get("/healthz")
 def healthz():
     with connect() as db:
@@ -188,7 +236,7 @@ def healthz():
     return {"status": "ok"}
 
 
-@app.get("/entities", dependencies=[Depends(authenticated)])
+@app.get("/entities", dependencies=[Depends(read_authenticated)])
 def entities(
     domain: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=100),
@@ -205,7 +253,7 @@ def entities(
             return cur.fetchall()
 
 
-@app.get("/claims/current", dependencies=[Depends(authenticated)])
+@app.get("/claims/current", dependencies=[Depends(read_authenticated)])
 def current_claims(
     entity_id: UUID,
     verified_only: bool = False,
@@ -226,7 +274,7 @@ def current_claims(
             return cur.fetchall()
 
 
-@app.get("/tasks", dependencies=[Depends(authenticated)])
+@app.get("/tasks", dependencies=[Depends(read_authenticated)])
 def tasks(
     task_status: TaskStatus | None = None,
     limit: int = Query(default=50, ge=1, le=100),
@@ -294,7 +342,7 @@ def memory_search_sql(include_history: bool) -> str:
     """
 
 
-@app.get("/memory/search", dependencies=[Depends(authenticated)])
+@app.get("/memory/search", dependencies=[Depends(read_authenticated)])
 def search_memory(
     q: str | None = Query(default=None, max_length=200),
     domain: str | None = Query(default=None, max_length=200),
@@ -332,7 +380,7 @@ def search_memory(
 
 
 
-@app.get("/experience/search", dependencies=[Depends(authenticated)])
+@app.get("/experience/search", dependencies=[Depends(read_authenticated)])
 def search_experience(
     domain: str | None = Query(default=None, max_length=200),
     entity_name: str | None = Query(default=None, max_length=200),
