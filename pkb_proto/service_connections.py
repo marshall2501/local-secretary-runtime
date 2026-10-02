@@ -116,6 +116,7 @@ def list_service_connections(
     *,
     include_disabled: bool = False,
     capability: str | None = None,
+    connection_role: str | None = None,
 ) -> list[dict]:
     clauses = []
     params: list[object] = []
@@ -125,6 +126,10 @@ def list_service_connections(
         cap = normalize_capabilities([capability])[0]
         clauses.append("%s = ANY(capabilities)")
         params.append(cap)
+    if connection_role:
+        role = normalize_connection_role(connection_role)
+        clauses.append("connection_role=%s")
+        params.append(role)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with db.cursor() as cur:
         cur.execute(
