@@ -4,7 +4,10 @@ import unittest
 from unittest.mock import patch
 
 from pydantic import ValidationError
-from api.secretary_api import CreateTask, NewCandidate, TaskTransition, api_config
+from api.secretary_api import (
+    CreateTask, NewCandidate, TaskTransition, api_config, external_read_token,
+    read_authenticated,
+)
 
 
 class ApiStaticTests(unittest.TestCase):
@@ -43,6 +46,41 @@ class ApiStaticTests(unittest.TestCase):
             clear=True,
         ):
             self.assertEqual(api_config()[1], "x" * 48)
+
+    def test_external_read_token_is_optional(self):
+        with patch.dict(
+            os.environ,
+            {"LSA_API_DSN": "host=127.0.0.1 user=secretary_api dbname=secretary",
+             "LSA_API_TOKEN": "x" * 48},
+            clear=True,
+        ):
+            self.assertIsNone(external_read_token())
+
+    def test_external_read_token_must_be_distinct(self):
+        with patch.dict(
+            os.environ,
+            {"LSA_API_DSN": "host=127.0.0.1 user=secretary_api dbname=secretary",
+             "LSA_API_TOKEN": "x" * 48,
+             "LSA_EXTERNAL_READ_TOKEN": "x" * 48},
+            clear=True,
+        ):
+            with self.assertRaises(RuntimeError):
+                external_read_token()
+
+    def test_external_read_token_authenticates_read_dependency_only(self):
+        with patch.dict(
+            os.environ,
+            {"LSA_API_DSN": "host=127.0.0.1 user=secretary_api dbname=secretary",
+             "LSA_API_TOKEN": "x" * 48,
+             "LSA_EXTERNAL_READ_TOKEN": "r" * 48},
+            clear=True,
+        ):
+            header = "Bearer " + "r" * 48
+            self.assertEqual(read_authenticated(header), "external_reader")
+            with self.assertRaises(Exception):
+                # Write routes continue to depend on authenticated(), not this helper.
+                from api.secretary_api import authenticated
+                authenticated(header)
 
     def test_task_requires_completion_criteria(self):
         with self.assertRaises(ValidationError):
