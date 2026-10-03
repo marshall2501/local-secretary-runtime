@@ -44,10 +44,10 @@ class RitsukoApplicationEntryTests(unittest.TestCase):
         queued=[]
         entry=RitsukoApplicationEntry(
             repo,
-            load_context=lambda request: ({"PC":{"name":"PC"}}, {"version":"obs-v1"}),
+            load_context=lambda request: ({"メインPC":{"name":"メインPC"}}, {"version":"obs-v1"}),
             scope_request=lambda request, entities, observation: dict(scoped),
             execute_read=lambda capability, request: execution,
-            execute_compare=lambda request: comparison,
+            execute_compare=lambda request, **kwargs: comparison,
             advisor_shadow_initial=lambda model, timeout: {"job_status":"queued","model":model},
             queue_advisor=lambda *args: queued.append(args),
         )
