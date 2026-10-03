@@ -1,8 +1,8 @@
-"""Daily PKB Web UI prototype on an isolated fictional PostgreSQL DB.
+"""Daily Local Secretary Web UI.
 
-This is the first user-facing PKB slice, separate from the developer Workbench.
-It deliberately refuses the production DB and accepts only the existing
-secretary_pkb_proto_20260927 fixture database through the dedicated writer role.
+The same application runs against an explicitly selected daily-runtime database
+boundary: production secretary for normal use or the historical isolated DB
+for regression-only validation.
 
 Run with: python -m interfaces.web.app
 """
@@ -1949,7 +1949,16 @@ app.on_shutdown(_shutdown_core_advisor_background_jobs)
 
 def main() -> None:
     _recover_interrupted_core_advisors()
-    ui.run(host="127.0.0.1", port=8093, reload=False, show=False, title="Local Secretary PKB")
+    try:
+        web_port = int(os.environ.get("LSA_DAILY_WEB_PORT", "8093"))
+    except ValueError as exc:
+        raise RuntimeError("LSA_DAILY_WEB_PORT is invalid") from exc
+    if not 1024 <= web_port <= 65535:
+        raise RuntimeError("LSA_DAILY_WEB_PORT is outside the allowed range")
+    ui.run(
+        host="127.0.0.1", port=web_port, reload=False, show=False,
+        title="Local Secretary PKB",
+    )
 
 
 if __name__ == "__main__":
