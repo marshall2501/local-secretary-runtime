@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .episode_intake import ingest, load_fixture
+from pkb.episode_intake import ingest, load_fixture
 from .smoke_isolated import connection
 
 WRITER = "secretary_pkb_proto_writer_20260927"

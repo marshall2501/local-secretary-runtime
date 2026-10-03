@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 from uuid import UUID
 
-from pkb_proto.query_service import ClaimQuery, query_claims
+from pkb.query_service import ClaimQuery, query_claims
 from pkb_proto.smoke_correction import at
 from pkb_proto.smoke_isolated import connection
 

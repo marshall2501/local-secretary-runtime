@@ -8,8 +8,8 @@ from uuid import UUID
 
 import psycopg
 
-from pkb_proto.ingestion_gate import InputRecord, ProposedClaim
-from pkb_proto.write_service import write_one
+from pkb.ingestion_gate import InputRecord, ProposedClaim
+from pkb.write_service import write_one
 
 WRITER = "secretary_pkb_proto_writer_20260927"
 DBNAME = "secretary_pkb_proto_20260927"
