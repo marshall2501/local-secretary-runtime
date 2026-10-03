@@ -11,7 +11,7 @@ import unittest
 from nicegui import Client, core, ui
 from uuid import UUID
 
-from pkb_proto import daily_pkb as daily
+from interfaces.web import app as daily
 from ritsuko.core.core_advisor import AdvisorResult
 
 
