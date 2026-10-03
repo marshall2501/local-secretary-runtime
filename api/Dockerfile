@@ -6,7 +6,7 @@ COPY api/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
     && useradd --uid 10001 --create-home --shell /usr/sbin/nologin secretary
 COPY api/ /app/api/
-COPY secretary/ /app/secretary/
+COPY secretary/ /app/secretary/\nCOPY application/ /app/application/\nCOPY infrastructure/ /app/infrastructure/\nCOPY interfaces/ /app/interfaces/
 USER 10001:10001
 EXPOSE 8010
 CMD ["python", "-m", "uvicorn", "api.secretary_api:app", "--host", "0.0.0.0", "--port", "8010", "--no-access-log"]

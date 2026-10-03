@@ -2,7 +2,7 @@ name: Python API static checks
 on:
   pull_request:
     paths:
-      - "api/**"
+      - "api/**"\n      - "interfaces/api/**"\n      - "application/**"\n      - "infrastructure/postgres/**"\n      - "interfaces/api/**"\n      - "application/**"\n      - "infrastructure/postgres/**"
       - "scripts/memory/**"
       - "tests/test_api_static.py"
       - "tests/test_memory_review.py"
@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -r api/requirements.txt
-      - run: python -m compileall -q api scripts/memory tests/test_api_static.py tests/test_memory_review.py tests/test_memory_search.py tests/test_api_container_config.py
+      - run: python -m compileall -q api interfaces/api application infrastructure/postgres scripts/memory tests/test_api_static.py tests/test_memory_review.py tests/test_memory_search.py tests/test_api_container_config.py
       - run: python -m unittest discover -s tests -p test_api_static.py -v
       - run: python -m unittest discover -s tests -p test_memory_review.py -v
       - run: python -m unittest discover -s tests -p test_memory_search.py -v

@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from pydantic import ValidationError
-from api.secretary_api import (
+from interfaces.api.app import (
     CreateTask, NewCandidate, TaskTransition, api_config, external_read_token,
     read_authenticated,
 )
@@ -79,7 +79,7 @@ class ApiStaticTests(unittest.TestCase):
             self.assertEqual(read_authenticated(header), "external_reader")
             with self.assertRaises(Exception):
                 # Write routes continue to depend on authenticated(), not this helper.
-                from api.secretary_api import authenticated
+                from interfaces.api.app import authenticated
                 authenticated(header)
 
     def test_task_requires_completion_criteria(self):
