@@ -65,6 +65,15 @@ from ritsuko.application.task_records import (
     record_pkb_read_record,
 )
 from ritsuko.application.read_dispatch import execute_core_read
+from ritsuko.application.driver_compare import (
+    clarified_driver_web_target,
+    compare_driver_values,
+    driver_web_query_from_detail,
+    execute_pkb_web_compare,
+    pkb_current_driver_value,
+    resolve_driver_web_target,
+    web_latest_version_value,
+)
 from ritsuko.core.request_scope import core_answer, scope_core_request
 from ritsuko.tasks.magi_task_store import (
     abort_proposal_review as abort_magi_proposal_review,
@@ -696,230 +705,29 @@ def web_text(text: str) -> dict:
     return research_text(text)
 
 
-_VERSION_VALUE_PATTERN = re.compile(r"\b\d{2,4}\.\d{1,3}(?:\.\d{1,4}){1,2}\b")
-
-
-def _pkb_current_driver_value(result: dict) -> str | None:
-    for row in result.get("items") or []:
-        value = row.get("current_driver")
-        if value:
-            return str(value).strip()
-        if row.get("predicate") == "current_driver" and row.get("value"):
-            return str(row.get("value")).strip()
-    return None
-
-
-def _web_latest_version_value(result: dict) -> tuple[str | None, str | None, str | None]:
-    summary = result.get("fact_summary") or {}
-    return (
-        summary.get("best_candidate"),
-        summary.get("preferred_kind"),
-        summary.get("status"),
-    )
-
-
-def _compare_driver_values(pkb_result: dict, web_result: dict) -> dict:
-    current = _pkb_current_driver_value(pkb_result)
-    latest, latest_kind, web_status = _web_latest_version_value(web_result)
-
-    if not current or not latest:
-        return {
-            "status": "insufficient_evidence",
-            "current": current,
-            "latest": latest,
-            "latest_kind": latest_kind,
-            "web_status": web_status,
-            "message": "PKB現在値またはWeb最新候補が不足しているため比較できません。",
-        }
-
-    current_match = _VERSION_VALUE_PATTERN.search(current)
-    latest_match = _VERSION_VALUE_PATTERN.search(str(latest))
-    if not current_match or not latest_match:
-        return {
-            "status": "not_comparable",
-            "current": current,
-            "latest": str(latest),
-            "latest_kind": latest_kind,
-            "web_status": web_status,
-            "message": (
-                f"PKB現在値は {current}、Web最新候補は {latest} ですが、"
-                "同じ版番号形式として安全に比較できません。"
-            ),
-        }
-
-    current_value = current_match.group(0)
-    latest_value = latest_match.group(0)
-    same = current_value == latest_value
-    return {
-        "status": "match" if same else "different",
-        "current": current_value,
-        "latest": latest_value,
-        "latest_kind": latest_kind,
-        "web_status": web_status,
-        "message": (
-            f"PKB現在値 {current_value} とWeb最新候補 {latest_value} は一致しています。"
-            if same
-            else f"PKB現在値 {current_value} とWeb最新候補 {latest_value} は異なります。"
-        ),
-    }
-
-
-def _plain_claim_value(value):
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip() if value is not None else None
-
-
-def _driver_web_query_from_detail(detail: dict | None) -> dict:
-    if not detail:
-        return {
-            "status": "missing_target",
-            "query": None,
-            "manufacturer": None,
-            "model": None,
-            "entity_name": None,
-        }
-
-    current = detail.get("current") or []
-    attrs = {}
-    for row in current:
-        predicate = row.get("predicate")
-        if predicate in {"manufacturer", "model"} and predicate not in attrs:
-            value = _plain_claim_value(row.get("value"))
-            if value:
-                attrs[predicate] = value
-
-    entity = detail.get("entity") or {}
-    entity_name = str(entity.get("name") or "").strip() or None
-    manufacturer = attrs.get("manufacturer")
-    model = attrs.get("model")
-
-    # Prefer explicit authoritative attributes. A generic Entity name such as
-    # GPU1 is not safe enough to send to web search as the product identity.
-    if not model:
-        return {
-            "status": "missing_model",
-            "query": None,
-            "manufacturer": manufacturer,
-            "model": None,
-            "entity_name": entity_name,
-        }
-
-    parts = [part for part in (manufacturer, model) if part]
-    return {
-        "status": "ready",
-        "query": " ".join(parts) + " latest driver official",
-        "manufacturer": manufacturer,
-        "model": model,
-        "entity_name": entity_name,
-    }
+_pkb_current_driver_value = pkb_current_driver_value
+_web_latest_version_value = web_latest_version_value
+_compare_driver_values = compare_driver_values
+_driver_web_query_from_detail = driver_web_query_from_detail
+_clarified_driver_web_target = clarified_driver_web_target
 
 
 def _resolve_driver_web_target(text: str) -> dict:
-    component_state = COMPONENT_STATE_QUERY_PATTERN.search(text.strip())
-    if not component_state:
-        return {
-            "status": "missing_component_reference",
-            "query": None,
-            "manufacturer": None,
-            "model": None,
-            "entity_name": None,
-        }
-
-    parent_name = component_state.group("parent").strip()
-    role_token = component_state.group("role")
-    with connection() as db:
-        resolved = resolve_component_reference(db, parent_name, role_token)
-        if resolved is None:
-            return {
-                "status": "component_not_unique_or_missing",
-                "query": None,
-                "manufacturer": None,
-                "model": None,
-                "entity_name": None,
-            }
-        detail = load_entity_detail(db, resolved["id"])
-    target = _driver_web_query_from_detail(detail)
-    target["parent_name"] = parent_name
-    target["role_token"] = role_token
-    target["component_id"] = resolved["id"]
-    return target
-
-
-def _clarified_driver_web_target(reply: str) -> dict:
-    value = reply.strip()
-    value = re.sub(
-        r"^(?:GPU(?:の)?モデル|モデル|製品名|GPU)\s*(?:は|:|：)?\s*",
-        "",
-        value,
-        flags=re.IGNORECASE,
-    ).strip()
-    if not value:
-        return {
-            "status": "missing_model",
-            "query": None,
-            "manufacturer": None,
-            "model": None,
-            "entity_name": None,
-        }
-    return {
-        "status": "ready",
-        "query": value + " latest driver official",
-        "manufacturer": None,
-        "model": value,
-        "entity_name": None,
-        "clarified_by_user": True,
-    }
+    return resolve_driver_web_target(
+        text,
+        connection_factory=connection,
+        resolve_component=resolve_component_reference,
+        load_detail=load_entity_detail,
+    )
 
 
 def _execute_pkb_web_compare(text: str, *, target_override: str | None = None) -> dict:
-    pkb = _execute_core_read("pkb_search", text)
-    target = (
-        _clarified_driver_web_target(target_override)
-        if target_override is not None
-        else _resolve_driver_web_target(text)
+    return execute_pkb_web_compare(
+        text,
+        target_override=target_override,
+        execute_read=_execute_core_read,
+        resolve_target=_resolve_driver_web_target,
     )
-    if target.get("status") != "ready":
-        comparison = {
-            "status": "insufficient_target",
-            "current": _pkb_current_driver_value(pkb["result"]),
-            "latest": None,
-            "latest_kind": None,
-            "web_status": None,
-            "web_query": None,
-            "target": target,
-            "message": (
-                "PKBで現在ドライバーは取得できましたが、Web検索に使うGPUの"
-                "manufacturer / model をPKBから安全に特定できません。"
-                "GPUモデルをPKBへ登録するか、依頼で明示してください。"
-            ),
-        }
-        return {
-            "capability": "pkb_web_compare",
-            "executions": [pkb],
-            "comparison": comparison,
-            "answer": comparison["message"],
-            "pkb": pkb["result"],
-            "web": None,
-            "web_query": None,
-            "needs_clarification": True,
-        }
-
-    web_query = target["query"]
-    web = _execute_core_read("web_research", web_query)
-    comparison = _compare_driver_values(pkb["result"], web["result"])
-    comparison["web_query"] = web_query
-    comparison["target"] = target
-    return {
-        "capability": "pkb_web_compare",
-        "executions": [pkb, web],
-        "comparison": comparison,
-        "answer": comparison["message"],
-        "pkb": pkb["result"],
-        "web": web["result"],
-        "web_query": web_query,
-        "needs_clarification": False,
-    }
 
 
 def _json_safe(value):
