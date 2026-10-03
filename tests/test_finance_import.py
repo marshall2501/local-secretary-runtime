@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from pkb_proto.finance_import import (
+from capabilities.finance.finance_import import (
     SOURCE_SYSTEM,
     _finance_filter_clause,
     _guard_db,

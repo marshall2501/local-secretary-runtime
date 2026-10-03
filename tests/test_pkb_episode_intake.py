@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from pkb_proto.episode_intake import digest, ingest, load_fixture, validate_corpus
+from pkb.episode_intake import digest, ingest, load_fixture, validate_corpus
 
 FIXTURE = Path(__file__).resolve().parents[1] / "pkb_proto" / "fixtures" / "episodes.json"
 

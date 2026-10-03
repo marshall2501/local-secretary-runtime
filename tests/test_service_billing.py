@@ -5,12 +5,12 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from pkb_proto.service_billing import (
+from capabilities.service_billing.service import (
     ServiceBillingError,
     read_google_cloud_month_billing,
     read_openai_month_billing,
 )
-from pkb_proto.service_connections import SERVICE_BILLING_READ
+from integrations.connections.service_connections import SERVICE_BILLING_READ
 
 
 def openai_connection(credential_ref: str = "env:OPENAI_ADMIN_KEY") -> dict:
@@ -58,7 +58,7 @@ class ServiceBillingTests(unittest.TestCase):
                     datetime(2026, 10, 2, tzinfo=timezone.utc),
                 )
 
-    @patch("pkb_proto.service_billing._paged")
+    @patch("capabilities.service_billing.service._paged")
     def test_openai_billing_is_normalized(self, paged):
         paged.side_effect = [
             [{"results": [
@@ -91,8 +91,8 @@ class ServiceBillingTests(unittest.TestCase):
                 datetime(2026, 10, 2, tzinfo=timezone.utc),
             )
 
-    @patch("pkb_proto.service_billing._google_authorized_session")
-    @patch("pkb_proto.service_billing._google_time_series")
+    @patch("capabilities.service_billing.service._google_authorized_session")
+    @patch("capabilities.service_billing.service._google_time_series")
     def test_google_cloud_deduplicates_per_user_quota_series(self, time_series, auth):
         auth.return_value = object()
 

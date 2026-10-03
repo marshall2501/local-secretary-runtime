@@ -9,9 +9,9 @@ from unittest.mock import patch
 import unittest
 import psycopg
 from psycopg import sql
-from pkb_proto.memory_contracts import MemoryIntake
-from pkb_proto.memory_intake import write_intake
-from pkb_proto.ingestion_gate import InputRecord, ProposedClaim
+from pkb.memory_contracts import MemoryIntake
+from pkb.memory_intake import write_intake
+from pkb.ingestion_gate import InputRecord, ProposedClaim
 from pkb_proto.write_service import write_one
 from pkb_proto.pending_service import enqueue, accept_pending, list_pending
 from pkb_proto.correction_service import correct_entity
