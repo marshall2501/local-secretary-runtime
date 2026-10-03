@@ -64,9 +64,9 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
-    def test_web_interface_has_no_concrete_postgres_dependency(self):
+    def test_interfaces_have_no_concrete_postgres_dependency(self):
         violations = []
-        for path in (ROOT / "interfaces" / "web").rglob("*.py"):
+        for path in (ROOT / "interfaces").rglob("*.py"):
             for name in _imports(path):
                 if (
                     name == "psycopg"
@@ -75,6 +75,18 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                     or name.startswith("infrastructure.postgres.")
                 ):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
+        self.assertEqual([], violations)
+
+    def test_application_and_domain_packages_do_not_import_infrastructure(self):
+        violations = []
+        for package in ("application", "ritsuko", "pkb", "capabilities"):
+            root = ROOT / package
+            if not root.exists():
+                continue
+            for path in root.rglob("*.py"):
+                for name in _imports(path):
+                    if name == "infrastructure" or name.startswith("infrastructure."):
+                        violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
 
