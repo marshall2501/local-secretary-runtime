@@ -6685,7 +6685,7 @@ def settings_page():
                         "LLM inference",
                         value=True,
                     )
-                    connection_cap_usage = ui.checkbox(
+                    connection_cap_billing = ui.checkbox(
                         "Service billing read",
                         value=False,
                     )
@@ -6736,13 +6736,13 @@ def settings_page():
                     )
                     default_caps = set(defaults["capabilities"])
                     connection_cap_llm.value = LLM_INFERENCE in default_caps
-                    connection_cap_usage.value = SERVICE_BILLING_READ in default_caps
+                    connection_cap_billing.value = SERVICE_BILLING_READ in default_caps
                     for control in (
                         connection_endpoint,
                         connection_type,
                         connection_config,
                         connection_cap_llm,
-                        connection_cap_usage,
+                        connection_cap_billing,
                     ):
                         control.update()
                     update_auth_field_visibility()
@@ -6765,7 +6765,7 @@ def settings_page():
                     )
                     caps = set(item.get("capabilities") or [])
                     connection_cap_llm.value = LLM_INFERENCE in caps
-                    connection_cap_usage.value = SERVICE_BILLING_READ in caps
+                    connection_cap_billing.value = SERVICE_BILLING_READ in caps
                     auth_api_key.value = ""
                     auth_username.value = ""
                     auth_password.value = ""
@@ -6775,7 +6775,7 @@ def settings_page():
                     for control in (
                         connection_name, connection_adapter, connection_type,
                         connection_endpoint, connection_role, connection_enabled,
-                        connection_config, connection_cap_llm, connection_cap_usage,
+                        connection_config, connection_cap_llm, connection_cap_billing,
                         auth_api_key, auth_username, auth_password,
                         auth_client_id, auth_client_secret, auth_refresh_token,
                     ):
@@ -6836,7 +6836,7 @@ def settings_page():
                         capabilities = []
                         if connection_cap_llm.value:
                             capabilities.append(LLM_INFERENCE)
-                        if connection_cap_usage.value:
+                        if connection_cap_billing.value:
                             capabilities.append(SERVICE_BILLING_READ)
 
                         with connection() as db:
