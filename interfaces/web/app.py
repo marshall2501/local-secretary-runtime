@@ -19,8 +19,6 @@ from pathlib import Path
 from threading import Event
 from uuid import UUID, uuid4
 
-import psycopg
-from psycopg.types.json import Jsonb
 from fastapi import HTTPException
 from nicegui import app, context, run, ui
 from interfaces.web.pages.top import register as register_top_page
@@ -36,6 +34,23 @@ from interfaces.web.pages.pkb import register as register_pkb_page
 from pydantic import BaseModel, Field
 
 from infrastructure.async_runtime.background_jobs import DaemonSerialBackgroundExecutor
+from bootstrap.web_runtime import (
+    DBNAME,
+    HOST,
+    WRITER,
+    DatabaseError,
+    build_core_execution_repository,
+    build_core_task_queries,
+    claim_core_cooperative_probe,
+    connection,
+    fail_core_cooperative_probe,
+    finalize_core_cooperative_probe,
+    interrupted_core_advisors,
+    pkb_debug_summary,
+    record_core_cooperative_probe,
+    restore_core_cooperative_probe,
+    write_core_advisor_shadow,
+)
 from pkb.correction_service import correct_entity
 from ritsuko.core.core_ooda import OODA_PHASES, derive_ooda
 from ritsuko.core.core_observation import build_observation_pack
@@ -62,21 +77,7 @@ from ritsuko.core.observation_loop import (
     run_pkb_observation_loop,
     resume_user_answer,
 )
-from ritsuko.application.task_queries import (
-    CoreTaskQueryService,
-    core_task_selection_result,
-)
-from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
-from infrastructure.postgres.pkb_debug import debug_database_summary
-from infrastructure.postgres.core_advisor_repository import (
-    claim_cooperative_probe as persist_claim_cooperative_probe,
-    fail_cooperative_probe as persist_fail_cooperative_probe,
-    finalize_cooperative_probe as persist_finalize_cooperative_probe,
-    record_cooperative_probe as persist_record_cooperative_probe,
-    restore_interrupted_cooperative_probe as persist_restore_interrupted_cooperative_probe,
-    write_advisor_shadow as persist_advisor_shadow,
-    list_interrupted_advisors,
-)
+from ritsuko.application.task_queries import core_task_selection_result
 from ritsuko.application.task_records import (
     abort_proposal_review_record,
     abort_user_resume_record,
@@ -91,7 +92,6 @@ from ritsuko.application.task_records import (
 )
 from ritsuko.application.read_dispatch import execute_core_read
 from ritsuko.application.entry import RitsukoApplicationEntry, contextualize_reply
-from infrastructure.postgres.core_execution_repository import PostgresCoreExecutionRepository
 from ritsuko.application.driver_compare import (
     clarified_driver_web_target,
     compare_driver_values,
@@ -178,9 +178,6 @@ from pkb.application.daily import (
     register_text as pkb_register_text,
     search_text as pkb_search_text,
     search_text_with_db as pkb_search_text_with_db,
-)
-from infrastructure.postgres.pkb_runtime import (
-    DBNAME, HOST, WRITER, connect_pkb_database,
 )
 from capabilities.service_billing.service import ServiceBillingError, read_service_billing_snapshot
 from capabilities.service_billing.settings import (
@@ -629,10 +626,6 @@ def _entity_source_rows(detail: dict) -> list[dict]:
         )
 
     return result
-
-
-def connection():
-    return connect_pkb_database()
 
 
 def _connection_credential_loader(connection_id: str) -> str | None:
@@ -1154,33 +1147,29 @@ def _advisor_shadow_initial(
 
 
 def _write_core_advisor_shadow(task_id: UUID, shadow: dict, event_type: str) -> bool:
-    return persist_advisor_shadow(connection, task_id, shadow, event_type)
+    return write_core_advisor_shadow(task_id, shadow, event_type)
 
 
 def _claim_cooperative_probe(task_id: UUID, capability: str) -> bool:
-    return persist_claim_cooperative_probe(connection, task_id, capability)
+    return claim_core_cooperative_probe(task_id, capability)
 
 
 def _record_cooperative_probe(task_id: UUID, request: str, execution: dict,
                               observation_pack: dict) -> tuple[UUID, UUID]:
-    return persist_record_cooperative_probe(
-        connection, task_id, request, execution, observation_pack
-    )
+    return record_core_cooperative_probe(task_id, request, execution, observation_pack)
 
 
 def _finalize_cooperative_probe(task_id: UUID, final_decision: dict,
                                 final_observation_pack: dict, execution: dict) -> None:
-    persist_finalize_cooperative_probe(
-        connection, task_id, final_decision, final_observation_pack, execution
-    )
+    finalize_core_cooperative_probe(task_id, final_decision, final_observation_pack, execution)
 
 
 def _fail_cooperative_probe(task_id: UUID, error: str) -> None:
-    persist_fail_cooperative_probe(connection, task_id, error)
+    fail_core_cooperative_probe(task_id, error)
 
 
 def _restore_interrupted_cooperative_probe(task_id: UUID, error: str) -> bool:
-    return persist_restore_interrupted_cooperative_probe(connection, task_id, error)
+    return restore_core_cooperative_probe(task_id, error)
 
 
 def _run_core_advisor_shadow(
@@ -1550,7 +1539,7 @@ def _load_ritsuko_request_context(request: str) -> tuple[dict[str, dict], dict]:
 
 def _ritsuko_application_entry() -> RitsukoApplicationEntry:
     return RitsukoApplicationEntry(
-        PostgresCoreExecutionRepository(connection),
+        build_core_execution_repository(),
         load_context=_load_ritsuko_request_context,
         scope_request=scope_core_request,
         execute_read=_execute_core_read,
@@ -1576,7 +1565,7 @@ def run_core_request(
 _contextualize_core_reply = contextualize_reply
 
 def _core_task_queries() -> CoreTaskQueryService:
-    return CoreTaskQueryService(PostgresCoreTaskQueryRepository(connection))
+    return build_core_task_queries()
 
 
 def load_recent_core_tasks(limit: int = 10, offset: int = 0) -> list[dict]:
@@ -1625,7 +1614,7 @@ def api_write_intake(params: MemoryIntake):
         return register_memory_intake(params)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    except (RuntimeError, psycopg.Error) as exc:
+    except (RuntimeError, DatabaseError) as exc:
         raise HTTPException(503, 'Memory Intakeの保存に失敗しました。同じ入力のまま再試行できます。') from exc
 
 
@@ -1637,7 +1626,7 @@ class PendingDecisionInput(BaseModel):
 def api_core_open_tasks():
     try:
         return {"items": load_open_core_tasks(20)}
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1645,7 +1634,7 @@ def api_core_open_tasks():
 def api_core_completed_tasks():
     try:
         return {"items": load_completed_core_tasks(8)}
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1655,7 +1644,7 @@ def api_core_trace(task_id: UUID):
         return load_core_task_trace(task_id)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    except (RuntimeError, psycopg.Error) as exc:
+    except (RuntimeError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1665,7 +1654,7 @@ def api_core_resume(task_id: UUID, params: TextInput):
         return resume_core_task(task_id, params.text)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    except (RuntimeError, psycopg.Error) as exc:
+    except (RuntimeError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1673,7 +1662,7 @@ def api_core_resume(task_id: UUID, params: TextInput):
 def api_core_request(params: TextInput):
     try:
         return run_core_request(params.text)
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1682,7 +1671,7 @@ def api_entities():
     try:
         with connection() as db:
             return _entities(db)
-    except (RuntimeError, psycopg.Error) as exc:
+    except (RuntimeError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1690,7 +1679,7 @@ def api_entities():
 def api_register(params: TextInput):
     try:
         return register_text(params.text)
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1698,7 +1687,7 @@ def api_register(params: TextInput):
 def api_correct(params: TextInput):
     try:
         return correct_text(params.text)
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1706,7 +1695,7 @@ def api_correct(params: TextInput):
 def api_search(params: TextInput):
     try:
         return search_text(params.text)
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1723,7 +1712,7 @@ def api_pending():
                     item["recorded_at"] = item["recorded_at"].isoformat()
                 result.append(item)
             return result
-    except (RuntimeError, ValueError, psycopg.Error) as exc:
+    except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1734,7 +1723,7 @@ def api_pending_review(pending_id: str, params: PendingDecisionInput):
             return asdict(review_pending(db, pending_id, params.decision))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    except (RuntimeError, psycopg.Error) as exc:
+    except (RuntimeError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
@@ -1745,14 +1734,12 @@ def api_pending_accept(pending_id: str):
             return asdict(accept_pending(db, pending_id))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    except (RuntimeError, psycopg.Error) as exc:
+    except (RuntimeError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
 def _debug_database_summary() -> dict:
-    return debug_database_summary(
-        connection, expected_database=DBNAME, expected_user=WRITER
-    )
+    return pkb_debug_summary()
 
 
 def _load_system_debug_snapshot() -> dict:
@@ -1891,7 +1878,7 @@ def _recover_interrupted_core_advisors(
 ) -> int:
     """Mark queued/running advisor jobs interrupted and restore resumable probes."""
     try:
-        rows = list_interrupted_advisors(connection)
+        rows = interrupted_core_advisors()
     except Exception:
         return 0
 

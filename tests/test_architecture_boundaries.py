@@ -48,6 +48,19 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
+    def test_web_interface_has_no_concrete_postgres_dependency(self):
+        violations = []
+        for path in (ROOT / "interfaces" / "web").rglob("*.py"):
+            for name in _imports(path):
+                if (
+                    name == "psycopg"
+                    or name.startswith("psycopg.")
+                    or name == "infrastructure.postgres"
+                    or name.startswith("infrastructure.postgres.")
+                ):
+                    violations.append(f"{path.relative_to(ROOT)} -> {name}")
+        self.assertEqual([], violations)
+
 
 if __name__ == "__main__":
     unittest.main()
