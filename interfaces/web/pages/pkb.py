@@ -1,15 +1,15 @@
 """pkb page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/pkb")
     def pkb_page():
-        globals().update(context)
+        globals().update(portal_context)
         state = {
             "write": None,
             "write_busy": False,

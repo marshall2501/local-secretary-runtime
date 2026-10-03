@@ -1,15 +1,15 @@
 """top page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/")
     def top_page():
-        globals().update(context)
+        globals().update(portal_context)
         with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
             _portal_header(
                 "Local Secretary",

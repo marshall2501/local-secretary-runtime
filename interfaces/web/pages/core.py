@@ -1,15 +1,15 @@
 """core page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/core")
     def core_page(task_id: str = ""):
-        globals().update(context)
+        globals().update(portal_context)
         state = {"result": None, "busy": False, "resume_busy": False,
                  "trace": None, "trace_error": None,
                  "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),

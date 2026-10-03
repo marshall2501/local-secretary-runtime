@@ -1,15 +1,15 @@
 """core history page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/core/history")
     def core_history_page():
-        globals().update(context)
+        globals().update(portal_context)
         state = {"offset": 0}
         page_size = 20
         with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-3"):

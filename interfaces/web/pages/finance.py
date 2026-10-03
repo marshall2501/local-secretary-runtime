@@ -1,15 +1,15 @@
 """finance page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/finance")
     def finance_page():
-        globals().update(context)
+        globals().update(portal_context)
         finance_preferences = _UI_PREFERENCES["finance"]
         state = {
             "preview": None,

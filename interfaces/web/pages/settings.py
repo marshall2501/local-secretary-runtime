@@ -1,15 +1,15 @@
 """settings page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/settings")
     def settings_page():
-        globals().update(context)
+        globals().update(portal_context)
         pkb_labels = {
             "write": "記録",
             "correction": "訂正",

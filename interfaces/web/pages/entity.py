@@ -1,15 +1,15 @@
 """entity page for the daily portal."""
 
 
-def sync(context: dict) -> None:
-    globals().update(context)
+def sync(portal_context: dict) -> None:
+    globals().update(portal_context)
 
 
-def register(context: dict):
-    sync(context)
+def register(portal_context: dict):
+    sync(portal_context)
     @ui.page("/entity/{entity_id}")
     def entity_page(entity_id: str):
-        globals().update(context)
+        globals().update(portal_context)
         try:
             with connection() as db:
                 detail = load_entity_detail(db, entity_id)
