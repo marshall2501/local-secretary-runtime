@@ -93,5 +93,42 @@ try {
             throw "PKB promotion manifest references sensitive value field: $sensitiveField"
         }
     }
+
+
+    $entityReconciliationPath = Join-Path $root 'scripts/db/entity-reconciliation.ps1'
+    if (-not (Test-Path -LiteralPath $entityReconciliationPath -PathType Leaf)) {
+        throw 'Missing PKB entity reconciliation inspection.'
+    }
+    $entityReconciliationText = Get-Content -LiteralPath $entityReconciliationPath -Raw
+    if ($entityReconciliationText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
+        throw 'PKB entity reconciliation inspection must remain read-only.'
+    }
+    if ($entityReconciliationText -notmatch 'BEGIN TRANSACTION READ ONLY') {
+        throw 'PKB entity reconciliation inspection must enforce read-only transactions.'
+    }
+    foreach ($sensitiveField in @('raw_text','citation','evidence','amount_jpy','auth_data','password','access_token')) {
+        if ($entityReconciliationText -match ('(?i)\b' + [regex]::Escape($sensitiveField) + '\b')) {
+            throw "PKB entity reconciliation references sensitive value field: $sensitiveField"
+        }
+    }
+
+    $rehearsalPath = Join-Path $root 'scripts/db/promotion-rehearsal.ps1'
+    if (-not (Test-Path -LiteralPath $rehearsalPath -PathType Leaf)) {
+        throw 'Missing disposable production promotion rehearsal tool.'
+    }
+    $rehearsalText = Get-Content -LiteralPath $rehearsalPath -Raw
+    foreach ($requiredMarker in @(
+        'local-secretary-test-promotion-',
+        "pg_restore','-U','secretary_admin','-d','secretary'",
+        "down','--volumes",
+        '001-004'
+    )) {
+        if (-not $rehearsalText.Contains($requiredMarker)) {
+            throw "Promotion rehearsal safety marker missing: $requiredMarker"
+        }
+    }
+    if ($rehearsalText.Contains('local-secretary-runtime-db')) {
+        throw 'Promotion rehearsal must never target the normal compose project.'
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
