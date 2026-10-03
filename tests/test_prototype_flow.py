@@ -3,10 +3,11 @@ import unittest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from api.secretary_api import (
-    PROTOTYPE_STEPS, CreateTask, create_prototype_task, read_prototype_task,
-    run_prototype_task,
+from interfaces.api.app import (
+    CreateTask, create_prototype_task, read_prototype_task, run_prototype_task,
 )
+from infrastructure.postgres.task_repository import PostgresTaskRepository
+from ritsuko.tasks.service import PROTOTYPE_STEPS, TaskService
 
 
 def fake_db(cursor):
@@ -14,6 +15,10 @@ def fake_db(cursor):
     db.__enter__.return_value = db
     db.cursor.return_value.__enter__.return_value = cursor
     return db
+
+
+def task_service_for(cursor):
+    return TaskService(PostgresTaskRepository(lambda: fake_db(cursor)))
 
 
 class PrototypeFlowTests(unittest.TestCase):
@@ -30,7 +35,7 @@ class PrototypeFlowTests(unittest.TestCase):
             domain="pc",
             completion_criteria="Record a simulated diagnosis",
         )
-        with patch("api.secretary_api.connect", return_value=fake_db(cur)):
+        with patch("interfaces.api.app.task_service", return_value=task_service_for(cur)):
             result = create_prototype_task(body, actor="local_user")
         self.assertEqual(result["id"], task_id)
         self.assertEqual(result["phase"], "planned")
@@ -50,7 +55,7 @@ class PrototypeFlowTests(unittest.TestCase):
         cur.fetchall.return_value = [
             {"step_order": 0, "description": PROTOTYPE_STEPS[0], "status": "pending"}
         ]
-        with patch("api.secretary_api.connect", return_value=fake_db(cur)):
+        with patch("interfaces.api.app.task_service", return_value=task_service_for(cur)):
             result = read_prototype_task(task_id, actor="local_user")
         self.assertEqual(result["id"], task_id)
         self.assertEqual(result["steps"][0]["description"], PROTOTYPE_STEPS[0])
@@ -78,7 +83,7 @@ class PrototypeFlowTests(unittest.TestCase):
               "citation": "fictional test source"}],
             [],
         ]
-        with patch("api.secretary_api.connect", return_value=fake_db(cur)):
+        with patch("interfaces.api.app.task_service", return_value=task_service_for(cur)):
             result = run_prototype_task(task_id, actor="local_user")
         self.assertEqual(result["task_id"], str(task_id))
         self.assertEqual(result["status"], "completed")
@@ -102,7 +107,7 @@ class PrototypeFlowTests(unittest.TestCase):
         cur.fetchone.return_value = {
             "id": task_id, "status": "completed", "checkpoint": {"g1": stored},
         }
-        with patch("api.secretary_api.connect", return_value=fake_db(cur)):
+        with patch("interfaces.api.app.task_service", return_value=task_service_for(cur)):
             result = run_prototype_task(task_id, actor="local_user")
         self.assertEqual(result, stored)
         self.assertEqual(len(cur.execute.call_args_list), 1)
@@ -123,7 +128,7 @@ class PrototypeFlowTests(unittest.TestCase):
             [],
             [],
         ]
-        with patch("api.secretary_api.connect", return_value=fake_db(cur)):
+        with patch("interfaces.api.app.task_service", return_value=task_service_for(cur)):
             result = run_prototype_task(task_id, actor="local_user")
         self.assertEqual(result["status"], "waiting_external")
         self.assertFalse(result["criteria_met"])
