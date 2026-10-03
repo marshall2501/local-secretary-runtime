@@ -92,10 +92,12 @@ def register(context: dict):
     
                 metrics = ui.row().classes("w-full gap-3 flex-wrap")
                 model_table = ui.column().classes("w-full gap-2")
+                debug_panel = ui.column().classes("w-full")
     
                 def render_result(result: dict | None, error: str | None = None):
                     metrics.clear()
                     model_table.clear()
+                    debug_panel.clear()
                     if error:
                         status.set_text(error)
                         status.classes(replace="text-sm text-red-700")
@@ -200,24 +202,30 @@ def register(context: dict):
                                 rows=rows,
                                 row_key="model",
                             ).classes("w-full")
-    
-                with ui.expansion(
-                    "取得デバッグ（Secret非表示）",
-                    icon="bug_report",
-                    value=False,
-                ).classes("w-full border border-indigo-200"):
-                    safe_debug = {
-                        "service": result.get("service"),
-                        "connection_name": result.get("connection_name"),
-                        "credential_source": result.get("credential_source"),
-                        "period_start": result.get("period_start"),
-                        "fetched_at": result.get("fetched_at"),
-                        "metadata": result.get("metadata") or {},
-                    }
-                    ui.code(
-                        json.dumps(safe_debug, ensure_ascii=False, indent=2, default=str)
-                    ).classes("w-full text-xs")
 
+                    with debug_panel:
+                        with ui.expansion(
+                            "取得デバッグ（Secret非表示）",
+                            icon="bug_report",
+                            value=False,
+                        ).classes("w-full border border-indigo-200"):
+                            safe_debug = {
+                                "service": result.get("service"),
+                                "connection_name": result.get("connection_name"),
+                                "credential_source": result.get("credential_source"),
+                                "period_start": result.get("period_start"),
+                                "fetched_at": result.get("fetched_at"),
+                                "metadata": result.get("metadata") or {},
+                            }
+                            ui.code(
+                                json.dumps(
+                                    safe_debug,
+                                    ensure_ascii=False,
+                                    indent=2,
+                                    default=str,
+                                )
+                            ).classes("w-full text-xs")
+    
                 async def refresh():
                     if state["busy"]:
                         return
