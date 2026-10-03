@@ -107,7 +107,7 @@ try {
 }
 Push-Location $worktree
 try {
-    & $python @pythonArgs -m pkb_proto.smoke_isolated --port $port --admin-secret $adminSecret --writer-secret $writerSecret
+    & $python @pythonArgs -m scripts.pkb.smoke_isolated --port $port --admin-secret $adminSecret --writer-secret $writerSecret
     if ($LASTEXITCODE -ne 0) { throw 'Isolated PostgreSQL smoke test failed.' }
 } finally {
     Pop-Location

@@ -24,7 +24,7 @@ Push-Location $worktree
 try {
     & $python -m unittest discover -s tests -p 'test_pkb*.py' -v
     if ($LASTEXITCODE -ne 0) { throw 'Offline PKB tests failed.' }
-    & $python -m pkb_proto.run_local_extraction --model $Model
+    & $python -m interfaces.workbench.run_local_extraction --model $Model
     if ($LASTEXITCODE -ne 0) { throw 'Local fictional extraction run failed.' }
 } finally {
     Pop-Location

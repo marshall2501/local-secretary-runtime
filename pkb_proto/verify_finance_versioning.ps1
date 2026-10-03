@@ -45,7 +45,7 @@ $env:LSA_PKB_DAILY_PORT = "$port"
 $env:LSA_PKB_DAILY_SECRET = $secret
 Push-Location $root
 try {
-    & $python -m pkb_proto.verify_finance_versioning
+    & $python -m scripts.pkb.verify_finance_versioning
     if ($LASTEXITCODE -ne 0) { throw 'Finance version-history probe failed.' }
 } finally {
     Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue

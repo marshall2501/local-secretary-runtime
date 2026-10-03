@@ -85,7 +85,7 @@ Push-Location $worktree
 try {
     & $python -m unittest discover -s tests -p 'test_pkb*.py' -v
     if ($LASTEXITCODE -ne 0) { throw 'Offline PKB tests failed.' }
-    & $python -m pkb_proto.smoke_episodes --writer-secret $writerSecret --port $port
+    & $python -m scripts.pkb.smoke_episodes --writer-secret $writerSecret --port $port
     if ($LASTEXITCODE -ne 0) { throw 'Fictional episode intake smoke failed.' }
 } finally {
     Pop-Location
