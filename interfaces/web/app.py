@@ -25,7 +25,7 @@ from fastapi import HTTPException
 from nicegui import app, context, run, ui
 from pydantic import BaseModel, Field
 
-from .background_jobs import DaemonSerialBackgroundExecutor
+from infrastructure.async_runtime.background_jobs import DaemonSerialBackgroundExecutor
 from pkb.correction_service import correct_entity
 from ritsuko.core.core_ooda import OODA_PHASES, derive_ooda
 from ritsuko.core.core_observation import build_observation_pack
@@ -191,7 +191,7 @@ from integrations.connections.service_connections import (
     list_service_connections,
     upsert_service_connection,
 )
-from .system_debug import (
+from infrastructure.system_debug import (
     database_snapshot as build_database_snapshot,
     environment_snapshot as build_environment_snapshot,
     runtime_snapshot as build_runtime_snapshot,
