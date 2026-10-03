@@ -25,7 +25,7 @@ from fastapi import HTTPException
 from nicegui import app, context, run, ui
 from pydantic import BaseModel, Field
 
-from .background_jobs import SerialBackgroundExecutor
+from .background_jobs import DaemonSerialBackgroundExecutor
 from .correction_service import correct_entity
 from .core_ooda import OODA_PHASES, derive_ooda
 from .core_observation import build_observation_pack
@@ -2046,7 +2046,17 @@ def _build_core_observation_pack(request: str, db, entities: dict[str, dict]) ->
     )
 
 
-_CORE_ADVISOR_EXECUTOR = SerialBackgroundExecutor("core-advisor-shadow")
+_CORE_ADVISOR_STOP_EVENT = Event()
+_CORE_ADVISOR_EXECUTOR = DaemonSerialBackgroundExecutor("core-advisor-shadow")
+
+
+class _CoreAdvisorShutdown(RuntimeError):
+    pass
+
+
+def _raise_if_core_advisor_stopping() -> None:
+    if _CORE_ADVISOR_STOP_EVENT.is_set():
+        raise _CoreAdvisorShutdown("server_shutdown")
 
 
 def _advisor_shadow_initial(
@@ -2130,6 +2140,12 @@ def _claim_cooperative_probe(task_id: UUID, capability: str) -> bool:
                     "question": None,
                     "reason": "magi_cooperative_probe",
                     "cooperative_cycle": 1,
+                    "cooperative_resume": {
+                        "phase": checkpoint.get("phase"),
+                        "selected_capability": checkpoint.get("selected_capability"),
+                        "question": checkpoint.get("question"),
+                        "reason": checkpoint.get("reason"),
+                    },
                 }
                 cur.execute(
                     """UPDATE secretary.tasks
@@ -2376,6 +2392,68 @@ def _fail_cooperative_probe(task_id: UUID, error: str) -> None:
                 )
 
 
+def _restore_interrupted_cooperative_probe(
+    task_id: UUID,
+    error: str,
+) -> bool:
+    """Return an interrupted legacy cooperative probe to a resumable state."""
+    with connection() as db:
+        with db.transaction():
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT status, checkpoint
+                       FROM secretary.tasks
+                       WHERE id=%s
+                       FOR UPDATE""",
+                    (task_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                status, checkpoint = row[0], row[1] or {}
+                if status != "running":
+                    return False
+                if checkpoint.get("core_slice") != "daily_read_only_v1":
+                    return False
+                if (
+                    checkpoint.get("reason") != "magi_cooperative_probe"
+                    and checkpoint.get("cooperative_cycle") not in {1, 2}
+                ):
+                    return False
+
+                resume = checkpoint.get("cooperative_resume")
+                if not isinstance(resume, dict):
+                    resume = {}
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": resume.get("phase") or "awaiting_clarification",
+                    "selected_capability": resume.get("selected_capability"),
+                    "question": (
+                        resume.get("question")
+                        or "バックグラウンドAdvisorが中断されました。同じTaskを再開してください。"
+                    ),
+                    "reason": resume.get("reason") or "advisor_interrupted",
+                    "cooperative_error": error,
+                    "cooperative_interrupted": True,
+                }
+                cur.execute(
+                    """UPDATE secretary.tasks
+                       SET status='waiting_external',
+                           checkpoint=%s,
+                           completed_at=NULL
+                       WHERE id=%s""",
+                    (Jsonb(next_checkpoint), task_id),
+                )
+                cur.execute(
+                    """INSERT INTO secretary.audit_events
+                       (actor, event_type, task_id, object_type, object_id, details)
+                       VALUES ('daily_core', 'core.advisor.task_restored',
+                               %s, 'task', %s, %s)""",
+                    (task_id, task_id, Jsonb({"error": error})),
+                )
+    return True
+
+
 def _run_core_advisor_shadow(
     task_id: UUID,
     request: str,
@@ -2390,6 +2468,7 @@ def _run_core_advisor_shadow(
     attempted_model = model
     claimed_probe = False
     try:
+        _raise_if_core_advisor_stopping()
         try:
             attempted_model = choose_advisor_model(list_advisor_models(), model)
         except Exception:
@@ -2408,6 +2487,7 @@ def _run_core_advisor_shadow(
             task_id, running, "core.advisor.running"
         ):
             return
+        _raise_if_core_advisor_stopping()
 
         current_selection = melchior.get("selected_capability")
         melchior_next_step = (
@@ -2424,6 +2504,7 @@ def _run_core_advisor_shadow(
             model=attempted_model,
             timeout=timeout_seconds,
         ).as_dict()
+        _raise_if_core_advisor_stopping()
         first_synthesis = synthesize_magi(
             melchior,
             first_result,
@@ -2469,7 +2550,9 @@ def _run_core_advisor_shadow(
             )
 
             capability = str(first_synthesis["selected_capability"])
+            _raise_if_core_advisor_stopping()
             claimed_probe = _claim_cooperative_probe(task_id, capability)
+            _raise_if_core_advisor_stopping()
             if not claimed_probe:
                 final = {
                     **first_result,
@@ -2496,6 +2579,7 @@ def _run_core_advisor_shadow(
                 request,
                 observation_pack,
             )
+            _raise_if_core_advisor_stopping()
             second_observation = extend_observation_pack(
                 observation_pack,
                 execution,
@@ -2507,6 +2591,7 @@ def _run_core_advisor_shadow(
                 execution,
                 second_observation,
             )
+            _raise_if_core_advisor_stopping()
 
             first_cycle["action"] = {
                 "action_id": str(action_id), "capability": capability,
@@ -2539,6 +2624,7 @@ def _run_core_advisor_shadow(
                 model=attempted_model,
                 timeout=timeout_seconds,
             ).as_dict()
+            _raise_if_core_advisor_stopping()
             second_synthesis = synthesize_magi(
                 melchior,
                 second_result,
@@ -2568,12 +2654,14 @@ def _run_core_advisor_shadow(
                 execution=execution,
                 executed_capabilities=(capability,),
             )
+            _raise_if_core_advisor_stopping()
             _finalize_cooperative_probe(
                 task_id,
                 final_decision,
                 second_observation,
                 execution,
             )
+            _raise_if_core_advisor_stopping()
             final = {
                 **second_result,
                 "job_status": "completed",
@@ -2624,9 +2712,12 @@ def _run_core_advisor_shadow(
             "cycles": [first_cycle],
             "cooperative_execution": {"status": "not_executed"},
         }
+        _raise_if_core_advisor_stopping()
         _write_core_advisor_shadow(
             task_id, final, f"core.advisor.{job_status}"
         )
+    except _CoreAdvisorShutdown:
+        return
     except Exception as exc:
         elapsed = round(time.perf_counter() - started_perf, 3)
         if claimed_probe:
@@ -2660,6 +2751,8 @@ def _queue_core_advisor_shadow(
     model: str | None,
     timeout_seconds: float,
 ) -> None:
+    if _CORE_ADVISOR_STOP_EVENT.is_set():
+        return
     _CORE_ADVISOR_EXECUTOR.submit(
         _run_core_advisor_shadow,
         task_id,
@@ -8870,8 +8963,10 @@ def pkb_page():
                                 )
 
 
-def _recover_interrupted_core_advisors() -> int:
-    """Mark queued/running advisor jobs from a previous process as interrupted."""
+def _recover_interrupted_core_advisors(
+    error: str = "interrupted_by_server_restart",
+) -> int:
+    """Mark queued/running advisor jobs interrupted and restore resumable probes."""
     try:
         with connection() as db:
             with db.cursor() as cur:
@@ -8905,16 +9000,28 @@ def _recover_interrupted_core_advisors() -> int:
             "comparison": "unavailable",
             "finished_at": now.isoformat(),
             "elapsed_seconds": round(float(elapsed), 3),
-            "error": "interrupted_by_server_restart",
+            "error": error,
         })
         try:
+            normalized_id = UUID(str(task_id))
             if _write_core_advisor_shadow(
-                UUID(str(task_id)), current, "core.advisor.interrupted"
+                normalized_id, current, "core.advisor.interrupted"
             ):
                 recovered += 1
+            _restore_interrupted_cooperative_probe(normalized_id, error)
         except Exception:
             pass
     return recovered
+
+
+def _shutdown_core_advisor_background_jobs() -> None:
+    """Prevent legacy Advisor work from keeping NiceGUI alive after shutdown."""
+    _CORE_ADVISOR_STOP_EVENT.set()
+    _CORE_ADVISOR_EXECUTOR.close(wait=False, cancel_pending=True)
+    _recover_interrupted_core_advisors("interrupted_by_server_shutdown")
+
+
+app.on_shutdown(_shutdown_core_advisor_background_jobs)
 
 
 if __name__ == "__main__":

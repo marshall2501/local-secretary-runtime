@@ -11,7 +11,7 @@ from pkb_proto.core_advisor import (
     diagnose_response,
     inspect_output,
 )
-from pkb_proto.daily_pkb import _run_core_advisor_shadow
+from pkb_proto.daily_pkb import (\n    _recover_interrupted_core_advisors,\n    _restore_interrupted_cooperative_probe,\n    _run_core_advisor_shadow,\n)
 
 
 class CoreAdvisorTests(unittest.TestCase):
@@ -384,6 +384,85 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(final_shadow["cooperative_execution"]["capability"], "pkb_search")
         self.assertEqual(final_shadow["cooperative_execution"]["final_next_step"], "respond")
         self.assertEqual(len(final_shadow["cycles"]), 2)
+
+    def test_interrupted_probe_restores_waiting_external_state(self):
+        from uuid import UUID
+
+        task_id = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+        checkpoint = {
+            "core_slice": "daily_read_only_v1",
+            "phase": "act",
+            "selected_capability": "pkb_search",
+            "question": None,
+            "reason": "magi_cooperative_probe",
+            "cooperative_cycle": 1,
+            "cooperative_resume": {
+                "phase": "awaiting_clarification",
+                "selected_capability": None,
+                "question": "元の確認質問",
+                "reason": "ambiguous_request",
+            },
+        }
+        with patch("pkb_proto.daily_pkb.connection") as connection:
+            db = connection.return_value.__enter__.return_value
+            cur = db.cursor.return_value.__enter__.return_value
+            cur.fetchone.return_value = ("running", checkpoint)
+
+            restored = _restore_interrupted_cooperative_probe(
+                task_id, "interrupted_by_server_shutdown"
+            )
+
+        self.assertTrue(restored)
+        update = next(
+            call for call in cur.execute.call_args_list
+            if "SET status='waiting_external'" in call.args[0]
+        )
+        restored_checkpoint = update.args[1][0].obj
+        self.assertEqual(restored_checkpoint["phase"], "awaiting_clarification")
+        self.assertEqual(restored_checkpoint["question"], "元の確認質問")
+        self.assertEqual(restored_checkpoint["reason"], "ambiguous_request")
+        self.assertTrue(restored_checkpoint["cooperative_interrupted"])
+        self.assertEqual(
+            restored_checkpoint["cooperative_error"],
+            "interrupted_by_server_shutdown",
+        )
+        self.assertTrue(any(
+            "core.advisor.task_restored" in call.args[0]
+            for call in cur.execute.call_args_list
+        ))
+
+    @patch("pkb_proto.daily_pkb._restore_interrupted_cooperative_probe")
+    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
+    @patch("pkb_proto.daily_pkb.connection")
+    def test_recovery_marks_shadow_and_repairs_running_probe(
+        self, connection, write_mock, restore_mock
+    ):
+        from uuid import UUID
+
+        task_id = UUID("eeeeeeee-ffff-ffff-ffff-ffffffffffff")
+        db = connection.return_value.__enter__.return_value
+        cur = db.cursor.return_value.__enter__.return_value
+        cur.fetchall.return_value = [(
+            task_id,
+            {
+                "job_status": "running",
+                "started_at": None,
+                "elapsed_seconds": 1.0,
+            },
+        )]
+
+        recovered = _recover_interrupted_core_advisors(
+            "interrupted_by_server_shutdown"
+        )
+
+        self.assertEqual(recovered, 1)
+        shadow = write_mock.call_args.args[1]
+        self.assertEqual(shadow["job_status"], "error")
+        self.assertEqual(shadow["error"], "interrupted_by_server_shutdown")
+        restore_mock.assert_called_once_with(
+            task_id, "interrupted_by_server_shutdown"
+        )
+
 
     @patch("pkb_proto.core_advisor.list_chat_models", return_value=["llama3.1:8b"])
     @patch("pkb_proto.core_advisor.urlopen", side_effect=URLError("offline"))
