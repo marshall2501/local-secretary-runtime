@@ -4,7 +4,7 @@ This is the first user-facing PKB slice, separate from the developer Workbench.
 It deliberately refuses the production DB and accepts only the existing
 secretary_pkb_proto_20260927 fixture database through the dedicated writer role.
 
-Run with: python -m pkb_proto.daily_pkb
+Run with: python -m interfaces.web.app
 """
 from __future__ import annotations
 
