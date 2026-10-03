@@ -55,6 +55,40 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
+    def test_no_legacy_pkb_proto_runtime_paths(self):
+        """Executable/runtime entrypoints must not point at the removed package tree."""
+        banned = (
+            "pkb_proto\\\\sql\\\\",
+            "pkb_proto/sql/",
+            "pkb_proto.daily_pkb",
+            "-m pkb_proto.",
+            ".\\\\pkb_proto\\\\",
+        )
+        roots = [
+            ROOT / "api", ROOT / "application", ROOT / "bootstrap",
+            ROOT / "capabilities", ROOT / "infrastructure", ROOT / "integrations",
+            ROOT / "interfaces", ROOT / "mcp_adapter", ROOT / "pkb",
+            ROOT / "ritsuko", ROOT / "scripts", ROOT / ".github" / "workflows",
+        ]
+        paths = []
+        for root in roots:
+            if not root.exists():
+                continue
+            paths.extend(
+                path for path in root.rglob("*")
+                if path.is_file()
+                and path.suffix.lower() in {".py", ".ps1", ".cmd", ".yml", ".yaml"}
+            )
+        paths.extend(ROOT.glob("Launch-*.cmd"))
+
+        violations = []
+        for candidate in paths:
+            content = candidate.read_text(encoding="utf-8")
+            for marker in banned:
+                if marker in content:
+                    violations.append(f"{candidate.relative_to(ROOT)} -> {marker}")
+        self.assertEqual([], violations)
+
     def test_pkb_and_capabilities_do_not_depend_on_ritsuko(self):
         violations = []
         for package in ("pkb", "capabilities"):
