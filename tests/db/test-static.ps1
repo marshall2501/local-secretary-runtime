@@ -67,5 +67,31 @@ try {
     if ($preflightText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
         throw 'Production promotion preflight must remain read-only.'
     }
+
+
+    $manifestPath = Join-Path $root 'scripts/db/promotion-manifest.ps1'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'Missing PKB production promotion manifest.'
+    }
+    $manifestText = Get-Content -LiteralPath $manifestPath -Raw
+    if ($manifestText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
+        throw 'PKB production promotion manifest must remain read-only.'
+    }
+    if ($manifestText -notmatch 'BEGIN TRANSACTION READ ONLY') {
+        throw 'PKB production promotion manifest must enforce read-only transactions.'
+    }
+    foreach ($sensitiveField in @(
+        'raw_text',
+        'citation',
+        'evidence',
+        'amount_jpy',
+        'auth_data',
+        'password',
+        'access_token'
+    )) {
+        if ($manifestText -match ('(?i)\b' + [regex]::Escape($sensitiveField) + '\b')) {
+            throw "PKB promotion manifest references sensitive value field: $sensitiveField"
+        }
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
