@@ -52,6 +52,7 @@ jobs:
       - name: Validate repository PowerShell and static rules
         shell: pwsh
         run: ./tests/db/test-static.ps1
+      - run: python -m unittest discover -s tests -p test_architecture_boundaries.py -v
       - run: python -m unittest discover -s tests -p test_pkb_web_workbench.py -v
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
       - run: python -m unittest discover -s tests -p test_core_gui.py -v
