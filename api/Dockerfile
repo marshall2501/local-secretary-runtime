@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 COPY api/ /app/api/
 COPY secretary/ /app/secretary/
 COPY application/ /app/application/
+COPY bootstrap/ /app/bootstrap/
 COPY ritsuko/ /app/ritsuko/
 COPY pkb/ /app/pkb/
 COPY infrastructure/ /app/infrastructure/

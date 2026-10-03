@@ -10,24 +10,22 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
-from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
-import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
-from psycopg.conninfo import conninfo_to_dict, make_conninfo
-from psycopg.rows import dict_row
 from pydantic import BaseModel, Field, StringConstraints
 
-from infrastructure.postgres.read_repository import MEMORY_KINDS, PostgresReadRepository, memory_search_sql
-from application.read_service import ReadService
-from ritsuko.tasks.service import (
-    PROTOTYPE_STEPS, TaskConflictError, TaskNotFoundError, TaskService,
+from bootstrap.api_runtime import (
+    api_config,
+    build_candidate_service,
+    build_read_service,
+    build_task_service,
+    connect,
+    verify_api_database,
 )
-from pkb.candidate_service import CandidateService
-from infrastructure.postgres.task_repository import PostgresTaskRepository
-from infrastructure.postgres.candidate_repository import PostgresCandidateRepository
+
+from ritsuko.tasks.service import TaskConflictError, TaskNotFoundError
 
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
@@ -63,51 +61,6 @@ class NewCandidate(BaseModel):
     prompt_version: ShortText
 
 
-def api_config() -> tuple[str, str]:
-    # Desktop dev mode keeps the existing localhost DSN + token workflow.
-    # Container mode loads both secrets from files mounted by Compose.
-    dsn = os.getenv("LSA_API_DSN", "").strip()
-    token = os.getenv("LSA_API_TOKEN", "")
-    container_mode = os.getenv("LSA_API_CONTAINER_MODE", "") == "1"
-    token_file = os.getenv("LSA_API_TOKEN_FILE", "")
-    password_file = os.getenv("LSA_API_DB_PASSWORD_FILE", "")
-    if not dsn:
-        raise RuntimeError("Set LSA_API_DSN for a dedicated restricted DB login.")
-    if token_file:
-        if not container_mode or token:
-            raise RuntimeError("Token file requires container mode without inline token.")
-        try:
-            token = Path(token_file).read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise RuntimeError("Unable to read API token secret file.") from exc
-    if len(token) < 32:
-        raise RuntimeError("Set a unique LSA_API_TOKEN of at least 32 characters.")
-    parsed = conninfo_to_dict(dsn)
-    if parsed.get("user") in ("secretary_admin", "postgres", None, ""):
-        raise RuntimeError("Refusing PostgreSQL provisioning/superuser account.")
-    if parsed.get("hostaddr"):
-        raise RuntimeError("Host address override is not allowed.")
-    if container_mode:
-        if parsed.get("user") != "secretary_api":
-            raise RuntimeError("Container API requires the candidate-only secretary_api login.")
-        if parsed.get("host") != "secretary-postgres":
-            raise RuntimeError("Container API must use its dedicated DB service hostname.")
-        if not password_file or parsed.get("password"):
-            raise RuntimeError("Container mode requires a separate DB password file.")
-        try:
-            password = Path(password_file).read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise RuntimeError("Unable to read database password secret file.") from exc
-        if not password:
-            raise RuntimeError("Database password file is empty.")
-        dsn = make_conninfo(dsn, password=password)
-    elif parsed.get("host") not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError("Desktop MVP API requires a localhost DB connection.")
-    elif password_file:
-        raise RuntimeError("Password file mode requires container mode.")
-    return dsn, token
-
-
 def external_read_token() -> str | None:
     """Return the optional read-only external credential.
 
@@ -140,65 +93,21 @@ def external_read_token() -> str | None:
     return token
 
 
-def connect() -> psycopg.Connection:
-    dsn, _ = api_config()
-    return psycopg.connect(dsn, row_factory=dict_row, connect_timeout=5)
+def read_service():
+    return build_read_service(connect)
 
 
-def read_service() -> ReadService:
-    """Build the shared read service without coupling it to FastAPI."""
-    return ReadService(PostgresReadRepository(connect))
+def task_service():
+    return build_task_service(connect)
 
 
-def task_service() -> TaskService:
-    """Compose RITSUKO task application logic with the PostgreSQL adapter."""
-    return TaskService(PostgresTaskRepository(connect))
-
-
-def candidate_service() -> CandidateService:
-    """Compose PKB candidate intake with the PostgreSQL adapter."""
-    return CandidateService(PostgresCandidateRepository(connect))
+def candidate_service():
+    return build_candidate_service(connect)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Fail closed at startup; do not offer an API backed by an admin connection.
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"
-            )
-            row = cur.fetchone()
-            if row is None or row["rolsuper"]:
-                raise RuntimeError("API DB login must be a non-superuser.")
-            cur.execute(
-                "SELECT pg_has_role(current_user, %s, 'member') AS too_privileged",
-                ("secretary_memory_writer",),
-            )
-            if cur.fetchone()["too_privileged"]:
-                raise RuntimeError("API must not inherit trusted memory-write privileges.")
-            checks = (
-                ("secretary.entities", "SELECT"),
-                ("secretary.pending_claims", "INSERT"),
-                ("secretary.tasks", "INSERT"),
-                ("secretary.audit_events", "INSERT"),
-            )
-            for table, permission in checks:
-                if table == "secretary.pending_claims":
-                    # Candidate role has column-level INSERT only, not table INSERT.
-                    cur.execute(
-                        "SELECT has_column_privilege(current_user, %s, %s, 'INSERT') AS permitted",
-                        (table, "entity_id"),
-                    )
-                else:
-                    cur.execute(
-                        "SELECT has_table_privilege(current_user, %s, %s) AS permitted",
-                        (table, permission),
-                    )
-                if not cur.fetchone()["permitted"]:
-                    raise RuntimeError(
-                        f"API DB login is missing {permission} on {table}."
-                    )
+    verify_api_database(connect)
     yield
 
 
