@@ -3,8 +3,8 @@ import json
 import unittest
 from pathlib import Path
 
-from pkb_proto.episode_intake import load_fixture
-from pkb_proto.extraction_service import (
+from pkb.episode_intake import load_fixture
+from pkb.extraction_service import (
     extraction_messages, inspect_model_output,
 )
 

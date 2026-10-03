@@ -3,12 +3,12 @@ from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 import unittest
-from pkb_proto.memory_contracts import MemoryIntake, validate_draft
-from pkb_proto.memory_extractor import extract
-from pkb_proto.memory_grounding import ground, resolve_entity
-from pkb_proto.ingestion_gate import memory_write_decision
-from pkb_proto.memory_intake import write_intake
-from pkb_proto.memory_registry import EFFECT_RULES
+from pkb.memory_contracts import MemoryIntake, validate_draft
+from pkb.memory_extractor import extract
+from pkb.memory_grounding import ground, resolve_entity
+from pkb.ingestion_gate import memory_write_decision
+from pkb.memory_intake import write_intake
+from pkb.memory_registry import EFFECT_RULES
 
 CATALOG = [dict(id='1', names={'サブPC','PC'}, kind='computer', retired=False),
            dict(id='2', names={'メインPC','PC'}, kind='computer', retired=False),

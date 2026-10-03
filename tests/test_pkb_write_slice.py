@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
-from pkb_proto.ingestion_gate import InputRecord, ProposedClaim
-from pkb_proto.write_service import _literal_gate, payload_hash, write_one
+from pkb.ingestion_gate import InputRecord, ProposedClaim
+from pkb.write_service import _literal_gate, payload_hash, write_one
 
 AT = datetime(2026, 9, 27, tzinfo=timezone.utc)
 

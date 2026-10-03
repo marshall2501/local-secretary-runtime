@@ -2,8 +2,8 @@
 import json
 import unittest
 
-from pkb_proto.extraction_service import Extraction
-from pkb_proto.gui_helpers import analyze_reply, export_report
+from pkb.extraction_service import Extraction
+from interfaces.workbench.gui_helpers import analyze_reply, export_report
 
 
 EP = {"id": "pc-01", "text": "サブPCの架空更新。"}

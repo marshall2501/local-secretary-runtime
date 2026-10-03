@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from pkb_proto.system_debug import environment_snapshot, git_snapshot
+from infrastructure.system_debug import environment_snapshot, git_snapshot
 
 
 class SystemDebugTests(TestCase):
