@@ -249,3 +249,18 @@ def restore_interrupted_cooperative_probe(connection_factory, task_id: UUID,
                     (task_id,task_id,Jsonb({"error":error})),
                 )
     return True
+
+
+def list_interrupted_advisors(connection_factory) -> list[tuple]:
+    """Return queued/running daily advisor records for restart recovery."""
+    with connection_factory() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                """SELECT id, checkpoint->'advisor_shadow'
+                   FROM secretary.tasks
+                   WHERE requested_by='local_user'
+                     AND COALESCE(checkpoint->>'core_slice', '')='daily_read_only_v1'
+                     AND COALESCE(checkpoint->'advisor_shadow'->>'job_status', '')
+                         IN ('queued', 'running')"""
+            )
+            return list(cur.fetchall())

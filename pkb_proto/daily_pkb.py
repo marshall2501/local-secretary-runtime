@@ -57,6 +57,7 @@ from ritsuko.application.task_queries import (
     core_task_selection_result,
 )
 from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
+from infrastructure.postgres.pkb_debug import debug_database_summary
 from infrastructure.postgres.core_advisor_repository import (
     claim_cooperative_probe as persist_claim_cooperative_probe,
     fail_cooperative_probe as persist_fail_cooperative_probe,
@@ -64,6 +65,7 @@ from infrastructure.postgres.core_advisor_repository import (
     record_cooperative_probe as persist_record_cooperative_probe,
     restore_interrupted_cooperative_probe as persist_restore_interrupted_cooperative_probe,
     write_advisor_shadow as persist_advisor_shadow,
+    list_interrupted_advisors,
 )
 from ritsuko.application.task_records import (
     abort_proposal_review_record,
@@ -2165,15 +2167,12 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
 
 from pkb.memory_contracts import MemoryIntake
 from pkb.memory_intake import write_intake
+from pkb.application.memory_intake import register_memory_intake as write_checked_memory_intake
 
 
 def register_memory_intake(intake: MemoryIntake) -> dict:
     with connection() as db:
-        with db.cursor() as cur:
-            cur.execute("SELECT to_regclass('secretary.pkb_memory_intakes')")
-            if cur.fetchone()[0] is None:
-                raise ValueError('Memory Intake用の隔離DB migration 019が未適用です。')
-        return write_intake(db, intake)
+        return write_checked_memory_intake(db, intake)
 
 
 class TextInput(BaseModel):
@@ -2316,41 +2315,9 @@ def api_pending_accept(pending_id: str):
 
 
 def _debug_database_summary() -> dict:
-    try:
-        with connection() as db:
-            with db.cursor() as cur:
-                cur.execute("SELECT current_database(), current_user")
-                database, user = cur.fetchone()
-            info = db.info
-        boundary_ok = (
-            database == DBNAME
-            and user == WRITER
-            and (info.host or "") in ("127.0.0.1", "localhost", "::1")
-        )
-        return {
-            "status": "ok" if boundary_ok else "warning",
-            "database": database,
-            "user": user,
-            "host": info.host or "",
-            "port": info.port,
-            "boundary_ok": boundary_ok,
-            "latest_migration": (
-                os.environ.get("LSA_PKB_DAILY_LATEST_MIGRATION") or "unknown"
-            ),
-        }
-    except Exception as exc:
-        return {
-            "status": "error",
-            "database": "unavailable",
-            "user": "unavailable",
-            "host": "",
-            "port": None,
-            "boundary_ok": False,
-            "latest_migration": (
-                os.environ.get("LSA_PKB_DAILY_LATEST_MIGRATION") or "unknown"
-            ),
-            "error": type(exc).__name__,
-        }
+    return debug_database_summary(
+        connection, expected_database=DBNAME, expected_user=WRITER
+    )
 
 
 def _load_system_debug_snapshot() -> dict:
@@ -7422,17 +7389,7 @@ def _recover_interrupted_core_advisors(
 ) -> int:
     """Mark queued/running advisor jobs interrupted and restore resumable probes."""
     try:
-        with connection() as db:
-            with db.cursor() as cur:
-                cur.execute(
-                    """SELECT id, checkpoint->'advisor_shadow'
-                       FROM secretary.tasks
-                       WHERE requested_by='local_user'
-                         AND COALESCE(checkpoint->>'core_slice', '')='daily_read_only_v1'
-                         AND COALESCE(checkpoint->'advisor_shadow'->>'job_status', '')
-                             IN ('queued', 'running')"""
-                )
-                rows = cur.fetchall()
+        rows = list_interrupted_advisors(connection)
     except Exception:
         return 0
 
