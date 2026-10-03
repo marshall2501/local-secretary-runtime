@@ -64,7 +64,7 @@ class CoreGuiTests(TestCase):
     def test_sql_paging_filters_offsets_and_validation(self):
         for name in ('open', 'completed', 'recent'):
             loader = getattr(daily, f'load_{name}_core_tasks')
-            with patch.object(daily, 'connection') as connection:
+            with patch('bootstrap.web_runtime.connection') as connection:
                 cur = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
                 cur.fetchall.return_value = []
                 self.assertEqual(loader(limit=6, offset=60), [])
@@ -142,7 +142,7 @@ class CoreGuiTests(TestCase):
         finalize.assert_called_once()
 
     def test_final_decision_is_persisted_with_task_status(self):
-        with patch.object(daily, 'connection') as connection:
+        with patch('bootstrap.web_runtime.connection') as connection:
             cur = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
             cur.fetchone.return_value = ({'existing': 'preserved'},)
             daily._finalize_cooperative_probe(UUID(int=1),

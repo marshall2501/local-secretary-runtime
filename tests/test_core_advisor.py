@@ -407,7 +407,7 @@ class CoreAdvisorTests(unittest.TestCase):
                 "reason": "ambiguous_request",
             },
         }
-        with patch("interfaces.web.app.connection") as connection:
+        with patch("bootstrap.web_runtime.connection") as connection:
             db = connection.return_value.__enter__.return_value
             cur = db.cursor.return_value.__enter__.return_value
             cur.fetchone.return_value = ("running", checkpoint)
@@ -437,7 +437,7 @@ class CoreAdvisorTests(unittest.TestCase):
 
     @patch("interfaces.web.app._restore_interrupted_cooperative_probe")
     @patch("interfaces.web.app._write_core_advisor_shadow", return_value=True)
-    @patch("interfaces.web.app.connection")
+    @patch("bootstrap.web_runtime.connection")
     def test_recovery_marks_shadow_and_repairs_running_probe(
         self, connection, write_mock, restore_mock
     ):
