@@ -11,7 +11,7 @@ $adminSecret = Join-Path $main 'secrets\postgres-password.txt'
 $writerSecret = Join-Path $worktree 'secrets\pkb-proto-writer-password.txt'
 $python = Join-Path $main '.venv\Scripts\python.exe'
 $envFile = Join-Path $main '.env.postgres'
-$migration = Join-Path $worktree 'pkb_proto\sql\006_pkb_proto_corrections.sql'
+$migration = Join-Path $worktree 'db\isolated\pkb_proto\006_pkb_proto_corrections.sql'
 if (!(Test-Path -LiteralPath $adminSecret -PathType Leaf) -or
     !(Test-Path -LiteralPath $writerSecret -PathType Leaf) -or
     !(Test-Path -LiteralPath $python -PathType Leaf) -or
