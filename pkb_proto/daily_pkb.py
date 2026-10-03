@@ -52,6 +52,20 @@ from ritsuko.core.observation_loop import (
     run_pkb_observation_loop,
     resume_user_answer,
 )
+from ritsuko.application.task_records import (
+    abort_proposal_review_record,
+    abort_user_resume_record,
+    claim_proposal_review_record,
+    claim_user_resume_record,
+    create_task_record,
+    fail_task_record,
+    finalize_proposal_review_record,
+    persist_session_record,
+    prepare_memory_intake_record,
+    record_pkb_read_record,
+)
+from ritsuko.application.read_dispatch import execute_core_read
+from ritsuko.core.request_scope import core_answer, scope_core_request
 from ritsuko.tasks.magi_task_store import (
     abort_proposal_review as abort_magi_proposal_review,
     abort_user_resume as abort_magi_user_resume,
@@ -1071,289 +1085,56 @@ def _execute_magi_pkb_request(
     return _execute_core_read("pkb_search", requested or user_raw)
 
 
-def _create_magi_core_task_record(
-    task_id: UUID,
-    request: str,
-    member_specs: list[dict],
-) -> None:
-    with connection() as db:
-        create_magi_core_task(
-            db,
-            task_id=task_id,
-            request=request,
-            member_specs=member_specs,
-        )
+def _create_magi_core_task_record(task_id: UUID, request: str, member_specs: list[dict]) -> None:
+    create_task_record(connection, task_id, request, member_specs)
 
 
-def _claim_magi_user_resume_record(
-    task_id: UUID,
-    reply_length: int,
-    reply_fingerprint: str,
-) -> tuple[dict, str | None]:
-    with connection() as db:
-        return claim_magi_user_resume(
-            db,
-            task_id=task_id,
-            reply_length=reply_length,
-            reply_fingerprint=reply_fingerprint,
-        )
+def _claim_magi_user_resume_record(task_id: UUID, reply_length: int, reply_fingerprint: str):
+    return claim_user_resume_record(connection, task_id, reply_length, reply_fingerprint)
 
 
-def _abort_magi_user_resume_record(
-    task_id: UUID,
-    error_type: str,
-) -> None:
-    with connection() as db:
-        abort_magi_user_resume(
-            db,
-            task_id=task_id,
-            error=error_type,
-        )
+def _abort_magi_user_resume_record(task_id: UUID, error_type: str) -> None:
+    abort_user_resume_record(connection, task_id, error_type)
 
 
-def _claim_magi_proposal_review_record(
-    task_id: UUID,
-    decision: str,
-    memory_result: dict | None,
-) -> tuple[dict, str | None, dict, dict]:
-    with connection() as db:
-        return claim_magi_proposal_review(
-            db,
-            task_id=task_id,
-            decision=decision,
-            memory_result=memory_result,
-        )
+def _claim_magi_proposal_review_record(task_id: UUID, decision: str, memory_result: dict | None):
+    return claim_proposal_review_record(connection, task_id, decision, memory_result)
 
 
-def _finalize_magi_proposal_review_record(
-    task_id: UUID,
-    session: dict,
-    selected_capability: str | None,
-) -> dict:
-    with connection() as db:
-        return finalize_magi_proposal_review(
-            db,
-            task_id=task_id,
-            session=session,
-            selected_capability=selected_capability,
-        )
+def _finalize_magi_proposal_review_record(task_id: UUID, session: dict, selected_capability: str | None) -> dict:
+    return finalize_proposal_review_record(connection, task_id, session, selected_capability)
 
 
-def _abort_magi_proposal_review_record(
-    task_id: UUID,
-    error_type: str,
-) -> None:
-    with connection() as db:
-        abort_magi_proposal_review(
-            db,
-            task_id=task_id,
-            error=error_type,
-        )
+def _abort_magi_proposal_review_record(task_id: UUID, error_type: str) -> None:
+    abort_proposal_review_record(connection, task_id, error_type)
 
 
 def _prepare_magi_memory_intake_record(task_id: UUID) -> MemoryIntake:
-    with connection() as db:
-        return prepare_magi_memory_intake(db, task_id=task_id)
+    return prepare_memory_intake_record(connection, task_id)
 
 
-def _persist_magi_core_session_record(
-    task_id: UUID,
-    session: dict,
-    selected_capability: str | None = None,
-) -> dict:
-    with connection() as db:
-        return persist_magi_core_session(
-            db,
-            task_id=task_id,
-            session=session,
-            selected_capability=selected_capability,
-        )
+def _persist_magi_core_session_record(task_id: UUID, session: dict, selected_capability: str | None = None) -> dict:
+    return persist_session_record(connection, task_id, session, selected_capability)
 
 
-def _record_magi_pkb_read_record(
-    task_id: UUID,
-    execution: dict,
-    pending_request: dict,
-) -> tuple[str, str]:
-    with connection() as db:
-        return record_magi_pkb_read(
-            db,
-            task_id=task_id,
-            execution=execution,
-            pending_request=pending_request,
-        )
+def _record_magi_pkb_read_record(task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
+    return record_pkb_read_record(connection, task_id, execution, pending_request)
 
 
 def _fail_magi_core_task_record(task_id: UUID, error_type: str) -> None:
-    with connection() as db:
-        fail_magi_core_task(db, task_id=task_id, error=error_type)
+    fail_task_record(connection, task_id, error_type)
 
 
 def _execute_core_read(capability: str, text: str) -> dict:
-    """Execute one bounded read-only capability and return normalized evidence metadata."""
-    if capability == "pkb_search":
-        result = search_text(text)
-        return {
-            "capability": capability,
-            "result": result,
-            "answer": core_answer(result),
-            "total": int(result.get("total") or 0),
-            "tool": "pkb",
-            "operation": "search",
-            "source_slug": "pkb-search",
-            "citation": "Secretary Core read-only PKB search result",
-            "verified_by": "deterministic_pkb_query",
-        }
-    if capability == "finance_read":
-        result = finance_text(text)
-        return {
-            "capability": capability,
-            "result": result,
-            "answer": finance_core_answer(result),
-            "total": int(result.get("total") or 0),
-            "tool": "finance",
-            "operation": "summary",
-            "source_slug": "finance-read",
-            "citation": "Secretary Core read-only finance summary",
-            "verified_by": "deterministic_finance_query",
-        }
-    if capability == "web_research":
-        result = web_text(text)
-        return {
-            "capability": capability,
-            "result": result,
-            "answer": web_core_answer(result),
-            "total": int(result.get("total") or 0),
-            "tool": "web",
-            "operation": "research",
-            "source_slug": "web-research",
-            "citation": "Secretary Core bounded read-only web research result",
-            "verified_by": "bounded_web_retrieval",
-            "source_metadata": {
-                "provider": result.get("provider"),
-                "region": result.get("region"),
-                "web_sources": [
-                    {
-                        "rank": hit.get("rank"),
-                        "title": hit.get("title"),
-                        "url": hit.get("url"),
-                        "snippet": hit.get("snippet"),
-                        "fetch_status": hit.get("fetch_status"),
-                        "evidence_rank": hit.get("evidence_rank"),
-                        "quality_score": hit.get("quality_score"),
-                        "authority_hint": hit.get("authority_hint"),
-                        "authority_level": hit.get("authority_level"),
-                        "version_candidates": hit.get("version_candidates"),
-                        "version_facts": hit.get("version_facts"),
-                        "date_hints": hit.get("date_hints"),
-                    }
-                    for hit in (result.get("hits") or [])
-                ],
-            },
-        }
-    raise ValueError("Unsupported Core read capability")
-
-
-def scope_core_request(
-    text: str,
-    entities: dict[str, dict],
-    observation_pack: dict | None = None,
-) -> dict:
-    """Fail closed unless this first Core slice can safely scope a PKB read."""
-    q = text.strip()
-    if not q:
-        return {
-            "status": "question",
-            "question": "何を確認したいか入力してください。",
-            "reason": "empty_request",
-        }
-
-    wants_web = any(
-        word in q
-        for word in ("Web", "WEB", "web", "ウェブ", "ネット", "インターネット", "公式サイト")
+    return execute_core_read(
+        capability, text,
+        pkb_search=search_text,
+        finance_read=finance_text,
+        web_research=web_text,
+        pkb_answer=core_answer,
+        finance_answer=finance_core_answer,
+        web_answer=web_core_answer,
     )
-    wants_compare = any(word in q for word in ("比較", "最新か", "新しいか", "最新版か"))
-    wants_current_driver = "ドライバ" in q and any(
-        word in q for word in ("現在", "今の", "現行")
-    )
-    if wants_web and wants_compare and wants_current_driver:
-        return {
-            "status": "ready",
-            "capability": "pkb_web_compare",
-            "domain": "pc",
-        }
-
-    if wants_web:
-        return {
-            "status": "ready",
-            "capability": "web_research",
-            "domain": "research",
-        }
-
-    if any(word in q for word in ("家計", "支出", "収入", "収支", "出費")):
-        return {
-            "status": "ready",
-            "capability": "finance_read",
-            "domain": "finance",
-        }
-
-    component_state = COMPONENT_STATE_QUERY_PATTERN.search(q)
-    if component_state and any(word in q for word in ("現在", "今の", "現行")):
-        return {"status": "ready", "capability": "pkb_search", "domain": "pc"}
-
-    if observation_pack is not None:
-        mentioned = list(observation_pack.get("matched_entities") or [])
-    else:
-        mentioned = [
-            row for name, row in sorted(
-                entities.items(), key=lambda item: len(item[0]), reverse=True
-            )
-            if name in q
-        ]
-    if mentioned and any(word in q for word in ("構成", "ドライバ", "サーボ", "履歴")):
-        return {
-            "status": "ready",
-            "capability": "pkb_search",
-            "domain": mentioned[0]["domain"],
-        }
-
-    return {
-        "status": "question",
-        "question": (
-            "この最小Coreでは、まだ対象と確認項目を安全に特定できません。"
-            " 例: 「メインPCのGPUの現在のドライバーを調べて」のように"
-            "対象と確認したい内容を指定してください。"
-        ),
-        "reason": "request_not_safely_scoped",
-    }
-
-
-def core_answer(search_result: dict) -> str:
-    rows = search_result.get("items") or []
-    if not rows:
-        return "PKBに該当する記録が見つかりませんでした。"
-
-    if search_result.get("result_kind") == "components":
-        parts = []
-        for row in rows[:8]:
-            label = row.get("component_name") or "構成要素"
-            role = row.get("relation_role")
-            driver = row.get("current_driver")
-            detail = label
-            if role:
-                detail += f"（{role}）"
-            if driver:
-                detail += f": 現在ドライバー {driver}"
-            parts.append(detail)
-        return "PKBの構成記録では、" + " / ".join(parts) + "。"
-
-    parts = []
-    for row in rows[:8]:
-        entity = row.get("entity_name") or "対象"
-        predicate = row.get("predicate") or "項目"
-        value = row.get("value")
-        parts.append(f"{entity}: {predicate}={value}")
-    return "PKBの記録では、" + " / ".join(parts) + "。"
 
 
 def load_core_task_window(loader, visible_count: int) -> tuple[list[dict], bool]:
