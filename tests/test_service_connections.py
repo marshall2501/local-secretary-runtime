@@ -14,8 +14,9 @@ from pkb_proto.credential_resolver import (
 from pkb_proto.service_connections import (
     CONNECTION_TYPES,
     LLM_INFERENCE,
-    PROVIDER_USAGE_READ,
+    SERVICE_BILLING_READ,
     adapter_defaults,
+    connection_adapter_keys,
     normalize_capabilities,
     normalize_connection_type,
 )
@@ -29,6 +30,12 @@ class ServiceConnectionContractTests(unittest.TestCase):
         self.assertEqual(adapter_defaults("openai")["connection_type"], "api_key")
         self.assertEqual(adapter_defaults("gemini")["connection_type"], "api_key")
         self.assertEqual(adapter_defaults("ollama")["connection_type"], "none")
+        self.assertEqual(adapter_defaults("google_cloud")["connection_type"], "external_credentials")
+        self.assertIn("google_cloud", connection_adapter_keys())
+        self.assertEqual(
+            adapter_defaults("google_cloud")["capabilities"],
+            [SERVICE_BILLING_READ],
+        )
         self.assertEqual(
             adapter_defaults("openai")["capabilities"],
             [LLM_INFERENCE],
@@ -37,7 +44,7 @@ class ServiceConnectionContractTests(unittest.TestCase):
     def test_connection_types_are_bounded(self):
         self.assertEqual(
             tuple(CONNECTION_TYPES),
-            ("none", "api_key", "username_password", "oauth2"),
+            ("none", "api_key", "username_password", "oauth2", "external_credentials"),
         )
         self.assertEqual(normalize_connection_type("api_key"), "api_key")
         with self.assertRaisesRegex(ValueError, "invalid_connection_type"):
@@ -47,10 +54,10 @@ class ServiceConnectionContractTests(unittest.TestCase):
         self.assertEqual(
             normalize_capabilities([
                 LLM_INFERENCE,
-                PROVIDER_USAGE_READ,
+                SERVICE_BILLING_READ,
                 LLM_INFERENCE,
             ]),
-            (LLM_INFERENCE, PROVIDER_USAGE_READ),
+            (LLM_INFERENCE, SERVICE_BILLING_READ),
         )
 
     def test_env_credential_reference_is_bootstrap_fallback(self):

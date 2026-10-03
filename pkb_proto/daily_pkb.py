@@ -107,19 +107,20 @@ from .write_service import write_one
 from .web_research import research_web
 from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
-from .provider_usage import ProviderUsageError, read_provider_month_usage
-from .provider_usage_settings import (
-    bootstrap_openai_usage_profile,
-    list_provider_usage_profiles,
-    upsert_provider_usage_profile,
+from .service_billing import ServiceBillingError, read_service_billing_snapshot
+from .service_billing_settings import (
+    bootstrap_openai_billing_profile,
+    list_service_billing_profiles,
+    upsert_service_billing_profile,
 )
 from .credential_resolver import register_connection_credential_loader
 from .service_connections import (
     CONNECTION_TYPES,
     LLM_INFERENCE,
-    PROVIDER_USAGE_READ,
+    SERVICE_BILLING_READ,
     adapter_defaults as connection_adapter_defaults,
     bootstrap_connection_auth_from_env,
+    connection_adapter_keys,
     get_connection_auth_value,
     get_service_connection,
     list_service_connections,
@@ -3853,7 +3854,7 @@ _FEATURES = [
     ("予定", "未実装", "grey", None, "Google Calendarの閲覧・検索・PKB関連付け"),
     ("給与・税金", "未実装", "grey", None, "原本保管・抽出・照合・集計"),
     ("RITSUKO", "試験中", "blue-grey", "/core", "Secretary Core / Orchestrator。Task・MAGI通信・最終判断を管理"),
-    ("API利用状況", "試験中", "indigo", "/api-usage", "OpenAI Organization Usage/Costsの今月実績を読取表示"),
+    ("利用料金・契約", "試験中", "indigo", "/service-billing", "OpenAI / Google等の利用量・料金・契約・上限をAdapter経由で正規化表示"),
     ("開発Workbench", "利用可能", "green", "http://127.0.0.1:8092/", "LLM/PKB/Coreの開発検証用。日常GUIとは分離"),
     ("システム状態 / デバッグ", "利用可能", "blue-grey", "/debug", "Runtime・PostgreSQL・主要件数・環境変数のread-only診断"),
 ]
@@ -3866,7 +3867,7 @@ def _nav():
         ui.button("PKB", icon="account_tree").props("flat href=/pkb tag=a")
         ui.button("RITSUKO", icon="hub").props("flat href=/core tag=a")
         ui.button("家計・資産", icon="account_balance_wallet").props("flat href=/finance tag=a")
-        ui.button("API利用状況", icon="query_stats").props("flat href=/api-usage tag=a")
+        ui.button("利用料金・契約", icon="query_stats").props("flat href=/service-billing tag=a")
         ui.button("デバッグ", icon="monitor_heart").props("flat href=/debug tag=a")
         ui.button("設定", icon="settings").props("flat href=/settings tag=a")
 
@@ -4220,8 +4221,8 @@ def debug_page():
         diagnostic_panel()
 
 
-@ui.page("/api-usage")
-def api_usage_page():
+@ui.page("/service-billing")
+def service_billing_page():
     state = {
         "result": None,
         "error": None,
@@ -4233,14 +4234,14 @@ def api_usage_page():
     try:
         with connection() as db:
             bootstrap_connection_auth_from_env(db)
-            bootstrap_openai_usage_profile(db)
-            state["profiles"] = list_provider_usage_profiles(db)
+            bootstrap_openai_billing_profile(db)
+            state["profiles"] = list_service_billing_profiles(db)
             for profile in state["profiles"]:
                 state["connections"][profile["connection_id"]] = (
                     get_service_connection(db, profile["connection_id"])
                 )
     except Exception as exc:
-        state["error"] = "API利用状況設定を読み込めません: " + str(exc)[:180]
+        state["error"] = "利用料金・契約設定を読み込めません: " + str(exc)[:180]
 
     profile_by_id = {item["id"]: item for item in state["profiles"]}
     profile_options = {
@@ -4257,19 +4258,19 @@ def api_usage_page():
 
     with ui.column().classes("w-full max-w-6xl mx-auto gap-4 p-4"):
         _portal_header(
-            "API利用状況",
-            "用途設定が明示的に選んだService Connection経由で利用実績を読取表示します。",
+            "利用料金・契約",
+            "Service Billing Profileが明示的に選んだService Connection経由で利用量・料金・契約状況を読取表示します。",
         )
 
         with ui.card().classes("w-full border-2 border-indigo-200"):
-            ui.label("Provider Usage").classes("text-xl font-bold")
+            ui.label("Service Billing").classes("text-xl font-bold")
             ui.label(
-                "usage / costs / limits / creditsを別概念として扱い、"
-                "取得できない値を0とはみなしません。現在のadapter実装はOpenAIです。"
+                "利用量 / charges / subscription / limits / creditsを別概念として扱い、"
+                "取得できない値を0とはみなしません。Adapterごとに取得可能な情報だけを正規化します。"
             ).classes("text-sm text-grey-7")
             ui.label(
                 "接続先・認証情報は設定画面のService Connectionで管理し、"
-                "API利用状況はProvider Usage Profileのconnection_idだけを使用します。"
+                "利用料金・契約はService Billing Profileのconnection_idだけを使用します。"
             ).classes("text-xs text-grey-7")
 
             profile_select = ui.select(
@@ -4279,7 +4280,7 @@ def api_usage_page():
                     if state["profiles"]
                     else None
                 ),
-                label="Provider Usage Profile",
+                label="Service Billing Profile",
             ).classes("w-full")
 
             with ui.row().classes("w-full items-center justify-between gap-3"):
@@ -4287,7 +4288,7 @@ def api_usage_page():
                     state["error"] or (
                         "未取得"
                         if state["profiles"]
-                        else "Provider Usage Profileがありません。設定画面でConnectionを割り当ててください。"
+                        else "Service Billing Profileがありません。設定画面でConnectionを割り当ててください。"
                     )
                 ).classes(
                     "text-sm text-red-700"
@@ -4323,38 +4324,38 @@ def api_usage_page():
                     + " / connection: "
                     + str(result.get("connection_name") or "-")
                 )
-                usage = result.get("usage") or {}
-                totals = usage.get("totals") or {}
-                costs = result.get("costs") or {}
-                cost_values = costs.get("values") or {}
-                cost_text = " / ".join(
+                activity = result.get("activity") or {}
+                totals = activity.get("totals") or {}
+                charges = result.get("charges") or {}
+                charge_values = charges.get("values") or {}
+                charge_text = " / ".join(
                     f"{currency.upper()} {value:,.4f}"
-                    for currency, value in sorted(cost_values.items())
+                    for currency, value in sorted(charge_values.items())
                 ) or (
                     "0"
-                    if costs.get("status") == "known"
+                    if charges.get("status") == "known"
                     else "unknown"
                 )
 
                 with metrics:
                     for title, value in (
-                        ("今月のCost", cost_text),
+                        ("今月の料金", charge_text),
                         (
                             "Requests",
                             f"{int(totals.get('requests') or 0):,}"
-                            if usage.get("status") == "known"
+                            if activity.get("status") in {"known", "partial"}
                             else "unknown",
                         ),
                         (
                             "Input tokens",
                             f"{int(totals.get('input_tokens') or 0):,}"
-                            if usage.get("status") == "known"
+                            if activity.get("status") in {"known", "partial"}
                             else "unknown",
                         ),
                         (
                             "Output tokens",
                             f"{int(totals.get('output_tokens') or 0):,}"
-                            if usage.get("status") == "known"
+                            if activity.get("status") in {"known", "partial"}
                             else "unknown",
                         ),
                         (
@@ -4365,17 +4366,21 @@ def api_usage_page():
                             "Credits",
                             str((result.get("credits") or {}).get("status") or "unknown"),
                         ),
+                        (
+                            "Subscription",
+                            str((result.get("subscription") or {}).get("status") or "unknown"),
+                        ),
                     ):
                         with ui.card().classes("min-w-48 bg-indigo-50"):
                             ui.label(title).classes("text-xs text-grey-7")
                             ui.label(value).classes("text-lg font-bold")
 
                 with model_table:
-                    ui.label("モデル別 Usage").classes("font-bold")
-                    rows = usage.get("by_model") or []
+                    ui.label("モデル別利用量").classes("font-bold")
+                    rows = activity.get("by_model") or []
                     if not rows:
                         ui.label(
-                            "この期間のcompletion usageはありません。"
+                            "この期間のモデル別利用実績はありません。"
                         ).classes("text-sm text-grey-7")
                     else:
                         ui.table(
@@ -4416,7 +4421,7 @@ def api_usage_page():
                 profile = profile_by_id.get(profile_id)
                 if profile is None:
                     ui.notify(
-                        "Provider Usage Profileを選択してください",
+                        "Service Billing Profileを選択してください",
                         type="warning",
                     )
                     return
@@ -4430,25 +4435,25 @@ def api_usage_page():
                 state["busy"] = True
                 refresh_button.disable()
                 status.set_text(
-                    str(profile.get("display_name") or "Provider Usage")
+                    str(profile.get("display_name") or "Service Billing")
                     + " / "
                     + str(selected.get("display_name") or "Connection")
                     + " から取得中..."
                 )
                 try:
                     result = await run.io_bound(
-                        read_provider_month_usage,
+                        read_service_billing_snapshot,
                         selected,
                     )
                     state["result"] = result
                     state["error"] = None
                     render_result(result)
-                except ProviderUsageError as exc:
+                except ServiceBillingError as exc:
                     state["error"] = str(exc)
                     render_result(None, state["error"])
                 except Exception:
                     state["error"] = (
-                        "API利用状況の取得で予期しないエラーが発生しました。"
+                        "利用料金・契約の取得で予期しないエラーが発生しました。"
                     )
                     render_result(None, state["error"])
                 finally:
@@ -4458,7 +4463,7 @@ def api_usage_page():
             refresh_button.on_click(refresh)
 
         ui.label(
-            "Usage値はConnection設定へ保存しません。残高・利用上限は取得できない限り"
+            "取得値はConnection設定へ保存しません。料金・契約・残高・利用上限は取得できない限り"
             "unknownとして扱います。接続先の変更は設定画面のProfile→Connection割当で行います。"
         ).classes("text-xs text-grey-7")
 
@@ -6590,7 +6595,7 @@ def settings_page():
                 try:
                     with connection() as db:
                         bootstrap_connection_auth_from_env(db)
-                        bootstrap_openai_usage_profile(db)
+                        bootstrap_openai_billing_profile(db)
                         connection_rows = list_service_connections(
                             db,
                             include_disabled=True,
@@ -6650,7 +6655,7 @@ def settings_page():
                         placeholder="例: OpenAI 通常API / OpenAI Admin / Ollama SubPC",
                     ).classes("min-w-64 grow")
                     connection_adapter = ui.select(
-                        options=list(PROVIDERS),
+                        options=list(connection_adapter_keys()),
                         value="openai",
                         label="Adapter",
                     ).classes("min-w-40")
@@ -6668,7 +6673,7 @@ def settings_page():
                     ).classes("min-w-96 grow")
                     connection_role = ui.input(
                         "Role（任意・分類表示用）",
-                        placeholder="llm / provider_usage など",
+                        placeholder="llm / service_billing など",
                     ).classes("min-w-56")
                     connection_config = ui.textarea(
                         "Config JSON（非認証の接続固有設定）",
@@ -6681,7 +6686,7 @@ def settings_page():
                         value=True,
                     )
                     connection_cap_usage = ui.checkbox(
-                        "Provider usage read",
+                        "Service billing read",
                         value=False,
                     )
 
@@ -6724,12 +6729,18 @@ def settings_page():
                         return
                     connection_endpoint.value = defaults["endpoint"]
                     connection_type.value = defaults["connection_type"]
+                    connection_config.value = json.dumps(
+                        defaults.get("config_data") or {},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
                     default_caps = set(defaults["capabilities"])
                     connection_cap_llm.value = LLM_INFERENCE in default_caps
-                    connection_cap_usage.value = PROVIDER_USAGE_READ in default_caps
+                    connection_cap_usage.value = SERVICE_BILLING_READ in default_caps
                     for control in (
                         connection_endpoint,
                         connection_type,
+                        connection_config,
                         connection_cap_llm,
                         connection_cap_usage,
                     ):
@@ -6754,7 +6765,7 @@ def settings_page():
                     )
                     caps = set(item.get("capabilities") or [])
                     connection_cap_llm.value = LLM_INFERENCE in caps
-                    connection_cap_usage.value = PROVIDER_USAGE_READ in caps
+                    connection_cap_usage.value = SERVICE_BILLING_READ in caps
                     auth_api_key.value = ""
                     auth_username.value = ""
                     auth_password.value = ""
@@ -6826,7 +6837,7 @@ def settings_page():
                         if connection_cap_llm.value:
                             capabilities.append(LLM_INFERENCE)
                         if connection_cap_usage.value:
-                            capabilities.append(PROVIDER_USAGE_READ)
+                            capabilities.append(SERVICE_BILLING_READ)
 
                         with connection() as db:
                             saved = upsert_service_connection(
@@ -6852,16 +6863,16 @@ def settings_page():
                         )
                         connection_edit_target.value = saved["id"]
                         connection_edit_target.update()
-                        usage_connection.options = {
+                        billing_connection.options = {
                             item["id"]: (
                                 item["display_name"] + f" [{item['adapter_key']}]"
                             )
                             for item in connection_by_id.values()
-                            if PROVIDER_USAGE_READ in set(item.get("capabilities") or [])
+                            if SERVICE_BILLING_READ in set(item.get("capabilities") or [])
                         }
-                        if usage_connection.value not in usage_connection.options:
-                            usage_connection.value = None
-                        usage_connection.update()
+                        if billing_connection.value not in billing_connection.options:
+                            billing_connection.value = None
+                        billing_connection.update()
 
                         llm_connection_by_id.clear()
                         llm_connection_by_id.update({
@@ -6907,117 +6918,117 @@ def settings_page():
                 ).classes("text-xs text-grey-7")
 
             with ui.expansion(
-                "API利用状況 — 接続割当",
+                "利用料金・契約 — 接続割当",
                 value=False,
                 icon="query_stats",
             ).classes("w-full border-2 border-indigo-200 bg-indigo-50"):
                 ui.label(
-                    "API利用状況の定義が使用するConnectionを明示的に選びます。"
+                    "利用料金・契約の定義が使用するConnectionを明示的に選びます。"
                     "ConnectionのRoleやCapabilityから自動選択しません。"
                 ).classes("text-sm")
                 try:
                     with connection() as db:
-                        usage_profiles = list_provider_usage_profiles(
+                        billing_profiles = list_service_billing_profiles(
                             db,
                             include_disabled=True,
                         )
-                        usage_connections = list_service_connections(
+                        billing_connections = list_service_connections(
                             db,
                             include_disabled=True,
-                            capability=PROVIDER_USAGE_READ,
+                            capability=SERVICE_BILLING_READ,
                         )
                 except Exception as exc:
-                    usage_profiles = []
-                    usage_connections = []
+                    billing_profiles = []
+                    billing_connections = []
                     ui.label(
-                        "Provider Usage設定を読み込めません: " + str(exc)[:180]
+                        "Service Billing設定を読み込めません: " + str(exc)[:180]
                     ).classes("text-sm text-red-700")
 
-                usage_profile_by_id = {
-                    item["id"]: item for item in usage_profiles
+                billing_profile_by_id = {
+                    item["id"]: item for item in billing_profiles
                 }
-                usage_profile_edit = ui.select(
+                billing_profile_edit = ui.select(
                     options={
                         item["id"]: item["display_name"]
                         + " → "
                         + item["connection_name"]
-                        for item in usage_profiles
+                        for item in billing_profiles
                     },
                     value=None,
-                    label="既存Provider Usage Profileを編集（未選択なら新規）",
+                    label="既存Service Billing Profileを編集（未選択なら新規）",
                 ).props("clearable").classes("w-full")
-                usage_profile_name = ui.input(
+                billing_profile_name = ui.input(
                     "表示名",
-                    value="OpenAI Usage",
+                    value="OpenAI Billing",
                 ).classes("w-full")
-                usage_connection = ui.select(
+                billing_connection = ui.select(
                     options={
                         item["id"]: item["display_name"]
                         + f" [{item['adapter_key']}]"
-                        for item in usage_connections
+                        for item in billing_connections
                     },
                     value=None,
                     label="使用するService Connection",
                 ).classes("w-full")
-                usage_profile_enabled = ui.switch("Enabled", value=True)
+                billing_profile_enabled = ui.switch("Enabled", value=True)
 
-                def apply_usage_profile(_event=None):
-                    item = usage_profile_by_id.get(
-                        str(usage_profile_edit.value or "")
+                def apply_billing_profile(_event=None):
+                    item = billing_profile_by_id.get(
+                        str(billing_profile_edit.value or "")
                     )
                     if item is None:
                         return
-                    usage_profile_name.value = item["display_name"]
-                    usage_connection.value = item["connection_id"]
-                    usage_profile_enabled.value = bool(item.get("enabled"))
-                    usage_profile_name.update()
-                    usage_connection.update()
-                    usage_profile_enabled.update()
+                    billing_profile_name.value = item["display_name"]
+                    billing_connection.value = item["connection_id"]
+                    billing_profile_enabled.value = bool(item.get("enabled"))
+                    billing_profile_name.update()
+                    billing_connection.update()
+                    billing_profile_enabled.update()
 
-                usage_profile_edit.on_value_change(apply_usage_profile)
+                billing_profile_edit.on_value_change(apply_billing_profile)
 
-                def save_usage_profile():
+                def save_billing_profile():
                     try:
                         with connection() as db:
-                            saved = upsert_provider_usage_profile(
+                            saved = upsert_service_billing_profile(
                                 db,
                                 display_name=str(
-                                    usage_profile_name.value or ""
+                                    billing_profile_name.value or ""
                                 ).strip(),
                                 connection_id=str(
-                                    usage_connection.value or ""
+                                    billing_connection.value or ""
                                 ).strip(),
-                                enabled=bool(usage_profile_enabled.value),
+                                enabled=bool(billing_profile_enabled.value),
                                 profile_id=(
-                                    str(usage_profile_edit.value)
-                                    if usage_profile_edit.value
+                                    str(billing_profile_edit.value)
+                                    if billing_profile_edit.value
                                     else None
                                 ),
                             )
-                        usage_profile_by_id[saved["id"]] = saved
-                        usage_profile_edit.options[saved["id"]] = (
+                        billing_profile_by_id[saved["id"]] = saved
+                        billing_profile_edit.options[saved["id"]] = (
                             saved["display_name"]
                             + " → "
                             + saved["connection_name"]
                         )
-                        usage_profile_edit.value = saved["id"]
-                        usage_profile_edit.update()
+                        billing_profile_edit.value = saved["id"]
+                        billing_profile_edit.update()
                         ui.notify(
-                            "Provider Usage Profileを保存しました",
+                            "Service Billing Profileを保存しました",
                             type="positive",
                         )
                     except Exception as exc:
                         ui.notify(
-                            "Provider Usage Profileを保存できません: "
+                            "Service Billing Profileを保存できません: "
                             + str(exc)[:220],
                             type="negative",
                         )
 
                 ui.button(
-                    "API利用状況の接続割当を保存",
+                    "利用料金・契約の接続割当を保存",
                     icon="save",
                     color="indigo",
-                    on_click=save_usage_profile,
+                    on_click=save_billing_profile,
                 )
 
             with ui.expansion(

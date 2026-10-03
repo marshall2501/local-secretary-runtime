@@ -23,8 +23,9 @@ $file022 = Join-Path $root 'pkb_proto\sql\022_ollama_generation_budget.sql'
 $file023 = Join-Path $root 'pkb_proto\sql\023_magi_retry_policy.sql'
 $file024 = Join-Path $root 'pkb_proto\sql\024_service_connections.sql'
 $file025 = Join-Path $root 'pkb_proto\sql\025_connection_auth_and_consumer_binding.sql'
+$file026 = Join-Path $root 'pkb_proto\sql\026_service_billing.sql'
 $file018 = Join-Path $root 'pkb_proto\sql\018_pkb_proto_core_audit_read.sql'
-foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023, $file024, $file025)) {
+foreach ($file in @($file008, $file009, $file010, $file011, $file012, $file013, $file014, $file015, $file016, $file017, $file018, $file019, $file020, $file021, $file022, $file023, $file024, $file025, $file026)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing migration: $file" }
 }
 
@@ -504,13 +505,44 @@ if (($has025 | Out-String).Trim() -eq '0') {
 $verify025 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='025_connection_auth_and_consumer_binding.sql';"
 $connectionTypeColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='service_connections' AND column_name='connection_type';"
 $connectionAuthColumn = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.columns WHERE table_schema='secretary' AND table_name='service_connections' AND column_name='auth_data';"
-$usageProfileTable = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='secretary' AND table_name='provider_usage_profiles';"
-$usageProfileGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.provider_usage_profiles','SELECT,INSERT,UPDATE,DELETE');"
+$usageProfileTable = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='secretary' AND table_name IN ('provider_usage_profiles','service_billing_profiles');"
+$usageProfileGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT CASE WHEN to_regclass('secretary.service_billing_profiles') IS NOT NULL THEN has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.service_billing_profiles','SELECT,INSERT,UPDATE,DELETE') ELSE has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.provider_usage_profiles','SELECT,INSERT,UPDATE,DELETE') END;"
 if ($LASTEXITCODE -ne 0 -or ($verify025 | Out-String).Trim() -ne '1' -or ($connectionTypeColumn | Out-String).Trim() -ne '1' -or ($connectionAuthColumn | Out-String).Trim() -ne '1' -or ($usageProfileTable | Out-String).Trim() -ne '1' -or ($usageProfileGrant | Out-String).Trim() -ne 't') {
     throw 'Connection auth / consumer binding migration verification failed.'
 }
 
-Write-Host 'PASS: PKB prototype migrations verified through 025 (Connection auth + explicit consumer binding included).'
+$has026 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='026_service_billing.sql';"
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect 026 schema version.' }
+if (($has026 | Out-String).Trim() -eq '0') {
+    $hash026 = (Get-FileHash -LiteralPath $file026 -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sql026 = [IO.File]::ReadAllText($file026).Replace('PENDING_SHA_REPLACED_BY_APPLIER', $hash026)
+    $tmpName026 = 'service-billing-' + [guid]::NewGuid().ToString('N') + '.sql'
+    $localTmp026 = Join-Path ([IO.Path]::GetTempPath()) $tmpName026
+    $remoteTmp026 = '/tmp/' + $tmpName026
+    try {
+        [IO.File]::WriteAllText($localTmp026, $sql026, (New-Object Text.UTF8Encoding($false)))
+        & docker cp $localTmp026 ($id + ':' + $remoteTmp026) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot stage 026 migration.' }
+        & docker exec $id psql -X -q -U secretary_admin -d $db -v ON_ERROR_STOP=1 -f $remoteTmp026
+        if ($LASTEXITCODE -ne 0) { throw '026 migration failed and was rolled back.' }
+    } finally {
+        if (Test-Path -LiteralPath $localTmp026) { Remove-Item -LiteralPath $localTmp026 }
+        & docker exec $id rm -f $remoteTmp026 | Out-Null
+    }
+} elseif (($has026 | Out-String).Trim() -ne '1') {
+    throw 'Unexpected duplicate 026 migration records.'
+}
+
+$verify026 = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='026_service_billing.sql';"
+$billingProfileTable = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='secretary' AND table_name='service_billing_profiles';"
+$legacyUsageProfileTable = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='secretary' AND table_name='provider_usage_profiles';"
+$billingProfileGrant = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('secretary_pkb_proto_writer_20260927','secretary.service_billing_profiles','SELECT,INSERT,UPDATE,DELETE');"
+$legacyCapabilityCount = & docker exec $id psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.service_connections WHERE 'provider_usage_read'=ANY(capabilities);"
+if ($LASTEXITCODE -ne 0 -or ($verify026 | Out-String).Trim() -ne '1' -or ($billingProfileTable | Out-String).Trim() -ne '1' -or ($legacyUsageProfileTable | Out-String).Trim() -ne '0' -or ($billingProfileGrant | Out-String).Trim() -ne 't' -or ($legacyCapabilityCount | Out-String).Trim() -ne '0') {
+    throw 'Service Billing migration verification failed.'
+}
+
+Write-Host 'PASS: PKB prototype migrations verified through 026 (Service Billing included).'
 
 
 

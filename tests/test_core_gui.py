@@ -1136,7 +1136,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 return result
 
             service = self.elements('Service Connections')[0]
-            usage = self.elements('API利用状況 — 接続割当')[0]
+            usage = self.elements('利用料金・契約 — 接続割当')[0]
             llm = self.elements('MAGI — LLM profile')[0]
             save = self.elements('保存して反映')[0]
             restore = self.elements('初期値に戻す')[0]
@@ -1160,7 +1160,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             'endpoint': 'https://api.openai.com/v1',
             'credential_ref': None,
             'account_label': None,
-            'capabilities': [daily.LLM_INFERENCE, daily.PROVIDER_USAGE_READ],
+            'capabilities': [daily.LLM_INFERENCE, daily.SERVICE_BILLING_READ],
             'config_data': {},
             'nonsecret_config': {},
             'enabled': True,
@@ -1172,9 +1172,9 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         with self.client, \
              patch.object(daily, 'connection'), \
              patch.object(daily, 'bootstrap_connection_auth_from_env', return_value=0), \
-             patch.object(daily, 'bootstrap_openai_usage_profile', return_value=None), \
+             patch.object(daily, 'bootstrap_openai_billing_profile', return_value=None), \
              patch.object(daily, 'list_service_connections', return_value=[]), \
-             patch.object(daily, 'list_provider_usage_profiles', return_value=[]), \
+             patch.object(daily, 'list_service_billing_profiles', return_value=[]), \
              patch.object(daily, 'list_llm_profiles', return_value=[]), \
              patch.object(daily, 'upsert_service_connection', return_value=saved_connection):
             daily.settings_page()

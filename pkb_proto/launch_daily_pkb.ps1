@@ -41,9 +41,9 @@ if ($info.Count -ne 1 -or $info[0].State.Health.Status -ne 'healthy' -or
     $bindings[0].HostPort -ne "$port") {
     throw 'PostgreSQL health or localhost binding is not the expected runtime configuration.'
 }
-$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='025_connection_auth_and_consumer_binding.sql';"
+$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='026_service_billing.sql';"
 if ($LASTEXITCODE -ne 0 -or ($count | Out-String).Trim() -ne '1') {
-    throw 'The isolated PKB database is missing migration 025. Run .\pkb_proto\run_pending_setup.ps1 first.'
+    throw 'The isolated PKB database is missing migration 026. Run .\pkb_proto\run_pending_setup.ps1 first.'
 }
 
 $migrationSummary = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || COALESCE((SELECT version FROM secretary.schema_migrations ORDER BY applied_at DESC, version DESC LIMIT 1), '');"

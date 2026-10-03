@@ -1,7 +1,7 @@
 """Shared connection registry for local and external service adapters.
 
 A Service Connection is the single DB record for connection + authentication
-settings. Consumer definitions (LLM Profile, Provider Usage, future Calendar /
+settings. Consumer definitions (LLM Profile, Service Billing, future Calendar /
 Finance definitions) explicitly reference a connection_id.
 
 Secret values are local DB data in auth_data. credential_ref remains only as a
@@ -23,9 +23,9 @@ from .credential_resolver import (
 )
 
 LLM_INFERENCE = "llm_inference"
-PROVIDER_USAGE_READ = "provider_usage_read"
+SERVICE_BILLING_READ = "service_billing_read"
 
-CONNECTION_TYPES = ("none", "api_key", "username_password", "oauth2")
+CONNECTION_TYPES = ("none", "api_key", "username_password", "oauth2", "external_credentials")
 
 ADAPTER_DEFAULTS = {
     "ollama": {
@@ -34,13 +34,15 @@ ADAPTER_DEFAULTS = {
         "connection_type": "none",
         "capabilities": (LLM_INFERENCE,),
         "supported_capabilities": (LLM_INFERENCE,),
+        "config_data": {},
     },
     "openai": {
         "endpoint": "https://api.openai.com/v1",
         "credential_ref": "env:OPENAI_API_KEY",
         "connection_type": "api_key",
         "capabilities": (LLM_INFERENCE,),
-        "supported_capabilities": (LLM_INFERENCE, PROVIDER_USAGE_READ),
+        "supported_capabilities": (LLM_INFERENCE, SERVICE_BILLING_READ),
+        "config_data": {},
     },
     "gemini": {
         "endpoint": "https://generativelanguage.googleapis.com/v1beta",
@@ -48,6 +50,19 @@ ADAPTER_DEFAULTS = {
         "connection_type": "api_key",
         "capabilities": (LLM_INFERENCE,),
         "supported_capabilities": (LLM_INFERENCE,),
+        "config_data": {},
+    },
+    "google_cloud": {
+        "endpoint": "https://monitoring.googleapis.com/v3",
+        "credential_ref": None,
+        "connection_type": "external_credentials",
+        "capabilities": (SERVICE_BILLING_READ,),
+        "supported_capabilities": (SERVICE_BILLING_READ,),
+        "config_data": {
+            "credential_provider": "google_adc",
+            "project_id": "",
+            "target_principal": "",
+        },
     },
 }
 
@@ -75,6 +90,11 @@ def normalize_connection_role(value: object | None) -> str | None:
     if not _TOKEN.fullmatch(role):
         raise ValueError("invalid_connection_role")
     return role
+
+
+def connection_adapter_keys() -> tuple[str, ...]:
+    """Return registered Service Connection adapter keys."""
+    return tuple(ADAPTER_DEFAULTS)
 
 
 def normalize_capabilities(value: object | None) -> tuple[str, ...]:
@@ -120,6 +140,7 @@ def adapter_defaults(adapter_key: str) -> dict:
         "connection_type": defaults["connection_type"],
         "capabilities": list(defaults["capabilities"]),
         "supported_capabilities": list(defaults["supported_capabilities"]),
+        "config_data": dict(defaults.get("config_data") or {}),
     }
 
 
@@ -329,6 +350,21 @@ def upsert_service_connection(
         elif kind == "oauth2" and auth:
             if not str(auth.get("client_id") or "").strip():
                 raise ValueError("oauth2_client_id_required")
+        elif kind == "external_credentials":
+            auth = {}
+
+        if key == "google_cloud":
+            if kind != "external_credentials":
+                raise ValueError("google_cloud_requires_external_credentials")
+            credential_provider = str(config.get("credential_provider") or "").strip()
+            project_id = str(config.get("project_id") or "").strip()
+            target_principal = str(config.get("target_principal") or "").strip()
+            if credential_provider != "google_adc":
+                raise ValueError("google_cloud_credential_provider_required")
+            if not project_id:
+                raise ValueError("google_cloud_project_id_required")
+            if not target_principal:
+                raise ValueError("google_cloud_target_principal_required")
 
         if row:
             cur.execute(
@@ -433,7 +469,7 @@ def ensure_llm_connection(
     )
 
 
-def ensure_openai_usage_connection(db) -> dict:
+def ensure_openai_billing_connection(db) -> dict:
     secret = os.environ.get("OPENAI_ADMIN_KEY", "").strip()
     return upsert_service_connection(
         db,
@@ -441,10 +477,10 @@ def ensure_openai_usage_connection(db) -> dict:
         display_name="OpenAI Admin",
         endpoint=ADAPTER_DEFAULTS["openai"]["endpoint"],
         credential_ref=env_name_to_credential_ref("OPENAI_ADMIN_KEY"),
-        capabilities=[PROVIDER_USAGE_READ],
+        capabilities=[SERVICE_BILLING_READ],
         auth_data={"api_key": secret} if secret else None,
         connection_type="api_key",
-        connection_role="provider_usage",
+        connection_role="service_billing",
         enabled=None,
     )
 

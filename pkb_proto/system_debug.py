@@ -71,7 +71,7 @@ KEY_RELATIONS = (
     ("Service Connections", "service_connections"),
     ("LLM Profiles", "llm_profiles"),
     ("MAGI Assignments", "magi_member_assignments"),
-    ("Provider Usage Profiles", "provider_usage_profiles"),
+    ("Service Billing Profiles", "service_billing_profiles"),
     ("Finance Transactions", "finance_transactions"),
 )
 

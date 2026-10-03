@@ -7,3 +7,6 @@ anyio>=4.6,<5
 
 # Read-only metasearch/extraction adapter used by daily Secretary Core.
 ddgs>=9.16,<10
+
+# Google Cloud Monitoring Service Billing adapter (ADC + SA impersonation).
+google-auth[requests]>=2.59,<3
