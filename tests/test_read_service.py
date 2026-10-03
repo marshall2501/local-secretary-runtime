@@ -2,7 +2,7 @@
 import unittest
 from uuid import UUID
 
-from secretary.read_service import ReadService
+from application.read_service import ReadService
 
 
 class FakeReadRepository:

@@ -36,11 +36,15 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                         violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
-    def test_tests_do_not_import_legacy_pkb_proto(self):
+    def test_tests_do_not_import_legacy_packages(self):
         violations = []
         for path in (ROOT / "tests").rglob("*.py"):
             for name in _imports(path):
-                if name == "pkb_proto" or name.startswith("pkb_proto."):
+                if (
+                    name == "pkb_proto"
+                    or name.startswith("pkb_proto.")
+                    or name in {"secretary.read_service", "secretary.read_repository"}
+                ):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
