@@ -32,7 +32,11 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                 continue
             for path in root.rglob("*.py"):
                 for name in _imports(path):
-                    if name == "pkb_proto" or name.startswith("pkb_proto."):
+                    if (
+                        name == "pkb_proto"
+                        or name.startswith("pkb_proto.")
+                        or name in {"secretary.read_service", "secretary.read_repository"}
+                    ):
                         violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
