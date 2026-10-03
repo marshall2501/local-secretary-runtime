@@ -9,6 +9,11 @@ import argparse
 from pathlib import Path
 
 import psycopg
+from psycopg.types.json import Jsonb
+
+JSONB_COLUMNS = {
+    "service_connections": frozenset({"nonsecret_config", "auth_data"}),
+}
 
 TABLES = (
     ("service_connections",
@@ -39,6 +44,24 @@ def _one(cur, statement: str, args=()):
     if row is None or len(row) != 1:
         raise RuntimeError("unexpected scalar result")
     return row[0]
+
+
+def _adapt_rows(table: str, columns: tuple[str, ...], rows: list[tuple]) -> list[tuple]:
+    """Adapt PostgreSQL values that psycopg cannot infer from bare %s placeholders."""
+    jsonb_columns = JSONB_COLUMNS.get(table, frozenset())
+    adapted = []
+    for row in rows:
+        values = []
+        for column, value in zip(columns, row, strict=True):
+            if column in jsonb_columns:
+                if not isinstance(value, dict):
+                    raise RuntimeError(
+                        f"unexpected JSON object type in {table}.{column}"
+                    )
+                value = Jsonb(value)
+            values.append(value)
+        adapted.append(tuple(values))
+    return adapted
 
 
 def _validate_source(cur):
@@ -74,7 +97,7 @@ def transfer(source, target, *, commit: bool) -> dict:
                 placeholders = ",".join(["%s"] * len(columns))
                 target_cur.executemany(
                     f"INSERT INTO secretary.{table} ({column_sql}) VALUES ({placeholders})",
-                    rows,
+                    _adapt_rows(table, columns, rows),
                 )
 
         for table, _, _ in TABLES:
