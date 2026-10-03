@@ -10,7 +10,7 @@ from psycopg.rows import dict_row
 
 from application.read_service import ReadService
 from infrastructure.postgres.candidate_repository import PostgresCandidateRepository
-from infrastructure.postgres.read_repository import PostgresReadRepository
+from infrastructure.postgres.read_repository import MEMORY_KINDS, PostgresReadRepository, memory_search_sql
 from infrastructure.postgres.task_repository import PostgresTaskRepository
 from pkb.candidate_service import CandidateService
 from ritsuko.tasks.service import TaskService

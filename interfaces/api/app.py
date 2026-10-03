@@ -17,12 +17,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field, StringConstraints
 
 from bootstrap.api_runtime import (
+    MEMORY_KINDS,
     api_config,
     build_candidate_service,
     build_read_service,
     build_task_service,
     connect,
     verify_api_database,
+    memory_search_sql,
 )
 
 from ritsuko.tasks.service import TaskConflictError, TaskNotFoundError
