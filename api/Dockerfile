@@ -8,6 +8,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 COPY api/ /app/api/
 COPY secretary/ /app/secretary/
 COPY application/ /app/application/
+COPY ritsuko/ /app/ritsuko/
+COPY pkb/ /app/pkb/
 COPY infrastructure/ /app/infrastructure/
 COPY interfaces/ /app/interfaces/
 USER 10001:10001

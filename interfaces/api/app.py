@@ -18,11 +18,16 @@ import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, StringConstraints
 
 from infrastructure.postgres.read_repository import MEMORY_KINDS, PostgresReadRepository, memory_search_sql
 from application.read_service import ReadService
+from ritsuko.tasks.service import (
+    PROTOTYPE_STEPS, TaskConflictError, TaskNotFoundError, TaskService,
+)
+from pkb.candidate_service import CandidateService
+from infrastructure.postgres.task_repository import PostgresTaskRepository
+from infrastructure.postgres.candidate_repository import PostgresCandidateRepository
 
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
@@ -40,16 +45,6 @@ class CreateTask(BaseModel):
     completion_criteria: Text
     entity_id: UUID | None = None
     due_at: datetime | None = None
-
-
-# G1: deterministic, LLM-free first slice. Later stages attach memory,
-# simulated tools, and verification to these persisted task steps.
-PROTOTYPE_STEPS = (
-    "Recall: inspect existing memory and previous actions",
-    "Plan: choose a safe read-only diagnostic",
-    "Execute: run a simulated read-only diagnostic",
-    "Verify and record the result",
-)
 
 
 class TaskTransition(BaseModel):
@@ -153,6 +148,16 @@ def connect() -> psycopg.Connection:
 def read_service() -> ReadService:
     """Build the shared read service without coupling it to FastAPI."""
     return ReadService(PostgresReadRepository(connect))
+
+
+def task_service() -> TaskService:
+    """Compose RITSUKO task application logic with the PostgreSQL adapter."""
+    return TaskService(PostgresTaskRepository(connect))
+
+
+def candidate_service() -> CandidateService:
+    """Compose PKB candidate intake with the PostgreSQL adapter."""
+    return CandidateService(PostgresCandidateRepository(connect))
 
 
 @asynccontextmanager
@@ -303,269 +308,45 @@ def search_experience(
 
 @app.post("/tasks", status_code=201)
 def create_task(body: CreateTask, actor: str = Depends(authenticated)):
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """INSERT INTO secretary.tasks
-                   (request, requested_by, domain, completion_criteria,
-                    entity_id, due_at, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'pending')
-                   RETURNING id, status, revision, created_at""",
-                (
-                    body.request, actor, body.domain, body.completion_criteria,
-                    body.entity_id, body.due_at,
-                ),
-            )
-            created = cur.fetchone()
-            cur.execute(
-                """INSERT INTO secretary.audit_events
-                   (actor, event_type, object_type, object_id)
-                   VALUES (%s, 'task.created', 'task', %s)""",
-                (actor, created["id"]),
-            )
-            return created
-
+    return task_service().create_task(
+        request=body.request,
+        actor=actor,
+        domain=body.domain,
+        completion_criteria=body.completion_criteria,
+        entity_id=body.entity_id,
+        due_at=body.due_at,
+    )
 
 
 @app.post("/prototype/tasks", status_code=201)
 def create_prototype_task(body: CreateTask, actor: str = Depends(authenticated)):
-    """Create one real Task ID and the fixed G1 steps in one DB transaction.
+    return task_service().create_prototype_task(
+        request=body.request,
+        actor=actor,
+        domain=body.domain,
+        completion_criteria=body.completion_criteria,
+        entity_id=body.entity_id,
+        due_at=body.due_at,
+    )
 
-    This is planning/persistence only: NO tool execution or LLM is implied.
-    An ordinary user need not manually insert Task Steps or copy UUIDs.
-    """
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """INSERT INTO secretary.tasks
-                   (request, requested_by, domain, completion_criteria,
-                    entity_id, due_at, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, 'pending')
-                   RETURNING id, status, revision, created_at""",
-                (body.request, actor, body.domain, body.completion_criteria,
-                 body.entity_id, body.due_at),
-            )
-            created = cur.fetchone()
-            steps = []
-            for step_order, description in enumerate(PROTOTYPE_STEPS):
-                cur.execute(
-                    """INSERT INTO secretary.task_steps
-                       (task_id, step_order, description)
-                       VALUES (%s, %s, %s)
-                       RETURNING id, step_order, description, status""",
-                    (created["id"], step_order, description),
-                )
-                steps.append(cur.fetchone())
-            cur.execute(
-                """INSERT INTO secretary.audit_events
-                   (actor, event_type, task_id, object_type, object_id)
-                   VALUES (%s, 'prototype.task_created', %s, 'task', %s)""",
-                (actor, created["id"], created["id"]),
-            )
-    return {**created, "steps": steps, "phase": "planned"}
 
+def _task_http_call(method, *args, **kwargs):
+    try:
+        return method(*args, **kwargs)
+    except TaskNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TaskConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/prototype/tasks/{task_id}/run")
 def run_prototype_task(task_id: UUID, actor: str = Depends(authenticated)):
-    """G1 deterministic slice: recall -> fixed plan -> mock tool -> verify/record.
-
-    Never diagnoses or modifies a real PC. All writes commit atomically; a
-    repeated call to an already completed prototype returns its saved summary.
-    Memory auto-write, LLM, Research, and a real Worker are separate G1/G2 work.
-    """
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT id, domain, entity_id, completion_criteria, status, checkpoint
-                   FROM secretary.tasks WHERE id = %s FOR UPDATE""",
-                (task_id,),
-            )
-            task = cur.fetchone()
-            if task is None:
-                raise HTTPException(status_code=404, detail="Task not found.")
-            checkpoint = task["checkpoint"] or {}
-            if task["status"] in ("completed", "waiting_external") and "g1" in checkpoint:
-                return checkpoint["g1"]
-            if task["status"] != "pending":
-                raise HTTPException(
-                    status_code=409,
-                    detail="Prototype can only run pending tasks.",
-                )
-
-            cur.execute(
-                """SELECT id, step_order, status
-                   FROM secretary.task_steps WHERE task_id = %s
-                   ORDER BY step_order FOR UPDATE""",
-                (task_id,),
-            )
-            steps = cur.fetchall()
-            if (len(steps) != len(PROTOTYPE_STEPS)
-                    or [row["step_order"] for row in steps] != list(range(len(PROTOTYPE_STEPS)))
-                    or any(row["status"] != "pending" for row in steps)):
-                raise HTTPException(status_code=409, detail="Not a fresh G1 prototype task.")
-
-            # SQL recall is deliberately bounded for the live demonstration;
-            # /memory/search remains the separate exhaustive/paginated API.
-            cur.execute(
-                """SELECT c.id, e.name AS entity_name, c.predicate, c.value,
-                          c.verification_status, s.citation
-                   FROM secretary.current_claims c
-                   JOIN secretary.entities e ON e.id = c.entity_id
-                   JOIN secretary.sources s ON s.id = c.source_id
-                   WHERE e.domain = %s
-                     AND (%s::uuid IS NULL OR c.entity_id = %s::uuid)
-                   ORDER BY c.recorded_at DESC, c.id DESC LIMIT 20""",
-                (task["domain"], task["entity_id"], task["entity_id"]),
-            )
-            recalled = [
-                {**row, "id": str(row["id"])} for row in cur.fetchall()
-            ]
-            cur.execute(
-                """SELECT r.id, r.outcome, r.summary, a.tool, a.operation
-                   FROM secretary.results r
-                   JOIN secretary.actions a ON a.id = r.action_id
-                   JOIN secretary.tasks t ON t.id = a.task_id
-                   WHERE t.domain = %s AND t.id <> %s
-                   ORDER BY r.recorded_at DESC, r.id DESC LIMIT 10""",
-                (task["domain"], task_id),
-            )
-            previous_results = [
-                {**row, "id": str(row["id"])} for row in cur.fetchall()
-            ]
-            cur.execute(
-                """UPDATE secretary.task_steps
-                   SET status = 'completed', checkpoint = %s
-                   WHERE id = %s""",
-                (Jsonb({"recalled_claim_count": len(recalled),
-                        "previous_result_count": len(previous_results)}), steps[0]["id"]),
-            )
-            cur.execute(
-                """UPDATE secretary.task_steps
-                   SET status = 'completed', checkpoint = %s
-                   WHERE id = %s""",
-                (Jsonb({"plan": "simulated_read_only_diagnostic"}), steps[1]["id"]),
-            )
-
-            # This Source describes GENERATED test output, not real machine
-            # evidence; a sha256/file archive would add no value here.
-            cur.execute(
-                """INSERT INTO secretary.sources
-                   (source_type, uri, citation, retrieved_at, confidentiality, metadata)
-                   VALUES ('tool', %s, %s, now(), 'private', %s)
-                   RETURNING id""",
-                (f"tool://prototype/simulated-read-only/{task_id}",
-                 "G1 simulated diagnostic; no real PC was inspected",
-                 Jsonb({"prototype": True, "simulated": True})),
-            )
-            source_id = cur.fetchone()["id"]
-            cur.execute(
-                """INSERT INTO secretary.actions
-                   (task_id, step_id, actor, tool, operation, parameters,
-                    risk, authorization_basis, status, idempotency_key,
-                    reversible, started_at, finished_at)
-                   VALUES (%s, %s, %s, 'prototype_mock', 'simulated_read_only',
-                           %s, 'read_only', 'prototype_fixture_only', 'succeeded',
-                           %s, true, now(), now())
-                   RETURNING id""",
-                (task_id, steps[2]["id"], actor,
-                 Jsonb({"simulated": True}), f"g1:{task_id}:simulated_read_only"),
-            )
-            action_id = cur.fetchone()["id"]
-            result_summary = "Simulated diagnostic recorded; no actual PC inspected."
-            cur.execute(
-                """INSERT INTO secretary.results
-                   (action_id, source_id, outcome, summary, evidence, verified_by, verified_at)
-                   VALUES (%s, %s, 'success', %s, %s, 'prototype_fixture', now())
-                   RETURNING id""",
-                (action_id, source_id, result_summary,
-                 Jsonb({"simulated": True, "recalled_claim_count": len(recalled)})),
-            )
-            result_id = cur.fetchone()["id"]
-            cur.execute(
-                """UPDATE secretary.task_steps
-                   SET status = 'completed', checkpoint = %s
-                   WHERE id = %s""",
-                (Jsonb({"action_id": str(action_id), "result_id": str(result_id),
-                        "simulated": True}), steps[2]["id"]),
-            )
-
-            # Do not claim an arbitrary natural-language criterion was met.
-            # Only the fixed G1 fixture criterion is mechanically checked.
-            criterion = task["completion_criteria"].lower()
-            criteria_met = (("模擬診断" in criterion and "記録" in criterion)
-                            or "record a simulated diagnosis" in criterion)
-            final_status = "completed" if criteria_met else "waiting_external"
-            if criteria_met:
-                cur.execute(
-                    """UPDATE secretary.task_steps
-                       SET status = 'completed', checkpoint = %s
-                       WHERE id = %s""",
-                    (Jsonb({"criteria_met": True, "scope": "simulated_result_only"}),
-                     steps[3]["id"]),
-                )
-            else:
-                cur.execute(
-                    """UPDATE secretary.task_steps
-                       SET checkpoint = %s WHERE id = %s""",
-                    (Jsonb({"criteria_met": False,
-                            "reason": "requires human verification of free-text criteria"}),
-                     steps[3]["id"]),
-                )
-            summary = {
-                "task_id": str(task_id), "status": final_status,
-                "phase": "recorded" if criteria_met else "needs_verification",
-                "simulated": True, "criteria_met": criteria_met,
-                "recalled_claims": recalled, "previous_results": previous_results,
-                "action_id": str(action_id), "result_id": str(result_id),
-                "result_summary": result_summary,
-            }
-            cur.execute(
-                """UPDATE secretary.tasks
-                   SET status = %s, completed_at = CASE WHEN %s THEN now() ELSE NULL END,
-                       checkpoint = %s
-                   WHERE id = %s""",
-                (final_status, criteria_met, Jsonb({"g1": summary}), task_id),
-            )
-            cur.execute(
-                """INSERT INTO secretary.audit_events
-                   (actor, event_type, task_id, action_id, object_type, object_id, details)
-                   VALUES (%s, 'prototype.mock_completed', %s, %s, 'task', %s, %s)""",
-                (actor, task_id, action_id, task_id,
-                 Jsonb({"simulated": True, "criteria_met": criteria_met})),
-            )
-            return summary
-
+    return _task_http_call(task_service().run_prototype_task, task_id, actor)
 
 
 @app.get("/prototype/tasks/{task_id}")
 def read_prototype_task(task_id: UUID, actor: str = Depends(authenticated)):
-    """Retrieve the same Task ID plus persisted step statuses after restart."""
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT id, request, domain, completion_criteria, status,
-                          revision, checkpoint, created_at, updated_at
-                   FROM secretary.tasks
-                   WHERE id = %s""",
-                (task_id,),
-            )
-            task = cur.fetchone()
-            if task is None:
-                raise HTTPException(status_code=404, detail="Task not found.")
-            cur.execute(
-                """SELECT id, step_order, description, status, checkpoint,
-                          attempt_count, last_error, updated_at
-                   FROM secretary.task_steps
-                   WHERE task_id = %s
-                   ORDER BY step_order""",
-                (task_id,),
-            )
-            steps = cur.fetchall()
-    checkpoint = task.get("checkpoint") or {}
-    phase = checkpoint.get("g1", {}).get("phase", "planned")
-    return {**task, "steps": steps, "phase": phase}
-
+    return _task_http_call(task_service().read_prototype_task, task_id)
 
 
 def transition_task(
@@ -575,28 +356,14 @@ def transition_task(
     destination: str,
     actor: str,
 ):
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """UPDATE secretary.tasks
-                   SET status = %s
-                   WHERE id = %s AND revision = %s AND status = ANY(%s)
-                   RETURNING id, status, revision, updated_at""",
-                (destination, task_id, revision, list(expected_statuses)),
-            )
-            updated = cur.fetchone()
-            if updated is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Task absent, revision changed, or transition not allowed.",
-                )
-            cur.execute(
-                """INSERT INTO secretary.audit_events
-                   (actor, event_type, task_id, object_type, object_id)
-                   VALUES (%s, %s, %s, 'task', %s)""",
-                (actor, f"task.{destination}", task_id, task_id),
-            )
-            return updated
+    return _task_http_call(
+        task_service().transition_task,
+        task_id,
+        revision,
+        expected_statuses,
+        destination,
+        actor,
+    )
 
 
 @app.post("/tasks/{task_id}/pause")
@@ -616,7 +383,6 @@ def resume_task(
     body: TaskTransition,
     actor: str = Depends(authenticated),
 ):
-    # Resumption is pending, not automatic execution.
     return transition_task(
         task_id, body.expected_revision, ("paused",), "pending", actor
     )
@@ -624,28 +390,15 @@ def resume_task(
 
 @app.post("/pending-claims", status_code=201)
 def propose_claim(body: NewCandidate, actor: str = Depends(authenticated)):
-    # The restricted DB role cannot set reviewer/status, insert accepted
-    # claims, or issue external approvals. A trusted review service is next.
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """INSERT INTO secretary.pending_claims
-                   (entity_id, source_id, claim_type, predicate, proposed_value,
-                    confidence, evidence, extraction_model, prompt_version)
-                   VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
-                   RETURNING id, review_status, recorded_at""",
-                (
-                    body.entity_id, body.source_id, body.claim_type,
-                    body.predicate, Jsonb(body.proposed_value),
-                    body.confidence, body.evidence, body.extraction_model,
-                    body.prompt_version,
-                ),
-            )
-            created = cur.fetchone()
-            cur.execute(
-                """INSERT INTO secretary.audit_events
-                   (actor, event_type, object_type, object_id)
-                   VALUES (%s, 'memory.candidate_proposed', 'pending_claim', %s)""",
-                (actor, created["id"]),
-            )
-            return created
+    return candidate_service().propose(
+        actor=actor,
+        entity_id=body.entity_id,
+        source_id=body.source_id,
+        claim_type=body.claim_type,
+        predicate=body.predicate,
+        proposed_value=body.proposed_value,
+        confidence=body.confidence,
+        evidence=body.evidence,
+        extraction_model=body.extraction_model,
+        prompt_version=body.prompt_version,
+    )
