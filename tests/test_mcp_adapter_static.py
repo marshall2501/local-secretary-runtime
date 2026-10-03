@@ -4,7 +4,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVER = (ROOT / "mcp_adapter" / "server.py").read_text(encoding="utf-8")
+SERVER = (ROOT / "interfaces" / "mcp" / "server.py").read_text(encoding="utf-8")
+SHIM = (ROOT / "mcp_adapter" / "server.py").read_text(encoding="utf-8")
 
 
 class McpAdapterStaticTests(unittest.TestCase):
@@ -22,6 +23,11 @@ class McpAdapterStaticTests(unittest.TestCase):
     def test_stdio_entrypoint_has_no_stdout_logging(self):
         self.assertIn("mcp.run()", SERVER)
         self.assertNotIn("print(", SERVER)
+
+    def test_compatibility_entrypoint_delegates_to_canonical_interface(self):
+        self.assertIn("interfaces.mcp.server", SHIM)
+        self.assertIn("mcp.run()", SHIM)
+        self.assertNotIn("psycopg", SHIM)
 
 
 if __name__ == "__main__":
