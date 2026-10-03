@@ -20,9 +20,25 @@ def _imports(path: Path) -> set[str]:
 
 
 class ArchitectureBoundaryTests(unittest.TestCase):
-    def test_ritsuko_does_not_depend_on_legacy_pkb_proto(self):
+    def test_production_code_does_not_depend_on_legacy_pkb_proto(self):
         violations = []
-        for path in (ROOT / "ritsuko").rglob("*.py"):
+        for package in (
+            "api", "application", "bootstrap", "capabilities", "infrastructure",
+            "integrations", "interfaces", "mcp_adapter", "pkb", "ritsuko",
+            "secretary",
+        ):
+            root = ROOT / package
+            if not root.exists():
+                continue
+            for path in root.rglob("*.py"):
+                for name in _imports(path):
+                    if name == "pkb_proto" or name.startswith("pkb_proto."):
+                        violations.append(f"{path.relative_to(ROOT)} -> {name}")
+        self.assertEqual([], violations)
+
+    def test_tests_do_not_import_legacy_pkb_proto(self):
+        violations = []
+        for path in (ROOT / "tests").rglob("*.py"):
             for name in _imports(path):
                 if name == "pkb_proto" or name.startswith("pkb_proto."):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
