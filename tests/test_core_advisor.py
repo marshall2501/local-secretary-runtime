@@ -11,7 +11,11 @@ from pkb_proto.core_advisor import (
     diagnose_response,
     inspect_output,
 )
-from pkb_proto.daily_pkb import (\n    _recover_interrupted_core_advisors,\n    _restore_interrupted_cooperative_probe,\n    _run_core_advisor_shadow,\n)
+from pkb_proto.daily_pkb import (
+    _recover_interrupted_core_advisors,
+    _restore_interrupted_cooperative_probe,
+    _run_core_advisor_shadow,
+)
 
 
 class CoreAdvisorTests(unittest.TestCase):
