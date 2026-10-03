@@ -26,12 +26,12 @@ LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定
 
 ## 主な入口
 
-- `pkb_proto/daily_pkb.py` / `pkb_proto/launch_daily_pkb.ps1` — localhostの日常用ポータル。現在のランチャーは隔離PKB DBと専用writerを明示的に検査します。
-- `pkb_proto/magi_async.py` — state-driven MAGI通信と各provider adapter。
-- `pkb_proto/service_connections.py` / `pkb_proto/credential_resolver.py` — 共通Service Connection RegistryとSecret非保持の資格情報参照境界。
-- `pkb_proto/magi_core_bridge.py` / `pkb_proto/magi_task_store.py` — RITSUKO側のObservation、Task永続化、resume/review境界。
-- `pkb_proto/memory_intake.py` / `pkb_proto/ingestion_gate.py` — Memory Intakeと決定的な書込み判断境界。
-- `pkb_proto/pending_service.py` — 例外Pendingの保存・確認処理。
+- `interfaces/web/app.py` / `pkb_proto/launch_daily_pkb.ps1` — localhostの日常用ポータル。現在のランチャーは隔離PKB DBと専用writerを明示的に検査します。
+- `ritsuko/magi/async_execution.py` — state-driven MAGI通信と各provider adapter。
+- `integrations/connections/` — 共通Service Connection RegistryとSecret非保持の資格情報参照境界。
+- `ritsuko/core/` / `ritsuko/tasks/` / `ritsuko/application/` — RITSUKO側のObservation、Task、共通依頼入口、resume/review境界。
+- `pkb/` — Memory Intake、SQL-first検索、訂正、Pendingと決定的な書込み判断境界。
+- `capabilities/` — Finance、Service Billing、Web Research等の再利用Capability。
 - `api/secretary_api.py` — localhost限定のSecretary API。
 - `scripts/db/postgres.ps1` — PostgreSQLのSetup / Start / Migrate / Doctor / Backup / Restore。
 - `Launch-PKB-Web.cmd` — 開発Workbench。

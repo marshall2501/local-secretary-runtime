@@ -1,12 +1,12 @@
-# `pkb_proto` — PKB / RITSUKO-MAGI integration area
+# `pkb_proto` — legacy compatibility / isolated prototype area
 
-`pkb_proto` は初期PKBプロトタイプから発展した実装領域です。ディレクトリ名は歴史的なもので、現在は独立PKB、日常用Web UI、Memory Intake、Pending例外処理、RITSUKO⇄MAGIの統合スライス、家計・Web調査など複数の検証実装を含みます。
+`pkb_proto` は初期PKBプロトタイプ由来の互換・隔離試験領域です。日常用Web UI、RITSUKO、PKB、Capabilityの本体実装は新しい責務別packageへ移行中で、このディレクトリを新規実装の所有先にはしません。
 
 このREADMEは現在使う入口と安全境界だけを示します。機能の実証済み範囲や現在の優先作業は、設計repoの [`STATUS`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) / [`PLAN`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/PLAN.md) を正本としてください。
 
 ## 主な領域
 
-- `daily_pkb.py` — localhostの日常用ポータル。PKB、RITSUKO、設定、家計・資産等の画面をまとめる。
+- `daily_pkb.py` — `interfaces.web.app` への互換alias。日常用ポータル本体は `interfaces/web/`。
 - `launch_daily_pkb.ps1` — 日常用ポータルの安全ランチャー。現在は隔離DB名、専用writer、migration、localhost bindingを検査してから起動する。
 - `web_workbench.py` / `web_workbench_core.py` — 開発用Workbench。日常用UIとは分離する。
 - `magi_async.py` — state-driven MAGI通信、provider adapter、turn処理。

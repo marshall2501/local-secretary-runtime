@@ -137,7 +137,7 @@ try {
     Push-Location $root
     $locationPushed = $true
 
-    & $python -m pkb_proto.daily_pkb
+    & $python -m interfaces.web.app
     if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
 } finally {
     Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue

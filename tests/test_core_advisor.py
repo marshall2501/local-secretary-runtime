@@ -11,7 +11,7 @@ from pkb_proto.core_advisor import (
     diagnose_response,
     inspect_output,
 )
-from pkb_proto.daily_pkb import (
+from interfaces.web.app import (
     _recover_interrupted_core_advisors,
     _restore_interrupted_cooperative_probe,
     _run_core_advisor_shadow,
@@ -184,10 +184,10 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(result.status, "invalid")
         self.assertEqual(result.error, "non_clarify_missing_information")
 
-    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
-    @patch("pkb_proto.daily_pkb.advise_core")
-    @patch("pkb_proto.daily_pkb.choose_advisor_model", return_value="gemma3:12b")
-    @patch("pkb_proto.daily_pkb.list_advisor_models", return_value=["gemma3:12b"])
+    @patch("interfaces.web.app._write_core_advisor_shadow", return_value=True)
+    @patch("interfaces.web.app.advise_core")
+    @patch("interfaces.web.app.choose_advisor_model", return_value="gemma3:12b")
+    @patch("interfaces.web.app.list_advisor_models", return_value=["gemma3:12b"])
     def test_async_worker_records_running_then_completed(
         self, _models, _choose, advise_mock, write_mock
     ):
@@ -237,10 +237,10 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(advise_kwargs["melchior_next_step"], "observe")
         self.assertEqual(advise_kwargs["task_state"], "received")
 
-    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
-    @patch("pkb_proto.daily_pkb.advise_core")
-    @patch("pkb_proto.daily_pkb.choose_advisor_model", return_value="gemma3:12b")
-    @patch("pkb_proto.daily_pkb.list_advisor_models", return_value=["gemma3:12b"])
+    @patch("interfaces.web.app._write_core_advisor_shadow", return_value=True)
+    @patch("interfaces.web.app.advise_core")
+    @patch("interfaces.web.app.choose_advisor_model", return_value="gemma3:12b")
+    @patch("interfaces.web.app.list_advisor_models", return_value=["gemma3:12b"])
     def test_async_worker_preserves_timeout_metadata(
         self, _models, _choose, advise_mock, write_mock
     ):
@@ -272,16 +272,16 @@ class CoreAdvisorTests(unittest.TestCase):
         self.assertEqual(final["error"], "TimeoutError")
 
 
-    @patch("pkb_proto.daily_pkb._finalize_cooperative_probe")
+    @patch("interfaces.web.app._finalize_cooperative_probe")
     @patch(
-        "pkb_proto.daily_pkb._record_cooperative_probe",
+        "interfaces.web.app._record_cooperative_probe",
         return_value=(
             __import__("uuid").UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             __import__("uuid").UUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
         ),
     )
     @patch(
-        "pkb_proto.daily_pkb._execute_cooperative_local_probe",
+        "interfaces.web.app._execute_cooperative_local_probe",
         return_value={
             "capability": "pkb_search",
             "result": {
@@ -298,11 +298,11 @@ class CoreAdvisorTests(unittest.TestCase):
             "verified_by": "deterministic_pkb_query",
         },
     )
-    @patch("pkb_proto.daily_pkb._claim_cooperative_probe", return_value=True)
-    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
-    @patch("pkb_proto.daily_pkb.advise_core")
-    @patch("pkb_proto.daily_pkb.choose_advisor_model", return_value="gemma3:12b")
-    @patch("pkb_proto.daily_pkb.list_advisor_models", return_value=["gemma3:12b"])
+    @patch("interfaces.web.app._claim_cooperative_probe", return_value=True)
+    @patch("interfaces.web.app._write_core_advisor_shadow", return_value=True)
+    @patch("interfaces.web.app.advise_core")
+    @patch("interfaces.web.app.choose_advisor_model", return_value="gemma3:12b")
+    @patch("interfaces.web.app.list_advisor_models", return_value=["gemma3:12b"])
     def test_ambiguous_worker_executes_synthesized_pkb_probe_then_reorients(
         self,
         _models,
@@ -407,7 +407,7 @@ class CoreAdvisorTests(unittest.TestCase):
                 "reason": "ambiguous_request",
             },
         }
-        with patch("pkb_proto.daily_pkb.connection") as connection:
+        with patch("interfaces.web.app.connection") as connection:
             db = connection.return_value.__enter__.return_value
             cur = db.cursor.return_value.__enter__.return_value
             cur.fetchone.return_value = ("running", checkpoint)
@@ -435,9 +435,9 @@ class CoreAdvisorTests(unittest.TestCase):
             for call in cur.execute.call_args_list
         ))
 
-    @patch("pkb_proto.daily_pkb._restore_interrupted_cooperative_probe")
-    @patch("pkb_proto.daily_pkb._write_core_advisor_shadow", return_value=True)
-    @patch("pkb_proto.daily_pkb.connection")
+    @patch("interfaces.web.app._restore_interrupted_cooperative_probe")
+    @patch("interfaces.web.app._write_core_advisor_shadow", return_value=True)
+    @patch("interfaces.web.app.connection")
     def test_recovery_marks_shadow_and_repairs_running_probe(
         self, connection, write_mock, restore_mock
     ):

@@ -115,7 +115,7 @@ class MemoryIntakeTests(unittest.TestCase):
 
     def test_gui_retains_envelope_for_retry(self):
         from pathlib import Path
-        source=(Path(__file__).parents[1]/'pkb_proto/daily_pkb.py').read_text(encoding='utf-8')
+        source=(Path(__file__).parents[1]/'interfaces/web/app.py').read_text(encoding='utf-8')
         self.assertIn('envelope.raw_text != text', source)
         self.assertIn('run.io_bound(register_memory_intake, envelope)', source)
         self.assertIn("@app.post('/api/pkb/intakes/issue')",source)
