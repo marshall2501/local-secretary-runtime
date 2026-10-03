@@ -9,10 +9,13 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 def connection_mode(db) -> str | None:
     info = db.info
-    host = info.host or ""
+    host = getattr(info, "host", "") or ""
     if host not in LOCAL_HOSTS:
         return None
-    pair = (info.dbname or "", info.user or "")
+    pair = (
+        getattr(info, "dbname", "") or "",
+        getattr(info, "user", "") or "",
+    )
     if pair == (PRODUCTION_DB, PRODUCTION_USER):
         return "production"
     if pair == (ISOLATED_DB, ISOLATED_USER):
