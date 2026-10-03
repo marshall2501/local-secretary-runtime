@@ -130,6 +130,45 @@ class ServiceBillingTests(unittest.TestCase):
             "google_adc_service_account_impersonation",
         )
 
+    @patch("capabilities.service_billing.service._google_authorized_session")
+    @patch("capabilities.service_billing.service._google_time_series")
+    def test_google_free_tier_uses_one_minute_axis_not_day_plus_minute(self, time_series, auth):
+        auth.return_value = object()
+
+        def fake_series(_session, *, metric_type, **_kwargs):
+            if metric_type.endswith("generate_content_free_tier_input_token_count/usage"):
+                return [
+                    series("gemini-free", "GenerateContentInputTokensPerModelPerMinute-FreeTier", 120, 30),
+                    series("gemini-free", "GenerateContentInputTokensPerModelPerDay-FreeTier", 120, 30),
+                ]
+            if metric_type.endswith("generate_content_free_tier_requests/usage"):
+                return [
+                    series("gemini-free", "GenerateRequestsPerMinutePerProjectPerModel-FreeTier", 2, 1),
+                    series("gemini-free", "GenerateRequestsPerDayPerProjectPerModel-FreeTier", 2, 1),
+                ]
+            if metric_type.endswith("generate_content_usage_output_token_count"):
+                return [series("gemini-free", "", 40)]
+            return []
+
+        time_series.side_effect = fake_series
+        result = read_google_cloud_month_billing(
+            google_connection(), datetime(2026, 10, 3, 4, 0, tzinfo=timezone.utc)
+        )
+        self.assertEqual(result["activity"]["totals"]["input_tokens"], 150)
+        self.assertEqual(result["activity"]["totals"]["requests"], 3)
+        self.assertEqual(result["activity"]["totals"]["output_tokens"], 40)
+        debug = result["metadata"]["quota_accounting"]
+        self.assertEqual(
+            debug["free_input"]["selected_limit_names"],
+            ["GenerateContentInputTokensPerModelPerMinute-FreeTier"],
+        )
+        self.assertEqual(
+            debug["free_requests"]["selected_limit_names"],
+            ["GenerateRequestsPerMinutePerProjectPerModel-FreeTier"],
+        )
+        self.assertEqual(debug["free_requests"]["source_series_count"], 2)
+        self.assertEqual(debug["free_requests"]["selected_series_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

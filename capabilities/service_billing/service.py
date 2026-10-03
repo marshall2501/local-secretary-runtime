@@ -262,8 +262,34 @@ def _series_value_total(series: dict) -> int | float:
     return total
 
 
-def _select_quota_series(series_list: list[dict], *, canonical_limit_name: str | None = None) -> list[dict]:
-    """Choose one accounting axis per model and exclude duplicate PerUser quota series."""
+def _quota_limit_name(series: dict) -> str:
+    return str(((series.get("metric") or {}).get("labels") or {}).get("limit_name") or "")
+
+
+def _quota_cadence(limit_name: str) -> str | None:
+    compact = "".join(ch for ch in limit_name.lower() if ch.isalnum())
+    if "perminute" in compact:
+        return "minute"
+    if "perday" in compact:
+        return "day"
+    return None
+
+
+def _select_quota_series(
+    series_list: list[dict],
+    *,
+    canonical_limit_name: str | None = None,
+    preferred_cadence: str | None = None,
+) -> list[dict]:
+    """Choose one quota accounting axis per model without double-counting usage.
+
+    Google evaluates the same request/token usage against multiple quota windows
+    (for example per-minute and per-day). Those are enforcement axes, not
+    additive usage. Monthly accounting therefore selects one deterministic axis.
+    """
+    if preferred_cadence not in {None, "minute", "day"}:
+        raise ValueError("preferred_cadence must be minute, day, or None")
+
     by_model: dict[str, list[dict]] = {}
     for series in series_list:
         labels = dict((series.get("metric") or {}).get("labels") or {})
@@ -273,32 +299,38 @@ def _select_quota_series(series_list: list[dict], *, canonical_limit_name: str |
     selected: list[dict] = []
     for model, rows in by_model.items():
         if canonical_limit_name:
-            matches = [
-                row for row in rows
-                if str(((row.get("metric") or {}).get("labels") or {}).get("limit_name") or "")
-                == canonical_limit_name
-            ]
+            matches = [row for row in rows if _quota_limit_name(row) == canonical_limit_name]
             if matches:
                 selected.extend(matches)
                 continue
 
-        non_user = [
-            row for row in rows
-            if "PerUser" not in str(
-                ((row.get("metric") or {}).get("labels") or {}).get("limit_name") or ""
-            )
-        ]
+        non_user = [row for row in rows if "peruser" not in _quota_limit_name(row).lower()]
         candidates = non_user or rows
-        limit_names = {
-            str(((row.get("metric") or {}).get("labels") or {}).get("limit_name") or "")
-            for row in candidates
-        }
+        if preferred_cadence:
+            cadence_matches = [
+                row for row in candidates
+                if _quota_cadence(_quota_limit_name(row)) == preferred_cadence
+            ]
+            if cadence_matches:
+                candidates = cadence_matches
+
+        limit_names = {_quota_limit_name(row) for row in candidates}
         if len(limit_names) > 1:
             raise ServiceBillingError(
                 f"Google Cloud quota seriesの集計軸を一意に決められません: {model}"
             )
         selected.extend(candidates)
     return selected
+
+
+def _quota_selection_debug(source: list[dict], selected: list[dict]) -> dict:
+    """Return non-secret observability for the chosen accounting axis."""
+    return {
+        "source_series_count": len(source),
+        "selected_series_count": len(selected),
+        "available_limit_names": sorted({_quota_limit_name(row) for row in source}),
+        "selected_limit_names": sorted({_quota_limit_name(row) for row in selected}),
+    }
 
 
 def _sum_series_by_model(series_list: list[dict]) -> tuple[int | float, dict[str, int | float]]:
@@ -379,12 +411,12 @@ def read_google_cloud_month_billing(connection: dict, now: datetime | None = Non
         data["paid_input"],
         canonical_limit_name="GenerateContentPaidTierInputTokensPerModelPerMinute",
     )
-    free_input = _select_quota_series(data["free_input"])
+    free_input = _select_quota_series(data["free_input"], preferred_cadence="minute")
     paid_requests = _select_quota_series(
         data["paid_requests"],
         canonical_limit_name="GenerateRequestsPerMinutePerProjectPerModel",
     )
-    free_requests = _select_quota_series(data["free_requests"])
+    free_requests = _select_quota_series(data["free_requests"], preferred_cadence="minute")
 
     paid_input_total, paid_input_models = _sum_series_by_model(paid_input)
     free_input_total, free_input_models = _sum_series_by_model(free_input)
@@ -456,6 +488,13 @@ def read_google_cloud_month_billing(connection: dict, now: datetime | None = Non
             "project_id": project_id,
             "credential_provider": "google_adc",
             "monitoring_metric_family": "generativelanguage.googleapis.com",
+            "quota_accounting": {
+                "policy": "one_axis_per_model_prefer_minute_for_free_tier",
+                "paid_input": _quota_selection_debug(data["paid_input"], paid_input),
+                "free_input": _quota_selection_debug(data["free_input"], free_input),
+                "paid_requests": _quota_selection_debug(data["paid_requests"], paid_requests),
+                "free_requests": _quota_selection_debug(data["free_requests"], free_requests),
+            },
         },
     }
 

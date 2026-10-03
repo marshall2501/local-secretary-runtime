@@ -201,6 +201,23 @@ def register(context: dict):
                                 row_key="model",
                             ).classes("w-full")
     
+                with ui.expansion(
+                    "取得デバッグ（Secret非表示）",
+                    icon="bug_report",
+                    value=False,
+                ).classes("w-full border border-indigo-200"):
+                    safe_debug = {
+                        "service": result.get("service"),
+                        "connection_name": result.get("connection_name"),
+                        "credential_source": result.get("credential_source"),
+                        "period_start": result.get("period_start"),
+                        "fetched_at": result.get("fetched_at"),
+                        "metadata": result.get("metadata") or {},
+                    }
+                    ui.code(
+                        json.dumps(safe_debug, ensure_ascii=False, indent=2, default=str)
+                    ).classes("w-full text-xs")
+
                 async def refresh():
                     if state["busy"]:
                         return
