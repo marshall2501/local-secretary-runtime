@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pkb_proto.core_observation import build_observation_pack
+from ritsuko.core.core_observation import build_observation_pack
 
 
 ENTITIES = {

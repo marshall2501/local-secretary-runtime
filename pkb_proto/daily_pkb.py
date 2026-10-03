@@ -27,11 +27,11 @@ from pydantic import BaseModel, Field
 
 from .background_jobs import DaemonSerialBackgroundExecutor
 from .correction_service import correct_entity
-from .core_ooda import OODA_PHASES, derive_ooda
-from .core_observation import build_observation_pack
+from ritsuko.core.core_ooda import OODA_PHASES, derive_ooda
+from ritsuko.core.core_observation import build_observation_pack
 from .core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
 from .core_synthesis import synthesize as synthesize_magi
-from .core_coordinator import (
+from ritsuko.core.core_coordinator import (
     can_auto_execute_ambiguous_probe,
     decide_after_observation,
     extend_observation_pack,
