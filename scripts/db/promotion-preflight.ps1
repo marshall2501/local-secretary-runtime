@@ -39,7 +39,7 @@ function Invoke-Lines {
 
 function Invoke-Scalar {
     param([string]$Database, [string]$Sql)
-    $values = Invoke-Lines -Database $Database -Sql $Sql
+    $values = @(Invoke-Lines -Database $Database -Sql $Sql)
     if ($values.Count -ne 1) { throw "Expected one scalar row from database $Database." }
     return $values[0]
 }
