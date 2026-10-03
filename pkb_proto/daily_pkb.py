@@ -80,6 +80,8 @@ from ritsuko.application.task_records import (
     record_pkb_read_record,
 )
 from ritsuko.application.read_dispatch import execute_core_read
+from ritsuko.application.entry import RitsukoApplicationEntry
+from infrastructure.postgres.core_execution_repository import PostgresCoreExecutionRepository
 from ritsuko.application.driver_compare import (
     clarified_driver_web_target,
     compare_driver_values,
@@ -1527,299 +1529,36 @@ def run_ritsuko_magi_cycle1_probe(
     }
 
 
+def _load_ritsuko_request_context(request: str) -> tuple[dict[str, dict], dict]:
+    with connection() as read_db:
+        entities = _entity_map(read_db)
+        observation_pack = _build_core_observation_pack(request, read_db, entities)
+    return entities, observation_pack
+
+
+def _ritsuko_application_entry() -> RitsukoApplicationEntry:
+    return RitsukoApplicationEntry(
+        PostgresCoreExecutionRepository(connection),
+        load_context=_load_ritsuko_request_context,
+        scope_request=scope_core_request,
+        execute_read=_execute_core_read,
+        execute_compare=_execute_pkb_web_compare,
+        advisor_shadow_initial=_advisor_shadow_initial,
+        queue_advisor=_queue_core_advisor_shadow,
+    )
+
+
 def run_core_request(
     text: str,
     advisor_model: str | None = None,
     advisor_timeout: float = 60.0,
 ) -> dict:
-    """Daily Secretary Core slice with asynchronous Shadow Advisor."""
-    request = text.strip()
-    if not request:
-        return {
-            "status": "rejected",
-            "phase": "input",
-            "message": "依頼を入力してください。",
-        }
-
-    with connection() as read_db:
-        entities = _entity_map(read_db)
-        observation_pack = _build_core_observation_pack(request, read_db, entities)
-    scoped = scope_core_request(request, entities, observation_pack)
-    advisor_shadow = _advisor_shadow_initial(advisor_model, advisor_timeout)
-
-    task_id = uuid4()
-    with connection() as db:
-        with db.transaction():
-            domain = scoped.get("domain") or "general"
-            initial_status = "running" if scoped["status"] == "ready" else "waiting_external"
-            checkpoint = {
-                "core_slice": "daily_read_only_v1",
-                "phase": (
-                    "decide"
-                    if scoped["status"] == "ready"
-                    else "awaiting_clarification"
-                ),
-                "selected_capability": scoped.get("capability"),
-                "question": scoped.get("question"),
-                "reason": scoped.get("reason"),
-                "observation_pack": observation_pack,
-                "magi_baseline": {
-                    "member": "MELCHIOR",
-                    "status": scoped["status"],
-                    "selected_capability": scoped.get("capability"),
-                },
-                "advisor_shadow": advisor_shadow,
-            }
-            with db.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO secretary.tasks
-                       (id, request, requested_by, domain, completion_criteria,
-                        permission_scope, status, checkpoint)
-                       VALUES (%s, %s, 'local_user', %s, %s, %s, %s, %s)""",
-                    (
-                        task_id,
-                        request,
-                        domain,
-                        "Return bounded local evidence with provenance or ask for clarification.",
-                        Jsonb({
-                            "pkb_read": True,
-                            "finance_read": True,
-                            "web_research": True,
-                            "pkb_web_compare": True,
-                            "external_actions": False,
-                        }),
-                        initial_status,
-                        Jsonb(checkpoint),
-                    ),
-                )
-
-                if scoped["status"] != "ready":
-                    cur.execute(
-                        """INSERT INTO secretary.audit_events
-                           (actor, event_type, task_id, object_type, object_id, details)
-                           VALUES ('daily_core', 'core.awaiting_clarification',
-                                   %s, 'task', %s, %s)""",
-                        (
-                            task_id,
-                            task_id,
-                            Jsonb({
-                                "reason": scoped["reason"],
-                                "advisor_shadow": advisor_shadow,
-                            }),
-                        ),
-                    )
-                    response = {
-                        "task_id": str(task_id),
-                        "status": "waiting_external",
-                        "phase": "awaiting_clarification",
-                        "message": "追加情報が必要です。",
-                        "question": scoped["question"],
-                        "selected_capability": scoped.get("capability"),
-                        "observation_pack": observation_pack,
-                        "magi_baseline": {
-                            "member": "MELCHIOR",
-                            "status": scoped["status"],
-                            "selected_capability": scoped.get("capability"),
-                        },
-                        "advisor_shadow": advisor_shadow,
-                    }
-                else:
-                    # Read capabilities use their own bounded DB connections so the
-                    # surrounding Task write transaction remains independent.
-                    if scoped["capability"] == "pkb_web_compare":
-                        plan_result = _execute_pkb_web_compare(request)
-                        executions = plan_result["executions"]
-                        answer = plan_result["answer"]
-                        comparison = plan_result["comparison"]
-                        result = {
-                            "status": "ok",
-                            "result_kind": "pkb_web_compare",
-                            "comparison": comparison,
-                        }
-                        total = sum(int(item.get("total") or 0) for item in executions)
-                    else:
-                        execution = _execute_core_read(scoped["capability"], request)
-                        executions = [execution]
-                        answer = execution["answer"]
-                        result = execution["result"]
-                        comparison = None
-                        total = execution["total"]
-
-                    enough = (
-                        all(int(item.get("total") or 0) > 0 for item in executions)
-                        and not (
-                            scoped["capability"] == "pkb_web_compare"
-                            and plan_result.get("needs_clarification")
-                        )
-                    )
-                    phase = "completed" if enough else "awaiting_clarification"
-                    task_status = "completed" if enough else "waiting_external"
-                    question = None if enough else (
-                        "比較に必要な記録またはWeb検索対象が不足しています。"
-                        "GPUのメーカー・モデルをPKBへ登録するか、依頼で明示してください。"
-                    )
-
-                    action_ids = []
-                    result_ids = []
-                    for attempt, execution in enumerate(executions, start=1):
-                        execution_result = execution["result"]
-                        execution_total = int(execution.get("total") or 0)
-                        cur.execute(
-                            """INSERT INTO secretary.sources
-                               (source_type, uri, citation, retrieved_at,
-                                confidentiality, metadata)
-                               VALUES ('tool', %s, %s, now(), 'private', %s)
-                               RETURNING id""",
-                            (
-                                f"tool://daily-core/{execution['source_slug']}/{task_id}/{attempt}",
-                                execution["citation"],
-                                Jsonb({
-                                    "task_id": str(task_id),
-                                    "capability": execution["capability"],
-                                    "query": request,
-                                    "result_count": execution_total,
-                                    **(execution.get("source_metadata") or {}),
-                                }),
-                            ),
-                        )
-                        source_id = cur.fetchone()[0]
-
-                        cur.execute(
-                            """INSERT INTO secretary.actions
-                               (task_id, actor, tool, operation, parameters, risk,
-                                authorization_basis, status, idempotency_key,
-                                reversible, started_at, finished_at)
-                               VALUES (%s, 'daily_core', %s, %s, %s,
-                                       'read_only', 'localhost_read_only',
-                                       'succeeded', %s, true, now(), now())
-                               RETURNING id""",
-                            (
-                                task_id,
-                                execution["tool"],
-                                execution["operation"],
-                                Jsonb({"query": request, "bounded": True, "step": attempt}),
-                                f"daily-core:{task_id}:{execution['source_slug']}:{attempt}",
-                            ),
-                        )
-                        action_id = cur.fetchone()[0]
-                        action_ids.append(action_id)
-
-                        cur.execute(
-                            """INSERT INTO secretary.results
-                               (action_id, source_id, outcome, summary, evidence,
-                                verified_by, verified_at)
-                               VALUES (%s, %s, %s, %s, %s,
-                                       %s, now())
-                               RETURNING id""",
-                            (
-                                action_id,
-                                source_id,
-                                "success" if execution_total > 0 else "inconclusive",
-                                execution["answer"],
-                                Jsonb({
-                                    "result_kind": execution_result.get("result_kind"),
-                                    "total": execution_total,
-                                    "data": execution_result,
-                                }),
-                                execution["verified_by"],
-                            ),
-                        )
-                        result_ids.append(cur.fetchone()[0])
-
-                    action_id = action_ids[-1]
-                    result_id = result_ids[-1]
-
-                    final_checkpoint = {
-                        "core_slice": "daily_read_only_v1",
-                        "phase": phase,
-                        "selected_capability": scoped["capability"],
-                        "action_id": str(action_id),
-                        "result_id": str(result_id),
-                        "action_ids": [str(value) for value in action_ids],
-                        "result_ids": [str(value) for value in result_ids],
-                        "result_count": total,
-                        "comparison": comparison,
-                        "question": question,
-                        "observation_pack": observation_pack,
-                        "magi_baseline": {
-                            "member": "MELCHIOR",
-                            "status": scoped["status"],
-                            "selected_capability": scoped.get("capability"),
-                        },
-                        "advisor_shadow": advisor_shadow,
-                    }
-                    cur.execute(
-                        """UPDATE secretary.tasks
-                           SET status=%s,
-                               checkpoint=%s,
-                               completed_at=CASE WHEN %s='completed' THEN now() ELSE NULL END
-                           WHERE id=%s""",
-                        (task_status, Jsonb(final_checkpoint), task_status, task_id),
-                    )
-                    cur.execute(
-                        """INSERT INTO secretary.audit_events
-                           (actor, event_type, task_id, action_id,
-                            object_type, object_id, details)
-                           VALUES ('daily_core', %s, %s, %s, 'task', %s, %s)""",
-                        (
-                            "core.completed" if total > 0 else "core.needs_more_context",
-                            task_id,
-                            action_id,
-                            task_id,
-                            Jsonb({
-                                "capability": scoped["capability"],
-                                "result_count": total,
-                                "action_count": len(action_ids),
-                                "comparison": comparison,
-                                "advisor_shadow": advisor_shadow,
-                            }),
-                        ),
-                    )
-
-                    response = {
-                        "task_id": str(task_id),
-                        "status": task_status,
-                        "phase": phase,
-                        "message": answer,
-                        "question": question,
-                        "selected_capability": scoped["capability"],
-                        "observation_pack": observation_pack,
-                        "magi_baseline": {
-                            "member": "MELCHIOR",
-                            "status": scoped["status"],
-                            "selected_capability": scoped.get("capability"),
-                        },
-                        "capability_result": result,
-                        "comparison": comparison,
-                        "advisor_shadow": advisor_shadow,
-                        "search": (
-                            plan_result["pkb"]
-                            if scoped["capability"] == "pkb_web_compare"
-                            else result if scoped["capability"] == "pkb_search" else None
-                        ),
-                        "finance": result if scoped["capability"] == "finance_read" else None,
-                        "web": (
-                            plan_result["web"]
-                            if scoped["capability"] == "pkb_web_compare"
-                            else result if scoped["capability"] == "web_research" else None
-                        ),
-                    }
-
-    # Queue only after the Task transaction commits. The Advisor can run for
-    # minutes without delaying or changing the deterministic Task outcome.
-    _queue_core_advisor_shadow(
-        task_id,
-        request,
-        {
-            "member": "MELCHIOR",
-            "status": scoped["status"],
-            "selected_capability": scoped.get("capability"),
-        },
-        observation_pack,
-        advisor_model,
-        advisor_timeout,
+    """GUI compatibility wrapper around the common RITSUKO application entry."""
+    return _ritsuko_application_entry().request(
+        text,
+        advisor_model=advisor_model,
+        advisor_timeout=advisor_timeout,
     )
-    return response
 
 
 def _contextualize_core_reply(
