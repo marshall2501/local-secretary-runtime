@@ -105,6 +105,15 @@ from pkb.ingestion_gate import InputRecord, ProposedClaim
 from pkb.query_service import ClaimQuery, query_claims
 from pkb.write_service import write_one
 from capabilities.web_research.web_research import research_web
+from capabilities.finance.application import (
+    core_finance_filters as finance_filters,
+    finance_core_answer,
+    query_finance_text,
+)
+from capabilities.web_research.application import (
+    research_text,
+    web_core_answer,
+)
 from pkb.pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
 from pkb.application.daily import (
@@ -662,186 +671,15 @@ def search_text(text: str) -> dict:
 
 
 def _core_finance_filters(text: str) -> dict:
-    """Parse the intentionally small date scope supported by the first finance Core slice."""
-    q = text.strip()
-    start_date = None
-    end_date = None
-
-    explicit = re.search(r"(?P<year>20\d{2})年(?P<month>1[0-2]|0?[1-9])月", q)
-    if explicit:
-        year = int(explicit.group("year"))
-        month = int(explicit.group("month"))
-        start = datetime(year, month, 1).date()
-        if month == 12:
-            next_month = datetime(year + 1, 1, 1).date()
-        else:
-            next_month = datetime(year, month + 1, 1).date()
-        start_date = start.isoformat()
-        end_date = (next_month - timedelta(days=1)).isoformat()
-    elif "今月" in q:
-        today = datetime.now().date()
-        start = today.replace(day=1)
-        if today.month == 12:
-            next_month = today.replace(year=today.year + 1, month=1, day=1)
-        else:
-            next_month = today.replace(month=today.month + 1, day=1)
-        start_date = start.isoformat()
-        end_date = (next_month - timedelta(days=1)).isoformat()
-
-    return {
-        "start_date": start_date,
-        "end_date": end_date,
-        "row_mode": "calculation_target",
-    }
+    return finance_filters(text)
 
 
 def finance_text(text: str) -> dict:
-    filters = _core_finance_filters(text)
-    with connection() as db:
-        dashboard = load_finance_dashboard(
-            db,
-            recent_limit=5,
-            start_date=filters["start_date"],
-            end_date=filters["end_date"],
-            row_mode=filters["row_mode"],
-            page=1,
-            sort_by="date",
-            sort_dir="desc",
-        )
-    return {
-        "status": "ok",
-        "result_kind": "finance_summary",
-        "total": dashboard.transaction_count,
-        "transaction_count": dashboard.transaction_count,
-        "calculation_target_count": dashboard.calculation_target_count,
-        "requested_start_date": filters["start_date"],
-        "requested_end_date": filters["end_date"],
-        "data_start_date": dashboard.start_date,
-        "data_end_date": dashboard.end_date,
-        "income_total": dashboard.income_total,
-        "expense_total": dashboard.expense_total,
-        "net_total": dashboard.net_total,
-        "monthly": dashboard.monthly[:12],
-        "categories": dashboard.categories[:10],
-        "recent_rows": dashboard.recent_rows[:5],
-        "import_batches": dashboard.import_batches[:1],
-    }
-
-
-def finance_core_answer(result: dict) -> str:
-    if int(result.get("total") or 0) == 0:
-        return "保存済み家計に該当する明細が見つかりませんでした。"
-    period = ""
-    if result.get("requested_start_date") or result.get("requested_end_date"):
-        period = (
-            f"{result.get('requested_start_date') or '-'}〜"
-            f"{result.get('requested_end_date') or '-'}の"
-        )
-    return (
-        f"保存済み家計では、{period}集計対象は{result['transaction_count']}件、"
-        f"収入は¥{int(result['income_total']):,}、"
-        f"支出は¥{int(result['expense_total']):,}、"
-        f"収支は¥{int(result['net_total']):,}です。"
-    )
-
-
-def web_core_answer(result: dict) -> str:
-    hits = result.get("hits") or []
-    facts = result.get("fact_summary") or {}
-    if facts.get("kind") == "driver_version":
-        if facts.get("status") == "primary_source_no_current_candidate":
-            primary = ", ".join(facts.get("primary_domains") or []) or "一次Source候補"
-            secondary = []
-            for group in facts.get("groups") or []:
-                for candidate in group.get("candidates") or []:
-                    if int(candidate.get("primary_source_count") or 0) == 0:
-                        secondary.append(
-                            f"{group.get('kind')}={candidate.get('value')}"
-                        )
-            secondary_text = " / ".join(secondary[:4])
-            return (
-                f"Web調査では一次Source候補（{primary}）を確認しましたが、"
-                "そこから現在版の番号を抽出できませんでした。"
-                + (f" 第三者候補: {secondary_text}。" if secondary_text else "")
-                + " 一次Sourceで確認できるまで最新値として確定しません。"
-            )
-
-        groups = facts.get("groups") or []
-        preferred_kind = facts.get("preferred_kind")
-        preferred = next(
-            (group for group in groups if group.get("kind") == preferred_kind),
-            groups[0] if groups else None,
-        )
-        if preferred:
-            status = preferred.get("status")
-            best = preferred.get("best_candidate")
-            candidates = preferred.get("candidates") or []
-            kind_label = {
-                "adrenalin_version": "Adrenalin版",
-                "driver_version": "ドライバー版",
-                "si_driver_version": "SI Driver版",
-            }.get(preferred.get("kind"), preferred.get("kind") or "版番号")
-            other_groups = [
-                group for group in groups if group is not preferred and group.get("best_candidate")
-            ]
-            other_text = ""
-            if other_groups:
-                other_text = " 別種の版番号: " + " / ".join(
-                    f"{group.get('kind')}={group.get('best_candidate')}"
-                    for group in other_groups[:3]
-                ) + "。"
-
-            if status == "leading_consensus" and best:
-                leading = candidates[0] if candidates else {}
-                return (
-                    f"Web調査では{kind_label}候補 {best} が"
-                    f"{leading.get('source_count', 0)}件のSourceで一致しています。"
-                    + other_text
-                    + "異なる種類の版番号同士は競合扱いしていません。"
-                )
-            if status == "latest_by_date" and best:
-                leading = candidates[0] if candidates else {}
-                return (
-                    f"Web調査では{kind_label}候補 {best} が、"
-                    f"近傍日付 {leading.get('latest_date') or '-'} を持つ最新候補として上位です。"
-                    + other_text
-                    + "ただし日付対応はページ本文の近傍文脈から抽出したため、一次Source表示で最終確認してください。"
-                )
-            if status == "single_candidate" and best:
-                return (
-                    f"Web調査では{kind_label}候補 {best} を1系統で抽出しました。"
-                    + other_text
-                    + "同じ種類の複数Source一致はまだ確認できていないため、確定値とは扱いません。"
-                )
-            if status == "conflicting_candidates":
-                values = " / ".join(
-                    str(row.get("value")) for row in candidates[:4] if row.get("value")
-                )
-                return (
-                    f"Web調査では同じ種類の{kind_label}候補が一致していません。"
-                    f"候補: {values}。"
-                    + other_text
-                    + "一次Sourceと対象期間を追加確認する必要があります。"
-                )
-
-    if not hits:
-        return "Web検索で結果が見つかりませんでした。"
-
-    parts = []
-    for hit in hits[:3]:
-        title = hit.get("title") or hit.get("url") or "検索結果"
-        snippet = (hit.get("snippet") or "").strip()
-        if len(snippet) > 220:
-            snippet = snippet[:217] + "..."
-        parts.append(title + (f" — {snippet}" if snippet else ""))
-    return "Web調査では、根拠候補の上位は " + " / ".join(parts) + "。"
+    return query_finance_text(text, connection_factory=connection)
 
 
 def web_text(text: str) -> dict:
-    result = research_web(text, max_results=5, max_fetches=2).as_dict()
-    result["status"] = "ok"
-    result["result_kind"] = "web_research"
-    return result
+    return research_text(text)
 
 
 _VERSION_VALUE_PATTERN = re.compile(r"\b\d{2,4}\.\d{1,3}(?:\.\d{1,4}){1,2}\b")
