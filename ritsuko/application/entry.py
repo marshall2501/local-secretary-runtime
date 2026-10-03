@@ -27,10 +27,12 @@ class RitsukoApplicationEntry:
         self._advisor_shadow_initial = advisor_shadow_initial
         self._queue_advisor = queue_advisor
 
-    def _execute_scoped(self, request: str, scoped: dict) -> dict:
+    def _execute_scoped(
+        self, request: str, scoped: dict, *, target_override: str | None = None
+    ) -> dict:
         capability = scoped["capability"]
         if capability == "pkb_web_compare":
-            plan_result = self._execute_compare(request)
+            plan_result = self._execute_compare(request, target_override=target_override)
             executions = plan_result["executions"]
             answer = plan_result["answer"]
             comparison = plan_result["comparison"]
@@ -162,3 +164,170 @@ class RitsukoApplicationEntry:
                 else result if capability == "web_research" else None
             ),
         }
+
+    def resume(self, task_id: UUID, reply: str) -> dict:
+        user_reply = reply.strip()
+        if not user_reply:
+            return {
+                "task_id": str(task_id),
+                "status": "waiting_external",
+                "phase": "awaiting_clarification",
+                "message": "追加回答を入力してください。",
+            }
+
+        with self._repository.resume_session(task_id) as session:
+            state = session.state
+            original_request = state["request"]
+            current_domain = state["domain"]
+            checkpoint = state["checkpoint"]
+            entities, _ = self._load_context(original_request)
+
+            prior_capability = checkpoint.get("selected_capability")
+            if prior_capability == "pkb_web_compare":
+                effective_request = original_request
+                scoped = {
+                    "status": "ready",
+                    "capability": "pkb_web_compare",
+                    "domain": current_domain or "pc",
+                }
+            else:
+                effective_request = contextualize_reply(
+                    original_request, user_reply, entities
+                )
+                scoped = self._scope_request(effective_request, entities, None)
+
+            replies = list(checkpoint.get("user_replies") or [])
+            replies.append(user_reply)
+            session.audit_clarification(
+                resolved=scoped["status"] == "ready",
+                reason=scoped.get("reason"),
+                reply_count=len(replies),
+            )
+
+            if scoped["status"] != "ready":
+                next_checkpoint = {
+                    **checkpoint,
+                    "phase": "awaiting_clarification",
+                    "question": scoped.get("question"),
+                    "reason": scoped.get("reason"),
+                    "user_replies": replies,
+                    "effective_request": effective_request,
+                }
+                session.save_waiting_checkpoint(next_checkpoint)
+                return {
+                    "task_id": str(task_id),
+                    "status": "waiting_external",
+                    "phase": "awaiting_clarification",
+                    "message": "まだ追加情報が必要です。",
+                    "question": scoped["question"],
+                }
+
+            session.mark_running()
+            outcome = self._execute_scoped(
+                original_request if scoped["capability"] == "pkb_web_compare" else effective_request,
+                scoped,
+                target_override=(user_reply if scoped["capability"] == "pkb_web_compare" else None),
+            )
+            attempt = session.next_attempt()
+            action_ids = []
+            result_ids = []
+            plan_result = outcome["plan_result"]
+            for step_offset, execution in enumerate(outcome["executions"]):
+                step = attempt + step_offset
+                query = (
+                    plan_result.get("web_query")
+                    if (
+                        scoped["capability"] == "pkb_web_compare"
+                        and execution["capability"] == "web_research"
+                        and plan_result is not None
+                    )
+                    else effective_request
+                )
+                action_id, result_id = session.record_execution(
+                    execution=execution,
+                    original_request=original_request,
+                    user_reply=user_reply,
+                    effective_request=effective_request,
+                    query=query,
+                    step=step,
+                )
+                action_ids.append(action_id)
+                result_ids.append(result_id)
+
+            action_id = action_ids[-1]
+            result_id = result_ids[-1]
+            next_checkpoint = {
+                **checkpoint,
+                "phase": outcome["phase"],
+                "selected_capability": scoped["capability"],
+                "action_id": str(action_id),
+                "result_id": str(result_id),
+                "action_ids": [str(value) for value in action_ids],
+                "result_ids": [str(value) for value in result_ids],
+                "result_count": outcome["total"],
+                "comparison": outcome["comparison"],
+                "question": outcome["question"],
+                "reason": None,
+                "user_replies": replies,
+                "effective_request": effective_request,
+            }
+            session.finalize_resume(
+                status=outcome["task_status"],
+                domain=scoped.get("domain") or current_domain,
+                checkpoint=next_checkpoint,
+                action_id=action_id,
+                event_type=(
+                    "core.resumed_completed"
+                    if outcome["total"] > 0
+                    else "core.resumed_needs_more_context"
+                ),
+                details={
+                    "capability": scoped["capability"],
+                    "result_count": outcome["total"],
+                    "reply_count": len(replies),
+                    "action_count": len(action_ids),
+                    "comparison": outcome["comparison"],
+                },
+            )
+
+            result = outcome["result"]
+            return {
+                "task_id": str(task_id),
+                "status": outcome["task_status"],
+                "phase": outcome["phase"],
+                "message": outcome["answer"],
+                "question": outcome["question"],
+                "selected_capability": scoped["capability"],
+                "capability_result": result,
+                "comparison": outcome["comparison"],
+                "search": (
+                    plan_result["pkb"]
+                    if scoped["capability"] == "pkb_web_compare"
+                    else result if scoped["capability"] == "pkb_search" else None
+                ),
+                "finance": result if scoped["capability"] == "finance_read" else None,
+                "web": (
+                    plan_result["web"]
+                    if scoped["capability"] == "pkb_web_compare"
+                    else result if scoped["capability"] == "web_research" else None
+                ),
+                "resumed": True,
+                "effective_request": effective_request,
+            }
+
+
+def contextualize_reply(original_request: str, reply: str, entities: dict[str, dict]) -> str:
+    """Carry one unique Entity from the original request into a short reply."""
+    reply = reply.strip()
+    if not reply:
+        return reply
+    ordered = sorted(entities.items(), key=lambda item: len(item[0]), reverse=True)
+    if any(name in reply for name, _ in ordered):
+        return reply
+    original_mentions = [name for name, _ in ordered if name in original_request]
+    if len(original_mentions) == 1:
+        entity_name = original_mentions[0]
+        if reply.startswith(("の", "について", "に関して")):
+            return entity_name + reply
+        return entity_name + "の" + reply
+    return reply

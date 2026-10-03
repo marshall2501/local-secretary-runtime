@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import ExitStack
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
@@ -174,3 +175,158 @@ class PostgresCoreExecutionRepository:
                             }),
                         ),
                     )
+
+
+class _PostgresResumeSession:
+    def __init__(self, connect: Callable, task_id: UUID):
+        self._connect = connect
+        self._task_id = task_id
+        self._stack = None
+        self._cur = None
+        self.state = None
+
+    def __enter__(self):
+        self._stack = ExitStack()
+        db = self._stack.enter_context(self._connect())
+        self._stack.enter_context(db.transaction())
+        self._cur = self._stack.enter_context(db.cursor())
+        self._cur.execute(
+            """SELECT id, request, domain, status, checkpoint
+               FROM secretary.tasks WHERE id=%s FOR UPDATE""",
+            (self._task_id,),
+        )
+        row = self._cur.fetchone()
+        if row is None:
+            self._stack.close()
+            raise ValueError("Taskが見つかりません。")
+        checkpoint = row[4] or {}
+        if row[3] != "waiting_external":
+            self._stack.close()
+            raise ValueError("waiting_external のTaskだけ再開できます。")
+        if checkpoint.get("core_slice") != "daily_read_only_v1":
+            self._stack.close()
+            raise ValueError("このTaskは日常Core最小縦断のTaskではありません。")
+        self.state = {
+            "request": row[1],
+            "domain": row[2],
+            "status": row[3],
+            "checkpoint": checkpoint,
+        }
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._stack.__exit__(exc_type, exc, tb)
+
+    def audit_clarification(self, *, resolved: bool, reason: str | None,
+                            reply_count: int) -> None:
+        self._cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('daily_core', 'core.clarification_received',
+                       %s, 'task', %s, %s)""",
+            (
+                self._task_id, self._task_id,
+                Jsonb({"resolved": resolved, "reason": reason, "reply_count": reply_count}),
+            ),
+        )
+
+    def save_waiting_checkpoint(self, checkpoint: dict) -> None:
+        self._cur.execute(
+            "UPDATE secretary.tasks SET checkpoint=%s WHERE id=%s",
+            (Jsonb(checkpoint), self._task_id),
+        )
+
+    def mark_running(self) -> None:
+        self._cur.execute(
+            "UPDATE secretary.tasks SET status='running' WHERE id=%s",
+            (self._task_id,),
+        )
+
+    def next_attempt(self) -> int:
+        self._cur.execute(
+            "SELECT count(*) FROM secretary.actions WHERE task_id=%s",
+            (self._task_id,),
+        )
+        return int(self._cur.fetchone()[0]) + 1
+
+    def record_execution(self, *, execution: dict, original_request: str,
+                         user_reply: str, effective_request: str, query: str,
+                         step: int) -> tuple[UUID, UUID]:
+        execution_result = execution["result"]
+        execution_total = int(execution.get("total") or 0)
+        self._cur.execute(
+            """INSERT INTO secretary.sources
+               (source_type, uri, citation, retrieved_at, confidentiality, metadata)
+               VALUES ('tool', %s, %s, now(), 'private', %s) RETURNING id""",
+            (
+                f"tool://daily-core/{execution['source_slug']}/{self._task_id}/{step}",
+                "Secretary Core resumed " + execution["citation"],
+                Jsonb({
+                    "task_id": str(self._task_id),
+                    "capability": execution["capability"],
+                    "original_request": original_request,
+                    "user_reply": user_reply,
+                    "effective_request": effective_request,
+                    "result_count": execution_total,
+                    **(execution.get("source_metadata") or {}),
+                }),
+            ),
+        )
+        source_id = self._cur.fetchone()[0]
+        self._cur.execute(
+            """INSERT INTO secretary.actions
+               (task_id, actor, tool, operation, parameters, risk,
+                authorization_basis, status, idempotency_key, reversible,
+                started_at, finished_at)
+               VALUES (%s, 'daily_core', %s, %s, %s, 'read_only',
+                       'localhost_read_only', 'succeeded', %s, true, now(), now())
+               RETURNING id""",
+            (
+                self._task_id, execution["tool"], execution["operation"],
+                Jsonb({"query": query, "bounded": True, "resumed": True, "step": step}),
+                f"daily-core:{self._task_id}:{execution['source_slug']}:{step}",
+            ),
+        )
+        action_id = self._cur.fetchone()[0]
+        self._cur.execute(
+            """INSERT INTO secretary.results
+               (action_id, source_id, outcome, summary, evidence, verified_by, verified_at)
+               VALUES (%s, %s, %s, %s, %s, %s, now()) RETURNING id""",
+            (
+                action_id, source_id,
+                "success" if execution_total > 0 else "inconclusive",
+                execution["answer"],
+                Jsonb({
+                    "result_kind": execution_result.get("result_kind"),
+                    "total": execution_total,
+                    "data": execution_result,
+                    "resumed": True,
+                }),
+                execution["verified_by"],
+            ),
+        )
+        result_id = self._cur.fetchone()[0]
+        return action_id, result_id
+
+    def finalize_resume(self, *, status: str, domain: str, checkpoint: dict,
+                        action_id: UUID, event_type: str, details: dict) -> None:
+        self._cur.execute(
+            """UPDATE secretary.tasks
+               SET status=%s, domain=%s, checkpoint=%s,
+                   completed_at=CASE WHEN %s='completed' THEN now() ELSE NULL END
+               WHERE id=%s""",
+            (status, domain, Jsonb(checkpoint), status, self._task_id),
+        )
+        self._cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, action_id, object_type, object_id, details)
+               VALUES ('daily_core', %s, %s, %s, 'task', %s, %s)""",
+            (event_type, self._task_id, action_id, self._task_id, Jsonb(details)),
+        )
+
+
+def _resume_session(self, task_id: UUID):
+    return _PostgresResumeSession(self._connect, task_id)
+
+
+PostgresCoreExecutionRepository.resume_session = _resume_session
