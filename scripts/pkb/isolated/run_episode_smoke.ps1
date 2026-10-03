@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $worktree = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $main = 'D:\AI\projects\local-secretary-runtime'
 $db = 'secretary_pkb_proto_20260927'
-$migration = Join-Path $worktree 'pkb_proto\sql\007_pkb_proto_episodes.sql'
+$migration = Join-Path $worktree 'db\isolated\pkb_proto\007_pkb_proto_episodes.sql'
 $python = Join-Path $main '.venv\Scripts\python.exe'
 $writerSecret = Join-Path $worktree 'secrets\pkb-proto-writer-password.txt'
 $envFile = Join-Path $main '.env.postgres'
