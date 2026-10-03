@@ -7,6 +7,11 @@ def sync(portal_context: dict) -> None:
 
 def register(portal_context: dict):
     sync(portal_context)
+
+    def _portal(name: str):
+        """Resolve parent application dependencies at call time."""
+        return portal_context[name]
+
     @ui.page("/core")
     def core_page(task_id: str = ""):
         globals().update(portal_context)
@@ -53,7 +58,7 @@ def register(portal_context: dict):
             task_id = (state["result"] or {}).get("task_id")
             if task_id:
                 try:
-                    state["trace"] = load_core_task_trace(UUID(task_id))
+                    state["trace"] = _portal("load_core_task_trace")(UUID(task_id))
                 except Exception as exc:
                     state["trace_error"] = str(exc)
     
@@ -67,7 +72,7 @@ def register(portal_context: dict):
                 return
             try:
                 state["trace"] = await run.io_bound(
-                    load_core_task_trace, UUID(task_id)
+                    _portal("load_core_task_trace"), UUID(task_id)
                 )
                 state["trace_error"] = None
                 trace_task = (state["trace"] or {}).get("task") or {}
@@ -488,7 +493,7 @@ def register(portal_context: dict):
                                     state["guided_stop_event"] = None
                                     guided_button.enable()
                                     try:
-                                        saved_trace = load_core_task_trace(
+                                        saved_trace = _portal("load_core_task_trace")(
                                             UUID(session["task_id"])
                                         )
                                         if (
@@ -606,7 +611,7 @@ def register(portal_context: dict):
     
                                 async def load_after_proposal_review() -> None:
                                     saved_trace = await run.io_bound(
-                                        load_core_task_trace,
+                                        _portal("load_core_task_trace"),
                                         UUID(session["task_id"]),
                                     )
                                     state["trace"] = saved_trace
@@ -696,7 +701,7 @@ def register(portal_context: dict):
                                     except Exception as exc:
                                         try:
                                             saved_trace = await run.io_bound(
-                                                load_core_task_trace,
+                                                _portal("load_core_task_trace"),
                                                 UUID(session["task_id"]),
                                             )
                                             state["trace"] = saved_trace
@@ -1206,7 +1211,7 @@ def register(portal_context: dict):
                 @ui.refreshable
                 def completed_tasks_panel():
                     try:
-                        rows, has_more = load_core_task_window(load_completed_core_tasks, list_limits["completed_limit"])
+                        rows, has_more = load_core_task_window(_portal("load_completed_core_tasks"), list_limits["completed_limit"])
                     except Exception as exc:
                         with ui.card().classes("w-full border border-red-200 bg-red-50"):
                             ui.label("完了済みTaskを取得できません: " + str(exc)).classes(
@@ -1249,7 +1254,7 @@ def register(portal_context: dict):
                 @ui.refreshable
                 def open_tasks_panel():
                     try:
-                        rows, has_more = load_core_task_window(load_open_core_tasks, list_limits["open_limit"])
+                        rows, has_more = load_core_task_window(_portal("load_open_core_tasks"), list_limits["open_limit"])
                     except Exception as exc:
                         with ui.card().classes("w-full border border-red-200 bg-red-50"):
                             ui.label("未完了Taskを取得できません: " + str(exc)).classes(
@@ -1304,7 +1309,7 @@ def register(portal_context: dict):
                 @ui.refreshable
                 def screen_log_panel():
                     try:
-                        rows = load_recent_core_tasks(10)
+                        rows = _portal("load_recent_core_tasks")(10)
                     except Exception as exc:
                         with ui.expansion(
                             "Core画面 全体稼働ログ",
@@ -1912,7 +1917,7 @@ def register(portal_context: dict):
                                 core_result.refresh()
                                 try:
                                     state["result"] = await run.io_bound(
-                                        resume_core_task,
+                                        _portal("resume_core_task"),
                                         UUID(result["task_id"]),
                                         reply_input.value or "",
                                     )
@@ -1949,7 +1954,7 @@ def register(portal_context: dict):
                         trace_panel.refresh()
                         try:
                             state["result"] = await run.io_bound(
-                                run_core_request,
+                                _portal("run_core_request"),
                                 request_input.value or "",
                                 state.get("advisor_model"),
                                 float(state.get("advisor_timeout") or 60),
@@ -1987,7 +1992,7 @@ def register(portal_context: dict):
     
                 if task_id:
                     try:
-                        saved_trace = load_core_task_trace(UUID(task_id))
+                        saved_trace = _portal("load_core_task_trace")(UUID(task_id))
                         select_saved_task(saved_trace["task"])
                     except (ValueError, psycopg.Error) as exc:
                         ui.notify("Taskを開けません: " + str(exc), type="negative")
