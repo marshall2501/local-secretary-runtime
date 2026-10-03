@@ -130,5 +130,9 @@ try {
     if ($rehearsalText.Contains('local-secretary-runtime-db')) {
         throw 'Promotion rehearsal must never target the normal compose project.'
     }
+
+    if ($rehearsalText -match '(?i)param\s*\(\s*\[string\[\]\]\s*\$Args\s*\)') {
+        throw 'Promotion rehearsal must not shadow PowerShell automatic $Args in command wrappers.'
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'

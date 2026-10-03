@@ -27,14 +27,14 @@ $composeBase = @(
 )
 
 function Invoke-Docker {
-    param([string[]]$Args)
-    & docker @Args
-    if ($LASTEXITCODE -ne 0) { throw "Docker command failed: $($Args -join ' ')" }
+    param([string[]]$DockerArgs)
+    & docker @DockerArgs
+    if ($LASTEXITCODE -ne 0) { throw "Docker command failed: $($DockerArgs -join ' ')" }
 }
 
 function Invoke-Compose {
-    param([string[]]$Args)
-    Invoke-Docker ($composeBase + $Args)
+    param([string[]]$ComposeArgs)
+    Invoke-Docker ($composeBase + $ComposeArgs)
 }
 
 function Snapshot-OtherContainers {
