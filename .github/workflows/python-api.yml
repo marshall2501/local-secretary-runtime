@@ -2,7 +2,10 @@ name: Python API static checks
 on:
   pull_request:
     paths:
-      - "api/**"\n      - "interfaces/api/**"\n      - "application/**"\n      - "infrastructure/postgres/**"\n      - "interfaces/api/**"\n      - "application/**"\n      - "infrastructure/postgres/**"
+      - "api/**"
+      - "interfaces/api/**"
+      - "application/**"
+      - "infrastructure/postgres/**"
       - "scripts/memory/**"
       - "tests/test_api_static.py"
       - "tests/test_memory_review.py"
@@ -17,6 +20,9 @@ on:
     branches: [main]
     paths:
       - "api/**"
+      - "interfaces/api/**"
+      - "application/**"
+      - "infrastructure/postgres/**"
       - "scripts/memory/**"
       - "tests/test_api_static.py"
       - "tests/test_memory_review.py"
@@ -46,6 +52,6 @@ jobs:
         run: |
           cp .env.api.example .env.api
           mkdir -p secrets
-          touch secrets/secretary-api-db-password.txt secrets/secretary-api-token.txt
+          touch secrets/secretary-api-db-password.txt secrets/secretary-api-token.txt secrets/secretary-external-read-token.txt
           docker compose --project-name local-secretary-runtime-api --env-file .env.api -f docker/compose.api.yml config --quiet
           docker build -f api/Dockerfile -t secretary-api-ci .
