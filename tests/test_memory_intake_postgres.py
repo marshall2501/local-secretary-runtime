@@ -12,10 +12,10 @@ from psycopg import sql
 from pkb.memory_contracts import MemoryIntake
 from pkb.memory_intake import write_intake
 from pkb.ingestion_gate import InputRecord, ProposedClaim
-from pkb_proto.write_service import write_one
-from pkb_proto.pending_service import enqueue, accept_pending, list_pending
-from pkb_proto.correction_service import correct_entity
-from pkb_proto.query_service import query_claims, ClaimQuery
+from pkb.write_service import write_one
+from pkb.pending_service import enqueue, accept_pending, list_pending
+from pkb.correction_service import correct_entity
+from pkb.query_service import query_claims, ClaimQuery
 
 DBNAME='secretary_pkb_proto_20260927'
 WRITER='secretary_pkb_proto_writer_20260927'
