@@ -27,13 +27,21 @@ from integrations.connections.credential_resolver import (
     env_name_to_credential_ref,
     resolve_connection_credential,
 )
-from infrastructure.async_runtime.transport import (
+from .transport_contract import (
     AsyncHTTPStatusError,
     AsyncRequestTimeout,
     AsyncRetryExhausted,
     AsyncTransportError,
-    request_json_with_retry,
 )
+
+
+async def _transport_not_configured(*_args, **_kwargs):
+    raise RuntimeError("async_transport_not_configured")
+
+
+# Composition roots replace this callable with the concrete async transport.
+# Keeping this module-level name preserves the existing test patch surface.
+request_json_with_retry = _transport_not_configured
 from .client import OLLAMA
 from .dialogue import (
     CLASSIFY_QUESTION,

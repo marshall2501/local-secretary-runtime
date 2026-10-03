@@ -6,6 +6,16 @@ adapters directly.
 """
 from __future__ import annotations
 
+from infrastructure.async_runtime.transport import request_json_with_retry as _request_json_with_retry
+import ritsuko.magi.async_execution as _magi_async_execution
+
+
+def configure_magi_async_transport() -> None:
+    _magi_async_execution.request_json_with_retry = _request_json_with_retry
+
+
+configure_magi_async_transport()
+
 from psycopg import Error as DatabaseError
 
 from infrastructure.postgres.core_advisor_repository import (
