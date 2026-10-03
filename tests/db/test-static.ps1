@@ -134,5 +134,12 @@ try {
     if ($rehearsalText -match '(?i)param\s*\(\s*\[string\[\]\]\s*\$Args\s*\)') {
         throw 'Promotion rehearsal must not shadow PowerShell automatic $Args in command wrappers.'
     }
+
+    if ($rehearsalText -match [regex]::Escape("Labels.'com.docker.compose.project'")) {
+        throw 'Promotion rehearsal must tolerate non-Compose containers without Compose labels under StrictMode.'
+    }
+    if ($rehearsalText -notmatch [regex]::Escape("PSObject.Properties['com.docker.compose.project']")) {
+        throw 'Promotion rehearsal must inspect optional Compose labels safely.'
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'

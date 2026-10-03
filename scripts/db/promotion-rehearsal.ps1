@@ -42,7 +42,14 @@ function Snapshot-OtherContainers {
     $result = @()
     foreach ($containerId in $ids) {
         $details = (Invoke-Docker @('inspect',$containerId) | Out-String | ConvertFrom-Json)[0]
-        if ($details.Config.Labels.'com.docker.compose.project' -ne $project) {
+        $composeProject = $null
+        if ($null -ne $details.Config.Labels) {
+            $projectProperty = $details.Config.Labels.PSObject.Properties['com.docker.compose.project']
+            if ($null -ne $projectProperty) {
+                $composeProject = "$($projectProperty.Value)"
+            }
+        }
+        if ($composeProject -ne $project) {
             $result += "$($details.Id)|$($details.State.Status)|$($details.State.StartedAt)|$($details.RestartCount)"
         }
     }
