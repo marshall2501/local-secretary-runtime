@@ -36,23 +36,23 @@ from ritsuko.core.core_coordinator import (
     decide_after_observation,
     extend_observation_pack,
 )
-from .ritsuko_magi_protocol import build_request_envelope, default_resource_catalog
-from .magi_client import (
+from ritsuko.magi.protocol import build_request_envelope, default_resource_catalog
+from ritsuko.magi.client import (
     call_member as call_magi_member,
     choose_model as choose_magi_model,
     list_chat_models as list_magi_models,
 )
-from .magi_dialogue import MAX_TURNS, export_dialogue
-from .magi_core_bridge import reviewable_user_knowledge_proposal
-from .magi_async import (
+from ritsuko.magi.dialogue import MAX_TURNS, export_dialogue
+from ritsuko.core.magi_bridge import reviewable_user_knowledge_proposal
+from ritsuko.magi.async_execution import (
     continue_with_observation_async,
 )
-from .magi_observation_loop import (
+from ritsuko.core.observation_loop import (
     review_proposal as review_magi_proposal,
     run_pkb_observation_loop,
     resume_user_answer,
 )
-from .magi_task_store import (
+from ritsuko.tasks.magi_task_store import (
     abort_proposal_review as abort_magi_proposal_review,
     abort_user_resume as abort_magi_user_resume,
     claim_proposal_review as claim_magi_proposal_review,
@@ -64,7 +64,7 @@ from .magi_task_store import (
     prepare_memory_intake as prepare_magi_memory_intake,
     record_pkb_read as record_magi_pkb_read,
 )
-from .magi_settings import (
+from ritsuko.magi.settings import (
     DEFAULT_RETRY_HTTP_CODES,
     DEFAULT_RETRY_WITHIN_TURN,
     DEFAULT_TIMEOUT_SECONDS,
@@ -80,7 +80,7 @@ from .magi_settings import (
     sync_ollama_profiles,
     upsert_llm_profile,
 )
-from .ollama_runtime import (
+from integrations.llm.ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
     OLLAMA_CONTEXT_OPTIONS,
