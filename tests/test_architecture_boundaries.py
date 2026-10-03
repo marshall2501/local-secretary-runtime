@@ -58,11 +58,11 @@ class ArchitectureBoundaryTests(unittest.TestCase):
     def test_no_legacy_pkb_proto_runtime_paths(self):
         """Executable/runtime entrypoints must not point at the removed package tree."""
         banned = (
-            "pkb_proto\\\\sql\\\\",
+            "pkb_proto\\sql\\",
             "pkb_proto/sql/",
             "pkb_proto.daily_pkb",
             "-m pkb_proto.",
-            ".\\\\pkb_proto\\\\",
+            ".\\pkb_proto\\",
         )
         roots = [
             ROOT / "api", ROOT / "application", ROOT / "bootstrap",
