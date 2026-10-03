@@ -43,10 +43,10 @@ from interfaces.web.app import (
     save_ui_preferences,
     scope_core_request,
 )
-from pkb_proto.daily_interpreter import inspect_output
-from pkb_proto.memory_contracts import MemoryIntake
-from pkb_proto.entity_model_service import classify_predicate
-from pkb_proto.pending_service import acceptance_eligible
+from pkb.daily_interpreter import inspect_output
+from pkb.memory_contracts import MemoryIntake
+from pkb.entity_model_service import classify_predicate
+from pkb.pending_service import acceptance_eligible
 
 
 ENTITIES = {

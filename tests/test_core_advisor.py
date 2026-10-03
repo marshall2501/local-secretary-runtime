@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from pkb_proto.core_advisor import (
+from ritsuko.core.core_advisor import (
     AdvisorResult,
     advise,
     choose_model,
@@ -468,8 +468,8 @@ class CoreAdvisorTests(unittest.TestCase):
         )
 
 
-    @patch("pkb_proto.core_advisor.list_chat_models", return_value=["llama3.1:8b"])
-    @patch("pkb_proto.core_advisor.urlopen", side_effect=URLError("offline"))
+    @patch("ritsuko.core.core_advisor.list_chat_models", return_value=["llama3.1:8b"])
+    @patch("ritsuko.core.core_advisor.urlopen", side_effect=URLError("offline"))
     def test_provider_error_never_raises_into_core(self, _urlopen, _models):
         result = advise(
             "メインPCのGPUを調べて",

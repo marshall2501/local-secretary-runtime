@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from pkb_proto.web_research import (
+from capabilities.web_research.web_research import (
     MAX_EXCERPT_CHARS,
     _safe_external_url,
     research_web,
@@ -192,7 +192,7 @@ class WebResearchTests(unittest.TestCase):
         self.assertFalse(_safe_external_url("file:///etc/passwd"))
         self.assertTrue(_safe_external_url("https://example.com/test"))
 
-    @patch("pkb_proto.web_research.DDGS", _FakeDDGS)
+    @patch("capabilities.web_research.web_research.DDGS", _FakeDDGS)
     def test_research_is_bounded_and_truncates_fetched_content(self):
         result = research_web(
             "example query",
@@ -209,7 +209,7 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(result["hits"][1]["fetch_status"], "fetched")
         self.assertEqual(result["hits"][2]["fetch_status"], "blocked_url")
 
-    @patch("pkb_proto.web_research.DDGS", _DriverDDGS)
+    @patch("capabilities.web_research.web_research.DDGS", _DriverDDGS)
     def test_driver_research_reranks_evidence_and_extracts_version_candidates(self):
         result = research_web(
             "RX 9070 XTの最新ドライバーをWebで調べて",
@@ -236,7 +236,7 @@ class WebResearchTests(unittest.TestCase):
             {"single_candidate", "leading_consensus"},
         )
 
-    @patch("pkb_proto.web_research.DDGS", _MixedVersionDDGS)
+    @patch("capabilities.web_research.web_research.DDGS", _MixedVersionDDGS)
     def test_semantically_different_driver_versions_are_not_cross_compared(self):
         result = research_web(
             "RX 9070 XTの最新ドライバーをWebで調べて",
@@ -260,7 +260,7 @@ class WebResearchTests(unittest.TestCase):
             "26.1.1",
         )
 
-    @patch("pkb_proto.web_research.DDGS", _SamePageMultipleAdrenalinDDGS)
+    @patch("capabilities.web_research.web_research.DDGS", _SamePageMultipleAdrenalinDDGS)
     def test_same_page_multiple_versions_uses_nearby_release_dates(self):
         result = research_web(
             "RX 9070 XTの最新ドライバーをWebで調べて",
@@ -277,7 +277,7 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(candidates["26.8.1"]["latest_date"], "2026-08-20")
         self.assertEqual(candidates["26.9.1"]["latest_date"], "2026-09-03")
 
-    @patch("pkb_proto.web_research.DDGS", _PrimaryWithoutVersionDDGS)
+    @patch("capabilities.web_research.web_research.DDGS", _PrimaryWithoutVersionDDGS)
     def test_primary_domain_without_current_version_does_not_promote_secondary_candidate(self):
         result = research_web(
             "Radeon RX 9070 XT latest driver official",
@@ -300,7 +300,7 @@ class WebResearchTests(unittest.TestCase):
         self.assertIn("26.9.1", secondary_values)
         self.assertIn("26.6.4", secondary_values)
 
-    @patch("pkb_proto.web_research.DDGS", _FakeDDGS)
+    @patch("capabilities.web_research.web_research.DDGS", _FakeDDGS)
     def test_query_and_result_bounds_fail_closed(self):
         with self.assertRaises(ValueError):
             research_web("", max_results=3)

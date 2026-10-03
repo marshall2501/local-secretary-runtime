@@ -2,7 +2,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from pkb_proto.ingestion_gate import InputRecord, ProposedClaim, Route, assess
+from pkb.ingestion_gate import InputRecord, ProposedClaim, Route, assess
 
 
 AT = datetime(2026, 9, 27, tzinfo=timezone.utc)

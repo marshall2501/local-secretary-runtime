@@ -12,7 +12,7 @@ from nicegui import Client, core, ui
 from uuid import UUID
 
 from pkb_proto import daily_pkb as daily
-from pkb_proto.core_advisor import AdvisorResult
+from ritsuko.core.core_advisor import AdvisorResult
 
 
 class CoreGuiTests(TestCase):

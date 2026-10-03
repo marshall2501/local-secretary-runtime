@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from pkb_proto.web_workbench_core import ExperimentRunner, RunStore
+from interfaces.workbench.core import ExperimentRunner, RunStore
 
 
 class WorkbenchCoreTests(unittest.TestCase):
