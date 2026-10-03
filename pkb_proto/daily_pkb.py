@@ -26,7 +26,7 @@ from nicegui import app, context, run, ui
 from pydantic import BaseModel, Field
 
 from .background_jobs import DaemonSerialBackgroundExecutor
-from .correction_service import correct_entity
+from pkb.correction_service import correct_entity
 from ritsuko.core.core_ooda import OODA_PHASES, derive_ooda
 from ritsuko.core.core_observation import build_observation_pack
 from .core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
@@ -86,35 +86,35 @@ from .ollama_runtime import (
     OLLAMA_CONTEXT_OPTIONS,
     OLLAMA_NUM_PREDICT_OPTIONS,
 )
-from .daily_interpreter import interpret as interpret_daily
+from pkb.daily_interpreter import interpret as interpret_daily
 
-from .entity_model_service import (
+from pkb.entity_model_service import (
     COMPONENT_ROLE_TOKENS,
     load_entity_detail,
     list_components,
     resolve_component_reference,
 )
-from .finance_preview import analyze_moneyforward_csv
-from .finance_import import (
+from capabilities.finance.finance_preview import analyze_moneyforward_csv
+from capabilities.finance.finance_import import (
     commit_import,
     finance_filter_options,
     load_finance_dashboard,
     plan_import,
 )
-from .ingestion_gate import InputRecord, ProposedClaim
-from .query_service import ClaimQuery, query_claims
-from .write_service import write_one
-from .web_research import research_web
-from .pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
+from pkb.ingestion_gate import InputRecord, ProposedClaim
+from pkb.query_service import ClaimQuery, query_claims
+from pkb.write_service import write_one
+from capabilities.web_research.web_research import research_web
+from pkb.pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
     list_pending, list_reviewed, review_pending)
-from .service_billing import ServiceBillingError, read_service_billing_snapshot
-from .service_billing_settings import (
+from capabilities.service_billing.service import ServiceBillingError, read_service_billing_snapshot
+from capabilities.service_billing.settings import (
     bootstrap_openai_billing_profile,
     list_service_billing_profiles,
     upsert_service_billing_profile,
 )
-from .credential_resolver import register_connection_credential_loader
-from .service_connections import (
+from integrations.connections.credential_resolver import register_connection_credential_loader
+from integrations.connections.service_connections import (
     CONNECTION_TYPES,
     LLM_INFERENCE,
     SERVICE_BILLING_READ,
@@ -3709,8 +3709,8 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
                 }
 
 
-from .memory_contracts import MemoryIntake
-from .memory_intake import write_intake
+from pkb.memory_contracts import MemoryIntake
+from pkb.memory_intake import write_intake
 
 
 def register_memory_intake(intake: MemoryIntake) -> dict:
