@@ -141,5 +141,22 @@ try {
     if ($rehearsalText -notmatch [regex]::Escape("PSObject.Properties['com.docker.compose.project']")) {
         throw 'Promotion rehearsal must inspect optional Compose labels safely.'
     }
+
+    foreach ($promotionHelper in @(
+        'scripts/db/runtime_settings_transfer.py',
+        'scripts/db/provision_daily_runtime.py',
+        'scripts/db/promote-production.ps1'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $promotionHelper) -PathType Leaf)) {
+            throw "Missing production promotion helper: $promotionHelper"
+        }
+    }
+    $launcherText = Get-Content -LiteralPath (Join-Path $root 'scripts/ui/launch_daily_pkb.ps1') -Raw
+    if ($launcherText -notmatch "\[ValidateSet\('isolated','production'\)\]") {
+        throw 'Daily launcher must expose an explicit isolated/production cutover mode.'
+    }
+    if ($launcherText -notmatch '008_runtime_privileges.sql') {
+        throw 'Production daily launcher must require migration 008.'
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'

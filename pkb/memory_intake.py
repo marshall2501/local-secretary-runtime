@@ -8,6 +8,7 @@ from .memory_extractor import extract
 from .memory_grounding import ground, load_catalog
 from .memory_registry import EFFECT_RULES
 from .pending_service import enqueue_candidate
+from config.runtime_database import connection_mode
 
 
 def write_intake(db, intake, *, extractor=extract):
@@ -123,7 +124,8 @@ def write_intake(db, intake, *, extractor=extract):
           (intake.source_kind, intake.source_ref, intake.raw_text,
            datetime.fromisoformat(intake.observed_at) if intake.observed_at else recorded,
            recorded, intake.confidentiality,
-           Jsonb(dict(fictional_only=True, input_id=intake.input_id, original_text=intake.raw_text,
+           Jsonb(dict(**({"fictional_only": True} if connection_mode(db) == "isolated" else {}),
+                      input_id=intake.input_id, original_text=intake.raw_text,
                       contract_version=intake.contract_version, timezone=intake.timezone))))
         source_id = cur.fetchone()[0]
         results = []

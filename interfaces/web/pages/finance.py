@@ -432,7 +432,7 @@ def register(portal_context: dict):
                 ui.label("MoneyForward CSV プレビュー").classes("text-lg font-bold text-blue-900")
                 ui.label(
                     "CSVはまずローカルWebプロセスのメモリ上で読み取り専用解析します。"
-                    "明示的に「隔離DBへImport」を押すまでPostgreSQLへ保存しません。"
+                    "明示的に「PostgreSQLへImport」を押すまで保存しません。"
                     "LLMには送信しません。"
                 ).classes("text-sm text-blue-900")
                 ui.label(
@@ -519,11 +519,11 @@ def register(portal_context: dict):
     
                     plan = state["import_plan"]
                     if plan is not None:
-                        with ui.expansion("隔離DB Import", value=True).classes(
+                        with ui.expansion("PostgreSQL Import", value=True).classes(
                             "w-full border-2 border-amber-300 bg-amber-50 text-amber-900 mt-3"
                         ):
                             ui.label(
-                                "保存先は secretary_pkb_proto_20260927 の金融テーブルのみ。"
+                                "保存先はDaily Runtimeが接続しているFinanceテーブルです。DB/Roleはデバッグ画面で確認できます。"
                                 "元CSVそのものはDBへ保存せず、ファイル名・SHA-256・Import Batchを出典として保持します。"
                             ).classes("text-sm text-amber-900")
                             with ui.row().classes("w-full gap-3 flex-wrap"):
@@ -558,7 +558,7 @@ def register(portal_context: dict):
                                     result = state["import_result"]
                                     if result.status == "committed":
                                         ui.notify(
-                                            f"隔離DBへImportしました: 新規{result.inserted} / "
+                                            f"PostgreSQLへImportしました: 新規{result.inserted} / "
                                             f"変更{result.updated} / 変更なし{result.unchanged}",
                                             type="positive",
                                         )
@@ -585,7 +585,7 @@ def register(portal_context: dict):
                                     finance_result.refresh()
     
                             import_button = ui.button(
-                                "隔離DBへImport",
+                                "PostgreSQLへImport",
                                 icon="save",
                                 color="orange",
                                 on_click=do_finance_import,

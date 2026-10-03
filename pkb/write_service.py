@@ -15,6 +15,7 @@ from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
 from .entity_model_service import (
     advance_state_for_event, authoritative_entity_aliases, classify_predicate,
 )
+from config.runtime_database import allowed_daily_connection, connection_mode, source_ref_allowed
 
 KNOWN_PREDICATES = {
     "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
@@ -78,16 +79,9 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
     handles one claim per input for the first prototype, not full episode
     extraction, correction, or conflict resolution.
     """
-    info = db.info
-    dbname = info.dbname or ""
-    host = info.host or ""
-    if not dbname.startswith("secretary_pkb_proto_") or host not in (
-        "localhost", "127.0.0.1", "::1",
-    ):
+    if not allowed_daily_connection(db):
         raise ValueError("Refusing non-prototype or non-local PostgreSQL connection")
-    if (info.user or "") != "secretary_pkb_proto_writer_20260927":
-        raise ValueError("Refusing a DB login other than the dedicated PKB prototype writer")
-    if not record.source_ref.startswith("fixture://"):
+    if not source_ref_allowed(db, record.source_ref):
         return WriteResult("rejected", "fictional_fixture_only")
 
     fingerprint = payload_hash(record, claim)
@@ -158,7 +152,8 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                     record.recorded_at, record.recorded_at,
                     record.confidentiality,
                     Jsonb({
-                        "fictional_only": True, "input_id": record.input_id,
+                        **({"fictional_only": True} if connection_mode(db) == "isolated" else {}),
+                        "input_id": record.input_id,
                         "original_text": record.text,
                     }),
                 ),
@@ -195,5 +190,10 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                    VALUES (%s,%s,%s,%s)""",
                 (record.input_id, fingerprint, source_id, claim_id),
             )
-            return WriteResult("inserted", "fictional_single_claim_committed",
-                               str(claim_id), str(source_id))
+            return WriteResult(
+                "inserted",
+                "fictional_single_claim_committed"
+                if connection_mode(db) == "isolated"
+                else "single_claim_committed",
+                str(claim_id), str(source_id),
+            )

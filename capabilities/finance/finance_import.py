@@ -13,12 +13,12 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from .finance_preview import FinancePreview
+from config.runtime_database import allowed_daily_connection, LOCAL_HOSTS
 
 
 SOURCE_SYSTEM = "moneyforward_me"
 EXPECTED_DB = "secretary_pkb_proto_20260927"
 EXPECTED_USER = "secretary_pkb_proto_writer_20260927"
-LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 @dataclass(frozen=True)
@@ -327,12 +327,13 @@ def finance_filter_options(db) -> dict[str, list[str]]:
 
 def _guard_db(db) -> None:
     info = db.info
-    if (info.dbname or "") != EXPECTED_DB:
-        raise ValueError("Refusing non-prototype finance database")
-    if (info.user or "") != EXPECTED_USER:
-        raise ValueError("Refusing non-dedicated finance writer")
     if (info.host or "") not in LOCAL_HOSTS:
         raise ValueError("Refusing non-local finance database")
+    if allowed_daily_connection(db):
+        return
+    if (info.dbname or "") != EXPECTED_DB:
+        raise ValueError("Refusing non-prototype finance database")
+    raise ValueError("Refusing non-dedicated finance writer")
 
 
 def source_sha256(data: bytes) -> str:

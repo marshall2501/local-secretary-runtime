@@ -12,6 +12,7 @@ from pkb.ingestion_gate import InputRecord, ProposedClaim
 from pkb.pending_service import enqueue as enqueue_pending
 from pkb.query_service import ClaimQuery, query_claims
 from pkb.write_service import write_one
+from config.runtime_database import source_ref
 
 
 COMPONENT_WRITE_PATTERN = re.compile(
@@ -215,7 +216,7 @@ def register_text(text: str, *, connection_factory, interpreter) -> dict:
         now = datetime.now(timezone.utc)
         record = InputRecord(
             input_id=input_id, source_kind="user_statement",
-            source_ref="fixture://daily-pkb/" + input_id, text=text,
+            source_ref=source_ref(db, "daily-pkb", input_id), text=text,
             recorded_at=now, occurred_at=now,
         )
         claim = ProposedClaim(
@@ -265,7 +266,9 @@ def correct_text(text: str, *, connection_factory) -> dict:
                    WHERE c.entity_id=%s AND c.predicate=%s
                      AND c.value=%s::jsonb AND c.origin='user_explicit'
                      AND c.verification_status='unverified'
-                     AND c.retracted_at IS NULL AND s.uri LIKE 'fixture://%%'
+                     AND c.retracted_at IS NULL
+                     AND (s.uri LIKE 'fixture://daily-pkb/%%'
+                          OR s.uri LIKE 'local://daily-pkb/%%')
                    ORDER BY c.recorded_at DESC""",
                 (UUID(old["id"]), parsed["predicate"], '"' + parsed["value"] + '"'),
             )
@@ -285,7 +288,7 @@ def correct_text(text: str, *, connection_factory) -> dict:
         now = datetime.now(timezone.utc)
         record = InputRecord(
             input_id=input_id, source_kind="user_statement",
-            source_ref="fixture://daily-pkb/" + input_id, text=text,
+            source_ref=source_ref(db, "daily-pkb", input_id), text=text,
             recorded_at=now, occurred_at=valid_from,
         )
         claim = ProposedClaim(

@@ -13,8 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-WRITER = "secretary_pkb_proto_writer_20260927"
-DBNAME = "secretary_pkb_proto_20260927"
+from config.runtime_database import allowed_daily_connection
 
 
 @dataclass(frozen=True)
@@ -110,12 +109,7 @@ def _sql() -> str:
 
 def query_claims(db, query: ClaimQuery) -> ClaimPage:
     validate(query)
-    info = db.info
-    if (
-        (info.dbname or "") != DBNAME
-        or (info.host or "") not in ("localhost", "127.0.0.1", "::1")
-        or (info.user or "") != WRITER
-    ):
+    if not allowed_daily_connection(db):
         raise ValueError("Refusing non-isolated DB or non-dedicated writer")
     known = query.known_at or datetime.now(timezone.utc)
     args = {

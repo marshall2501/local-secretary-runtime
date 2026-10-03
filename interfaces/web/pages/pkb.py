@@ -228,7 +228,7 @@ def register(portal_context: dict):
                 "日常用PKB • Core/Workbenchから独立 • localhostのみ",
             )
             ui.label(
-                "現在は架空データ専用の隔離DB secretary_pkb_proto_20260927。運用DB・実データには接続しません。"
+                "保存先はDaily Runtimeで選択されたPostgreSQLです。現在のDB/Roleはデバッグ画面で確認できます。"
             ).classes("text-sm text-orange-700")
     
             with ui.row().classes("w-full items-center gap-2"):
@@ -317,7 +317,7 @@ def register(portal_context: dict):
                             try:
                                 memory_state['result'] = await run.io_bound(register_memory_intake, envelope)
                             except Exception:
-                                memory_state['result'] = {'message': '保存できませんでした。隔離DBのmigration 019適用と接続を確認してください。同じ内容で再試行できます。'}
+                                memory_state['result'] = {'message': '保存できませんでした。Daily Runtimeのproduction schemaと接続を確認してください。同じ内容で再試行できます。'}
                             finally:
                                 memory_state['busy'] = False
                                 memory_button.enable()

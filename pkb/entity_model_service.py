@@ -11,9 +11,7 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from .memory_registry import EFFECT_RULES
-
-DBNAME = "secretary_pkb_proto_20260927"
-WRITER = "secretary_pkb_proto_writer_20260927"
+from config.runtime_database import allowed_daily_connection
 
 EVENT_PREDICATES = {
     "driver_updated",
@@ -70,12 +68,7 @@ def classify_predicate(predicate: str) -> str | None:
 
 
 def _allowed(db) -> bool:
-    info = db.info
-    return (
-        (info.dbname or "") == DBNAME
-        and (info.host or "") in ("localhost", "127.0.0.1", "::1")
-        and (info.user or "") == WRITER
-    )
+    return allowed_daily_connection(db)
 
 
 def create_relation(

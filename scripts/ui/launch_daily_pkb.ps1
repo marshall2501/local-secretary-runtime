@@ -1,6 +1,9 @@
 # Daily PKB Web UI prototype. Uses only the existing isolated fictional DB.
 [CmdletBinding()]
-param()
+param(
+    [ValidateSet('isolated','production')]
+    [string]$DatabaseMode = 'isolated'
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -8,9 +11,17 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $envFile = Join-Path $root '.env.postgres'
 $runtimeEnvFile = Join-Path $root '.env'
-$secret = Join-Path $root 'secrets\pkb-proto-writer-password.txt'
-$db = 'secretary_pkb_proto_20260927'
-$role = 'secretary_pkb_proto_writer_20260927'
+if ($DatabaseMode -eq 'production') {
+    $secret = Join-Path $root 'secrets\secretary-daily-runtime-password.txt'
+    $db = 'secretary'
+    $role = 'secretary_daily_runtime'
+    $requiredMigration = '008_runtime_privileges.sql'
+} else {
+    $secret = Join-Path $root 'secrets\pkb-proto-writer-password.txt'
+    $db = 'secretary_pkb_proto_20260927'
+    $role = 'secretary_pkb_proto_writer_20260927'
+    $requiredMigration = '026_service_billing.sql'
+}
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw 'Expected the existing runtime virtualenv.'
@@ -19,7 +30,7 @@ if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
     throw 'Missing .env.postgres.'
 }
 if (-not (Test-Path -LiteralPath $secret -PathType Leaf)) {
-    throw 'Missing isolated PKB writer secret. Run the already validated prototype setup/smoke path first.'
+    throw 'Missing daily runtime writer secret for the selected database mode.'
 }
 
 & $python -c 'import nicegui, fastapi, psycopg, ddgs, httpx, anyio'
@@ -41,9 +52,9 @@ if ($info.Count -ne 1 -or $info[0].State.Health.Status -ne 'healthy' -or
     $bindings[0].HostPort -ne "$port") {
     throw 'PostgreSQL health or localhost binding is not the expected runtime configuration.'
 }
-$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='026_service_billing.sql';"
+$count = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM secretary.schema_migrations WHERE version='$requiredMigration';"
 if ($LASTEXITCODE -ne 0 -or ($count | Out-String).Trim() -ne '1') {
-    throw 'The isolated PKB database is missing migration 026. Run .\scripts\pkb\isolated\run_pending_setup.ps1 first.'
+    throw "The selected daily runtime database is missing required migration $requiredMigration."
 }
 
 $migrationSummary = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || COALESCE((SELECT version FROM secretary.schema_migrations ORDER BY applied_at DESC, version DESC LIMIT 1), '');"
@@ -59,7 +70,7 @@ $latestMigration = $migrationParts[1]
 
 $userExists = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='$role';"
 if ($LASTEXITCODE -ne 0 -or ($userExists | Out-String).Trim() -ne '1') {
-    throw 'Dedicated isolated PKB writer role is missing.'
+    throw 'Selected daily runtime writer role is missing.'
 }
 
 $allowedRuntimeEnv = @(
@@ -130,6 +141,7 @@ try {
         }
     }
 
+    $env:LSA_DAILY_DB_MODE = $DatabaseMode
     $env:LSA_PKB_DAILY_PORT = "$port"
     $env:LSA_PKB_DAILY_SECRET = $secret
     $env:LSA_PKB_DAILY_MIGRATION_COUNT = $migrationCount
@@ -140,6 +152,7 @@ try {
     & $python -m interfaces.web.app
     if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
 } finally {
+    Remove-Item Env:LSA_DAILY_DB_MODE -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_SECRET -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_MIGRATION_COUNT -ErrorAction SilentlyContinue

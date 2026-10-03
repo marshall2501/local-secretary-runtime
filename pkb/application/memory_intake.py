@@ -8,5 +8,5 @@ def register_memory_intake(db, intake) -> dict:
     with db.cursor() as cur:
         cur.execute("SELECT to_regclass('secretary.pkb_memory_intakes')")
         if cur.fetchone()[0] is None:
-            raise ValueError("Memory Intake用の隔離DB migration 019が未適用です。")
+            raise ValueError("Memory Intake用のproduction schemaが未適用です。")
     return write_intake(db, intake)

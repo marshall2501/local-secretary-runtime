@@ -31,7 +31,7 @@ def register(portal_context: dict):
                 with ui.card().classes("w-72 border-2 border-blue-300 bg-blue-50"):
                     ui.label("家計・資産").classes("text-lg font-bold")
                     ui.label("保存済み家計表示＋MoneyForward CSV取込").classes("text-sm")
-                    ui.label("隔離DBの保存済み明細・集計・Import履歴を表示").classes(
+                    ui.label("Daily Runtimeの保存済み明細・集計・Import履歴を表示").classes(
                         "text-xs text-blue-800"
                     )
                     ui.button("家計・資産を開く", icon="arrow_forward", color="blue").props(
@@ -71,8 +71,8 @@ def register(portal_context: dict):
     
             with ui.card().classes("w-full"):
                 ui.label("開発中の現在地").classes("text-lg font-bold")
-                ui.label("PKB: 架空隔離DBでEntity / Relation / Event / State縦断まで実機確認済み")
-                ui.label("家計: MoneyForward CSV 2,270件を隔離DBへ保存し、保存済み表示へ拡張")
+                ui.label("PKB: Entity / Relation / Event / State縦断をDaily Runtimeで提供")
+                ui.label("家計: MoneyForward CSV取込・保存済み表示をDaily Runtimeで提供")
                 ui.label("金融実データは隔離DBのみ。運用DB・外部金融サービス操作はまだ行いません。").classes(
                     "text-sm text-orange-800"
                 )

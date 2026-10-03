@@ -15,8 +15,7 @@ from psycopg.types.json import Jsonb
 
 from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
 from .entity_model_service import classify_predicate
-
-WRITER = "secretary_pkb_proto_writer_20260927"
+from config.runtime_database import allowed_daily_connection, source_ref_allowed
 
 
 @dataclass(frozen=True)
@@ -63,14 +62,9 @@ def explicit_reassignment_quote(quote: str, old_name: str, new_name: str, value:
 
 def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionResult:
     """One explicit correction inside a transaction on an isolated fixture DB."""
-    info = db.info
-    if (
-        (info.dbname or "") != "secretary_pkb_proto_20260927"
-        or (info.host or "") not in ("localhost", "127.0.0.1", "::1")
-        or (info.user or "") != WRITER
-    ):
+    if not allowed_daily_connection(db):
         raise ValueError("Refusing non-isolated DB or non-dedicated writer")
-    if not record.source_ref.startswith("fixture://"):
+    if not source_ref_allowed(db, record.source_ref):
         return CorrectionResult("rejected", "fictional_fixture_only")
     if claim.intent != "correction" or not claim.corrects_claim_id:
         return CorrectionResult("rejected", "explicit_correction_and_old_claim_required")

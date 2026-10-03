@@ -7,9 +7,7 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from .entity_model_service import advance_state_for_event, classify_predicate
-
-DBNAME = "secretary_pkb_proto_20260927"
-WRITER = "secretary_pkb_proto_writer_20260927"
+from config.runtime_database import allowed_daily_connection, connection_mode, source_ref
 
 SUPPORTED_ACCEPT_ACTIONS = {
     "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
@@ -48,12 +46,7 @@ class PendingResult:
 
 
 def _allowed(db) -> bool:
-    info = db.info
-    return (
-        (info.dbname or "") == DBNAME
-        and (info.host or "") in ("localhost", "127.0.0.1", "::1")
-        and (info.user or "") == WRITER
-    )
+    return allowed_daily_connection(db)
 
 
 def available(db) -> bool:
@@ -195,7 +188,7 @@ def accept_pending(db, pending_id: str) -> PendingResult:
         if item["retired_at"] is not None or not acceptance_eligible(item):
             return PendingResult("review", "pending_not_eligible_for_acceptance", pending_id)
 
-        source_uri = "fixture://daily-pkb/pending/" + str(item["id"])
+        source_uri = source_ref(db, "daily-pkb/pending", str(item["id"]))
         cur.execute(
             """INSERT INTO secretary.sources
                (source_type, uri, citation, retrieved_at, recorded_at,
@@ -208,7 +201,7 @@ def accept_pending(db, pending_id: str) -> PendingResult:
                 item["recorded_at"],
                 item["recorded_at"],
                 Jsonb({
-                    "fictional_only": True,
+                    **({"fictional_only": True} if connection_mode(db) == "isolated" else {}),
                     "pending_intake_id": str(item["id"]),
                     "original_text": item["raw_text"],
                     "promoted_by_user_review": True,

@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from hashlib import sha256
 import json
+import os
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -22,8 +23,10 @@ class MemoryIntake:
     @classmethod
     def issue(cls, raw_text, *, now=None, timezone='Asia/Tokyo'):
         identifier = str(uuid4())
+        mode = os.environ.get('LSA_DAILY_DB_MODE', 'isolated').strip().lower()
+        scheme = 'local' if mode == 'production' else 'fixture'
         return cls('memory-intake/v1', identifier, raw_text, 'user_statement',
-                   'fixture://memory-intake/' + identifier,
+                   scheme + '://memory-intake/' + identifier,
                    (now or datetime.now(ZoneInfo(timezone))).isoformat(), timezone=timezone)
 
     def validate(self):
@@ -34,8 +37,8 @@ class MemoryIntake:
             raise ValueError('invalid_input_text')
         if self.source_kind not in {'user_statement', 'file', 'web', 'tool', 'service'}:
             raise ValueError('invalid_source_kind')
-        if not self.source_ref.startswith('fixture://'):
-            raise ValueError('fictional_source_required')
+        if not self.source_ref.startswith(('fixture://', 'local://')):
+            raise ValueError('unsupported_source_ref')
         if self.confidentiality not in {'public', 'private', 'restricted'}:
             raise ValueError('invalid_confidentiality')
         ZoneInfo(self.timezone)
