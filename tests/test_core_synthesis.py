@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pkb_proto.core_synthesis import synthesize
+from ritsuko.core.core_synthesis import synthesize
 
 
 PERMISSIONS = {

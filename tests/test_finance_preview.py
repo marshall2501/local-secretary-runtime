@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pkb_proto.finance_preview import analyze_moneyforward_csv
+from capabilities.finance.finance_preview import analyze_moneyforward_csv
 
 
 HEADER = "計算対象,日付,内容,金額（円）,保有金融機関,大項目,中項目,メモ,振替,ID\n"

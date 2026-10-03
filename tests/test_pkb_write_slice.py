@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
-from pkb_proto.ingestion_gate import InputRecord, ProposedClaim
-from pkb_proto.write_service import _literal_gate, payload_hash, write_one
+from pkb.ingestion_gate import InputRecord, ProposedClaim
+from pkb.write_service import _literal_gate, payload_hash, write_one
 
 AT = datetime(2026, 9, 27, tzinfo=timezone.utc)
 
@@ -82,12 +82,12 @@ class WriteSliceTests(unittest.TestCase):
                          "fictional_fixture_only")
 
     def test_event_semantics_are_append_only(self):
-        from pkb_proto.entity_model_service import classify_predicate
+        from pkb.entity_model_service import classify_predicate
         self.assertEqual(classify_predicate("driver_updated"), "event")
         self.assertEqual(classify_predicate("servo_updated"), "event")
 
     def test_current_driver_semantics_are_state(self):
-        from pkb_proto.entity_model_service import classify_predicate
+        from pkb.entity_model_service import classify_predicate
         self.assertEqual(classify_predicate("current_driver"), "state")
 
 

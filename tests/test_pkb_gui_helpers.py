@@ -2,8 +2,8 @@
 import json
 import unittest
 
-from pkb_proto.extraction_service import Extraction
-from pkb_proto.gui_helpers import analyze_reply, export_report
+from pkb.extraction_service import Extraction
+from interfaces.workbench.gui_helpers import analyze_reply, export_report
 
 
 EP = {"id": "pc-01", "text": "サブPCの架空更新。"}
@@ -53,7 +53,7 @@ class GuiHelpersTests(unittest.TestCase):
         self.assertEqual(exported["results"][0]["elapsed_seconds"], 12.345)
 
     def test_copy_button_copies_exact_report_without_opening_gui(self):
-        from pkb_proto.gui import Workbench
+        from interfaces.workbench.desktop import Workbench
 
         class FakeRoot:
             def __init__(self):

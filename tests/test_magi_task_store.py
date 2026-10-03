@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
-from pkb_proto.magi_task_store import (
+from ritsuko.tasks.magi_task_store import (
     abort_proposal_review,
     abort_user_resume,
     claim_proposal_review,

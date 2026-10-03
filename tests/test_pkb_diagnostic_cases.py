@@ -2,10 +2,10 @@
 import json
 import unittest
 
-from pkb_proto.diagnostic_cases import (MODES, EPISODE_UNUSED, build_ollama_payload,
+from interfaces.workbench.diagnostic_cases import (MODES, EPISODE_UNUSED, build_ollama_payload,
                                         request_for, judge_response)
-from pkb_proto.extraction_service import Extraction
-from pkb_proto.gui_helpers import analyze_reply
+from pkb.extraction_service import Extraction
+from interfaces.workbench.gui_helpers import analyze_reply
 
 EP = {"id": "pc-01",
       "text": "サブPCを架空GPUドライバーDRV-A1へ更新した。直後はゲームが軽くなった。",

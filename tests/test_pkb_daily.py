@@ -6,7 +6,7 @@ from unittest.mock import patch
 from pathlib import Path
 from uuid import UUID
 
-from pkb_proto.daily_pkb import (
+from interfaces.web.app import (
     CORE_UI_DEFAULT_OPEN,
     ENTITY_UI_DEFAULT_OPEN,
     ENTITY_TAB_DEFAULT,
@@ -43,10 +43,10 @@ from pkb_proto.daily_pkb import (
     save_ui_preferences,
     scope_core_request,
 )
-from pkb_proto.daily_interpreter import inspect_output
-from pkb_proto.memory_contracts import MemoryIntake
-from pkb_proto.entity_model_service import classify_predicate
-from pkb_proto.pending_service import acceptance_eligible
+from pkb.daily_interpreter import inspect_output
+from pkb.memory_contracts import MemoryIntake
+from pkb.entity_model_service import classify_predicate
+from pkb.pending_service import acceptance_eligible
 
 
 ENTITIES = {
@@ -623,10 +623,10 @@ class DailyPKBParserTests(unittest.TestCase):
                 "status": "mystery",
             })
 
-    @patch("pkb_proto.daily_pkb.load_entity_detail")
-    @patch("pkb_proto.daily_pkb.resolve_component_reference")
-    @patch("pkb_proto.daily_pkb._entity_map")
-    @patch("pkb_proto.daily_pkb.connection")
+    @patch("interfaces.web.app.load_entity_detail")
+    @patch("interfaces.web.app.resolve_component_reference")
+    @patch("interfaces.web.app._entity_map")
+    @patch("interfaces.web.app.connection")
     def test_magi_pkb_request_resolves_component_and_returns_model(
         self, connection_mock, entity_map_mock, resolve_mock, detail_mock
     ):
@@ -684,9 +684,9 @@ class DailyPKBParserTests(unittest.TestCase):
         resolve_mock.assert_called_once()
         detail_mock.assert_called_once()
 
-    @patch("pkb_proto.daily_pkb.list_components")
-    @patch("pkb_proto.daily_pkb.load_entity_detail")
-    @patch("pkb_proto.daily_pkb.connection")
+    @patch("interfaces.web.app.list_components")
+    @patch("interfaces.web.app.load_entity_detail")
+    @patch("interfaces.web.app.connection")
     def test_cooperative_pkb_probe_expands_known_pc_to_component_overview(
         self, connection_mock, detail_mock, components_mock
     ):

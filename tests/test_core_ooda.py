@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from nicegui import Client, core, ui
-from pkb_proto import daily_pkb
-from pkb_proto.core_ooda import derive_ooda
+from interfaces.web import app as daily_pkb
+from ritsuko.core.core_ooda import derive_ooda
 
 
 class OodaRulesTests(unittest.TestCase):

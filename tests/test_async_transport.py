@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock, patch
 import anyio
 import httpx
 
-from pkb_proto.async_transport import (
+from infrastructure.async_runtime.transport import (
     AsyncHTTPStatusError,
     AsyncRequestTimeout,
     AsyncRetryExhausted,
     request_json,
     request_json_with_retry,
 )
-from pkb_proto.magi_async import (
+from ritsuko.magi.async_execution import (
     _call_gemini_guided_async,
     _call_ollama_guided_async,
     call_guided_panel_async,
@@ -95,10 +95,10 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
         transport = _SequenceTransport()
         async with httpx.AsyncClient(transport=transport, timeout=None) as client:
             with patch(
-                "pkb_proto.async_transport.random.uniform",
+                "infrastructure.async_runtime.transport.random.uniform",
                 return_value=0.0,
             ), patch(
-                "pkb_proto.async_transport.anyio.sleep",
+                "infrastructure.async_runtime.transport.anyio.sleep",
                 new=AsyncMock(return_value=None),
             ):
                 result, diagnostic = await request_json_with_retry(
@@ -224,7 +224,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             {"GEMINI_API_KEY": "test-only-secret"},
             clear=False,
         ), patch(
-            "pkb_proto.magi_async.request_json_with_retry",
+            "ritsuko.magi.async_execution.request_json_with_retry",
             new=AsyncMock(side_effect=failure),
         ):
             result = await _call_gemini_guided_async(
@@ -282,7 +282,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "final_status": "ok",
         }
         mock = AsyncMock(return_value=(response, retry_diagnostic))
-        with patch("pkb_proto.magi_async.request_json_with_retry", mock):
+        with patch("ritsuko.magi.async_execution.request_json_with_retry", mock):
             result = await _call_ollama_guided_async(
                 {"stage": "classify"},
                 model="qwen3.5:9b",
@@ -323,7 +323,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "os.environ",
             {"LSA_MAGI_OLLAMA_NUM_PREDICT": "2048"},
             clear=False,
-        ), patch("pkb_proto.magi_async.request_json_with_retry", mock):
+        ), patch("ritsuko.magi.async_execution.request_json_with_retry", mock):
             result = await _call_ollama_guided_async(
                 {"stage": "classify"},
                 model="qwen3.5:9b",
@@ -401,7 +401,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "turn": 1,
         }
         with patch(
-            "pkb_proto.magi_async._call_panel_member_async",
+            "ritsuko.magi.async_execution._call_panel_member_async",
             side_effect=fake_member,
         ):
             result = await call_guided_panel_async(
@@ -481,7 +481,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             },
         ]
         with patch(
-            "pkb_proto.magi_async._call_panel_member_async",
+            "ritsuko.magi.async_execution._call_panel_member_async",
             side_effect=fake_member,
         ):
             result = await call_guided_panel_async(

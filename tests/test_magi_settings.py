@@ -5,7 +5,7 @@ import unittest
 from uuid import UUID
 from unittest.mock import patch
 
-from pkb_proto.magi_settings import (
+from ritsuko.magi.settings import (
     DEFAULT_RETRY_HTTP_CODES,
     DEFAULT_RETRY_WITHIN_TURN,
     DEFAULT_TIMEOUT_SECONDS,
@@ -16,7 +16,7 @@ from pkb_proto.magi_settings import (
     save_member_assignments,
     upsert_llm_profile,
 )
-from pkb_proto.ollama_runtime import (
+from integrations.llm.ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
     DEFAULT_OLLAMA_CONTEXT_TOKENS,
 )
@@ -152,7 +152,7 @@ class MagiSettingsTests(unittest.TestCase):
             "enabled": True,
         }
         with patch(
-            "pkb_proto.magi_settings.ensure_llm_connection",
+            "ritsuko.magi.settings.ensure_llm_connection",
             return_value=connection,
         ):
             saved = upsert_llm_profile(
@@ -219,7 +219,7 @@ class MagiSettingsTests(unittest.TestCase):
             for index, name in enumerate(MEMBER_NAMES, start=1)
         ]
         with patch(
-            "pkb_proto.magi_settings.load_member_specs",
+            "ritsuko.magi.settings.load_member_specs",
             return_value=assignments,
         ):
             save_member_assignments(db, assignments)

@@ -38,7 +38,7 @@ cd D:\AI\projects\local-secretary-runtime
 
 失敗した未適用migrationはトランザクション境界で扱い、既存の適用済み履歴を書き換えて帳尻を合わせません。スキーマ変更前は影響に応じてバックアップ・復元可能性を確認してください。
 
-`pkb_proto/sql` は隔離PKB試験用であり、運用 `secretary` DBのmigrationディレクトリではありません。
+`db/isolated/pkb_proto` は隔離PKB試験用であり、運用 `secretary` DBのmigrationディレクトリではありません。
 
 ## 権限
 

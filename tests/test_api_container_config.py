@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from psycopg.conninfo import conninfo_to_dict
 
-from api.secretary_api import api_config, external_read_token
+from interfaces.api.app import api_config, external_read_token
 
 
 class ApiContainerConfigTests(unittest.TestCase):

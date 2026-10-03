@@ -4,14 +4,14 @@ import os
 import unittest
 from unittest.mock import patch
 
-from pkb_proto.credential_resolver import (
+from integrations.connections.credential_resolver import (
     CredentialResolutionError,
     env_name_to_credential_ref,
     register_connection_credential_loader,
     resolve_connection_credential,
     resolve_credential,
 )
-from pkb_proto.service_connections import (
+from integrations.connections.service_connections import (
     CONNECTION_TYPES,
     LLM_INFERENCE,
     SERVICE_BILLING_READ,

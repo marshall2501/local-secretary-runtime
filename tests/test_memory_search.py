@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from api.secretary_api import memory_search_sql, search_memory
+from interfaces.api.app import memory_search_sql, search_memory
 
 
 class MemorySearchTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class MemorySearchTests(unittest.TestCase):
         db = MagicMock()
         db.__enter__.return_value = db
         db.cursor.return_value.__enter__.return_value = cur
-        with patch("api.secretary_api.connect", return_value=db):
+        with patch("interfaces.api.app.connect", return_value=db):
             result = search_memory(
                 q=None, domain=None, kind=None,
                 include_history=False, limit=50, offset=100
@@ -42,7 +42,7 @@ class MemorySearchTests(unittest.TestCase):
         db = MagicMock()
         db.__enter__.return_value = db
         db.cursor.return_value.__enter__.return_value = cur
-        with patch("api.secretary_api.connect", return_value=db):
+        with patch("interfaces.api.app.connect", return_value=db):
             result = search_memory(
                 q="  RAM_%  ", domain=" pc ", kind="claim",
                 include_history=True, limit=10, offset=0

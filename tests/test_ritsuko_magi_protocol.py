@@ -5,8 +5,8 @@ import json
 from unittest.mock import patch
 import unittest
 
-from pkb_proto.magi_client import call_member, choose_model
-from pkb_proto.magi_dialogue import (
+from ritsuko.magi.client import call_member, choose_model
+from ritsuko.magi.dialogue import (
     CATEGORIES, PROMPT_VERSION, start_dialogue, continue_with_observation,
     continue_with_user_clarification, panel_member_specs,
     select_weighted_consensus, validate_turn, _call_ollama_guided,
@@ -14,7 +14,7 @@ from pkb_proto.magi_dialogue import (
     _normalized_member_specs,
 )
 
-from pkb_proto.ritsuko_magi_protocol import (
+from ritsuko.magi.protocol import (
     ALLOWED_VALUES,
     build_request_envelope,
     default_resource_catalog,
@@ -69,7 +69,7 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
             'message': {'content': '', 'thinking': 'private model reasoning'},
             'done_reason': 'length', 'eval_count': 1800,
         }
-        with patch('pkb_proto.magi_client.urlopen',
+        with patch('ritsuko.magi.client.urlopen',
                    return_value=BytesIO(json.dumps(outer).encode('utf-8'))):
             result=call_member(self.request(), member_name='MELCHIOR',
                                model='qwen3.5:9b')
@@ -127,7 +127,7 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
         self.assertTrue(any("request_id:duplicate" in error for error in errors))
 
     def test_request_id_schema_and_generic_source_guidance(self):
-        from pkb_proto.ritsuko_magi_protocol import (
+        from ritsuko.magi.protocol import (
             MAGI_RESPONSE_SCHEMA, SYSTEM_INSTRUCTION,
         )
         request_item_schema = MAGI_RESPONSE_SCHEMA["properties"]["analysis"][
@@ -165,7 +165,7 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
             captured["payload"] = json.loads(req.data.decode("utf-8"))
             return BytesIO(json.dumps(outer, ensure_ascii=False).encode("utf-8"))
 
-        with patch("pkb_proto.magi_dialogue.urlopen", side_effect=fake_urlopen):
+        with patch("ritsuko.magi.dialogue.urlopen", side_effect=fake_urlopen):
             result = _call_ollama_guided(
                 {"stage": "classify"},
                 model="qwen3.5:4b",
@@ -474,7 +474,7 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(session["next_step"],"multiple_requests_detected")
 
     def test_system_distinguishes_available_sources_from_observations(self):
-        from pkb_proto.magi_dialogue import SYSTEM
+        from ritsuko.magi.dialogue import SYSTEM
         self.assertIn("利用可能であることは、その内容を取得済みという意味ではありません",SYSTEM)
         self.assertIn("Observation",SYSTEM)
         self.assertIn("今回指定された判断だけ",SYSTEM)
@@ -504,7 +504,7 @@ class GuidedDialogueTests(unittest.TestCase):
             "OPENAI_API_KEY":"test-key",
             "OPENAI_BASE_URL":"https://api.openai.com/v1",
         }, clear=False), patch(
-            "pkb_proto.magi_dialogue.urlopen",
+            "ritsuko.magi.dialogue.urlopen",
             return_value=BytesIO(json.dumps(outer).encode("utf-8")),
         ) as mocked:
             result=_call_openai_guided(
@@ -532,7 +532,7 @@ class GuidedDialogueTests(unittest.TestCase):
             },
         }
         with patch.dict("os.environ", {"GEMINI_API_KEY":"gemini-test-key"}, clear=False), patch(
-            "pkb_proto.magi_dialogue.urlopen",
+            "ritsuko.magi.dialogue.urlopen",
             return_value=BytesIO(json.dumps(outer).encode("utf-8")),
         ) as mocked:
             result=_call_gemini_guided(
@@ -603,7 +603,7 @@ class GuidedDialogueTests(unittest.TestCase):
                 "status":"ok","response":responses[spec["name"]],
                 "errors":[],"diagnostic":{},
             }
-        with patch("pkb_proto.magi_dialogue._call_panel_member",side_effect=fake_member):
+        with patch("ritsuko.magi.dialogue._call_panel_member",side_effect=fake_member):
             result=call_guided_panel(
                 {"stage":"classify","magi_member":"MAGI_PANEL"},
                 member_specs=specs,timeout=30,
@@ -640,7 +640,7 @@ class GuidedDialogueTests(unittest.TestCase):
                 "weight":spec["weight"],"timeout_seconds":spec["timeout_seconds"],
                 "status":"ok","response":response,"errors":[],"diagnostic":{},
             }
-        with patch("pkb_proto.magi_dialogue._call_panel_member",side_effect=fake_member):
+        with patch("ritsuko.magi.dialogue._call_panel_member",side_effect=fake_member):
             session=start_dialogue("私の構成は？",member_specs=specs,timeout=30)
         self.assertEqual(session["status"],"waiting_information")
         self.assertEqual(session["member_specs"][0]["provider"],"ollama")

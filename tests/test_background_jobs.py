@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 
-from pkb_proto.background_jobs import DaemonSerialBackgroundExecutor
+from infrastructure.async_runtime.background_jobs import DaemonSerialBackgroundExecutor
 
 
 class DaemonSerialBackgroundExecutorTests(unittest.TestCase):

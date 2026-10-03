@@ -3,8 +3,8 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from pkb_proto.correction_service import correct_entity, explicit_reassignment_quote
-from pkb_proto.ingestion_gate import InputRecord, ProposedClaim
+from pkb.correction_service import correct_entity, explicit_reassignment_quote
+from pkb.ingestion_gate import InputRecord, ProposedClaim
 
 AT = datetime(2026, 9, 22, tzinfo=timezone.utc)
 

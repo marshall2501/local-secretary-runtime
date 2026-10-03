@@ -3,12 +3,12 @@ from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 import unittest
-from pkb_proto.memory_contracts import MemoryIntake, validate_draft
-from pkb_proto.memory_extractor import extract
-from pkb_proto.memory_grounding import ground, resolve_entity
-from pkb_proto.ingestion_gate import memory_write_decision
-from pkb_proto.memory_intake import write_intake
-from pkb_proto.memory_registry import EFFECT_RULES
+from pkb.memory_contracts import MemoryIntake, validate_draft
+from pkb.memory_extractor import extract
+from pkb.memory_grounding import ground, resolve_entity
+from pkb.ingestion_gate import memory_write_decision
+from pkb.memory_intake import write_intake
+from pkb.memory_registry import EFFECT_RULES
 
 CATALOG = [dict(id='1', names={'サブPC','PC'}, kind='computer', retired=False),
            dict(id='2', names={'メインPC','PC'}, kind='computer', retired=False),
@@ -115,10 +115,12 @@ class MemoryIntakeTests(unittest.TestCase):
 
     def test_gui_retains_envelope_for_retry(self):
         from pathlib import Path
-        source=(Path(__file__).parents[1]/'pkb_proto/daily_pkb.py').read_text(encoding='utf-8')
-        self.assertIn('envelope.raw_text != text', source)
-        self.assertIn('run.io_bound(register_memory_intake, envelope)', source)
-        self.assertIn("@app.post('/api/pkb/intakes/issue')",source)
+        root = Path(__file__).parents[1]
+        pkb_page = (root/'interfaces/web/pages/pkb.py').read_text(encoding='utf-8')
+        app_source = (root/'interfaces/web/app.py').read_text(encoding='utf-8')
+        self.assertIn('envelope.raw_text != text', pkb_page)
+        self.assertIn('run.io_bound(register_memory_intake, envelope)', pkb_page)
+        self.assertIn("@app.post('/api/pkb/intakes/issue')", app_source)
 
 
 if __name__ == '__main__':

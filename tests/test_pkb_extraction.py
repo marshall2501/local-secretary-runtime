@@ -3,13 +3,13 @@ import json
 import unittest
 from pathlib import Path
 
-from pkb_proto.episode_intake import load_fixture
-from pkb_proto.extraction_service import (
+from pkb.episode_intake import load_fixture
+from pkb.extraction_service import (
     extraction_messages, inspect_model_output,
 )
 
 EPISODES = load_fixture(
-    Path(__file__).resolve().parents[1] / "pkb_proto" / "fixtures" / "episodes.json"
+    Path(__file__).resolve().parents[1] / "interfaces" / "workbench" / "fixtures" / "episodes.json"
 )
 PC = next(ep for ep in EPISODES if ep["id"] == "pc-04")
 EXTERNAL = next(ep for ep in EPISODES if ep["id"] == "pc-05")

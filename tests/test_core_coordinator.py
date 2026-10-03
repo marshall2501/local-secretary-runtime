@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pkb_proto.core_coordinator import (
+from ritsuko.core.core_coordinator import (
     can_auto_execute_ambiguous_probe,
     decide_after_observation,
     extend_observation_pack,

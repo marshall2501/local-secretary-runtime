@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pkb_proto.magi_core_bridge import (
+from ritsuko.core.magi_bridge import (
     pending_pkb_request,
     proposal_review_observation,
     reviewable_user_knowledge_proposal,
