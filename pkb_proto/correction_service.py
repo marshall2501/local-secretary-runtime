@@ -1,2 +1,5 @@
-"""Compatibility shim. Use pkb.correction_service."""
-from pkb.correction_service import *  # noqa: F401,F403
+"""Compatibility alias. Use pkb.correction_service."""
+from importlib import import_module as _import_module
+import sys as _sys
+_impl = _import_module("pkb.correction_service")
+_sys.modules[__name__] = _impl

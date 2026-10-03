@@ -1,2 +1,5 @@
-"""Compatibility shim. Use pkb.write_service."""
-from pkb.write_service import *  # noqa: F401,F403
+"""Compatibility alias. Use pkb.write_service."""
+from importlib import import_module as _import_module
+import sys as _sys
+_impl = _import_module("pkb.write_service")
+_sys.modules[__name__] = _impl

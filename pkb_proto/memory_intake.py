@@ -1,2 +1,5 @@
-"""Compatibility shim. Use pkb.memory_intake."""
-from pkb.memory_intake import *  # noqa: F401,F403
+"""Compatibility alias. Use pkb.memory_intake."""
+from importlib import import_module as _import_module
+import sys as _sys
+_impl = _import_module("pkb.memory_intake")
+_sys.modules[__name__] = _impl

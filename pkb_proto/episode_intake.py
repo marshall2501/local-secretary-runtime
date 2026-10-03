@@ -1,2 +1,5 @@
-"""Compatibility shim. Use pkb.episode_intake."""
-from pkb.episode_intake import *  # noqa: F401,F403
+"""Compatibility alias. Use pkb.episode_intake."""
+from importlib import import_module as _import_module
+import sys as _sys
+_impl = _import_module("pkb.episode_intake")
+_sys.modules[__name__] = _impl

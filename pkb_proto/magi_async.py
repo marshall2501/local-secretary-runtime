@@ -1,4 +1,5 @@
-"""Compatibility shim. Use ritsuko.magi.async_execution."""
+"""Compatibility alias. Use ritsuko.magi.async_execution."""
 from importlib import import_module as _import_module
+import sys as _sys
 _impl = _import_module("ritsuko.magi.async_execution")
-globals().update({k: v for k, v in vars(_impl).items() if not k.startswith("__")})
+_sys.modules[__name__] = _impl

@@ -1,2 +1,5 @@
-"""Compatibility shim. Use ritsuko.core.core_coordinator."""
-from ritsuko.core.core_coordinator import *  # noqa: F401,F403
+"""Compatibility alias. Use ritsuko.core.core_coordinator."""
+from importlib import import_module as _import_module
+import sys as _sys
+_impl = _import_module("ritsuko.core.core_coordinator")
+_sys.modules[__name__] = _impl
