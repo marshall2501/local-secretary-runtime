@@ -2,7 +2,7 @@
 
 This is NOT a production memory writer or an LLM semantic verifier.
 Use only a dedicated secretary_pkb_proto_* DB with the 001-004 schema and the
-pkb_proto/sql/005_pkb_proto_receipts.sql prototype extension.
+db/isolated/pkb_proto/005_pkb_proto_receipts.sql prototype extension.
 """
 from __future__ import annotations
 
