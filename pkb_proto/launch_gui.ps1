@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$fixture = Join-Path $repo 'pkb_proto\fixtures\episodes.json'
+$fixture = Join-Path $repo 'interfaces\workbench\fixtures\episodes.json'
 if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) {
     throw 'Bundled fictional episodes are missing.'
 }
@@ -24,7 +24,7 @@ if ($null -eq $python) {
 Push-Location $repo
 try {
     if ($python -eq 'py') {
-        & py -3.12 -m pkb_proto.gui
+        & py -3.12 -m interfaces.workbench.desktop
     } else {
         & $python -m pkb_proto.gui
     }

@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Push-Location $root
 try {
-    & $python @pythonArgs -m pkb_proto.web_workbench
+    & $python @pythonArgs -m interfaces.workbench.app
     if ($LASTEXITCODE -ne 0) { throw 'Local Workbench stopped with an error.' }
 } finally {
     Pop-Location

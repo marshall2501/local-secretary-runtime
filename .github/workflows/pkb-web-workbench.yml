@@ -161,7 +161,7 @@ jobs:
       - name: Start isolated localhost server and inspect read-only fixture API
         shell: bash
         run: |
-          python -m pkb_proto.web_workbench >/tmp/workbench.log 2>&1 &
+          python -m interfaces.workbench.app >/tmp/workbench.log 2>&1 &
           server=$!
           trap 'kill $server 2>/dev/null || true' EXIT
           ready=0
