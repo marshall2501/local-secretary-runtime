@@ -9,7 +9,7 @@ from pkb.extraction_service import (
 )
 
 EPISODES = load_fixture(
-    Path(__file__).resolve().parents[1] / "pkb_proto" / "fixtures" / "episodes.json"
+    Path(__file__).resolve().parents[1] / "interfaces" / "workbench" / "fixtures" / "episodes.json"
 )
 PC = next(ep for ep in EPISODES if ep["id"] == "pc-04")
 EXTERNAL = next(ep for ep in EPISODES if ep["id"] == "pc-05")

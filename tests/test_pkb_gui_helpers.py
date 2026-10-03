@@ -53,7 +53,7 @@ class GuiHelpersTests(unittest.TestCase):
         self.assertEqual(exported["results"][0]["elapsed_seconds"], 12.345)
 
     def test_copy_button_copies_exact_report_without_opening_gui(self):
-        from pkb_proto.gui import Workbench
+        from interfaces.workbench.desktop import Workbench
 
         class FakeRoot:
             def __init__(self):

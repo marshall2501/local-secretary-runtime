@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from pkb.episode_intake import digest, ingest, load_fixture, validate_corpus
 
-FIXTURE = Path(__file__).resolve().parents[1] / "pkb_proto" / "fixtures" / "episodes.json"
+FIXTURE = Path(__file__).resolve().parents[1] / "interfaces" / "workbench" / "fixtures" / "episodes.json"
 
 
 class EpisodeIntakeTests(unittest.TestCase):
