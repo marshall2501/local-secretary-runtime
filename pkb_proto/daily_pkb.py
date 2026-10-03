@@ -52,6 +52,11 @@ from ritsuko.core.observation_loop import (
     run_pkb_observation_loop,
     resume_user_answer,
 )
+from ritsuko.application.task_queries import (
+    CoreTaskQueryService,
+    core_task_selection_result,
+)
+from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
 from ritsuko.application.task_records import (
     abort_proposal_review_record,
     abort_user_resume_record,
@@ -2170,283 +2175,24 @@ def _contextualize_core_reply(
     return reply
 
 
+def _core_task_queries() -> CoreTaskQueryService:
+    return CoreTaskQueryService(PostgresCoreTaskQueryRepository(connection))
+
+
 def load_recent_core_tasks(limit: int = 10, offset: int = 0) -> list[dict]:
-    """Load a compact screen-wide Core activity view for debugging."""
-    if type(limit) is not int or not 1 <= limit <= 50:
-        raise ValueError("limit must be 1..50")
-    if type(offset) is not int or offset < 0:
-        raise ValueError("offset must be a nonnegative integer")
-    with connection() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT t.id, t.request, t.status, t.revision,
-                          t.created_at, t.updated_at, t.completed_at,
-                          t.checkpoint,
-                          count(DISTINCT a.id) AS action_count,
-                          count(DISTINCT r.id) AS result_count
-                   FROM secretary.tasks t
-                   LEFT JOIN secretary.actions a ON a.task_id=t.id
-                   LEFT JOIN secretary.results r ON r.action_id=a.id
-                   WHERE t.requested_by='local_user'
-                     AND COALESCE(t.checkpoint->>'core_slice', '') IN
-                         ('daily_read_only_v1','ritsuko_magi_observation_v1')
-                   GROUP BY t.id
-                   ORDER BY t.updated_at DESC, t.id DESC
-                   LIMIT %s OFFSET %s""",
-                (limit, offset),
-            )
-            rows = cur.fetchall()
-    result = []
-    for row in rows:
-        checkpoint = row[7] or {}
-        result.append({
-            "id": str(row[0]),
-            "request": row[1],
-            "status": row[2],
-            "revision": row[3],
-            "created_at": row[4],
-            "updated_at": row[5],
-            "completed_at": row[6],
-            "core_slice": checkpoint.get("core_slice"),
-            "phase": checkpoint.get("phase"),
-            "selected_capability": checkpoint.get("selected_capability"),
-            "action_count": row[8],
-            "result_count": row[9],
-        })
-    return result
+    return _core_task_queries().recent(limit, offset)
 
 
 def load_open_core_tasks(limit: int = 20, offset: int = 0) -> list[dict]:
-    """Load unfinished daily Core tasks so they can survive page/server restarts."""
-    if type(limit) is not int or not 1 <= limit <= 50:
-        raise ValueError("limit must be 1..50")
-    if type(offset) is not int or offset < 0:
-        raise ValueError("offset must be a nonnegative integer")
-    with connection() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT t.id, t.request, t.status, t.revision,
-                          t.created_at, t.updated_at, t.checkpoint,
-                          count(DISTINCT a.id) AS action_count,
-                          count(DISTINCT r.id) AS result_count
-                   FROM secretary.tasks t
-                   LEFT JOIN secretary.actions a ON a.task_id=t.id
-                   LEFT JOIN secretary.results r ON r.action_id=a.id
-                   WHERE t.requested_by='local_user'
-                     AND COALESCE(t.checkpoint->>'core_slice', '') IN
-                         ('daily_read_only_v1','ritsuko_magi_observation_v1')
-                     AND t.status IN ('waiting_external', 'running', 'paused')
-                   GROUP BY t.id
-                   ORDER BY t.updated_at DESC, t.id DESC
-                   LIMIT %s OFFSET %s""",
-                (limit, offset),
-            )
-            rows = cur.fetchall()
-    result = []
-    for row in rows:
-        checkpoint = row[6] or {}
-        result.append({
-            "id": str(row[0]),
-            "request": row[1],
-            "status": row[2],
-            "revision": row[3],
-            "created_at": row[4],
-            "updated_at": row[5],
-            "core_slice": checkpoint.get("core_slice"),
-            "phase": checkpoint.get("phase"),
-            "selected_capability": checkpoint.get("selected_capability"),
-            "question": checkpoint.get("question"),
-            "message": checkpoint.get("message"),
-            "effective_request": checkpoint.get("effective_request"),
-            "user_replies": list(checkpoint.get("user_replies") or []),
-            "advisor_shadow": checkpoint.get("advisor_shadow"),
-            "action_count": row[7],
-            "result_count": row[8],
-        })
-    return result
+    return _core_task_queries().open(limit, offset)
 
 
 def load_completed_core_tasks(limit: int = 8, offset: int = 0) -> list[dict]:
-    """Load recently completed daily Core tasks for read-only review."""
-    if type(limit) is not int or not 1 <= limit <= 50:
-        raise ValueError("limit must be 1..50")
-    if type(offset) is not int or offset < 0:
-        raise ValueError("offset must be a nonnegative integer")
-    with connection() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT t.id, t.request, t.status, t.revision,
-                          t.created_at, t.updated_at, t.completed_at,
-                          t.checkpoint,
-                          count(DISTINCT a.id) AS action_count,
-                          count(DISTINCT r.id) AS result_count
-                   FROM secretary.tasks t
-                   LEFT JOIN secretary.actions a ON a.task_id=t.id
-                   LEFT JOIN secretary.results r ON r.action_id=a.id
-                   WHERE t.requested_by='local_user'
-                     AND COALESCE(t.checkpoint->>'core_slice', '') IN
-                         ('daily_read_only_v1','ritsuko_magi_observation_v1')
-                     AND t.status='completed'
-                   GROUP BY t.id
-                   ORDER BY COALESCE(t.completed_at, t.updated_at) DESC, t.id DESC
-                   LIMIT %s OFFSET %s""",
-                (limit, offset),
-            )
-            rows = cur.fetchall()
-    result = []
-    for row in rows:
-        checkpoint = row[7] or {}
-        result.append({
-            "id": str(row[0]),
-            "request": row[1],
-            "status": row[2],
-            "revision": row[3],
-            "created_at": row[4],
-            "updated_at": row[5],
-            "completed_at": row[6],
-            "core_slice": checkpoint.get("core_slice"),
-            "phase": checkpoint.get("phase"),
-            "selected_capability": checkpoint.get("selected_capability"),
-            "question": checkpoint.get("question"),
-            "message": checkpoint.get("message"),
-            "effective_request": checkpoint.get("effective_request"),
-            "user_replies": list(checkpoint.get("user_replies") or []),
-            "comparison": checkpoint.get("comparison"),
-            "advisor_shadow": checkpoint.get("advisor_shadow"),
-            "action_count": row[8],
-            "result_count": row[9],
-        })
-    return result
-
-
-def core_task_selection_result(item: dict) -> dict:
-    """Convert one persisted Task summary into the same UI state as a live request."""
-    task_id = str(item.get("id") or "").strip()
-    status = str(item.get("status") or "").strip()
-    if not task_id:
-        raise ValueError("Task ID is required")
-    if status not in {"waiting_external", "running", "paused", "completed", "failed"}:
-        raise ValueError("Unsupported Task status")
-    return {
-        "task_id": task_id,
-        "status": status,
-        "core_slice": item.get("core_slice"),
-        "phase": item.get("phase"),
-        "selected_capability": item.get("selected_capability"),
-        "question": item.get("question"),
-        "message": (
-            item.get("message")
-            or (
-                "完了済みTaskを閲覧しています。"
-                if status == "completed"
-                else "保存済みTaskを選択しました。"
-            )
-        ),
-        "effective_request": item.get("effective_request"),
-        "comparison": item.get("comparison"),
-        "advisor_shadow": item.get("advisor_shadow"),
-        "read_only_history": status == "completed",
-        "resumed_from_storage": True,
-    }
+    return _core_task_queries().completed(limit, offset)
 
 
 def load_core_task_trace(task_id: UUID) -> dict:
-    """Load a structured, user-visible execution trace for one Core Task."""
-    with connection() as db:
-        with db.cursor() as cur:
-            cur.execute(
-                """SELECT id, request, domain, status, revision,
-                          created_at, updated_at, completed_at, checkpoint
-                   FROM secretary.tasks
-                   WHERE id=%s""",
-                (task_id,),
-            )
-            task = cur.fetchone()
-            if task is None:
-                raise ValueError("Taskが見つかりません。")
-
-            cur.execute(
-                """SELECT a.id, a.tool, a.operation, a.risk, a.status,
-                          a.recorded_at, a.started_at, a.finished_at,
-                          r.id, r.outcome, r.summary, r.verified_by,
-                          r.verified_at, s.uri
-                   FROM secretary.actions a
-                   LEFT JOIN secretary.results r ON r.action_id=a.id
-                   LEFT JOIN secretary.sources s ON s.id=r.source_id
-                   WHERE a.task_id=%s
-                   ORDER BY a.recorded_at, a.id""",
-                (task_id,),
-            )
-            action_rows = cur.fetchall()
-
-            cur.execute(
-                """SELECT event_type, occurred_at
-                   FROM secretary.audit_events
-                   WHERE task_id=%s
-                     AND actor IN ('daily_core_advisor', 'ritsuko_core')
-                   ORDER BY occurred_at, id""",
-                (task_id,),
-            )
-            advisor_event_rows = cur.fetchall()
-
-    checkpoint = task[8] or {}
-    return {
-        "task": {
-            "id": str(task[0]),
-            "request": task[1],
-            "domain": task[2],
-            "status": task[3],
-            "revision": task[4],
-            "created_at": task[5],
-            "updated_at": task[6],
-            "completed_at": task[7],
-            "core_slice": checkpoint.get("core_slice"),
-            "phase": checkpoint.get("phase"),
-            "selected_capability": checkpoint.get("selected_capability"),
-            "question": checkpoint.get("question"),
-            "effective_request": checkpoint.get("effective_request"),
-            "user_replies": list(checkpoint.get("user_replies") or []),
-            "observation_pack": checkpoint.get("observation_pack"),
-            "magi_baseline": checkpoint.get("magi_baseline"),
-            "advisor_shadow": checkpoint.get("advisor_shadow"),
-            "message": checkpoint.get("message"),
-            "cooperative_result": checkpoint.get("cooperative_result"),
-            "cooperative_cycle": checkpoint.get("cooperative_cycle"),
-            "reason": checkpoint.get("reason"),
-            "final_core_decision": checkpoint.get("final_core_decision"),
-            "result_count": checkpoint.get("result_count"),
-            "magi_session": checkpoint.get("magi_session"),
-            "proposal_review": checkpoint.get("proposal_review"),
-            "proposal_memory_intake": checkpoint.get("proposal_memory_intake"),
-            "user_resume": checkpoint.get("user_resume"),
-        },
-        "actions": [
-            {
-                "action_id": str(row[0]),
-                "tool": row[1],
-                "operation": row[2],
-                "risk": row[3],
-                "action_status": row[4],
-                "recorded_at": row[5],
-                "started_at": row[6],
-                "finished_at": row[7],
-                "result_id": str(row[8]) if row[8] else None,
-                "outcome": row[9],
-                "summary": row[10],
-                "verified_by": row[11],
-                "verified_at": row[12],
-                "source_uri": row[13],
-            }
-            for row in action_rows
-        ],
-        "advisor_events": [
-            {
-                "event_type": row[0],
-                "occurred_at": row[1],
-            }
-            for row in advisor_event_rows
-        ],
-    }
+    return _core_task_queries().trace(task_id)
 
 
 def resume_core_task(task_id: UUID, reply: str) -> dict:
