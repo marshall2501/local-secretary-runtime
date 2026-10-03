@@ -38,7 +38,7 @@ class MemoryPostgresTests(unittest.TestCase):
         cls.admin.execute(next((ROOT/'db/migrations').glob('001*')).read_text(encoding='utf-8'))
         cls.admin.execute("INSERT INTO secretary.entities(name,entity_type,domain) VALUES ('メインPC','computer','pc'),('サブPC','computer','pc'),('NIKKE','software','game'),('SERVO1','rc_servo','rc')")
         for number in (5,6,8,9,10,11,12,13,14,15,19):
-            path=next((ROOT/'pkb_proto/sql').glob(f'{number:03d}_*'))
+            path=next((ROOT/'db/isolated/pkb_proto').glob(f'{number:03d}_*'))
             cls.admin.execute(path.read_text(encoding='utf-8'))
         cls.admin.execute(sql.SQL('GRANT USAGE ON SCHEMA secretary TO {}').format(sql.Identifier(WRITER)))
         cls.admin.execute(sql.SQL('GRANT SELECT ON secretary.entities,secretary.sources,secretary.claims,secretary.pending_claims TO {}').format(sql.Identifier(WRITER)))

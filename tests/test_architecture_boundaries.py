@@ -20,6 +20,9 @@ def _imports(path: Path) -> set[str]:
 
 
 class ArchitectureBoundaryTests(unittest.TestCase):
+    def test_legacy_pkb_proto_directory_is_absent(self):
+        self.assertFalse((ROOT / "pkb_proto").exists())
+
     def test_production_code_does_not_depend_on_legacy_pkb_proto(self):
         violations = []
         for package in (
