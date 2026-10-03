@@ -145,6 +145,7 @@ try {
     foreach ($promotionHelper in @(
         'scripts/db/runtime_settings_transfer.py',
         'scripts/db/provision_daily_runtime.py',
+        'scripts/db/verify_production_runtime.py',
         'scripts/db/promote-production.ps1'
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $root $promotionHelper) -PathType Leaf)) {
@@ -157,6 +158,21 @@ try {
     }
     if ($launcherText -notmatch '008_runtime_privileges.sql') {
         throw 'Production daily launcher must require migration 008.'
+    }
+
+    foreach ($runtimeRehearsalMarker in @(
+        'provision_daily_runtime.py',
+        'verify_production_runtime.py',
+        'ProductionRuntimeRehearsed',
+        'Remove-Item -LiteralPath $runtimeSecret'
+    )) {
+        if (-not $rehearsalText.Contains($runtimeRehearsalMarker)) {
+            throw "Production runtime rehearsal marker missing: $runtimeRehearsalMarker"
+        }
+    }
+    $dailyWebText = Get-Content -LiteralPath (Join-Path $root 'interfaces/web/app.py') -Raw
+    if ($dailyWebText -notmatch 'LSA_DAILY_WEB_PORT') {
+        throw 'Daily Web runtime must support an ephemeral rehearsal port.'
     }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
