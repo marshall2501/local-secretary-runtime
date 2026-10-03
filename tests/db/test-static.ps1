@@ -3,8 +3,7 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $errorsFound = @()
 $scriptRoots = @(
     (Join-Path $root 'scripts'),
-    (Join-Path $root 'tests'),
-    (Join-Path $root 'pkb_proto')
+    (Join-Path $root 'tests')
 )
 Get-ChildItem -Path $scriptRoots -Recurse -Filter '*.ps1' -File | ForEach-Object {
     $tokens = $null

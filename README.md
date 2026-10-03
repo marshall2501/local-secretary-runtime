@@ -26,7 +26,7 @@ LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定
 
 ## 主な入口
 
-- `interfaces/web/app.py` / `pkb_proto/launch_daily_pkb.ps1` — localhostの日常用ポータル。現在のランチャーは隔離PKB DBと専用writerを明示的に検査します。
+- `interfaces/web/app.py` / `scripts/ui/launch_daily_pkb.ps1` — localhostの日常用ポータル。現在のランチャーは隔離PKB DBと専用writerを明示的に検査します。
 - `ritsuko/magi/async_execution.py` — state-driven MAGI通信と各provider adapter。
 - `integrations/connections/` — 共通Service Connection RegistryとSecret非保持の資格情報参照境界。
 - `ritsuko/core/` / `ritsuko/tasks/` / `ritsuko/application/` — RITSUKO側のObservation、Task、共通依頼入口、resume/review境界。
@@ -36,7 +36,7 @@ LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定
 - `scripts/db/postgres.ps1` — PostgreSQLのSetup / Start / Migrate / Doctor / Backup / Restore。
 - `Launch-PKB-Web.cmd` — 開発Workbench。
 
-`pkb_proto` というディレクトリ名は歴史的なものです。中には現行の検証・統合スライスも含まれます。各機能の採用状況や実機到達点はファイル名ではなく `STATUS` と実測で判断してください。
+旧 `pkb_proto` Python実装は責務別packageへ移行済みです。隔離PKB DBの履歴migrationは `db/isolated/pkb_proto/`、隔離検証スクリプトは `scripts/pkb/isolated/` に保全します。これらは運用 `secretary` DBへ直接適用するproduction migrationではありません。
 
 ## PostgreSQL
 
@@ -62,7 +62,7 @@ cd D:\AI\projects\local-secretary-runtime
 
 - `.env`、APIキー、Secret、個人原本、DBダンプ、個人ログをGitへ登録しない。
 - PostgreSQL管理者資格情報をLLMや通常アプリへ渡さない。
-- `pkb_proto/sql` の隔離試験用migrationを運用 `secretary` DBへ適用しない。
+- `db/isolated/pkb_proto` の隔離試験用migrationを運用 `secretary` DBへ適用しない。
 - 実データ・運用DB・高影響操作では、設計repoのD-08に従いバックアップ、復元可能性、権限、承認を確認する。
 - 同じPC上の独立プロジェクト `yt-topic-search` のCompose、container、network、volumeを変更・停止しない。
 - GitHub反映、オフラインテスト、隔離DB試験、サブPC実機、統合動作、日常利用を区別し、未実証を完成と報告しない。
