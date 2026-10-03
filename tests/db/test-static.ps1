@@ -24,5 +24,48 @@ try {
     }
     git diff --check
     if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed.' }
+
+
+    $promotionMigrations = @(
+        'db/migrations/005_pkb_runtime_schema.sql',
+        'db/migrations/006_finance_runtime_schema.sql',
+        'db/migrations/007_runtime_settings_schema.sql',
+        'db/migrations/008_runtime_privileges.sql'
+    )
+    foreach ($relative in $promotionMigrations) {
+        $migrationPath = Join-Path $root $relative
+        if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
+            throw "Missing production promotion migration: $relative"
+        }
+        $migrationText = Get-Content -LiteralPath $migrationPath -Raw
+        foreach ($banned in @(
+            'secretary_pkb_proto_20260927',
+            'secretary_pkb_proto_writer_20260927',
+            'fixture://',
+            'fictional_only',
+            'pkb_episode_receipts',
+            'provider_usage_profiles',
+            '14000000-0000-0000-0000-'
+        )) {
+            if ($migrationText.Contains($banned)) {
+                throw "Prototype/history marker '$banned' leaked into $relative"
+            }
+        }
+        if ($migrationText -match '(?im)^\s*INSERT\s+INTO\s+') {
+            throw "Production schema migration must not contain data INSERT statements: $relative"
+        }
+        if ($migrationText -match 'schema_migrations') {
+            throw "Migration history is owned by scripts/db/migrate.sh: $relative"
+        }
+    }
+
+    $preflightPath = Join-Path $root 'scripts/db/promotion-preflight.ps1'
+    if (-not (Test-Path -LiteralPath $preflightPath -PathType Leaf)) {
+        throw 'Missing production promotion preflight.'
+    }
+    $preflightText = Get-Content -LiteralPath $preflightPath -Raw
+    if ($preflightText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
+        throw 'Production promotion preflight must remain read-only.'
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'

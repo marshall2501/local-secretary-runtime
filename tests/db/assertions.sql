@@ -58,6 +58,76 @@ BEGIN
         RAISE EXCEPTION 'Memory-only review role boundary failed';
     END IF;
 END $review_test$;
+
+DO $promotion_test$
+DECLARE role_name text;
+BEGIN
+    IF to_regclass('secretary.entity_relations') IS NULL
+       OR to_regclass('secretary.pkb_pending_intake') IS NULL
+       OR to_regclass('secretary.pkb_memory_intakes') IS NULL
+       OR to_regclass('secretary.finance_transactions') IS NULL
+       OR to_regclass('secretary.service_connections') IS NULL
+       OR to_regclass('secretary.llm_profiles') IS NULL
+       OR to_regclass('secretary.magi_member_assignments') IS NULL
+       OR to_regclass('secretary.service_billing_profiles') IS NULL THEN
+        RAISE EXCEPTION 'Production promotion schema is incomplete';
+    END IF;
+
+    IF to_regclass('secretary.pkb_episode_receipts') IS NOT NULL THEN
+        RAISE EXCEPTION 'Prototype episode receipt table leaked into production schema';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='secretary'
+          AND table_name='llm_profiles'
+          AND column_name IN ('provider','endpoint','credential_env')
+    ) THEN
+        RAISE EXCEPTION 'Legacy LLM connection snapshot columns leaked into production schema';
+    END IF;
+
+    FOREACH role_name IN ARRAY ARRAY[
+        'secretary_finance_writer',
+        'secretary_magi_settings_writer',
+        'secretary_connection_writer',
+        'secretary_billing_writer'
+    ] LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name AND NOT rolcanlogin) THEN
+            RAISE EXCEPTION 'Missing production group role: %', role_name;
+        END IF;
+    END LOOP;
+
+    IF EXISTS (
+        SELECT 1 FROM pg_roles
+        WHERE rolname='secretary_pkb_proto_writer_20260927'
+    ) THEN
+        RAISE EXCEPTION 'Prototype writer role leaked into production cluster';
+    END IF;
+
+    IF NOT has_table_privilege(
+            'secretary_memory_writer','secretary.entity_relations','SELECT,INSERT,UPDATE')
+       OR NOT has_table_privilege(
+            'secretary_memory_writer','secretary.pkb_pending_intake','SELECT,INSERT,UPDATE')
+       OR NOT has_table_privilege(
+            'secretary_finance_writer','secretary.finance_transactions','SELECT,INSERT,UPDATE')
+       OR NOT has_table_privilege(
+            'secretary_magi_settings_writer','secretary.llm_profiles','SELECT,INSERT,UPDATE,DELETE')
+       OR NOT has_table_privilege(
+            'secretary_connection_writer','secretary.service_connections','SELECT,INSERT,UPDATE,DELETE')
+       OR NOT has_table_privilege(
+            'secretary_billing_writer','secretary.service_billing_profiles','SELECT,INSERT,UPDATE,DELETE') THEN
+        RAISE EXCEPTION 'Production promotion role grant failed';
+    END IF;
+
+    IF has_table_privilege('secretary_reader','secretary.finance_transactions','SELECT')
+       OR has_table_privilege('secretary_reader','secretary.service_connections','SELECT')
+       OR has_table_privilege('secretary_reader','secretary.llm_profiles','SELECT')
+       OR has_table_privilege('secretary_reader','secretary.service_billing_profiles','SELECT')
+       OR has_table_privilege('secretary_finance_writer','secretary.service_connections','SELECT')
+       OR has_table_privilege('secretary_connection_writer','secretary.finance_transactions','SELECT') THEN
+        RAISE EXCEPTION 'Production promotion least-privilege boundary failed';
+    END IF;
+END $promotion_test$;
 ROLLBACK;
 -- Persistent synthetic checkpoint checked after restart and restore.
 INSERT INTO secretary.tasks(id,request,requested_by,domain,completion_criteria,status,checkpoint,next_run_at)
