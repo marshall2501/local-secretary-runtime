@@ -4,7 +4,7 @@
 
 新しい主要作業や作業選定時は、設計repo `local-secretary-ai/main` の現行 [START_HERE](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/START_HERE.md) を入口に、`PROJECT → ARCHITECTURE → STATUS → PLAN` を確認する。必要な個別設計、DesignDecisions、DevelopmentKnowledgeは今回の作業に関係する部分だけ追加確認する。
 
-作業を選定した後の変更レベル、change plan、traceability、安全・検証、同一plan内の不具合修正、完了条件は設計repoの [DEVELOPMENT_RULES](https://github.com/marshall2501/local-secretary-ai/blob/main/DEVELOPMENT_RULES.md) を正本とする。Level B / C の個別planは設計repoの `docs/templates/change-plan-template.md` を基準にする。
+作業を選定した後の変更レベル、change plan、traceability、安全・検証、同一plan内の不具合修正、完了条件は設計repoの [DEVELOPMENT_RULES](https://github.com/marshall2501/local-secretary-ai/blob/main/DEVELOPMENT_RULES.md) を正本とする。Level B / C の個別planは設計repoの `docs/templates/local-secretary-change-plan-template.md` を基準にする。
 
 設計repoを取得できない場合は、その旨を明示する。ローカルに残る古い文書や過去の会話を「最新版」と呼ばず、高影響変更は正本を確認できるまで安全側で扱う。
 
