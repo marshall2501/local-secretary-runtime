@@ -61,18 +61,32 @@ def _configured_live_port() -> int:
     return port
 
 
-def _validate_disposable_target(target_port: int, live_port: int) -> None:
+def _validate_disposable_target(
+    target_port: int,
+    live_port: int,
+    target_database: str = "secretary",
+) -> None:
     if not 1024 <= target_port <= 65535 or not 1024 <= live_port <= 65535:
         raise RuntimeError("invalid PostgreSQL port")
     configured = _configured_live_port()
     if live_port != configured:
         raise RuntimeError("supplied live PostgreSQL port does not match local configuration")
-    if target_port == configured:
-        raise RuntimeError("refusing production write probes against the live PostgreSQL port")
+    from config.runtime_database import (
+        PRODUCTION_DB,
+        approved_production_database_name,
+    )
+    if not approved_production_database_name(target_database):
+        raise RuntimeError("unapproved production rehearsal database")
+    if target_port == configured and target_database == PRODUCTION_DB:
+        raise RuntimeError("refusing production write probes against the live PostgreSQL database")
 
 
-def _validate_runtime_identity(database: str, user: str) -> None:
-    if (database, user) != ("secretary", "secretary_daily_runtime"):
+def _validate_runtime_identity(
+    database: str,
+    user: str,
+    expected_database: str = "secretary",
+) -> None:
+    if (database, user) != (expected_database, "secretary_daily_runtime"):
         raise RuntimeError("production runtime connected with the wrong database identity")
 
 
@@ -151,11 +165,16 @@ def main() -> None:
     parser.add_argument("--target-port", type=int, required=True)
     parser.add_argument("--live-port", type=int, required=True)
     parser.add_argument("--runtime-secret-file", type=Path, required=True)
+    parser.add_argument("--target-database", default="secretary")
     parser.add_argument("--settings-source-port", type=int)
     parser.add_argument("--admin-secret-file", type=Path)
     args = parser.parse_args()
 
-    _validate_disposable_target(args.target_port, args.live_port)
+    _validate_disposable_target(
+        args.target_port,
+        args.live_port,
+        args.target_database,
+    )
     if args.settings_source_port is not None and not 1024 <= args.settings_source_port <= 65535:
         raise RuntimeError("invalid settings source PostgreSQL port")
     if (args.settings_source_port is None) != (args.admin_secret_file is None):
@@ -163,6 +182,7 @@ def main() -> None:
     _read_secret(args.runtime_secret_file)
 
     os.environ["LSA_DAILY_DB_MODE"] = "production"
+    os.environ["LSA_DAILY_DB_NAME"] = args.target_database
     os.environ["LSA_PKB_DAILY_PORT"] = str(args.target_port)
     os.environ["LSA_PKB_DAILY_SECRET"] = str(args.runtime_secret_file)
 
@@ -196,7 +216,11 @@ def main() -> None:
 
     with connect_pkb_database() as db:
         info = db.info
-        _validate_runtime_identity(info.dbname or "", info.user or "")
+        _validate_runtime_identity(
+            info.dbname or "",
+            info.user or "",
+            args.target_database,
+        )
         with db.cursor() as cur:
             cur.execute(
                 """SELECT count(*) FROM secretary.schema_migrations
