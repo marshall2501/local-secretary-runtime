@@ -23,6 +23,12 @@ class ProductionRuntimeVerifierContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "does not match"):
                 verifier._validate_disposable_target(55432, 15432)
 
+    def test_generic_pkb_probe_reads_back_written_event_history(self):
+        self.assertEqual(
+            verifier._pkb_event_read_query("RehearsalPC-abc"),
+            "RehearsalPC-abcのドライバー更新履歴",
+        )
+
     def test_expected_database_and_role_are_required(self):
         verifier._validate_runtime_identity("secretary", "secretary_daily_runtime")
         for database, user in (
