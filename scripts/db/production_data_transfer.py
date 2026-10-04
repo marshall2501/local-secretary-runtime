@@ -47,8 +47,14 @@ def _read_closure_sql() -> str:
     return value
 
 
-def _validate_endpoints(source_cur, target_cur) -> None:
-    if one(source_cur, "SELECT current_database()") != "secretary_pkb_proto_20260927":
+def _validate_endpoints(
+    source_cur,
+    target_cur,
+    *,
+    source_database: str,
+    target_database: str,
+) -> None:
+    if one(source_cur, "SELECT current_database()") != source_database:
         raise RuntimeError("unexpected data source database")
     if one(
         source_cur,
@@ -56,7 +62,7 @@ def _validate_endpoints(source_cur, target_cur) -> None:
            WHERE version='026_service_billing.sql'""",
     ) != 1:
         raise RuntimeError("isolated source is not at migration 026")
-    if one(target_cur, "SELECT current_database()") != "secretary":
+    if one(target_cur, "SELECT current_database()") != target_database:
         raise RuntimeError("unexpected data target database")
     if one(
         target_cur,
@@ -303,15 +309,32 @@ def _validate_references(cur) -> None:
         raise RuntimeError("referential validation failed: " + ",".join(failed))
 
 
-def transfer(source, target, *, commit: bool) -> dict:
+def transfer(
+    source,
+    target,
+    *,
+    commit: bool,
+    source_database: str = "secretary_pkb_proto_20260927",
+    target_database: str = "secretary",
+) -> dict:
     closure = _read_closure_sql()
     try:
         with source.cursor() as source_cur, target.cursor() as target_cur:
-            _validate_endpoints(source_cur, target_cur)
+            _validate_endpoints(
+                source_cur,
+                target_cur,
+                source_database=source_database,
+                target_database=target_database,
+            )
             pkb = _copy_pkb(source_cur, target_cur, closure)
             finance = _copy_finance(source_cur, target_cur)
 
-        settings = copy_settings(source, target, require_empty=True)
+        settings = copy_settings(
+            source,
+            target,
+            require_empty=True,
+            expected_target_database=target_database,
+        )
 
         with target.cursor() as target_cur:
             _validate_references(target_cur)
@@ -343,25 +366,34 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-port", type=int, required=True)
     parser.add_argument("--target-port", type=int, required=True)
+    parser.add_argument("--source-database", default="secretary_pkb_proto_20260927")
+    parser.add_argument("--target-database", default="secretary")
     parser.add_argument("--secret-file", type=Path, required=True)
     parser.add_argument("--commit", action="store_true")
     args = parser.parse_args()
 
     if not 1024 <= args.source_port <= 65535 or not 1024 <= args.target_port <= 65535:
         raise RuntimeError("invalid PostgreSQL port")
-    if args.source_port == args.target_port:
-        raise RuntimeError("source and rebuild target ports must differ")
+    if (
+        args.source_port == args.target_port
+        and args.source_database == args.target_database
+    ):
+        raise RuntimeError("source and rebuild target must differ")
     if not args.secret_file.is_file():
         raise RuntimeError("local PostgreSQL secret is missing")
     password = args.secret_file.read_text(encoding="utf-8").strip()
     if len(password) < 32:
         raise RuntimeError("local PostgreSQL secret is invalid")
 
-    with connect_admin(
-        args.source_port, "secretary_pkb_proto_20260927", password
-    ) as source:
-        with connect_admin(args.target_port, "secretary", password) as target:
-            result = transfer(source, target, commit=args.commit)
+    with connect_admin(args.source_port, args.source_database, password) as source:
+        with connect_admin(args.target_port, args.target_database, password) as target:
+            result = transfer(
+                source,
+                target,
+                commit=args.commit,
+                source_database=args.source_database,
+                target_database=args.target_database,
+            )
 
     pkb_source, pkb_inserted, pkb_updated = _count_summary(result["pkb"])
     finance_source, finance_inserted, finance_updated = _count_summary(result["finance"])
