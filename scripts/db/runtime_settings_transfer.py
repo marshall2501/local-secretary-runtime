@@ -15,14 +15,49 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.db.transfer_common import copy_all_rows, one
+from scripts.db.transfer_common import copy_query_rows, one
 
 
 TABLES = (
-    ("service_connections", ("id",), "id"),
-    ("llm_profiles", ("id",), "id"),
-    ("magi_member_assignments", ("member",), "member"),
-    ("service_billing_profiles", ("id",), "id"),
+    (
+        "service_connections",
+        (
+            "id", "display_name", "adapter_key", "endpoint", "credential_ref",
+            "account_label", "capabilities", "nonsecret_config", "auth_data",
+            "connection_type", "connection_role", "enabled", "created_at",
+            "updated_at",
+        ),
+        ("id",),
+        "id",
+    ),
+    (
+        "llm_profiles",
+        (
+            "id", "display_name", "connection_id", "model",
+            "context_window_tokens", "ollama_num_predict", "retry_http_codes",
+            "enabled", "created_at", "updated_at",
+        ),
+        ("id",),
+        "id",
+    ),
+    (
+        "magi_member_assignments",
+        (
+            "member", "profile_id", "enabled", "weight", "timeout_seconds",
+            "retry_within_turn", "updated_at",
+        ),
+        ("member",),
+        "member",
+    ),
+    (
+        "service_billing_profiles",
+        (
+            "id", "display_name", "connection_id", "enabled", "created_at",
+            "updated_at",
+        ),
+        ("id",),
+        "id",
+    ),
 )
 
 
@@ -72,18 +107,22 @@ def copy_settings(
         validate_target(target_cur, expected_target_database)
 
         if require_empty:
-            for table, _, _ in TABLES:
+            for table, _, _, _ in TABLES:
                 if one(target_cur, f"SELECT count(*) FROM secretary.{table}") != 0:
                     raise RuntimeError(f"target settings table is not empty: {table}")
 
         counts = {}
-        for table, key_columns, order_by in TABLES:
-            result = copy_all_rows(
+        for table, columns, key_columns, order_by in TABLES:
+            result = copy_query_rows(
                 source_cur,
                 target_cur,
                 table=table,
                 key_columns=key_columns,
-                order_by=order_by,
+                columns=columns,
+                source_query_template=(
+                    f"SELECT {{columns}} FROM secretary.{table} t "
+                    f"ORDER BY {order_by}"
+                ),
             )
             counts[table] = result["source"]
 
@@ -123,7 +162,7 @@ def copy_settings(
         if any(orphan_counts):
             raise RuntimeError("settings transfer created orphan references")
 
-        for table, _, _ in TABLES:
+        for table, _, _, _ in TABLES:
             if one(target_cur, f"SELECT count(*) FROM secretary.{table}") != counts[table]:
                 raise RuntimeError(f"settings count mismatch after transfer: {table}")
 
