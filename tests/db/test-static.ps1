@@ -152,6 +152,14 @@ try {
             throw "Missing production promotion helper: $promotionHelper"
         }
     }
+
+    $runtimeProvisionText = Get-Content -LiteralPath (Join-Path $root 'scripts/db/provision_daily_runtime.py') -Raw
+    if ($runtimeProvisionText -match 'PASSWORD\s+%s') {
+        throw 'Role password DDL must not use psycopg bind placeholders.'
+    }
+    if ($runtimeProvisionText -notmatch 'sql\.Literal\(runtime_password\)') {
+        throw 'Role password DDL must quote the generated secret with psycopg sql.Literal.'
+    }
     $launcherText = Get-Content -LiteralPath (Join-Path $root 'scripts/ui/launch_daily_pkb.ps1') -Raw
     if ($launcherText -notmatch "\[ValidateSet\('isolated','production'\)\]") {
         throw 'Daily launcher must expose an explicit isolated/production cutover mode.'

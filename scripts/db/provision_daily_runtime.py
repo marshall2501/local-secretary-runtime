@@ -62,16 +62,20 @@ def main():
                 cur.execute(
                     sql.SQL(
                         "CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                        "NOREPLICATION NOBYPASSRLS PASSWORD %s"
-                    ).format(sql.Identifier(ROLE)),
-                    (runtime_password,),
+                        "NOREPLICATION NOBYPASSRLS PASSWORD {}"
+                    ).format(
+                        sql.Identifier(ROLE),
+                        sql.Literal(runtime_password),
+                    )
                 )
             else:
                 if not row[0] or any(row[1:]):
                     raise RuntimeError("existing daily runtime role has unsafe attributes")
                 cur.execute(
-                    sql.SQL("ALTER ROLE {} PASSWORD %s").format(sql.Identifier(ROLE)),
-                    (runtime_password,),
+                    sql.SQL("ALTER ROLE {} PASSWORD {}").format(
+                        sql.Identifier(ROLE),
+                        sql.Literal(runtime_password),
+                    )
                 )
             for group in GROUPS:
                 cur.execute(sql.SQL("GRANT {} TO {}").format(
