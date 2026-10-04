@@ -1,7 +1,5 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [string]$BackupPath,
     [ValidatePattern('^secretary_rebuild_[a-z0-9_]{1,40}$')]
     [string]$ReplacementDatabase
 )
@@ -9,22 +7,18 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$composeFile = Join-Path $root 'docker/compose.postgres.yml'
-$composeDirectory = Split-Path $composeFile
 $envFile = Join-Path $root '.env.postgres'
-$service = 'secretary-postgres'
 $adminSecret = Join-Path $root 'secrets/postgres-password.txt'
 $runtimeSecret = Join-Path $root 'secrets/secretary-daily-runtime-password.txt'
 $python = Join-Path $root '.venv/Scripts/python.exe'
-$dataTransfer = Join-Path $root 'scripts/db/production_data_transfer.py'
-$dataRestoreHelper = Join-Path $root 'scripts/db/restore-data-only.sh'
-$runtimeRunner = Join-Path $root 'scripts/db/run_production_runtime_rehearsal.py'
+$initializer = Join-Path $root 'scripts/db/initialize-fresh-production.ps1'
+$settingsTransfer = Join-Path $root 'scripts/db/runtime_settings_transfer.py'
 $provisionRuntime = Join-Path $root 'scripts/db/provision_daily_runtime.py'
-$BackupPath = [IO.Path]::GetFullPath($BackupPath)
+$rehearsal = Join-Path $root 'scripts/db/promotion-rehearsal.ps1'
 
 foreach ($needed in @(
-    $BackupPath,$composeFile,$envFile,$adminSecret,$python,
-    $dataTransfer,$dataRestoreHelper,$runtimeRunner,$provisionRuntime
+    $envFile,$adminSecret,$runtimeSecret,$python,
+    $initializer,$settingsTransfer,$provisionRuntime,$rehearsal
 )) {
     if (-not (Test-Path -LiteralPath $needed -PathType Leaf)) {
         throw "Required rebuild input is missing: $needed"
@@ -43,201 +37,66 @@ if ($portLines.Count -ne 1) { throw 'Cannot determine the live Secretary Postgre
 $livePort = [int]($portLines[0] -replace '^LSA_DB_PORT=', '')
 if ($livePort -lt 1024 -or $livePort -gt 65535) { throw 'Invalid live PostgreSQL port.' }
 
-function Invoke-Docker {
-    param([string[]]$DockerArgs)
-    & docker @DockerArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Docker command failed: $($DockerArgs -join ' ')"
-    }
+$ids = @(docker ps -q --filter 'label=com.docker.compose.project=local-secretary-runtime-db' --filter 'label=com.docker.compose.service=secretary-postgres')
+if ($LASTEXITCODE -ne 0 -or $ids.Count -ne 1) {
+    throw 'Expected exactly one running Secretary PostgreSQL container.'
+}
+$container = $ids[0]
+$inspect = @(docker inspect $container | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0 -or $inspect.Count -ne 1 -or $inspect[0].State.Health.Status -ne 'healthy') {
+    throw 'Secretary PostgreSQL is not healthy.'
 }
 
-function Get-FreePort {
-    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
-    try {
-        $listener.Start()
-        return ([Net.IPEndPoint]$listener.LocalEndpoint).Port
-    } finally {
-        $listener.Stop()
-    }
+$oldExists = & docker exec $container psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='secretary';"
+if ($LASTEXITCODE -ne 0 -or ($oldExists | Out-String).Trim() -ne '1') {
+    throw 'Existing secretary database is missing.'
 }
-
-$liveIds = @(Invoke-Docker @(
-    'ps','-q',
-    '--filter','label=com.docker.compose.project=local-secretary-runtime-db',
-    '--filter','label=com.docker.compose.service=secretary-postgres'
-))
-if ($liveIds.Count -ne 1) { throw 'Expected one owned live Secretary PostgreSQL container.' }
-$liveContainer = $liveIds[0]
-$liveInfo = (Invoke-Docker @('inspect',$liveContainer) | Out-String | ConvertFrom-Json)[0]
-if ($liveInfo.State.Health.Status -ne 'healthy') { throw 'Live Secretary PostgreSQL is not healthy.' }
-
-$existingReplacement = @(
-    Invoke-Docker @(
-        'exec',$liveContainer,'psql','-X','-q','-A','-t',
-        '-U','secretary_admin','-d','postgres','-v','ON_ERROR_STOP=1',
-        '-c',"SELECT count(*) FROM pg_database WHERE datname='$ReplacementDatabase';"
-    )
-)
-if (($existingReplacement | Out-String).Trim() -ne '0') {
+$replacementExists = & docker exec $container psql -X -A -t -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE datname='$ReplacementDatabase';"
+if ($LASTEXITCODE -ne 0 -or ($replacementExists | Out-String).Trim() -ne '0') {
     throw "Replacement database already exists: $ReplacementDatabase"
 }
 
-$project = 'local-secretary-test-rebuild-' + [guid]::NewGuid().ToString('N').Substring(0,12)
-$tempPort = Get-FreePort
-$oldPort = $env:LSA_DB_PORT
-$env:LSA_DB_PORT = "$tempPort"
-$composeBase = @(
-    'compose','--project-name',$project,'--project-directory',$composeDirectory,
-    '--env-file',$envFile,'-f',$composeFile
-)
+# Prove the exact fresh-schema + settings-only path first in a disposable DB.
+& $rehearsal
 
-function Invoke-TempCompose {
-    param([string[]]$ComposeArgs)
-    Invoke-Docker ($composeBase + $ComposeArgs)
-}
-
-$tempHostDump = Join-Path ([IO.Path]::GetTempPath()) (
-    'lsa-rebuild-' + [guid]::NewGuid().ToString('N') + '.dump'
-)
-$tempRemoteSourceBackup = '/tmp/lsa-source-' + [guid]::NewGuid().ToString('N') + '.dump'
-$tempRemoteRebuiltDump = '/tmp/lsa-rebuilt-' + [guid]::NewGuid().ToString('N') + '.dump'
-$liveRemoteRebuiltDump = '/tmp/lsa-rebuilt-' + [guid]::NewGuid().ToString('N') + '.dump'
-$replacementCreated = $false
+$created = $false
 $completed = $false
-
 try {
-    Invoke-TempCompose @('up','-d','--wait','--wait-timeout','120',$service)
-    $tempIds = @(Invoke-TempCompose @('ps','-q',$service))
-    if ($tempIds.Count -ne 1) { throw 'Expected one temporary rebuild PostgreSQL container.' }
-    $tempContainer = $tempIds[0]
+    & docker exec $container createdb -U secretary_admin --template=template0 --owner=secretary_admin $ReplacementDatabase
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot create replacement database.' }
+    $created = $true
 
-    Invoke-Docker @('cp',$BackupPath,"$($tempContainer):$tempRemoteSourceBackup")
-    Invoke-TempCompose @('exec','-T',$service,'pg_restore','--list',$tempRemoteSourceBackup) | Out-Null
+    & $initializer -Database $ReplacementDatabase
 
-    Invoke-TempCompose @('exec','-T',$service,'sh','/opt/secretary/scripts/migrate.sh')
+    & $python $settingsTransfer --source-port $livePort --target-port $livePort --source-database secretary_pkb_proto_20260927 --target-database $ReplacementDatabase --secret-file $adminSecret --commit
+    if ($LASTEXITCODE -ne 0) { throw 'Runtime settings transfer into replacement database failed.' }
 
-    $migrationState = @(
-        Invoke-TempCompose @(
-            'exec','-T',$service,'psql','-X','-q','-A','-t',
-            '-U','secretary_admin','-d','secretary','-v','ON_ERROR_STOP=1',
-            '-c',"SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-        )
-    )
-    if (($migrationState | Out-String).Trim() -ne '8|008_runtime_privileges.sql') {
-        throw "Unexpected rebuilt schema migration state: $(($migrationState | Out-String).Trim())"
-    }
-
-    Invoke-TempCompose @(
-        'exec','-T',$service,'sh','/opt/secretary/scripts/restore-data-only.sh',
-        'secretary',$tempRemoteSourceBackup
-    )
-
-    $transferArgs = @(
-        $dataTransfer,
-        '--source-port',"$livePort",
-        '--target-port',"$tempPort",
-        '--secret-file',$adminSecret,
-        '--commit'
-    )
-    & $python @transferArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Selected daily data transfer into rebuilt database failed.' }
-
-    Invoke-TempCompose @(
-        'exec','-T',$service,'pg_dump',
-        '-U','secretary_admin','-d','secretary',
-        '--format=custom','--no-owner','--no-acl',
-        '--file',$tempRemoteRebuiltDump
-    )
-    Invoke-TempCompose @('exec','-T',$service,'pg_restore','--list',$tempRemoteRebuiltDump) | Out-Null
-
-    $runtimeArgs = @(
-        $runtimeRunner,
-        '--target-port',"$tempPort",
-        '--live-port',"$livePort",
-        '--admin-secret-file',$adminSecret,
-        '--settings-source-port',"$livePort"
-    )
-    & $python @runtimeArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Improved runtime verification failed against the rebuilt temporary database.'
-    }
-
-    Invoke-Docker @('cp',"$($tempContainer):$tempRemoteRebuiltDump",$tempHostDump)
-
-    Invoke-Docker @(
-        'exec',$liveContainer,'createdb','-U','secretary_admin',
-        '--template=template0',$ReplacementDatabase
-    )
-    $replacementCreated = $true
-
-    Invoke-Docker @('cp',$tempHostDump,"$($liveContainer):$liveRemoteRebuiltDump")
-    Invoke-Docker @(
-        'exec',$liveContainer,'pg_restore',
-        '-U','secretary_admin','-d',$ReplacementDatabase,
-        '--single-transaction','--exit-on-error','--no-owner','--no-acl',
-        $liveRemoteRebuiltDump
-    )
-
-    $provisionArgs = @(
-        $provisionRuntime,
-        '--port',"$livePort",
-        '--database',$ReplacementDatabase,
-        '--admin-secret-file',$adminSecret,
-        '--runtime-secret-file',$runtimeSecret
-    )
-    & $python @provisionArgs
+    & $python $provisionRuntime --port $livePort --database $ReplacementDatabase --admin-secret-file $adminSecret --runtime-secret-file $runtimeSecret
     if ($LASTEXITCODE -ne 0) { throw 'Daily runtime provisioning on replacement database failed.' }
 
-    $replacementState = @(
-        Invoke-Docker @(
-            'exec',$liveContainer,'psql','-X','-q','-A','-t',
-            '-U','secretary_admin','-d',$ReplacementDatabase,'-v','ON_ERROR_STOP=1',
-            '-c',"SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-        )
-    )
-    if (($replacementState | Out-String).Trim() -ne '8|008_runtime_privileges.sql') {
-        throw "Replacement database migration state is unexpected: $(($replacementState | Out-String).Trim())"
+    $state = & docker exec $container psql -X -A -t -U secretary_admin -d $ReplacementDatabase -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
+    if ($LASTEXITCODE -ne 0 -or ($state | Out-String).Trim() -ne '8|008_runtime_privileges.sql') {
+        throw "Replacement database migration state is unexpected: $(($state | Out-String).Trim())"
     }
 
     $completed = $true
     Write-Host ''
-    Write-Host '=== Clean production rebuild ==='
+    Write-Host '=== Fresh production replacement ==='
     [pscustomobject]@{
         ReplacementDatabase = $ReplacementDatabase
-        LivePort = $livePort
-        ImprovedRuntimeVerifiedInDisposableDB = $true
         OldSecretaryPreserved = $true
-        IsolatedSourcePreserved = $true
-        ReplacementProvisioned = $true
+        IsolatedSettingsSourcePreserved = $true
+        LegacyDataRestored = $false
+        SettingsOnlyTransferred = $true
+        ReadyForGuiValidation = $true
     } | Format-List
-    Write-Host 'PASS: clean replacement database created from the improved runtime schema and required daily data.'
-    Write-Host 'The existing secretary database was not replaced or renamed.'
+    Write-Host 'PASS: fresh replacement database created without restoring legacy PKB/Finance/Task data.'
+    Write-Host 'The existing secretary database has not been renamed or replaced.'
 } finally {
-    try {
-        if (Test-Path -LiteralPath $tempHostDump) {
-            Remove-Item -LiteralPath $tempHostDump -Force
-        }
-        try {
-            Invoke-Docker @('exec',$liveContainer,'rm','-f',$liveRemoteRebuiltDump)
-        } catch {
-            if ($completed) { throw }
-        }
-        if ($replacementCreated -and -not $completed) {
-            try {
-                Invoke-Docker @(
-                    'exec',$liveContainer,'dropdb','-U','secretary_admin',
-                    '--if-exists','--force',$ReplacementDatabase
-                )
-            } catch {
-                Write-Warning "Failed to remove incomplete replacement database $ReplacementDatabase."
-            }
-        }
-    } finally {
-        try {
-            $env:LSA_DB_PORT = "$tempPort"
-            Invoke-TempCompose @('down','--volumes')
-        } finally {
-            $env:LSA_DB_PORT = $oldPort
+    if ($created -and -not $completed) {
+        & docker exec $container dropdb -U secretary_admin --if-exists --force $ReplacementDatabase
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to remove incomplete replacement database $ReplacementDatabase."
         }
     }
 }
