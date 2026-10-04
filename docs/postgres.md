@@ -32,19 +32,19 @@ cd D:\AI\projects\local-secretary-runtime
 
 `Doctor` はhealth、localhost binding、認証、migration履歴等を検査します。migration前に失敗する項目がある場合は `Start → Migrate → Doctor` の順で確認します。
 
-## Migration
+## Migration / clean rebuild
 
-`Migrate` は `db/migrations/NNN_*.sql` を順番に適用し、適用履歴とSHA-256を確認します。適用済みmigrationを編集しないでください。変更は新しいmigrationとして追加します。
+稼働中DBに適用済みのmigration履歴は書き換えません。通常の差分変更では、現在のactive migration列へ新しいmigrationを追加します。
 
-失敗した未適用migrationはトランザクション境界で扱い、既存の適用済み履歴を書き換えて帳尻を合わせません。スキーマ変更前は影響に応じてバックアップ・復元可能性を確認してください。
+一方、構成整理などで永続化構造そのものを整理し直す場合は、旧migrationを新DBへ再演することを目的にしません。旧DBと旧migrationはrollback／履歴資産として保全し、現在採用schemaから別名のclean replacement DBを作り、必要データを選別移植できます。切替前に新DBで既存機能を確認し、旧DBは戻し先として残します。
 
-`db/isolated/pkb_proto` は隔離PKB試験用であり、運用 `secretary` DBのmigrationディレクトリではありません。
+`db/isolated/pkb_proto` は隔離PKB試験の履歴・回帰資産であり、通常production DBへ直接適用しません。
 
-## 権限
+## 権限と操作境界
 
-DBには読み取り、候補、記憶更新、Task更新、監査等の責務を分離したroleがあります。通常アプリへ `secretary_admin` を渡さず、用途に必要な最小権限のloginを使います。
+`secretary_admin` はDB作成・復旧・schema管理用です。通常のローカルRuntimeは共通のruntime loginからPKB / RITSUKO / Finance / MAGI設定 / Service Connection / Service Billing等の必要tableを利用できる構成を許容し、機能ごとのwriter role分割を成果として増やしません。
 
-記憶書込みの可否、Pending確認、外部操作の承認は別の責務です。DB roleが存在するだけで、LLM出力や外部Actionの実行許可が成立するわけではありません。
+外部クライアントからのread/write、ChatGPT / MCP、外部変更Action、Secret、高影響操作は、Web/API/MCPの公開surface・認証とRITSUKO Policy / Approval / Executor等、その操作を実際に制御できる境界で制限します。DB roleの追加分割は具体的な運用上の必要性が出たとき再評価します。
 
 `current_claims` は現在有効な記録を表しますが、すべてがverifiedであることを意味しません。有効時点、記録時点、supersedes、verification等を失わず扱ってください。
 
