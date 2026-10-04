@@ -12,12 +12,17 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _REBUILD_DB = re.compile(r"^secretary_rebuild_[a-z0-9_]{1,40}$")
 
 
+def approved_production_database_name(value: str) -> bool:
+    value = str(value or "").strip()
+    return value == PRODUCTION_DB or bool(_REBUILD_DB.fullmatch(value))
+
+
 def production_database_name() -> str:
     """Return the canonical DB, or one explicitly named replacement DB for rehearsal."""
     value = os.environ.get("LSA_DAILY_DB_NAME", "").strip()
     if not value:
         return PRODUCTION_DB
-    if value == PRODUCTION_DB or _REBUILD_DB.fullmatch(value):
+    if approved_production_database_name(value):
         return value
     raise RuntimeError("LSA_DAILY_DB_NAME is not an approved production database name")
 
