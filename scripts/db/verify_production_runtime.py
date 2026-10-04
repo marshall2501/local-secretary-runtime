@@ -160,6 +160,15 @@ def _no_model(_text: str, _entities: set[str]):
     )
 
 
+def _pkb_event_read_query(entity_name: str) -> str:
+    """Read back the event written by the generic computer probe.
+
+    current_driver is derived only for supported component entity types such as
+    GPU/NIC, so the generic computer probe must query driver_updated history.
+    """
+    return f"{entity_name}のドライバー更新履歴"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-port", type=int, required=True)
@@ -277,7 +286,7 @@ def main() -> None:
                 raise RuntimeError("production PKB write used an invalid source boundary")
 
     search_result = search_text(
-        f"{entity_name}の現在のドライバー",
+        _pkb_event_read_query(entity_name),
         connection_factory=connect_pkb_database,
     )
     if int(search_result.get("total") or 0) < 1:
@@ -397,7 +406,7 @@ def main() -> None:
 
         api_search = _json_request(
             f"http://127.0.0.1:{web_port}/api/pkb/search",
-            {"text": f"{entity_name}の現在のドライバー"},
+            {"text": _pkb_event_read_query(entity_name)},
         )
         if int(api_search.get("total") or 0) < 1:
             raise RuntimeError("production Web API PKB search probe failed")
