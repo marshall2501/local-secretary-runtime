@@ -49,8 +49,8 @@ def validate_source(cur) -> None:
         raise RuntimeError("isolated settings source is missing migration 026")
 
 
-def validate_target(cur) -> None:
-    if one(cur, "SELECT current_database()") != "secretary":
+def validate_target(cur, expected_database: str = "secretary") -> None:
+    if one(cur, "SELECT current_database()") != expected_database:
         raise RuntimeError("unexpected settings target database")
     if one(
         cur,
@@ -60,10 +60,16 @@ def validate_target(cur) -> None:
         raise RuntimeError("production settings target is missing migration 008")
 
 
-def copy_settings(source, target, *, require_empty: bool = True) -> dict:
+def copy_settings(
+    source,
+    target,
+    *,
+    require_empty: bool = True,
+    expected_target_database: str = "secretary",
+) -> dict:
     with source.cursor() as source_cur, target.cursor() as target_cur:
         validate_source(source_cur)
-        validate_target(target_cur)
+        validate_target(target_cur, expected_target_database)
 
         if require_empty:
             for table, _, _ in TABLES:
@@ -124,9 +130,20 @@ def copy_settings(source, target, *, require_empty: bool = True) -> dict:
     return {**counts, "auth_configured": int(source_auth)}
 
 
-def transfer(source, target, *, commit: bool) -> dict:
+def transfer(
+    source,
+    target,
+    *,
+    commit: bool,
+    expected_target_database: str = "secretary",
+) -> dict:
     try:
-        result = copy_settings(source, target, require_empty=True)
+        result = copy_settings(
+            source,
+            target,
+            require_empty=True,
+            expected_target_database=expected_target_database,
+        )
         if commit:
             target.commit()
         else:
@@ -141,6 +158,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-port", type=int, required=True)
     parser.add_argument("--target-port", type=int, required=True)
+    parser.add_argument("--source-database", default="secretary_pkb_proto_20260927")
+    parser.add_argument("--target-database", default="secretary")
     parser.add_argument("--secret-file", type=Path, required=True)
     parser.add_argument("--commit", action="store_true")
     args = parser.parse_args()
@@ -153,11 +172,14 @@ def main() -> None:
     if len(password) < 32:
         raise RuntimeError("local PostgreSQL secret is invalid")
 
-    with connect_admin(
-        args.source_port, "secretary_pkb_proto_20260927", password
-    ) as source:
-        with connect_admin(args.target_port, "secretary", password) as target:
-            result = transfer(source, target, commit=args.commit)
+    with connect_admin(args.source_port, args.source_database, password) as source:
+        with connect_admin(args.target_port, args.target_database, password) as target:
+            result = transfer(
+                source,
+                target,
+                commit=args.commit,
+                expected_target_database=args.target_database,
+            )
 
     print("Settings transfer: " + ("COMMIT" if result["committed"] else "ROLLBACK rehearsal"))
     print(
