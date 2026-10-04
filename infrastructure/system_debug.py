@@ -18,6 +18,7 @@ PROCESS_STARTED_AT = datetime.now(timezone.utc)
 
 SAFE_ENV_NAMES = (
     "LSA_PKB_DAILY_PORT",
+    "LSA_DAILY_DB_NAME",
     "OLLAMA_HOST",
     "OPENAI_BASE_URL",
     "GEMINI_BASE_URL",
