@@ -80,7 +80,11 @@ def copy_query_rows(
             raise RuntimeError(f"missing transfer key {table}.{key}")
 
     column_sql = sql.SQL(",").join(map(sql.Identifier, target_columns))
-    source_query = sql.SQL(source_query_template).format(columns=column_sql)
+    source_column_sql = sql.SQL(",").join(
+        sql.SQL("t.{}").format(sql.Identifier(column))
+        for column in target_columns
+    )
+    source_query = sql.SQL(source_query_template).format(columns=source_column_sql)
     source_cur.execute(source_query, source_args)
     rows = source_cur.fetchall()
 
@@ -126,6 +130,6 @@ def copy_all_rows(source_cur, target_cur, *, table: str,
         table=table,
         key_columns=key_columns,
         source_query_template=(
-            f"SELECT {{columns}} FROM secretary.{table} ORDER BY {order_by}"
+            f"SELECT {{columns}} FROM secretary.{table} t ORDER BY {order_by}"
         ),
     )
