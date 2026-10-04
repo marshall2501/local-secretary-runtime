@@ -17,7 +17,7 @@ $provisionRuntime = Join-Path $root 'scripts/db/provision_daily_runtime.py'
 $rehearsal = Join-Path $root 'scripts/db/promotion-rehearsal.ps1'
 
 foreach ($needed in @(
-    $envFile,$adminSecret,$runtimeSecret,$python,
+    $envFile,$adminSecret,$python,
     $initializer,$settingsTransfer,$provisionRuntime,$rehearsal
 )) {
     if (-not (Test-Path -LiteralPath $needed -PathType Leaf)) {
@@ -73,6 +73,9 @@ try {
 
     & $python $provisionRuntime --port $livePort --database $ReplacementDatabase --admin-secret-file $adminSecret --runtime-secret-file $runtimeSecret
     if ($LASTEXITCODE -ne 0) { throw 'Daily runtime provisioning on replacement database failed.' }
+    if (-not (Test-Path -LiteralPath $runtimeSecret -PathType Leaf)) {
+        throw 'Daily runtime provisioning did not create the runtime secret.'
+    }
 
     $state = & docker exec $container psql -X -A -t -U secretary_admin -d $ReplacementDatabase -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
     if ($LASTEXITCODE -ne 0 -or ($state | Out-String).Trim() -ne '8|008_runtime_privileges.sql') {
