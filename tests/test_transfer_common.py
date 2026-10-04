@@ -46,6 +46,62 @@ class TransferCommonExecutionTests(unittest.TestCase):
         self.assertEqual(result["source"], 0)
         self.assertEqual(len(source.execute.call_args.args), 1)
 
+    def test_explicit_columns_allow_legacy_source_schema(self):
+        source = MagicMock()
+        target = MagicMock()
+        source.fetchall.return_value = [("id-1", "current-name")]
+        target.fetchone.return_value = None
+
+        with patch(
+            "scripts.db.transfer_common.relation_columns",
+            side_effect=[
+                (("legacy_only", "name", "id"), {
+                    "legacy_only": "text", "name": "text", "id": "uuid"
+                }),
+                (("id", "name"), {"id": "uuid", "name": "text"}),
+            ],
+        ):
+            result = copy_query_rows(
+                source,
+                target,
+                table="settings",
+                key_columns=("id",),
+                columns=("id", "name"),
+                source_query_template=(
+                    "SELECT {columns} FROM secretary.settings t ORDER BY id"
+                ),
+            )
+
+        self.assertEqual(result["source"], 1)
+        self.assertEqual(result["inserted"], 1)
+
+    def test_explicit_columns_reject_unexpected_target_schema(self):
+        source = MagicMock()
+        target = MagicMock()
+
+        with patch(
+            "scripts.db.transfer_common.relation_columns",
+            side_effect=[
+                (("id", "name", "legacy_only"), {
+                    "id": "uuid", "name": "text", "legacy_only": "text"
+                }),
+                (("name", "id"), {"name": "text", "id": "uuid"}),
+            ],
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "target column mapping mismatch"
+            ):
+                copy_query_rows(
+                    source,
+                    target,
+                    table="settings",
+                    key_columns=("id",),
+                    columns=("id", "name"),
+                    source_query_template=(
+                        "SELECT {columns} FROM secretary.settings t ORDER BY id"
+                    ),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
