@@ -26,13 +26,21 @@ RITSUKO = Secretary Core / Orchestrator。Task、履歴、Observation、権限�
 - サブPCを通常の開発・稼働先、メインPCを手動復旧先として扱う。
 - ユーザーにサブPC操作を依頼する場合は、原則一度に一操作だけ提示し、結果を確認して次を選ぶ。
 
+## Simplification, recovery, and internal database boundaries
+
+「無駄を省く」「簡単にする」「改善する」は、変更行数、機能範囲、DB権限、検証範囲を小さくする指示ではない。同じ責務・SQL・設定・接続処理・変換・検証を機能ごとに重複実装せず、不要になった旧経路を整理し、全体として一貫して使える状態にすることを優先する。
+
+構成整理後に「改善前まで使えるように戻す」と言われた場合、旧source layoutや旧packageへrevertしない。現在の責務別構成を維持し、以前利用できた機能を新構成上で再成立させる。永続化構造が旧実装の履歴に引かれて複雑化した場合、現在採用schemaから新しいDBを作成し、必要データを選別移植してよい。
+
+ローカル内部Runtimeでは、機能ごとのDB writer role細分化を成果としない。管理・復旧用accessは通常Runtimeから分離するが、通常Runtimeは共通DB access boundaryを使える。ChatGPT / MCP / Web API等の外部入口、外部変更Action、Secret、高影響操作はAPI公開surface、認証、RITSUKO Policy / Approval / Executor等の操作境界で制御する。内部DB roleを追加分割するのは具体的な運用上の必要性が確認できた場合だけとする。
+
 ## Development rules
 
 実装前に、目的への貢献、変更対象、期待する挙動、失敗条件、検証方法を明確にする。同じ条件で確認済みの証拠は再利用し、条件が変わった過去実験を一般化しない。
 
 技術やフレームワークを目的化しない。PostgreSQL、FastAPI、Docker、Ollama、クラウドLLM、MCP、n8n等は必要に応じて変更・置換できる手段として扱う。n8nをSecretary Coreそのものとは扱わない。
 
-適用済みmigrationは書き換えず新しいmigrationを追加する。運用DBや実データへ影響する変更では、必要なバックアップ・復元・権限・承認を確認する。
+稼働中DBへ適用済みのmigration履歴は書き換えない。一方、意図的にclean replacement DBを作る場合は、旧migration列を履歴資産として保全したうえで、現在採用schemaのbaselineを新しい正本として作り直してよい。運用DBや実データへ影響する変更では、必要なバックアップ・復元・権限・承認を確認する。
 
 ## Documentation
 
