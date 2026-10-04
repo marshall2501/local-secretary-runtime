@@ -15,8 +15,7 @@ $service = 'secretary-postgres'
 $secretFile = Join-Path $root 'secrets/postgres-password.txt'
 $python = Join-Path $root '.venv/Scripts/python.exe'
 $settingsTransfer = Join-Path $root 'scripts/db/runtime_settings_transfer.py'
-$runtimeProvision = Join-Path $root 'scripts/db/provision_daily_runtime.py'
-$runtimeVerify = Join-Path $root 'scripts/db/verify_production_runtime.py'
+$runtimeRunner = Join-Path $root 'scripts/db/run_production_runtime_rehearsal.py'
 $BackupPath = [IO.Path]::GetFullPath($BackupPath)
 
 if (-not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) {
@@ -26,11 +25,9 @@ if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw 'Missing .env
 if (-not (Test-Path -LiteralPath $secretFile -PathType Leaf)) { throw 'Missing local PostgreSQL secret.' }
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Missing runtime Python virtualenv.' }
 if ($IncludeSettings -and -not (Test-Path -LiteralPath $settingsTransfer -PathType Leaf)) { throw 'Missing settings transfer helper.' }
-if (-not (Test-Path -LiteralPath $runtimeProvision -PathType Leaf)) { throw 'Missing daily runtime provision helper.' }
-if (-not (Test-Path -LiteralPath $runtimeVerify -PathType Leaf)) { throw 'Missing production runtime verification helper.' }
+if (-not (Test-Path -LiteralPath $runtimeRunner -PathType Leaf)) { throw 'Missing strict production runtime rehearsal runner.' }
 
 $project = 'local-secretary-test-promotion-' + [guid]::NewGuid().ToString('N').Substring(0,12)
-$runtimeSecret = Join-Path ([IO.Path]::GetTempPath()) ($project + '-runtime.secret')
 $composeBase = @(
     'compose','--project-name',$project,'--project-directory',$composeDirectory,
     '--env-file',$envFile,'-f',$composeFile
@@ -180,21 +177,16 @@ WHERE rolname IN (
         if ($LASTEXITCODE -ne 0) { throw 'Runtime settings promotion rehearsal failed.' }
     }
 
-    & $python $runtimeProvision --port $rehearsalPort --admin-secret-file $secretFile --runtime-secret-file $runtimeSecret
-    if ($LASTEXITCODE -ne 0) { throw 'Disposable daily runtime login provisioning failed.' }
-
-    $verifyArgs = @(
-        $runtimeVerify,
+    $runtimeArgs = @(
+        $runtimeRunner,
         '--target-port', "$rehearsalPort",
-        '--runtime-secret-file', $runtimeSecret
+        '--live-port', "$sourcePort",
+        '--admin-secret-file', $secretFile
     )
     if ($IncludeSettings) {
-        $verifyArgs += @(
-            '--settings-source-port', "$sourcePort",
-            '--admin-secret-file', $secretFile
-        )
+        $runtimeArgs += @('--settings-source-port', "$sourcePort")
     }
-    & $python @verifyArgs
+    & $python @runtimeArgs
     if ($LASTEXITCODE -ne 0) { throw 'Production daily runtime rehearsal failed.' }
 
     Write-Host ''
@@ -216,7 +208,6 @@ WHERE rolname IN (
     Write-Host 'PASS: backup restored, settings promotion checked, and production runtime rehearsed in a disposable PostgreSQL project.'
     Write-Host 'Live secretary database and existing container state were not changed.'
 } finally {
-    Remove-Item -LiteralPath $runtimeSecret -Force -ErrorAction SilentlyContinue
     try {
         $env:LSA_DB_PORT = "$rehearsalPort"
         Invoke-Compose @('down','--volumes')

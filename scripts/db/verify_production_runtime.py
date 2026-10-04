@@ -42,6 +42,40 @@ def _read_secret(path: Path) -> str:
     return value
 
 
+def _configured_live_port() -> int:
+    env_file = ROOT / ".env.postgres"
+    if not env_file.is_file():
+        raise RuntimeError("cannot verify the configured live PostgreSQL port")
+    matches = []
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        if line.startswith("LSA_DB_PORT="):
+            matches.append(line.split("=", 1)[1].strip())
+    if len(matches) != 1:
+        raise RuntimeError("cannot determine the configured live PostgreSQL port")
+    try:
+        port = int(matches[0])
+    except ValueError as exc:
+        raise RuntimeError("configured live PostgreSQL port is invalid") from exc
+    if not 1024 <= port <= 65535:
+        raise RuntimeError("configured live PostgreSQL port is outside the allowed range")
+    return port
+
+
+def _validate_disposable_target(target_port: int, live_port: int) -> None:
+    if not 1024 <= target_port <= 65535 or not 1024 <= live_port <= 65535:
+        raise RuntimeError("invalid PostgreSQL port")
+    configured = _configured_live_port()
+    if live_port != configured:
+        raise RuntimeError("supplied live PostgreSQL port does not match local configuration")
+    if target_port == configured:
+        raise RuntimeError("refusing production write probes against the live PostgreSQL port")
+
+
+def _validate_runtime_identity(database: str, user: str) -> None:
+    if (database, user) != ("secretary", "secretary_daily_runtime"):
+        raise RuntimeError("production runtime connected with the wrong database identity")
+
+
 def _source_setting_counts(port: int, admin_secret_file: Path) -> dict[str, int]:
     password = _read_secret(admin_secret_file)
     with psycopg.connect(
@@ -115,13 +149,13 @@ def _no_model(_text: str, _entities: set[str]):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-port", type=int, required=True)
+    parser.add_argument("--live-port", type=int, required=True)
     parser.add_argument("--runtime-secret-file", type=Path, required=True)
     parser.add_argument("--settings-source-port", type=int)
     parser.add_argument("--admin-secret-file", type=Path)
     args = parser.parse_args()
 
-    if not 1024 <= args.target_port <= 65535:
-        raise RuntimeError("invalid target PostgreSQL port")
+    _validate_disposable_target(args.target_port, args.live_port)
     if args.settings_source_port is not None and not 1024 <= args.settings_source_port <= 65535:
         raise RuntimeError("invalid settings source PostgreSQL port")
     if (args.settings_source_port is None) != (args.admin_secret_file is None):
@@ -162,8 +196,7 @@ def main() -> None:
 
     with connect_pkb_database() as db:
         info = db.info
-        if (info.dbname, info.user) != ("secretary", "secretary_daily_runtime"):
-            raise RuntimeError("production runtime connected with the wrong database identity")
+        _validate_runtime_identity(info.dbname or "", info.user or "")
         with db.cursor() as cur:
             cur.execute(
                 """SELECT count(*) FROM secretary.schema_migrations

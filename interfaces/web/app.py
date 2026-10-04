@@ -17,6 +17,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
+from config.runtime_web import resolve_daily_web_port
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -1949,14 +1950,11 @@ app.on_shutdown(_shutdown_core_advisor_background_jobs)
 
 def main() -> None:
     _recover_interrupted_core_advisors()
-    try:
-        web_port = int(os.environ.get("LSA_DAILY_WEB_PORT", "8093"))
-    except ValueError as exc:
-        raise RuntimeError("LSA_DAILY_WEB_PORT is invalid") from exc
-    if not 1024 <= web_port <= 65535:
-        raise RuntimeError("LSA_DAILY_WEB_PORT is outside the allowed range")
     ui.run(
-        host="127.0.0.1", port=web_port, reload=False, show=False,
+        host="127.0.0.1",
+        port=resolve_daily_web_port(),
+        reload=False,
+        show=False,
         title="Local Secretary PKB",
     )
 

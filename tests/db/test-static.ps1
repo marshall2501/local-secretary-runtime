@@ -146,6 +146,7 @@ try {
         'scripts/db/runtime_settings_transfer.py',
         'scripts/db/provision_daily_runtime.py',
         'scripts/db/verify_production_runtime.py',
+        'scripts/db/run_production_runtime_rehearsal.py',
         'scripts/db/promote-production.ps1'
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $root $promotionHelper) -PathType Leaf)) {
@@ -168,24 +169,54 @@ try {
         throw 'Production daily launcher must require migration 008.'
     }
 
-    foreach ($runtimeRehearsalMarker in @(
-        'provision_daily_runtime.py',
-        'verify_production_runtime.py',
-        'ProductionRuntimeRehearsed',
-        'Remove-Item -LiteralPath $runtimeSecret'
-    )) {
-        if (-not $rehearsalText.Contains($runtimeRehearsalMarker)) {
-            throw "Production runtime rehearsal marker missing: $runtimeRehearsalMarker"
-        }
+    $tokens = $null
+    $rehearsalParseErrors = $null
+    $rehearsalAst = [Management.Automation.Language.Parser]::ParseFile(
+        $rehearsalPath, [ref]$tokens, [ref]$rehearsalParseErrors
+    )
+    if ($rehearsalParseErrors.Count) { throw ($rehearsalParseErrors | Out-String) }
+    $commands = @($rehearsalAst.FindAll(
+        { param($node) $node -is [Management.Automation.Language.CommandAst] },
+        $true
+    ))
+    $runnerCalls = @($commands | Where-Object {
+        $_.Extent.Text -match '^&\s+\$python\s+@runtimeArgs} finally { Pop-Location }
+Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
+
+    })
+    if ($runnerCalls.Count -ne 1) {
+        throw 'Promotion rehearsal must invoke the strict runtime runner exactly once.'
     }
+    $runnerOffset = $runnerCalls[0].Extent.StartOffset
+    $successOffset = $rehearsalText.IndexOf('ProductionRuntimeRehearsed = $true')
+    if ($successOffset -le $runnerOffset) {
+        throw 'ProductionRuntimeRehearsed may only be reported after the runtime runner.'
+    }
+    $exitGuards = @($rehearsalAst.FindAll(
+        {
+            param($node)
+            $node -is [Management.Automation.Language.IfStatementAst] -and
+            $node.Extent.Text -match '\$LASTEXITCODE\s+-ne\s+0' -and
+            $node.Extent.StartOffset -gt $runnerOffset -and
+            $node.Extent.StartOffset -lt $successOffset
+        },
+        $true
+    ))
+    if ($exitGuards.Count -lt 1) {
+        throw 'Runtime runner non-zero exit must stop rehearsal before success is reported.'
+    }
+
     $dailyWebText = Get-Content -LiteralPath (Join-Path $root 'interfaces/web/app.py') -Raw
-    if ($dailyWebText -notmatch 'LSA_DAILY_WEB_PORT') {
-        throw 'Daily Web runtime must support an ephemeral rehearsal port.'
+    if ($dailyWebText -notmatch 'resolve_daily_web_port\(\)') {
+        throw 'Daily Web runtime must resolve the configured rehearsal port through the tested contract.'
     }
 
     $runtimeVerifyText = Get-Content -LiteralPath (Join-Path $root 'scripts/db/verify_production_runtime.py') -Raw
     if ($runtimeVerifyText -notmatch 'sys\.path\.insert\(0, str\(ROOT\)\)') {
         throw 'Direct production verifier execution must add the repository root to sys.path.'
+    }
+    if ($runtimeVerifyText -notmatch '_validate_disposable_target') {
+        throw 'Production verifier must reject the configured live PostgreSQL port before write probes.'
     }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
