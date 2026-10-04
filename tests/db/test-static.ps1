@@ -112,67 +112,57 @@ try {
         }
     }
 
+    $initializerPath = Join-Path $root 'scripts/db/initialize-fresh-production.ps1'
+    if (-not (Test-Path -LiteralPath $initializerPath -PathType Leaf)) {
+        throw 'Missing fresh production initializer.'
+    }
+    $initializerText = Get-Content -LiteralPath $initializerPath -Raw
+    foreach ($requiredMarker in @(
+        'secretary_rebuild_',
+        'Existing cluster roles missing',
+        "db/migrations/008_runtime_privileges.sql",
+        'CREATE ROLE secretary_[a-z_]+ NOLOGIN'
+    )) {
+        if (-not $initializerText.Contains($requiredMarker)) {
+            throw "Fresh production initializer marker missing: $requiredMarker"
+        }
+    }
+    if ($initializerText -match '(?i)pg_restore|pg_dump|BackupPath') {
+        throw 'Fresh production initializer must not depend on dump/restore.'
+    }
+
     $rehearsalPath = Join-Path $root 'scripts/db/promotion-rehearsal.ps1'
     if (-not (Test-Path -LiteralPath $rehearsalPath -PathType Leaf)) {
-        throw 'Missing disposable production promotion rehearsal tool.'
+        throw 'Missing fresh production rehearsal tool.'
     }
     $rehearsalText = Get-Content -LiteralPath $rehearsalPath -Raw
     foreach ($requiredMarker in @(
-        'local-secretary-test-promotion-',
-        "/opt/secretary/scripts/restore-data-only.sh",
-        "'secretary',$remoteBackup",
-        "/opt/secretary/scripts/migrate.sh",
-        "down','--volumes"
+        'secretary_rebuild_rehearsal_',
+        'runtime_settings_transfer.py',
+        'LegacyDataRestored = $false',
+        'SettingsOnlyTransferred = $true',
+        'dropdb'
     )) {
         if (-not $rehearsalText.Contains($requiredMarker)) {
-            throw "Promotion rehearsal safety marker missing: $requiredMarker"
+            throw "Fresh production rehearsal marker missing: $requiredMarker"
         }
     }
-    if ($rehearsalText.Contains('local-secretary-runtime-db')) {
-        throw 'Promotion rehearsal must never target the normal compose project.'
-    }
-
-
-    $restoreHelperPath = Join-Path $root 'scripts/db/restore-data-only.sh'
-    $restoreHelperText = Get-Content -LiteralPath $restoreHelperPath -Raw
-    foreach ($requiredMarker in @(
-        'pg_restore --list',
-        'TABLE DATA secretary schema_migrations',
-        '--use-list="$filtered"',
-        '--data-only'
-    )) {
-        if (-not $restoreHelperText.Contains($requiredMarker)) {
-            throw "Shared restore helper marker missing: $requiredMarker"
-        }
-    }
-    if ($restoreHelperText -match '--exclude-table-data') {
-        throw 'Shared restore helper must not use pg_dump-only --exclude-table-data.'
-    }
-
-    if ($rehearsalText -match '(?i)param\s*\(\s*\[string\[\]\]\s*\$Args\s*\)') {
-        throw 'Promotion rehearsal must not shadow PowerShell automatic $Args in command wrappers.'
-    }
-
-    if ($rehearsalText -match [regex]::Escape("Labels.'com.docker.compose.project'")) {
-        throw 'Promotion rehearsal must tolerate non-Compose containers without Compose labels under StrictMode.'
-    }
-    if ($rehearsalText -notmatch [regex]::Escape("PSObject.Properties['com.docker.compose.project']")) {
-        throw 'Promotion rehearsal must inspect optional Compose labels safely.'
+    if ($rehearsalText -match '(?i)pg_restore|pg_dump|BackupPath|production_data_transfer') {
+        throw 'Fresh production rehearsal must not restore legacy operational data.'
     }
 
     foreach ($promotionHelper in @(
         'scripts/db/transfer_common.py',
-        'scripts/db/production_data_transfer.py',
-        'scripts/db/restore-data-only.sh',
         'scripts/db/runtime_settings_transfer.py',
         'scripts/db/provision_daily_runtime.py',
         'scripts/db/verify_production_runtime.py',
-        'scripts/db/run_production_runtime_rehearsal.py',
+        'scripts/db/initialize-fresh-production.ps1',
+        'scripts/db/promotion-rehearsal.ps1',
         'scripts/db/rebuild-production.ps1',
         'scripts/db/promote-production.ps1'
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $root $promotionHelper) -PathType Leaf)) {
-            throw "Missing production promotion helper: $promotionHelper"
+            throw "Missing production rebuild helper: $promotionHelper"
         }
     }
 
@@ -201,49 +191,18 @@ try {
     $rebuildText = Get-Content -LiteralPath $rebuildPath -Raw
     foreach ($requiredMarker in @(
         'secretary_rebuild_',
-        '/opt/secretary/scripts/restore-data-only.sh',
-        'production_data_transfer.py',
-        'run_production_runtime_rehearsal.py',
-        'OldSecretaryPreserved = $true'
+        'promotion-rehearsal.ps1',
+        'runtime_settings_transfer.py',
+        'OldSecretaryPreserved = $true',
+        'LegacyDataRestored = $false',
+        'SettingsOnlyTransferred = $true'
     )) {
         if (-not $rebuildText.Contains($requiredMarker)) {
-            throw "Clean rebuild safety marker missing: $requiredMarker"
+            throw "Fresh rebuild safety marker missing: $requiredMarker"
         }
     }
-
-    $tokens = $null
-    $rehearsalParseErrors = $null
-    $rehearsalAst = [Management.Automation.Language.Parser]::ParseFile(
-        $rehearsalPath, [ref]$tokens, [ref]$rehearsalParseErrors
-    )
-    if ($rehearsalParseErrors.Count) { throw ($rehearsalParseErrors | Out-String) }
-    $commands = @($rehearsalAst.FindAll(
-        { param($node) $node -is [Management.Automation.Language.CommandAst] },
-        $true
-    ))
-    $runnerCalls = @($commands | Where-Object {
-        $_.Extent.Text -match '^&\s+\$python\s+@runtimeArgs$'
-    })
-    if ($runnerCalls.Count -ne 1) {
-        throw 'Promotion rehearsal must invoke the strict runtime runner exactly once.'
-    }
-    $runnerOffset = $runnerCalls[0].Extent.StartOffset
-    $successOffset = $rehearsalText.IndexOf('ProductionRuntimeRehearsed = $true')
-    if ($successOffset -le $runnerOffset) {
-        throw 'ProductionRuntimeRehearsed may only be reported after the runtime runner.'
-    }
-    $exitGuards = @($rehearsalAst.FindAll(
-        {
-            param($node)
-            $node -is [Management.Automation.Language.IfStatementAst] -and
-            $node.Extent.Text -match '\$LASTEXITCODE\s+-ne\s+0' -and
-            $node.Extent.StartOffset -gt $runnerOffset -and
-            $node.Extent.StartOffset -lt $successOffset
-        },
-        $true
-    ))
-    if ($exitGuards.Count -lt 1) {
-        throw 'Runtime runner non-zero exit must stop rehearsal before success is reported.'
+    if ($rebuildText -match '(?i)pg_restore|pg_dump|BackupPath|production_data_transfer') {
+        throw 'Fresh rebuild must not depend on legacy data restore.'
     }
 
     $dailyWebText = Get-Content -LiteralPath (Join-Path $root 'interfaces/web/app.py') -Raw
