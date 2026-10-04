@@ -17,13 +17,14 @@ $adminSecret = Join-Path $root 'secrets/postgres-password.txt'
 $runtimeSecret = Join-Path $root 'secrets/secretary-daily-runtime-password.txt'
 $python = Join-Path $root '.venv/Scripts/python.exe'
 $dataTransfer = Join-Path $root 'scripts/db/production_data_transfer.py'
+$dataRestoreHelper = Join-Path $root 'scripts/db/restore-data-only.sh'
 $runtimeRunner = Join-Path $root 'scripts/db/run_production_runtime_rehearsal.py'
 $provisionRuntime = Join-Path $root 'scripts/db/provision_daily_runtime.py'
 $BackupPath = [IO.Path]::GetFullPath($BackupPath)
 
 foreach ($needed in @(
     $BackupPath,$composeFile,$envFile,$adminSecret,$python,
-    $dataTransfer,$runtimeRunner,$provisionRuntime
+    $dataTransfer,$dataRestoreHelper,$runtimeRunner,$provisionRuntime
 )) {
     if (-not (Test-Path -LiteralPath $needed -PathType Leaf)) {
         throw "Required rebuild input is missing: $needed"
@@ -127,11 +128,8 @@ try {
     }
 
     Invoke-TempCompose @(
-        'exec','-T',$service,'pg_restore',
-        '-U','secretary_admin','-d','secretary',
-        '--data-only','--disable-triggers','--exit-on-error','--no-owner','--no-acl',
-        '--exclude-table-data=secretary.schema_migrations',
-        $tempRemoteSourceBackup
+        'exec','-T',$service,'sh','/opt/secretary/scripts/restore-data-only.sh',
+        'secretary',$tempRemoteSourceBackup
     )
 
     $transferArgs = @(
