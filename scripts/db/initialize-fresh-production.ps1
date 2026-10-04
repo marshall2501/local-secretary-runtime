@@ -41,10 +41,10 @@ if ($LASTEXITCODE -ne 0 -or ($exists | Out-String).Trim() -ne '1') {
 
 $parts = New-Object 'System.Collections.Generic.List[string]'
 $parts.Add('BEGIN;')
-$parts.Add(@'
+$guardSql = @'
 DO $guard$
 BEGIN
-    IF current_database() <> :'target_database' THEN
+    IF current_database() <> '__TARGET_DATABASE__' THEN
         RAISE EXCEPTION 'Fresh production initializer connected to the wrong database';
     END IF;
     IF to_regnamespace('secretary') IS NOT NULL THEN
@@ -62,7 +62,8 @@ CREATE TABLE secretary.schema_migrations (
     sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
     applied_at timestamptz NOT NULL DEFAULT now()
 );
-'@)
+'@
+$parts.Add($guardSql.Replace('__TARGET_DATABASE__', $Database))
 
 foreach ($relative in $migrations) {
     $path = Join-Path $root $relative
@@ -92,7 +93,7 @@ try {
     & docker cp $localTmp ($container + ':' + $remoteTmp)
     if ($LASTEXITCODE -ne 0) { throw 'Cannot copy fresh production migration script.' }
 
-    & docker exec $container psql -X -U secretary_admin -d $Database -v ON_ERROR_STOP=1 -v "target_database=$Database" -f $remoteTmp
+    & docker exec $container psql -X -U secretary_admin -d $Database -v ON_ERROR_STOP=1 -f $remoteTmp
     if ($LASTEXITCODE -ne 0) {
         throw 'Fresh production schema initialization failed; transaction rolled back.'
     }
