@@ -32,16 +32,21 @@ def _run_steps(
     runtime_secret_file: Path,
     settings_source_port: int | None,
     runner,
+    target_database: str = "secretary",
 ) -> None:
     provision_cmd = [
         sys.executable,
         str(PROVISION),
         "--port",
         str(target_port),
+        "--database",
+        target_database,
         "--admin-secret-file",
         str(admin_secret_file),
         "--runtime-secret-file",
         str(runtime_secret_file),
+        "--target-database",
+        target_database,
     ]
     verify_cmd = [
         sys.executable,
@@ -80,11 +85,15 @@ def run_rehearsal(
     admin_secret_file: Path,
     settings_source_port: int | None = None,
     runner=None,
+    target_database: str = "secretary",
 ) -> None:
     target_port = _validate_port(target_port, "target")
     live_port = _validate_port(live_port, "live")
-    if target_port == live_port:
-        raise RuntimeError("refusing to run production write probes on the live PostgreSQL port")
+    from config.runtime_database import PRODUCTION_DB, approved_production_database_name
+    if not approved_production_database_name(target_database):
+        raise RuntimeError("unapproved production rehearsal database")
+    if target_port == live_port and target_database == PRODUCTION_DB:
+        raise RuntimeError("refusing to run production write probes on the live PostgreSQL database")
     if settings_source_port is not None:
         settings_source_port = _validate_port(settings_source_port, "settings source")
     if not admin_secret_file.is_file():
@@ -100,6 +109,7 @@ def run_rehearsal(
             runtime_secret_file=runtime_secret,
             settings_source_port=settings_source_port,
             runner=execute,
+            target_database=target_database,
         )
         if runtime_secret.exists():
             raise RuntimeError("temporary runtime secret remained after verification")
@@ -111,6 +121,7 @@ def main() -> None:
     parser.add_argument("--live-port", type=int, required=True)
     parser.add_argument("--admin-secret-file", type=Path, required=True)
     parser.add_argument("--settings-source-port", type=int)
+    parser.add_argument("--target-database", default="secretary")
     args = parser.parse_args()
 
     run_rehearsal(
@@ -118,6 +129,7 @@ def main() -> None:
         live_port=args.live_port,
         admin_secret_file=args.admin_secret_file,
         settings_source_port=args.settings_source_port,
+        target_database=args.target_database,
     )
     print("PASS: provision completed before verification and the temporary runtime secret was removed.")
 
