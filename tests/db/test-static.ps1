@@ -119,10 +119,8 @@ try {
     $rehearsalText = Get-Content -LiteralPath $rehearsalPath -Raw
     foreach ($requiredMarker in @(
         'local-secretary-test-promotion-',
-        "'pg_restore'",
-        "'-U','secretary_admin','-d','secretary'",
-        "'--data-only'",
-        "'--exclude-table-data=secretary.schema_migrations'",
+        "/opt/secretary/scripts/restore-data-only.sh",
+        "'secretary',$remoteBackup",
         "/opt/secretary/scripts/migrate.sh",
         "down','--volumes"
     )) {
@@ -132,6 +130,23 @@ try {
     }
     if ($rehearsalText.Contains('local-secretary-runtime-db')) {
         throw 'Promotion rehearsal must never target the normal compose project.'
+    }
+
+
+    $restoreHelperPath = Join-Path $root 'scripts/db/restore-data-only.sh'
+    $restoreHelperText = Get-Content -LiteralPath $restoreHelperPath -Raw
+    foreach ($requiredMarker in @(
+        'pg_restore --list',
+        'TABLE DATA secretary schema_migrations',
+        '--use-list="$filtered"',
+        '--data-only'
+    )) {
+        if (-not $restoreHelperText.Contains($requiredMarker)) {
+            throw "Shared restore helper marker missing: $requiredMarker"
+        }
+    }
+    if ($restoreHelperText -match '--exclude-table-data') {
+        throw 'Shared restore helper must not use pg_dump-only --exclude-table-data.'
     }
 
     if ($rehearsalText -match '(?i)param\s*\(\s*\[string\[\]\]\s*\$Args\s*\)') {
@@ -148,6 +163,7 @@ try {
     foreach ($promotionHelper in @(
         'scripts/db/transfer_common.py',
         'scripts/db/production_data_transfer.py',
+        'scripts/db/restore-data-only.sh',
         'scripts/db/runtime_settings_transfer.py',
         'scripts/db/provision_daily_runtime.py',
         'scripts/db/verify_production_runtime.py',
@@ -185,8 +201,7 @@ try {
     $rebuildText = Get-Content -LiteralPath $rebuildPath -Raw
     foreach ($requiredMarker in @(
         'secretary_rebuild_',
-        "'--data-only'",
-        "'--exclude-table-data=secretary.schema_migrations'",
+        '/opt/secretary/scripts/restore-data-only.sh',
         'production_data_transfer.py',
         'run_production_runtime_rehearsal.py',
         'OldSecretaryPreserved = $true'
@@ -241,7 +256,7 @@ try {
         throw 'Direct production verifier execution must add the repository root to sys.path.'
     }
     if ($runtimeVerifyText -notmatch '_validate_disposable_target') {
-        throw 'Production verifier must reject the configured live PostgreSQL port before write probes.'
+        throw 'Production verifier must reject write probes against the live production database.'
     }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
