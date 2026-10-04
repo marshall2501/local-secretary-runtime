@@ -120,8 +120,10 @@ try {
     foreach ($requiredMarker in @(
         'local-secretary-test-promotion-',
         "pg_restore','-U','secretary_admin','-d','secretary'",
-        "down','--volumes",
-        '001-004'
+        "'--data-only'",
+        "'--exclude-table-data=secretary.schema_migrations'",
+        "/opt/secretary/scripts/migrate.sh",
+        "down','--volumes"
     )) {
         if (-not $rehearsalText.Contains($requiredMarker)) {
             throw "Promotion rehearsal safety marker missing: $requiredMarker"
@@ -143,6 +145,8 @@ try {
     }
 
     foreach ($promotionHelper in @(
+        'scripts/db/transfer_common.py',
+        'scripts/db/production_data_transfer.py',
         'scripts/db/runtime_settings_transfer.py',
         'scripts/db/provision_daily_runtime.py',
         'scripts/db/verify_production_runtime.py',
