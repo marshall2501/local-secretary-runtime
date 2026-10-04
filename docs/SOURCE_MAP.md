@@ -3,7 +3,9 @@
 更新: 2026-10-04  
 参照runtime: `local-secretary-runtime main`（確認時 `6023bb67...`）
 
-この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための索引です。
+この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
+
+source directoryの役割・dependency direction・重要な配置原則の設計正本は [`local-secretary-ai/docs/01_Architecture/RuntimeSourceArchitecture_実装ソース構造.md`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/RuntimeSourceArchitecture_%E5%AE%9F%E8%A3%85%E3%82%BD%E3%83%BC%E3%82%B9%E6%A7%8B%E9%80%A0.md) です。本資料は、その設計を**現在どのfileが実装しているか**を追跡します。
 
 本資料は「どこに何が実装されているか」を示すものであり、機能が実機受入済みであることを意味しません。
 
@@ -50,6 +52,9 @@
 ---
 
 ## 2. 現在の主要ソース構成
+
+<details>
+<summary>主要source treeを表示</summary>
 
 ```text
 local-secretary-runtime/
@@ -205,6 +210,7 @@ local-secretary-runtime/
    └─ db/
 ```
 
+</details>
 ---
 
 ## 3. 日常Web GUI
@@ -640,4 +646,4 @@ PKB、Finance、Service Billing等は独立利用可能なApplication Capability
 7. 対応する自動テストはどれか
 8. 本資料の「機能 ↔ ソース」対応が古くなっていないか
 
-SOURCE_MAPは現在のソース索引であり、設計理由はDesignDecisions、実装・実機受入状況はSTATUS、現在選択中の作業はPLANへ記録します。
+SOURCE_MAPは現在の実装ソース索引です。directory責務・dependency boundaryは設計repoの `RuntimeSourceArchitecture_実装ソース構造.md`、設計理由はDesignDecisions、実装・実機受入状況はSTATUS、現在選択中の作業はPLANを正本とします。
