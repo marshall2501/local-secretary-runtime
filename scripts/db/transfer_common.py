@@ -70,6 +70,7 @@ def copy_query_rows(
     key_columns: Sequence[str],
     source_query_template: str,
     source_args=(),
+    update_on_collision: bool = False,
 ) -> dict[str, int]:
     source_columns, _ = relation_columns(source_cur, table)
     target_columns, target_types = relation_columns(target_cur, table)
@@ -96,15 +97,46 @@ def copy_query_rows(
     )
 
     inserted = 0
+    updated = 0
     skipped = 0
+    column_index = {name: index for index, name in enumerate(target_columns)}
+    non_key_columns = tuple(
+        column for column in target_columns if column not in key_columns
+    )
     for row in rows:
         existing = _select_existing(
             target_cur, table, target_columns, key_columns, row
         )
         if existing is not None:
-            if tuple(existing) != tuple(row):
+            if tuple(existing) == tuple(row):
+                skipped += 1
+                continue
+            if not update_on_collision:
                 raise RuntimeError(f"data collision in {table}")
-            skipped += 1
+            assignments = sql.SQL(",").join(
+                sql.SQL("{} = %s").format(sql.Identifier(column))
+                for column in non_key_columns
+            )
+            predicates = sql.SQL(" AND ").join(
+                sql.SQL("{} = %s").format(sql.Identifier(column))
+                for column in key_columns
+            )
+            update_query = sql.SQL(
+                "UPDATE secretary.{} SET {} WHERE {}"
+            ).format(
+                sql.Identifier(table),
+                assignments,
+                predicates,
+            )
+            update_values = [
+                _adapt(row[column_index[column]], target_types[column])
+                for column in non_key_columns
+            ]
+            update_values.extend(
+                row[column_index[column]] for column in key_columns
+            )
+            target_cur.execute(update_query, tuple(update_values))
+            updated += 1
             continue
         adapted = tuple(
             _adapt(value, target_types[column])
@@ -116,6 +148,7 @@ def copy_query_rows(
     return {
         "source": len(rows),
         "inserted": inserted,
+        "updated": updated,
         "skipped_equal": skipped,
     }
 
