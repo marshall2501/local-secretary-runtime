@@ -119,7 +119,8 @@ try {
     $rehearsalText = Get-Content -LiteralPath $rehearsalPath -Raw
     foreach ($requiredMarker in @(
         'local-secretary-test-promotion-',
-        "pg_restore','-U','secretary_admin','-d','secretary'",
+        "'pg_restore'",
+        "'-U','secretary_admin','-d','secretary'",
         "'--data-only'",
         "'--exclude-table-data=secretary.schema_migrations'",
         "/opt/secretary/scripts/migrate.sh",
