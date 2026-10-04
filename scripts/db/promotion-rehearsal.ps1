@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)]
     [string]$BackupPath,
-    [switch]$IncludeSettings
+    [switch]$IncludeSettings,
+    [switch]$IncludeDailyData
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -14,7 +15,7 @@ $envFile = Join-Path $root '.env.postgres'
 $service = 'secretary-postgres'
 $secretFile = Join-Path $root 'secrets/postgres-password.txt'
 $python = Join-Path $root '.venv/Scripts/python.exe'
-$settingsTransfer = Join-Path $root 'scripts/db/runtime_settings_transfer.py'
+$dataTransfer = Join-Path $root 'scripts/db/production_data_transfer.py'
 $runtimeRunner = Join-Path $root 'scripts/db/run_production_runtime_rehearsal.py'
 $BackupPath = [IO.Path]::GetFullPath($BackupPath)
 
@@ -24,7 +25,8 @@ if (-not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw 'Missing .env.postgres.' }
 if (-not (Test-Path -LiteralPath $secretFile -PathType Leaf)) { throw 'Missing local PostgreSQL secret.' }
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Missing runtime Python virtualenv.' }
-if ($IncludeSettings -and -not (Test-Path -LiteralPath $settingsTransfer -PathType Leaf)) { throw 'Missing settings transfer helper.' }
+$transferDailyData = [bool]($IncludeDailyData -or $IncludeSettings)
+if ($transferDailyData -and -not (Test-Path -LiteralPath $dataTransfer -PathType Leaf)) { throw 'Missing production data transfer helper.' }
 if (-not (Test-Path -LiteralPath $runtimeRunner -PathType Leaf)) { throw 'Missing strict production runtime rehearsal runner.' }
 
 $project = 'local-secretary-test-promotion-' + [guid]::NewGuid().ToString('N').Substring(0,12)
@@ -150,9 +152,9 @@ try {
     $prototypeRole = Invoke-Scalar "SELECT count(*) FROM pg_roles WHERE rolname='secretary_pkb_proto_writer_20260927';"
     if ($prototypeRole -ne '0') { throw 'Prototype writer role leaked into rehearsal cluster.' }
 
-    if ($IncludeSettings) {
-        & $python $settingsTransfer --source-port $sourcePort --target-port $rehearsalPort --secret-file $secretFile --commit
-        if ($LASTEXITCODE -ne 0) { throw 'Runtime settings promotion rehearsal failed.' }
+    if ($transferDailyData) {
+        & $python $dataTransfer --source-port $sourcePort --target-port $rehearsalPort --secret-file $secretFile --commit
+        if ($LASTEXITCODE -ne 0) { throw 'Production daily data transfer rehearsal failed.' }
     }
 
     $runtimeArgs = @(
@@ -161,7 +163,7 @@ try {
         '--live-port', "$sourcePort",
         '--admin-secret-file', $secretFile
     )
-    if ($IncludeSettings) {
+    if ($transferDailyData) {
         $runtimeArgs += @('--settings-source-port', "$sourcePort")
     }
     & $python @runtimeArgs
@@ -179,11 +181,11 @@ try {
         ExistingRowCountsPreserved = $true
         SchemaTablesInitiallyEmpty = $true
         SharedInternalRuntimeAccess = $true
-        SettingsPromotionRehearsed = [bool]$IncludeSettings
+        DailyDataTransferRehearsed = $transferDailyData
         ProductionRuntimeRehearsed = $true
     } | Format-List
 
-    Write-Host 'PASS: backup restored, settings transfer checked, and shared-access production runtime rehearsed in a disposable PostgreSQL project.'
+    Write-Host 'PASS: backup restored, selected daily data transfer checked, and shared-access production runtime rehearsed in a disposable PostgreSQL project.'
     Write-Host 'Live secretary database and existing container state were not changed.'
 } finally {
     try {
