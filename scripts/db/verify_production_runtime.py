@@ -20,6 +20,11 @@ from uuid import UUID, uuid4
 import psycopg
 
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
 SETTING_TABLES = (
     "service_connections",
     "llm_profiles",
@@ -321,10 +326,9 @@ def main() -> None:
     web_port = _free_port()
     web_env = dict(os.environ)
     web_env["LSA_DAILY_WEB_PORT"] = str(web_port)
-    root = Path(__file__).resolve().parents[2]
     proc = subprocess.Popen(
         [sys.executable, "-m", "interfaces.web.app"],
-        cwd=str(root),
+        cwd=str(ROOT),
         env=web_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

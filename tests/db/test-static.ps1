@@ -182,5 +182,10 @@ try {
     if ($dailyWebText -notmatch 'LSA_DAILY_WEB_PORT') {
         throw 'Daily Web runtime must support an ephemeral rehearsal port.'
     }
+
+    $runtimeVerifyText = Get-Content -LiteralPath (Join-Path $root 'scripts/db/verify_production_runtime.py') -Raw
+    if ($runtimeVerifyText -notmatch 'sys\.path\.insert\(0, str\(ROOT\)\)') {
+        throw 'Direct production verifier execution must add the repository root to sys.path.'
+    }
 } finally { Pop-Location }
 Write-Host 'PASS: repository PowerShell parsing, sensitive-path ignore rules, diff whitespace.'
