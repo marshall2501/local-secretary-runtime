@@ -267,7 +267,7 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(seen[1]["question_purpose"], "identify_missing_information")
         self.assertEqual(seen[1]["prompt_version"], PROMPT_VERSION)
         self.assertEqual(seen[1]["task_context"]["classification"]["category"],"INFORMATION")
-        self.assertIn("必要最小限",seen[1]["question_from_ritsuko"])
+        self.assertIn("依頼を進めるために必要な事実",seen[1]["question_from_ritsuko"])
         self.assertEqual(session["status"], "waiting_information")
         self.assertEqual(session["next_step"], "review_information_requests")
         self.assertEqual(session["pending_requests"][0]["source"],"pkb")
@@ -400,7 +400,7 @@ class GuidedDialogueTests(unittest.TestCase):
         caller,seen=self.scripted(self.classification("KNOWLEDGE"),candidate)
         session=start_dialogue("スマホをPixel 10に買い替えた",model="gemma3:12b",caller=caller)
         self.assertEqual(seen[1]["question_purpose"],"formulate_knowledge_candidate")
-        self.assertIn("最小事実",seen[1]["question_from_ritsuko"])
+        self.assertIn("記録に必要な事実",seen[1]["question_from_ritsuko"])
         self.assertEqual(session["status"],"proposal_ready")
         self.assertEqual(session["detail"]["knowledge_candidate"],"スマホはPixel 10")
 
