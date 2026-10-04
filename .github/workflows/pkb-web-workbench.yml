@@ -18,6 +18,7 @@ on:
       - "scripts/pkb/isolated/run_pending_setup.ps1"
       - "scripts/pkb/isolated/verify_finance_versioning.ps1"
       - "tests/test_*.py"
+      - "tests/db/**"
       - "requirements-web.txt"
       - ".github/workflows/pkb-web-workbench.yml"
   pull_request:
@@ -37,6 +38,7 @@ on:
       - "scripts/pkb/isolated/run_pending_setup.ps1"
       - "scripts/pkb/isolated/verify_finance_versioning.ps1"
       - "tests/test_*.py"
+      - "tests/db/**"
       - "requirements-web.txt"
       - ".github/workflows/pkb-web-workbench.yml"
   workflow_dispatch:
