@@ -80,6 +80,7 @@ FROM secretary.entities t
 JOIN entity_closure c ON c.id=t.id
 ORDER BY t.created_at,t.id
 """,
+        update_on_collision=True,
     )
     results["sources"] = copy_query_rows(
         source_cur,
@@ -92,6 +93,7 @@ FROM secretary.sources t
 JOIN source_closure c ON c.id=t.id
 ORDER BY t.recorded_at,t.id
 """,
+        update_on_collision=True,
     )
     results["pending_claims"] = copy_query_rows(
         source_cur,
@@ -109,6 +111,7 @@ WHERE t.id IN (
 )
 ORDER BY t.recorded_at,t.id
 """,
+        update_on_collision=True,
     )
 
     claim_query = closure + """,
@@ -138,6 +141,7 @@ ORDER BY d.depth,t.recorded_at,t.id
         table="claims",
         key_columns=("id",),
         source_query_template=claim_query,
+        update_on_collision=True,
     )
 
     relation_query = closure + """,
@@ -167,6 +171,7 @@ ORDER BY d.depth,t.recorded_at,t.id
         table="entity_relations",
         key_columns=("id",),
         source_query_template=relation_query,
+        update_on_collision=True,
     )
     results["pkb_pending_intake"] = copy_query_rows(
         source_cur,
@@ -179,6 +184,7 @@ FROM secretary.pkb_pending_intake t
 JOIN candidate_pending c ON c.id=t.id
 ORDER BY t.recorded_at,t.id
 """,
+        update_on_collision=True,
     )
     results["pkb_input_receipts"] = copy_query_rows(
         source_cur,
@@ -191,6 +197,7 @@ FROM secretary.pkb_input_receipts t
 JOIN input_receipt_closure c ON c.input_id=t.input_id
 ORDER BY t.created_at,t.input_id
 """,
+        update_on_collision=True,
     )
     results["pkb_correction_receipts"] = copy_query_rows(
         source_cur,
@@ -203,6 +210,7 @@ FROM secretary.pkb_correction_receipts t
 JOIN correction_receipt_closure c ON c.input_id=t.input_id
 ORDER BY t.created_at,t.input_id
 """,
+        update_on_collision=True,
     )
     results["pkb_memory_intakes"] = copy_query_rows(
         source_cur,
@@ -215,6 +223,7 @@ FROM secretary.pkb_memory_intakes t
 JOIN candidate_memory_intakes c ON c.input_id=t.input_id
 ORDER BY t.created_at,t.input_id
 """,
+        update_on_collision=True,
     )
     results["pkb_memory_candidate_receipts"] = copy_query_rows(
         source_cur,
@@ -228,6 +237,7 @@ JOIN candidate_memory_receipts c
   ON c.input_id=t.input_id AND c.candidate_id=t.candidate_id
 ORDER BY t.input_id,t.candidate_id
 """,
+        update_on_collision=True,
     )
     return results
 
@@ -322,10 +332,11 @@ def transfer(source, target, *, commit: bool) -> dict:
     }
 
 
-def _count_summary(group: dict[str, dict[str, int]]) -> tuple[int, int]:
+def _count_summary(group: dict[str, dict[str, int]]) -> tuple[int, int, int]:
     source = sum(item["source"] for item in group.values())
     inserted = sum(item["inserted"] for item in group.values())
-    return source, inserted
+    updated = sum(item["updated"] for item in group.values())
+    return source, inserted, updated
 
 
 def main() -> None:
@@ -352,13 +363,14 @@ def main() -> None:
         with connect_admin(args.target_port, "secretary", password) as target:
             result = transfer(source, target, commit=args.commit)
 
-    pkb_source, pkb_inserted = _count_summary(result["pkb"])
-    finance_source, finance_inserted = _count_summary(result["finance"])
+    pkb_source, pkb_inserted, pkb_updated = _count_summary(result["pkb"])
+    finance_source, finance_inserted, finance_updated = _count_summary(result["finance"])
     settings = result["settings"]
     print("Production data transfer: " + ("COMMIT" if result["committed"] else "ROLLBACK rehearsal"))
     print(
-        f"PKBRows={pkb_source} PKBInserted={pkb_inserted} "
-        f"FinanceRows={finance_source} FinanceInserted={finance_inserted}"
+        f"PKBRows={pkb_source} PKBInserted={pkb_inserted} PKBUpdated={pkb_updated} "
+        f"FinanceRows={finance_source} FinanceInserted={finance_inserted} "
+        f"FinanceUpdated={finance_updated}"
     )
     print(
         "Connections={service_connections} Profiles={llm_profiles} "
