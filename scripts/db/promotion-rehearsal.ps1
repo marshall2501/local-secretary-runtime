@@ -103,38 +103,59 @@ try {
 
     Invoke-Docker @('cp',$BackupPath,"$($containerId):$remoteBackup")
     Invoke-Compose @('exec','-T',$service,'pg_restore','--list',$remoteBackup) | Out-Null
-    Invoke-Compose @('exec','-T',$service,'pg_restore','-U','secretary_admin','-d','secretary','--single-transaction','--exit-on-error','--no-owner','--no-acl',$remoteBackup)
 
-    $beforeVersionCount = [int](Invoke-Scalar "SELECT count(*) FROM secretary.schema_migrations;")
-    $beforeLatest = Invoke-Scalar "SELECT max(version) FROM secretary.schema_migrations;"
-    if ($beforeVersionCount -ne 4 -or $beforeLatest -notlike '004_*') {
-        throw "Rehearsal requires a pre-promotion backup at production migrations 001-004. Found count=$beforeVersionCount latest=$beforeLatest"
-    }
-
-    $trackedTables = @('entities','sources','pending_claims','claims','tasks','task_steps','approvals','actions','results','audit_events')
-    $beforeCounts = @{}
-    foreach ($table in $trackedTables) {
-        if ($table -notmatch '^[a-z_][a-z0-9_]*$') { throw "Unsafe table identifier: $table" }
-        $beforeCounts[$table] = [long](Invoke-Scalar "SELECT count(*) FROM secretary.$table;")
-    }
-
+    # Build the replacement from the schema required by the improved runtime.
+    # The old production backup contributes data only; its historical schema and
+    # migration state are not restored into the replacement.
     Invoke-Compose @('exec','-T',$service,'sh','/opt/secretary/scripts/migrate.sh')
 
-    foreach ($version in @(
-        '005_pkb_runtime_schema.sql',
-        '006_finance_runtime_schema.sql',
-        '007_runtime_settings_schema.sql',
-        '008_runtime_privileges.sql'
-    )) {
-        $applied = Invoke-Scalar "SELECT count(*) FROM secretary.schema_migrations WHERE version='$version';"
-        if ($applied -ne '1') { throw "Required production promotion migration missing after rehearsal: $version" }
+    $schemaMigrationCount = [int](Invoke-Scalar "SELECT count(*) FROM secretary.schema_migrations;")
+    $schemaLatest = Invoke-Scalar "SELECT max(version) FROM secretary.schema_migrations;"
+    if ($schemaMigrationCount -ne 8 -or $schemaLatest -ne '008_runtime_privileges.sql') {
+        throw "Fresh replacement schema is unexpected. Found count=$schemaMigrationCount latest=$schemaLatest"
     }
 
-    foreach ($table in $trackedTables) {
-        $after = [long](Invoke-Scalar "SELECT count(*) FROM secretary.$table;")
-        if ($after -ne $beforeCounts[$table]) {
-            throw "Schema promotion changed pre-existing row count for $table."
-        }
+    $schemaDataTables = @(
+        'entities','sources','pending_claims','claims','issues','hypotheses','decisions',
+        'tasks','task_steps','task_dependencies','task_step_dependencies',
+        'approvals','actions','results','audit_events',
+        'entity_relations','pkb_input_receipts','pkb_correction_receipts',
+        'pkb_pending_intake','pkb_memory_intakes','pkb_memory_candidate_receipts',
+        'finance_import_batches','finance_accounts','finance_categories',
+        'finance_transactions','finance_transaction_versions',
+        'llm_profiles','magi_member_assignments','service_connections',
+        'service_billing_profiles'
+    )
+    foreach ($table in $schemaDataTables) {
+        if ($table -notmatch '^[a-z_][a-z0-9_]*$') { throw "Unsafe table identifier: $table" }
+        $count = [long](Invoke-Scalar "SELECT count(*) FROM secretary.$table;")
+        if ($count -ne 0) { throw "Fresh replacement schema unexpectedly contains data in $table." }
+    }
+
+    # Preserve the old operational rows without restoring the old schema or its
+    # migration history. New columns in the current schema use their defaults.
+    Invoke-Compose @(
+        'exec','-T',$service,'pg_restore',
+        '-U','secretary_admin','-d','secretary',
+        '--data-only','--disable-triggers','--exit-on-error','--no-owner','--no-acl',
+        '--exclude-table-data=secretary.schema_migrations',
+        $remoteBackup
+    )
+
+    $afterRestoreMigrationCount = [int](Invoke-Scalar "SELECT count(*) FROM secretary.schema_migrations;")
+    $afterRestoreLatest = Invoke-Scalar "SELECT max(version) FROM secretary.schema_migrations;"
+    if ($afterRestoreMigrationCount -ne $schemaMigrationCount -or $afterRestoreLatest -ne $schemaLatest) {
+        throw 'Old production data restore changed replacement migration state.'
+    }
+
+    $trackedProductionTables = @(
+        'entities','sources','pending_claims','claims','issues','hypotheses','decisions',
+        'tasks','task_steps','task_dependencies','task_step_dependencies',
+        'approvals','actions','results','audit_events'
+    )
+    $restoredProductionRows = 0L
+    foreach ($table in $trackedProductionTables) {
+        $restoredProductionRows += [long](Invoke-Scalar "SELECT count(*) FROM secretary.$table;")
     }
 
     foreach ($table in @(
@@ -146,7 +167,9 @@ try {
         'service_billing_profiles'
     )) {
         $count = [long](Invoke-Scalar "SELECT count(*) FROM secretary.$table;")
-        if ($count -ne 0) { throw "Schema-only rehearsal unexpectedly populated $table." }
+        if ($count -ne 0) {
+            throw "Legacy production backup unexpectedly populated post-004 table $table."
+        }
     }
 
     $prototypeRole = Invoke-Scalar "SELECT count(*) FROM pg_roles WHERE rolname='secretary_pkb_proto_writer_20260927';"
@@ -174,18 +197,17 @@ try {
     [pscustomobject]@{
         Project = $project
         HostPort = $rehearsalPort
-        BeforeMigrationCount = $beforeVersionCount
-        BeforeLatestMigration = $beforeLatest
-        AfterMigrationCount = [int](Invoke-Scalar "SELECT count(*) FROM secretary.schema_migrations;")
-        AfterLatestMigration = Invoke-Scalar "SELECT max(version) FROM secretary.schema_migrations;"
-        ExistingRowCountsPreserved = $true
+        SchemaMigrationCount = $schemaMigrationCount
+        SchemaLatestMigration = $schemaLatest
+        LegacyProductionRowsRestored = $restoredProductionRows
+        OldSchemaNotRestored = $true
         SchemaTablesInitiallyEmpty = $true
         SharedInternalRuntimeAccess = $true
         DailyDataTransferRehearsed = $transferDailyData
         ProductionRuntimeRehearsed = $true
     } | Format-List
 
-    Write-Host 'PASS: backup restored, selected daily data transfer checked, and shared-access production runtime rehearsed in a disposable PostgreSQL project.'
+    Write-Host 'PASS: fresh replacement schema built, legacy production data restored data-only, selected daily data transferred, and improved production runtime rehearsed.'
     Write-Host 'Live secretary database and existing container state were not changed.'
 } finally {
     try {
