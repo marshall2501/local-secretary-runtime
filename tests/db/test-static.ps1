@@ -151,6 +151,7 @@ try {
         'scripts/db/provision_daily_runtime.py',
         'scripts/db/verify_production_runtime.py',
         'scripts/db/run_production_runtime_rehearsal.py',
+        'scripts/db/rebuild-production.ps1',
         'scripts/db/promote-production.ps1'
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $root $promotionHelper) -PathType Leaf)) {
@@ -171,6 +172,27 @@ try {
     }
     if ($launcherText -notmatch '008_runtime_privileges.sql') {
         throw 'Production daily launcher must require migration 008.'
+    }
+    if ($launcherText -notmatch 'LSA_DAILY_DB_NAME') {
+        throw 'Production daily launcher must pass the selected rebuilt database name to runtime.'
+    }
+    if ($launcherText -notmatch 'secretary_rebuild_') {
+        throw 'Production daily launcher must allow an approved rebuilt production database.'
+    }
+
+    $rebuildPath = Join-Path $root 'scripts/db/rebuild-production.ps1'
+    $rebuildText = Get-Content -LiteralPath $rebuildPath -Raw
+    foreach ($requiredMarker in @(
+        'secretary_rebuild_',
+        "'--data-only'",
+        "'--exclude-table-data=secretary.schema_migrations'",
+        'production_data_transfer.py',
+        'run_production_runtime_rehearsal.py',
+        'OldSecretaryPreserved = $true'
+    )) {
+        if (-not $rebuildText.Contains($requiredMarker)) {
+            throw "Clean rebuild safety marker missing: $requiredMarker"
+        }
     }
 
     $tokens = $null
