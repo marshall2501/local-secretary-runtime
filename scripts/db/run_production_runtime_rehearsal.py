@@ -45,8 +45,6 @@ def _run_steps(
         str(admin_secret_file),
         "--runtime-secret-file",
         str(runtime_secret_file),
-        "--target-database",
-        target_database,
     ]
     verify_cmd = [
         sys.executable,
@@ -57,6 +55,8 @@ def _run_steps(
         str(live_port),
         "--runtime-secret-file",
         str(runtime_secret_file),
+        "--target-database",
+        target_database,
     ]
     if settings_source_port is not None:
         verify_cmd.extend([
