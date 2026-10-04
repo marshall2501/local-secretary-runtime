@@ -14,7 +14,7 @@ $provisionRuntime = Join-Path $root 'scripts/db/provision_daily_runtime.py'
 $verifier = Join-Path $root 'scripts/db/verify_production_runtime.py'
 
 foreach ($needed in @(
-    $envFile,$adminSecret,$runtimeSecret,$python,
+    $envFile,$adminSecret,$python,
     $initializer,$settingsTransfer,$provisionRuntime,$verifier
 )) {
     if (-not (Test-Path -LiteralPath $needed -PathType Leaf)) {
@@ -56,6 +56,9 @@ try {
 
     & $python $provisionRuntime --port $livePort --database $database --admin-secret-file $adminSecret --runtime-secret-file $runtimeSecret
     if ($LASTEXITCODE -ne 0) { throw 'Daily runtime provisioning rehearsal failed.' }
+    if (-not (Test-Path -LiteralPath $runtimeSecret -PathType Leaf)) {
+        throw 'Daily runtime provisioning did not create the runtime secret.'
+    }
 
     & $python $verifier --target-port $livePort --live-port $livePort --runtime-secret-file $runtimeSecret --target-database $database --settings-source-port $livePort --admin-secret-file $adminSecret
     if ($LASTEXITCODE -ne 0) { throw 'Fresh production runtime rehearsal failed.' }
