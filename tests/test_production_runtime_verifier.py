@@ -5,10 +5,18 @@ from scripts.db import verify_production_runtime as verifier
 
 
 class ProductionRuntimeVerifierContractTests(unittest.TestCase):
-    def test_live_port_is_rejected(self):
+    def test_live_production_database_is_rejected(self):
         with patch.object(verifier, "_configured_live_port", return_value=5432):
-            with self.assertRaisesRegex(RuntimeError, "live PostgreSQL port"):
+            with self.assertRaisesRegex(RuntimeError, "live PostgreSQL database"):
                 verifier._validate_disposable_target(5432, 5432)
+
+    def test_rebuild_database_is_allowed_on_live_port(self):
+        with patch.object(verifier, "_configured_live_port", return_value=5432):
+            verifier._validate_disposable_target(
+                5432,
+                5432,
+                "secretary_rebuild_20261004_test",
+            )
 
     def test_supplied_live_port_must_match_configuration(self):
         with patch.object(verifier, "_configured_live_port", return_value=5432):
