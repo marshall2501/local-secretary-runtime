@@ -11,8 +11,14 @@ from psycopg import sql
 from psycopg.types.json import Json, Jsonb
 
 
-def one(cur, statement: str, args=()):
-    cur.execute(statement, args)
+def _execute(cur, statement, args=None):
+    if args is None or len(args) == 0:
+        return cur.execute(statement)
+    return cur.execute(statement, args)
+
+
+def one(cur, statement: str, args=None):
+    _execute(cur, statement, args)
     row = cur.fetchone()
     if row is None or len(row) != 1:
         raise RuntimeError("unexpected scalar result")
@@ -69,7 +75,7 @@ def copy_query_rows(
     table: str,
     key_columns: Sequence[str],
     source_query_template: str,
-    source_args=(),
+    source_args=None,
     update_on_collision: bool = False,
 ) -> dict[str, int]:
     source_columns, _ = relation_columns(source_cur, table)
@@ -86,7 +92,7 @@ def copy_query_rows(
         for column in target_columns
     )
     source_query = sql.SQL(source_query_template).format(columns=source_column_sql)
-    source_cur.execute(source_query, source_args)
+    _execute(source_cur, source_query, source_args)
     rows = source_cur.fetchall()
 
     placeholders = sql.SQL(",").join(sql.Placeholder() for _ in target_columns)
