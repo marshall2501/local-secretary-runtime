@@ -77,25 +77,45 @@ def copy_query_rows(
     source_query_template: str,
     source_args=None,
     update_on_collision: bool = False,
+    columns: Sequence[str] | None = None,
 ) -> dict[str, int]:
-    source_columns, _ = relation_columns(source_cur, table)
-    target_columns, target_types = relation_columns(target_cur, table)
-    if source_columns != target_columns:
-        raise RuntimeError(f"source/target column mismatch: {table}")
+    source_relation_columns, _ = relation_columns(source_cur, table)
+    target_relation_columns, target_types = relation_columns(target_cur, table)
+
+    if columns is None:
+        if source_relation_columns != target_relation_columns:
+            raise RuntimeError(f"source/target column mismatch: {table}")
+        transfer_columns = target_relation_columns
+    else:
+        transfer_columns = tuple(columns)
+        if not transfer_columns or len(set(transfer_columns)) != len(transfer_columns):
+            raise RuntimeError(f"invalid transfer column mapping: {table}")
+        missing_source = [
+            column for column in transfer_columns
+            if column not in source_relation_columns
+        ]
+        if missing_source:
+            raise RuntimeError(
+                f"source is missing mapped columns for {table}: "
+                + ",".join(missing_source)
+            )
+        if target_relation_columns != transfer_columns:
+            raise RuntimeError(f"target column mapping mismatch: {table}")
+
     for key in key_columns:
-        if key not in target_columns:
+        if key not in transfer_columns:
             raise RuntimeError(f"missing transfer key {table}.{key}")
 
-    column_sql = sql.SQL(",").join(map(sql.Identifier, target_columns))
+    column_sql = sql.SQL(",").join(map(sql.Identifier, transfer_columns))
     source_column_sql = sql.SQL(",").join(
         sql.SQL("t.{}").format(sql.Identifier(column))
-        for column in target_columns
+        for column in transfer_columns
     )
     source_query = sql.SQL(source_query_template).format(columns=source_column_sql)
     _execute(source_cur, source_query, source_args)
     rows = source_cur.fetchall()
 
-    placeholders = sql.SQL(",").join(sql.Placeholder() for _ in target_columns)
+    placeholders = sql.SQL(",").join(sql.Placeholder() for _ in transfer_columns)
     insert_query = sql.SQL("INSERT INTO secretary.{} ({}) VALUES ({})").format(
         sql.Identifier(table),
         column_sql,
@@ -105,13 +125,13 @@ def copy_query_rows(
     inserted = 0
     updated = 0
     skipped = 0
-    column_index = {name: index for index, name in enumerate(target_columns)}
+    column_index = {name: index for index, name in enumerate(transfer_columns)}
     non_key_columns = tuple(
-        column for column in target_columns if column not in key_columns
+        column for column in transfer_columns if column not in key_columns
     )
     for row in rows:
         existing = _select_existing(
-            target_cur, table, target_columns, key_columns, row
+            target_cur, table, transfer_columns, key_columns, row
         )
         if existing is not None:
             if tuple(existing) == tuple(row):
@@ -146,7 +166,7 @@ def copy_query_rows(
             continue
         adapted = tuple(
             _adapt(value, target_types[column])
-            for column, value in zip(target_columns, row, strict=True)
+            for column, value in zip(transfer_columns, row, strict=True)
         )
         target_cur.execute(insert_query, adapted)
         inserted += 1
