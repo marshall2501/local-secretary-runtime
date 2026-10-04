@@ -42,8 +42,9 @@
 | MCP互換entry | [../mcp_adapter/server.py](../mcp_adapter/server.py) | `interfaces.mcp.server`へ委譲 | stdio MCP |
 | DB migration | [../scripts/db/migrate.sh](../scripts/db/migrate.sh) | migration管理 | PostgreSQL |
 | DB Backup / Restore | [../scripts/db/postgres.ps1](../scripts/db/postgres.ps1) | DB運用 | pg_dump / pg_restore |
-| DB再構築検証 | [../scripts/db/promotion-preflight.ps1](../scripts/db/promotion-preflight.ps1), [../scripts/db/promotion-rehearsal.ps1](../scripts/db/promotion-rehearsal.ps1) | clean rebuild rehearsal | PostgreSQL |
-| Production DB再構築 | [../scripts/db/rebuild-production.ps1](../scripts/db/rebuild-production.ps1) | current schema + selected data → replacement DB | PostgreSQL |
+| DB再構築検証 | [../scripts/db/promotion-preflight.ps1](../scripts/db/promotion-preflight.ps1), [../scripts/db/promotion-rehearsal.ps1](../scripts/db/promotion-rehearsal.ps1) | fresh schema + settings-only rehearsal | PostgreSQL |
+| Fresh Production初期化 | [../scripts/db/initialize-fresh-production.ps1](../scripts/db/initialize-fresh-production.ps1) | migration 001-008 / existing cluster role reuse | PostgreSQL |
+| Production DB再構築 | [../scripts/db/rebuild-production.ps1](../scripts/db/rebuild-production.ps1) | fresh schema + settings only → replacement DB | PostgreSQL |
 | 旧昇格entry互換 | [../scripts/db/promote-production.ps1](../scripts/db/promote-production.ps1) | clean rebuildへ委譲 | PowerShell |
 
 ---
@@ -179,8 +180,11 @@ local-secretary-runtime/
 │  │  ├─ migrate.sh
 │  │  ├─ compare-runtime-databases.ps1
 │  │  ├─ promotion-preflight.ps1
+│  │  ├─ initialize-fresh-production.ps1
 │  │  ├─ promotion-rehearsal.ps1
+│  │  ├─ rebuild-production.ps1
 │  │  ├─ promote-production.ps1
+│  │  ├─ runtime_settings_transfer.py
 │  │  └─ verify_production_runtime.py
 │  └─ pkb/
 │     └─ isolated/                # isolated regression / evidence
@@ -519,8 +523,10 @@ DB境界と昇格手順の正本:
 | production migration | `scripts/db/migrate.sh` |
 | 2DB read-only比較 | `scripts/db/compare-runtime-databases.ps1` |
 | promotion事前検査 | `scripts/db/promotion-preflight.ps1` |
-| promotion rehearsal | `scripts/db/promotion-rehearsal.ps1` |
-| production promotion | `scripts/db/promote-production.ps1` |
+| fresh production初期化 | `scripts/db/initialize-fresh-production.ps1` |
+| settings-only rehearsal | `scripts/db/promotion-rehearsal.ps1` |
+| fresh replacement DB作成 | `scripts/db/rebuild-production.ps1` |
+| production promotion互換entry | `scripts/db/promote-production.ps1` |
 | production runtime検証 | `scripts/db/verify_production_runtime.py` |
 | runtime設定移送 | `scripts/db/runtime_settings_transfer.py` |
 
