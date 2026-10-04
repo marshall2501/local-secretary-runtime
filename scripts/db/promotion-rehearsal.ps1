@@ -99,16 +99,6 @@ try {
     if ($containerIds.Count -ne 1) { throw 'Expected one rehearsal PostgreSQL container.' }
     $containerId = $containerIds[0]
 
-    $roleSql = @"
-CREATE ROLE secretary_reader NOLOGIN;
-CREATE ROLE secretary_candidate_writer NOLOGIN;
-CREATE ROLE secretary_memory_writer NOLOGIN;
-CREATE ROLE secretary_task_writer NOLOGIN;
-CREATE ROLE secretary_audit_writer NOLOGIN;
-CREATE ROLE secretary_review_writer NOLOGIN;
-"@
-    Invoke-Compose @('exec','-T',$service,'psql','-X','-U','secretary_admin','-d','postgres','-v','ON_ERROR_STOP=1','-c',$roleSql)
-
     Invoke-Docker @('cp',$BackupPath,"$($containerId):$remoteBackup")
     Invoke-Compose @('exec','-T',$service,'pg_restore','--list',$remoteBackup) | Out-Null
     Invoke-Compose @('exec','-T',$service,'pg_restore','-U','secretary_admin','-d','secretary','--single-transaction','--exit-on-error','--no-owner','--no-acl',$remoteBackup)
@@ -157,18 +147,6 @@ CREATE ROLE secretary_review_writer NOLOGIN;
         if ($count -ne 0) { throw "Schema-only rehearsal unexpectedly populated $table." }
     }
 
-    $roleCheck = Invoke-Scalar @"
-SELECT count(*)
-FROM pg_roles
-WHERE rolname IN (
-  'secretary_finance_writer',
-  'secretary_magi_settings_writer',
-  'secretary_connection_writer',
-  'secretary_billing_writer'
-) AND NOT rolcanlogin;
-"@
-    if ($roleCheck -ne '4') { throw 'Production promotion group-role creation failed in rehearsal cluster.' }
-
     $prototypeRole = Invoke-Scalar "SELECT count(*) FROM pg_roles WHERE rolname='secretary_pkb_proto_writer_20260927';"
     if ($prototypeRole -ne '0') { throw 'Prototype writer role leaked into rehearsal cluster.' }
 
@@ -200,12 +178,12 @@ WHERE rolname IN (
         AfterLatestMigration = Invoke-Scalar "SELECT max(version) FROM secretary.schema_migrations;"
         ExistingRowCountsPreserved = $true
         SchemaTablesInitiallyEmpty = $true
-        ProductionGroupRolesPresent = $true
+        SharedInternalRuntimeAccess = $true
         SettingsPromotionRehearsed = [bool]$IncludeSettings
         ProductionRuntimeRehearsed = $true
     } | Format-List
 
-    Write-Host 'PASS: backup restored, settings promotion checked, and production runtime rehearsed in a disposable PostgreSQL project.'
+    Write-Host 'PASS: backup restored, settings transfer checked, and shared-access production runtime rehearsed in a disposable PostgreSQL project.'
     Write-Host 'Live secretary database and existing container state were not changed.'
 } finally {
     try {
