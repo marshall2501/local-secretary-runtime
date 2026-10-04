@@ -103,7 +103,7 @@ class ProductionRuntimeRehearsalRunnerTests(unittest.TestCase):
         finally:
             temp.cleanup()
 
-    def test_live_port_is_rejected_before_subprocess(self):
+    def test_live_production_database_is_rejected_before_subprocess(self):
         temp, admin, _runtime = self._paths()
         called = []
 
@@ -111,7 +111,7 @@ class ProductionRuntimeRehearsalRunnerTests(unittest.TestCase):
             called.append(command)
 
         try:
-            with self.assertRaisesRegex(RuntimeError, "live PostgreSQL port"):
+            with self.assertRaisesRegex(RuntimeError, "live PostgreSQL database"):
                 run_rehearsal(
                     target_port=5432,
                     live_port=5432,
