@@ -1,5 +1,18 @@
 #!/bin/sh
 set -eu
+
+database=${SECRETARY_DB_NAME:-secretary}
+case "$database" in
+    secretary) ;;
+    secretary_rebuild_*)
+        suffix=${database#secretary_rebuild_}
+        test -n "$suffix"
+        test ${#database} -le 63
+        case "$suffix" in *[!a-z0-9_]*) exit 1;; esac
+        ;;
+    *) exit 1 ;;
+esac
+
 # One psql session/transaction: lock serializes concurrent runners, including first use.
 script=$(mktemp /tmp/secretary-migrate.XXXXXX)
 trap 'rm -f "$script"' EXIT HUP INT TERM
@@ -35,4 +48,4 @@ SELECT EXISTS (SELECT 1 FROM secretary.schema_migrations WHERE version = '$versi
 SQL
 done
 printf '\nCOMMIT;\n' >> "$script"
-psql -X -U secretary_admin -d secretary -f "$script"
+psql -X -U secretary_admin -d "$database" -f "$script"
