@@ -16,6 +16,7 @@ $service = 'secretary-postgres'
 $secretFile = Join-Path $root 'secrets/postgres-password.txt'
 $python = Join-Path $root '.venv/Scripts/python.exe'
 $dataTransfer = Join-Path $root 'scripts/db/production_data_transfer.py'
+$dataRestoreHelper = Join-Path $root 'scripts/db/restore-data-only.sh'
 $runtimeRunner = Join-Path $root 'scripts/db/run_production_runtime_rehearsal.py'
 $BackupPath = [IO.Path]::GetFullPath($BackupPath)
 
@@ -27,6 +28,7 @@ if (-not (Test-Path -LiteralPath $secretFile -PathType Leaf)) { throw 'Missing l
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Missing runtime Python virtualenv.' }
 $transferDailyData = [bool]($IncludeDailyData -or $IncludeSettings)
 if ($transferDailyData -and -not (Test-Path -LiteralPath $dataTransfer -PathType Leaf)) { throw 'Missing production data transfer helper.' }
+if (-not (Test-Path -LiteralPath $dataRestoreHelper -PathType Leaf)) { throw 'Missing shared data-only restore helper.' }
 if (-not (Test-Path -LiteralPath $runtimeRunner -PathType Leaf)) { throw 'Missing strict production runtime rehearsal runner.' }
 
 $project = 'local-secretary-test-promotion-' + [guid]::NewGuid().ToString('N').Substring(0,12)
@@ -133,13 +135,11 @@ try {
     }
 
     # Preserve the old operational rows without restoring the old schema or its
-    # migration history. New columns in the current schema use their defaults.
+    # migration history. The shared helper removes only schema_migrations TABLE DATA
+    # from the archive TOC, then restores the remaining data through pg_restore -L.
     Invoke-Compose @(
-        'exec','-T',$service,'pg_restore',
-        '-U','secretary_admin','-d','secretary',
-        '--data-only','--disable-triggers','--exit-on-error','--no-owner','--no-acl',
-        '--exclude-table-data=secretary.schema_migrations',
-        $remoteBackup
+        'exec','-T',$service,'sh','/opt/secretary/scripts/restore-data-only.sh',
+        'secretary',$remoteBackup
     )
 
     $afterRestoreMigrationCount = [int](Invoke-Scalar "SELECT count(*) FROM secretary.schema_migrations;")
