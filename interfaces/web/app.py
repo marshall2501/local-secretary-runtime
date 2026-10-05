@@ -43,9 +43,12 @@ from bootstrap.web_runtime import (
     build_core_execution_repository,
     build_core_task_queries,
     build_entity_catalog_service,
+    build_finance_repository,
     build_magi_settings_repository,
     build_magi_task_repository,
     build_pkb_repository,
+    build_service_billing_settings_repository,
+    build_service_connection_repository,
     claim_core_cooperative_probe,
     connection,
     fail_core_cooperative_probe,
@@ -190,6 +193,9 @@ from infrastructure.system_debug import (
 _pkb_repository = build_pkb_repository()
 _magi_task_repository = build_magi_task_repository()
 _magi_settings_repository = build_magi_settings_repository()
+_service_connection_repository = build_service_connection_repository()
+_service_billing_settings_repository = build_service_billing_settings_repository()
+_finance_repository = build_finance_repository()
 
 def _notify_client(client, message: str, *, type: str) -> None:
     """Send a notification through a stable client context.
@@ -616,8 +622,11 @@ def _entity_source_rows(detail: dict) -> list[dict]:
 
 
 def _connection_credential_loader(connection_id: str) -> str | None:
-    with connection() as db:
-        return get_connection_auth_value(db, connection_id, "api_key")
+    return get_connection_auth_value(
+        _service_connection_repository,
+        connection_id,
+        "api_key",
+    )
 
 
 register_connection_credential_loader(_connection_credential_loader)
@@ -639,8 +648,9 @@ def _load_magi_configuration(
     default_local_model: str | None,
 ) -> tuple[list[dict], list[dict]]:
     """Load DB settings, importing env defaults only when DB has no assignments."""
-    with connection() as db:
-        bootstrap_connection_auth_from_env(db)
+    bootstrap_connection_auth_from_env(
+        _service_connection_repository
+    )
     sync_ollama_profiles(
         _magi_settings_repository,
         installed_ollama_models,
@@ -720,7 +730,7 @@ def _core_finance_filters(text: str) -> dict:
 
 
 def finance_text(text: str) -> dict:
-    return query_finance_text(text, connection_factory=connection)
+    return query_finance_text(text, repository=_finance_repository)
 
 
 def web_text(text: str) -> dict:
