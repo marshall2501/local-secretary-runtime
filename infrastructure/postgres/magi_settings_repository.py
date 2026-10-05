@@ -5,9 +5,11 @@ from uuid import UUID, uuid4
 
 from integrations.connections.service_connections import (
     LLM_INFERENCE,
+    legacy_credential_env,
+)
+from infrastructure.postgres.service_connection_repository import (
     ensure_llm_connection,
     get_service_connection,
-    legacy_credential_env,
 )
 from integrations.llm.ollama_runtime import (
     DEFAULT_MAGI_OLLAMA_NUM_PREDICT,
