@@ -19,14 +19,22 @@ def register(portal_context: dict):
         }
     
         try:
-            with connection() as db:
-                bootstrap_connection_auth_from_env(db)
-                bootstrap_openai_billing_profile(db)
-                state["profiles"] = list_service_billing_profiles(db)
-                for profile in state["profiles"]:
-                    state["connections"][profile["connection_id"]] = (
-                        get_service_connection(db, profile["connection_id"])
+            bootstrap_connection_auth_from_env(
+                _service_connection_repository
+            )
+            bootstrap_openai_billing_profile(
+                _service_billing_settings_repository
+            )
+            state["profiles"] = list_service_billing_profiles(
+                _service_billing_settings_repository
+            )
+            for profile in state["profiles"]:
+                state["connections"][profile["connection_id"]] = (
+                    get_service_connection(
+                        _service_connection_repository,
+                        profile["connection_id"],
                     )
+                )
         except Exception as exc:
             state["error"] = "利用料金・契約設定を読み込めません: " + str(exc)[:180]
     
