@@ -59,13 +59,13 @@ if ($LASTEXITCODE -ne 0 -or ($count | Out-String).Trim() -ne '1') {
     throw "The selected daily runtime database is missing required migration $requiredMigration."
 }
 
-$migrationSummary = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || COALESCE((SELECT version FROM secretary.schema_migrations ORDER BY applied_at DESC, version DESC LIMIT 1), '');"
+$migrationSummary = & docker exec $ids[0] psql -X -A -t -U secretary_admin -d $db -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || COALESCE((SELECT version FROM secretary.schema_migrations ORDER BY applied_at DESC, version DESC LIMIT 1), '') FROM secretary.schema_migrations;"
 if ($LASTEXITCODE -ne 0) {
-    throw 'Cannot read isolated PKB migration summary.'
+    throw 'Cannot read daily runtime migration summary.'
 }
 $migrationParts = (($migrationSummary | Out-String).Trim()) -split '\|', 2
 if ($migrationParts.Count -ne 2 -or $migrationParts[0] -notmatch '^[0-9]+$' -or -not $migrationParts[1]) {
-    throw 'Invalid isolated PKB migration summary.'
+    throw 'Invalid daily runtime migration summary.'
 }
 $migrationCount = $migrationParts[0]
 $latestMigration = $migrationParts[1]
