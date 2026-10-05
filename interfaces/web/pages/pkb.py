@@ -249,10 +249,72 @@ def register(portal_context: dict):
                 value=tab_refs[PKB_TAB_DEFAULT],
             ).classes("w-full"):
                 with ui.tab_panel(tab_refs["record"]).classes("p-0 pt-3"):
+                    memory_state = {'envelope': None, 'busy': False, 'result': None}
+                    entity_state = {'busy': False, 'result': None}
+
+                    with ui.expansion(
+                        '対象(Entity)を追加',
+                        value=False,
+                    ).classes('w-full border border-slate-200 bg-slate-50'):
+                        ui.label(
+                            '未知の対象が確認待ちになった場合だけ、本人が対象名・分野・種類を明示して追加します。'
+                            ' LLMの推測だけではEntityを自動作成しません。'
+                        ).classes('text-sm')
+                        ui.label('例: サブPC / pc / computer').classes('text-xs text-grey-7')
+                        with ui.row().classes('w-full gap-2 flex-wrap'):
+                            entity_name_input = ui.input(label='対象名').classes('min-w-56 grow')
+                            entity_domain_input = ui.input(label='分野 (domain)').classes('min-w-40')
+                            entity_type_input = ui.input(label='種類 (entity type)').classes('min-w-48')
+
+                        @ui.refreshable
+                        def entity_create_result():
+                            result = entity_state['result']
+                            if not result:
+                                return
+                            action = '追加しました' if result.get('created') else '既存Entityを利用します'
+                            ui.label(
+                                f"{action}: {result.get('name')} / "
+                                f"{result.get('domain')} / {result.get('entity_type')}"
+                            ).classes('text-sm text-green-800')
+
+                        async def do_entity_create():
+                            if entity_state['busy']:
+                                return
+                            entity_state['busy'] = True
+                            entity_create_button.disable()
+                            try:
+                                result = await run.io_bound(
+                                    create_entity,
+                                    entity_name_input.value or '',
+                                    entity_domain_input.value or '',
+                                    entity_type_input.value or '',
+                                )
+                                entity_state['result'] = result
+                                # A previous unresolved Memory Intake result is keyed by its
+                                # input_id. After the authoritative Entity is created, issue a
+                                # new envelope when the same text is submitted again.
+                                memory_state['envelope'] = None
+                                ui.notify(
+                                    'Entityを登録しました。同じ記録内容をそのまま再処理できます。',
+                                    type='positive',
+                                )
+                            except Exception as exc:
+                                ui.notify(str(exc)[:240], type='negative')
+                            finally:
+                                entity_state['busy'] = False
+                                entity_create_button.enable()
+                                entity_create_result.refresh()
+
+                        entity_create_button = ui.button(
+                            '対象を追加',
+                            on_click=do_entity_create,
+                            color='blue-grey',
+                        )
+                        entity_create_result()
+
                     with ui.expansion('自然言語でまとめて記録（Memory Intake v1）', value=True).classes('w-full'):
                         ui.label('例: サブPCのWindows11を26H2に上げた。 明確な対応文は自動記録し、曖昧な部分は保留します。予定から現在状態は更新しません。').classes('text-sm')
                         intake_text = ui.textarea(label='記録する内容').classes('w-full')
-                        memory_state = {'envelope': None, 'busy': False, 'result': None}
     
                         @ui.refreshable
                         def memory_result():
