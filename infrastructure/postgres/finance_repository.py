@@ -18,6 +18,7 @@ from capabilities.finance.finance_preview import FinancePreview
 from config.runtime_database import LOCAL_HOSTS, allowed_daily_connection
 
 EXPECTED_DB = "secretary_pkb_proto_20260927"
+EXPECTED_USER = "secretary_pkb_proto_writer_20260927"
 
 
 def _finance_filter_clause(
