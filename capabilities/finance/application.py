@@ -34,14 +34,18 @@ def core_finance_filters(text: str) -> dict:
     return {"start_date": start_date, "end_date": end_date, "row_mode": "calculation_target"}
 
 
-def query_finance_text(text: str, *, connection_factory) -> dict:
+def query_finance_text(text: str, *, repository) -> dict:
     filters = core_finance_filters(text)
-    with connection_factory() as db:
-        dashboard = load_finance_dashboard(
-            db, recent_limit=5,
-            start_date=filters["start_date"], end_date=filters["end_date"],
-            row_mode=filters["row_mode"], page=1, sort_by="date", sort_dir="desc",
-        )
+    dashboard = load_finance_dashboard(
+        repository,
+        recent_limit=5,
+        start_date=filters["start_date"],
+        end_date=filters["end_date"],
+        row_mode=filters["row_mode"],
+        page=1,
+        sort_by="date",
+        sort_dir="desc",
+    )
     return {
         "status": "ok", "result_kind": "finance_summary",
         "total": dashboard.transaction_count,
