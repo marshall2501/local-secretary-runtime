@@ -42,6 +42,7 @@ from bootstrap.web_runtime import (
     DatabaseError,
     build_core_execution_repository,
     build_core_task_queries,
+    build_entity_catalog_service,
     claim_core_cooperative_probe,
     connection,
     fail_core_cooperative_probe,
@@ -635,6 +636,17 @@ def _connection_credential_loader(connection_id: str) -> str | None:
 
 
 register_connection_credential_loader(_connection_credential_loader)
+
+
+_entity_catalog_service = build_entity_catalog_service()
+
+
+def create_entity(name: str, domain: str, entity_type: str) -> dict:
+    return _entity_catalog_service.create(
+        name=name,
+        domain=domain,
+        entity_type=entity_type,
+    )
 
 
 def _load_magi_configuration(
