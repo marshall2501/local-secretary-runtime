@@ -111,3 +111,11 @@ def verify_api_database(connect_factory=connect) -> None:
                     raise RuntimeError(
                         f"API DB login is missing {permission} on {table}."
                     )
+
+
+def api_health_probe(connect_factory=connect) -> None:
+    """Read-only liveness probe kept inside the composition/infrastructure boundary."""
+    with connect_factory() as db:
+        with db.cursor() as cur:
+            cur.execute("SELECT 1 AS ok")
+            cur.fetchone()
