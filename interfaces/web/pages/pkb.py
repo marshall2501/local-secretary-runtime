@@ -524,8 +524,7 @@ def register(portal_context: dict):
                         "w-full border-2 border-indigo-300 bg-indigo-50 text-indigo-900" + _block_visibility_class("pkb", "entities")
                     ):
                         try:
-                            with connection() as db:
-                                entity_rows = _entities(db)
+                            entity_rows = _entities()
                         except Exception as exc:
                             ui.label("Entity一覧を取得できません: " + str(exc)).classes("text-red-700")
                         else:
