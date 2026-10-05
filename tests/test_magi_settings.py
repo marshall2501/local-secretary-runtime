@@ -13,6 +13,8 @@ from ritsuko.magi.settings import (
     fallback_member_specs,
     normalize_retry_http_codes,
     provider_defaults,
+)
+from infrastructure.postgres.magi_settings_repository import (
     save_member_assignments,
     upsert_llm_profile,
 )
@@ -152,7 +154,7 @@ class MagiSettingsTests(unittest.TestCase):
             "enabled": True,
         }
         with patch(
-            "ritsuko.magi.settings.ensure_llm_connection",
+            "infrastructure.postgres.magi_settings_repository.ensure_llm_connection",
             return_value=connection,
         ):
             saved = upsert_llm_profile(
@@ -219,7 +221,7 @@ class MagiSettingsTests(unittest.TestCase):
             for index, name in enumerate(MEMBER_NAMES, start=1)
         ]
         with patch(
-            "ritsuko.magi.settings.load_member_specs",
+            "infrastructure.postgres.magi_settings_repository.load_member_specs",
             return_value=assignments,
         ):
             save_member_assignments(db, assignments)
