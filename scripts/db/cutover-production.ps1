@@ -66,6 +66,36 @@ if ($legacyExists -ne '0') { throw "Legacy database target already exists: $lega
 
 $oldRenamed = $false
 $newPromoted = $false
+
+function Restore-DatabaseNames {
+    if ($newPromoted) {
+        try {
+            & docker exec $container psql -X -A -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE secretary RENAME TO $ReplacementDatabase;"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning 'Automatic rollback could not restore the replacement database name.'
+                return
+            }
+            $script:newPromoted = $false
+        } catch {
+            Write-Warning 'Automatic rollback raised an error while restoring the replacement database name.'
+            return
+        }
+    }
+    if ($oldRenamed) {
+        try {
+            & docker exec $container psql -X -A -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE $legacy RENAME TO secretary;"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Automatic rollback failed. Preserved old database remains named $legacy."
+                return
+            }
+            $script:oldRenamed = $false
+            Write-Warning 'Cutover failed; original database names were restored automatically.'
+        } catch {
+            Write-Warning "Automatic rollback raised an error. Preserved old database remains named $legacy."
+        }
+    }
+}
+
 try {
     & docker exec $container psql -X -A -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE secretary RENAME TO $legacy;"
     if ($LASTEXITCODE -ne 0) { throw 'Failed to preserve old secretary database under legacy name.' }
@@ -74,29 +104,13 @@ try {
     & docker exec $container psql -X -A -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE $ReplacementDatabase RENAME TO secretary;"
     if ($LASTEXITCODE -ne 0) { throw 'Failed to promote validated replacement database.' }
     $newPromoted = $true
-} catch {
-    if ($oldRenamed -and -not $newPromoted) {
-        try {
-            & docker exec $container psql -X -A -U secretary_admin -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE $legacy RENAME TO secretary;"
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Automatic rollback failed. Preserved old database remains named $legacy."
-            } else {
-                Write-Warning 'Promotion failed; old secretary database name was restored automatically.'
-                $oldRenamed = $false
-            }
-        } catch {
-            Write-Warning "Automatic rollback raised an error. Preserved old database remains named $legacy."
-        }
+
+    $newState = Invoke-AdminScalar 'secretary' "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
+    if ($newState -ne '8|008_runtime_privileges.sql') {
+        throw "Promoted secretary migration state is unexpected: $newState"
     }
-    throw
-}
 
-$newState = Invoke-AdminScalar 'secretary' "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-if ($newState -ne '8|008_runtime_privileges.sql') {
-    throw "Promoted secretary migration state is unexpected: $newState"
-}
-
-$counts = Invoke-AdminScalar 'secretary' @"
+    $counts = Invoke-AdminScalar 'secretary' @"
 SELECT
   (SELECT count(*) FROM secretary.entities)::text || '|' ||
   (SELECT count(*) FROM secretary.claims)::text || '|' ||
@@ -107,10 +121,14 @@ SELECT
   (SELECT count(*) FROM secretary.service_billing_profiles)::text;
 "@
 
-$legacyPresent = Invoke-AdminScalar 'postgres' "SELECT count(*) FROM pg_database WHERE datname='$legacy';"
-$replacementPresent = Invoke-AdminScalar 'postgres' "SELECT count(*) FROM pg_database WHERE datname='$ReplacementDatabase';"
-if ($legacyPresent -ne '1' -or $replacementPresent -ne '0') {
-    throw 'Post-cutover database identity verification failed.'
+    $legacyPresent = Invoke-AdminScalar 'postgres' "SELECT count(*) FROM pg_database WHERE datname='$legacy';"
+    $replacementPresent = Invoke-AdminScalar 'postgres' "SELECT count(*) FROM pg_database WHERE datname='$ReplacementDatabase';"
+    if ($legacyPresent -ne '1' -or $replacementPresent -ne '0') {
+        throw 'Post-cutover database identity verification failed.'
+    }
+} catch {
+    Restore-DatabaseNames
+    throw
 }
 
 Write-Host ''
@@ -125,3 +143,4 @@ Write-Host '=== Production cutover ==='
 } | Format-List
 Write-Host 'PASS: validated replacement database promoted to secretary; old production retained as rollback database.'
 Write-Host 'No client sessions were terminated by the cutover script.'
+
