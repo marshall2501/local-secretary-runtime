@@ -6,10 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
-from pkb.correction_service import correct_entity
+from infrastructure.postgres.pkb_correction_repository import correct_entity
 from pkb.ingestion_gate import InputRecord, ProposedClaim
 from scripts.pkb.smoke_isolated import connection
-from pkb.write_service import write_one
+from infrastructure.postgres.pkb_write_repository import write_one
 
 DB = "secretary_pkb_proto_20260927"
 WRITER = "secretary_pkb_proto_writer_20260927"
