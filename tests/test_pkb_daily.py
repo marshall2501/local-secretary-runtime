@@ -623,12 +623,11 @@ class DailyPKBParserTests(unittest.TestCase):
                 "status": "mystery",
             })
 
-    @patch("interfaces.web.app.load_entity_detail")
-    @patch("interfaces.web.app.resolve_component_reference")
+    @patch("interfaces.web.app._pkb_repository.load_entity_detail")
+    @patch("interfaces.web.app._pkb_repository.resolve_component_reference")
     @patch("interfaces.web.app._entity_map")
-    @patch("interfaces.web.app.connection")
     def test_magi_pkb_request_resolves_component_and_returns_model(
-        self, connection_mock, entity_map_mock, resolve_mock, detail_mock
+        self, entity_map_mock, resolve_mock, detail_mock
     ):
         entity_map_mock.return_value = ENTITIES
         resolve_mock.return_value = {
@@ -684,13 +683,11 @@ class DailyPKBParserTests(unittest.TestCase):
         resolve_mock.assert_called_once()
         detail_mock.assert_called_once()
 
-    @patch("interfaces.web.app.list_components")
-    @patch("interfaces.web.app.load_entity_detail")
-    @patch("interfaces.web.app.connection")
+    @patch("interfaces.web.app._pkb_repository.list_components")
+    @patch("interfaces.web.app._pkb_repository.load_entity_detail")
     def test_cooperative_pkb_probe_expands_known_pc_to_component_overview(
-        self, connection_mock, detail_mock, components_mock
+        self, detail_mock, components_mock
     ):
-        db = connection_mock.return_value.__enter__.return_value
         detail_mock.return_value = {
             "entity": {
                 "id": ENTITIES["メインPC"]["id"],
@@ -764,8 +761,10 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIsInstance(result["result"]["current"][0]["valid_from"], str)
         self.assertIsInstance(result["result"]["relations"][0]["valid_from"], str)
         self.assertIsInstance(result["result"]["events"][0]["recorded_at"], str)
-        detail_mock.assert_called_once_with(db, ENTITIES["メインPC"]["id"])
-        components_mock.assert_called_once()
+        detail_mock.assert_called_once_with(ENTITIES["メインPC"]["id"])
+        components_mock.assert_called_once_with(
+            UUID(ENTITIES["メインPC"]["id"])
+        )
 
     def test_core_scope_routes_current_vs_latest_driver_to_pkb_web_compare(self):
         result = scope_core_request(
