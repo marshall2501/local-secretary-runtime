@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from pkb.ingestion_gate import InputRecord, ProposedClaim
-from pkb.write_service import _literal_gate, payload_hash, write_one
+from pkb.write_service import _literal_gate, payload_hash
+from infrastructure.postgres.pkb_write_repository import write_one
 
 AT = datetime(2026, 9, 27, tzinfo=timezone.utc)
 
