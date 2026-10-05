@@ -30,6 +30,9 @@ from infrastructure.postgres.core_advisor_repository import (
 from infrastructure.postgres.core_execution_repository import PostgresCoreExecutionRepository
 from infrastructure.postgres.magi_task_repository import PostgresMagiTaskRepository
 from infrastructure.postgres.magi_settings_repository import PostgresMagiSettingsRepository
+from infrastructure.postgres.service_connection_repository import PostgresServiceConnectionRepository
+from infrastructure.postgres.service_billing_settings_repository import PostgresServiceBillingSettingsRepository
+from infrastructure.postgres.finance_repository import PostgresFinanceRepository
 from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
 from infrastructure.postgres.entity_catalog_repository import PostgresEntityCatalogRepository
 from infrastructure.postgres.pkb_repository import PostgresPkbRepository
@@ -65,6 +68,18 @@ def build_magi_task_repository() -> PostgresMagiTaskRepository:
 
 def build_magi_settings_repository() -> PostgresMagiSettingsRepository:
     return PostgresMagiSettingsRepository(connection)
+
+
+def build_service_connection_repository() -> PostgresServiceConnectionRepository:
+    return PostgresServiceConnectionRepository(connection)
+
+
+def build_service_billing_settings_repository() -> PostgresServiceBillingSettingsRepository:
+    return PostgresServiceBillingSettingsRepository(connection)
+
+
+def build_finance_repository() -> PostgresFinanceRepository:
+    return PostgresFinanceRepository(connection)
 
 
 def write_core_advisor_shadow(task_id, shadow, event_type):
