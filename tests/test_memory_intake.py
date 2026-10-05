@@ -7,7 +7,7 @@ from pkb.memory_contracts import MemoryIntake, validate_draft
 from pkb.memory_extractor import extract
 from pkb.memory_grounding import ground, resolve_entity
 from pkb.ingestion_gate import memory_write_decision
-from pkb.memory_intake import write_intake
+from infrastructure.postgres.pkb_memory_repository import write_intake
 from pkb.memory_registry import EFFECT_RULES
 
 CATALOG = [dict(id='1', names={'サブPC','PC'}, kind='computer', retired=False),
