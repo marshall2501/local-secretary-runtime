@@ -40,9 +40,13 @@ def register(portal_context: dict):
         }
     
         try:
-            with connection() as db:
-                state["stored"] = load_finance_dashboard(db, **state["filters"])
-                state["filter_options"] = finance_filter_options(db)
+            state["stored"] = load_finance_dashboard(
+                _finance_repository,
+                **state["filters"],
+            )
+            state["filter_options"] = finance_filter_options(
+                _finance_repository
+            )
         except Exception as exc:
             state["stored_error"] = str(exc)
     
@@ -112,8 +116,10 @@ def register(portal_context: dict):
                         if filters["start_date"] and filters["end_date"] and filters["start_date"] > filters["end_date"]:
                             ui.notify("開始日は終了日以前にしてください", type="warning")
                             return
-                        with connection() as db:
-                            state["stored"] = load_finance_dashboard(db, **filters)
+                        state["stored"] = load_finance_dashboard(
+                            _finance_repository,
+                            **filters,
+                        )
                         state["filters"] = filters
                         state["stored_error"] = None
                     except Exception as exc:
@@ -283,8 +289,10 @@ def register(portal_context: dict):
                                         filters["page"] = 1
                                     elif target_page is not None:
                                         filters["page"] = target_page
-                                    with connection() as db:
-                                        state["stored"] = load_finance_dashboard(db, **filters)
+                                    state["stored"] = load_finance_dashboard(
+                                        _finance_repository,
+                                        **filters,
+                                    )
                                     state["filters"] = filters
                                     state["stored_error"] = None
                                 except Exception as exc:
@@ -547,13 +555,12 @@ def register(portal_context: dict):
                                 import_button.disable()
                                 try:
                                     def _commit():
-                                        with connection() as db:
-                                            return commit_import(
-                                                db,
-                                                state["preview"],
-                                                state["csv_bytes"],
-                                                state["filename"] or "moneyforward.csv",
-                                            )
+                                        return commit_import(
+                                            _finance_repository,
+                                            state["preview"],
+                                            state["csv_bytes"],
+                                            state["filename"] or "moneyforward.csv",
+                                        )
                                     state["import_result"] = await run.io_bound(_commit)
                                     result = state["import_result"]
                                     if result.status == "committed":
@@ -566,15 +573,19 @@ def register(portal_context: dict):
                                         ui.notify("同じCSVはすでにImport済みです", type="info")
                                     else:
                                         ui.notify("Importを実行しませんでした: " + str(result.reason), type="warning")
-                                    with connection() as db:
-                                        state["import_plan"] = plan_import(
-                                            db, state["preview"], state["csv_bytes"]
-                                        )
-                                        state["stored"] = load_finance_dashboard(
-                                            db, **state["filters"]
-                                        )
-                                        state["filter_options"] = finance_filter_options(db)
-                                        state["stored_error"] = None
+                                    state["import_plan"] = plan_import(
+                                        _finance_repository,
+                                        state["preview"],
+                                        state["csv_bytes"],
+                                    )
+                                    state["stored"] = load_finance_dashboard(
+                                        _finance_repository,
+                                        **state["filters"],
+                                    )
+                                    state["filter_options"] = finance_filter_options(
+                                        _finance_repository
+                                    )
+                                    state["stored_error"] = None
                                     stored_finance.refresh()
                                 except Exception as exc:
                                     state["import_result"] = None
@@ -610,8 +621,11 @@ def register(portal_context: dict):
                     try:
                         filename, data = await _uploaded_bytes(event)
                         preview = analyze_moneyforward_csv(data, filename)
-                        with connection() as db:
-                            import_plan = plan_import(db, preview, data)
+                        import_plan = plan_import(
+                            _finance_repository,
+                            preview,
+                            data,
+                        )
                         state["preview"] = preview
                         state["filename"] = filename
                         state["csv_bytes"] = data
