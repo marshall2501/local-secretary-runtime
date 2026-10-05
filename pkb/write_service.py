@@ -1,21 +1,11 @@
-"""Single-claim, fictional-only PostgreSQL write slice for the self-built PKB.
-
-This is NOT a production memory writer or an LLM semantic verifier.
-Use only a dedicated secretary_pkb_proto_* DB with the 001-004 schema and the
-db/isolated/pkb_proto/005_pkb_proto_receipts.sql prototype extension.
-"""
+"""Pure single-claim PKB write rules and persistence-port delegate."""
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass
-from uuid import UUID
 
-from .ingestion_gate import InputRecord, ProposedClaim, Route, assess
-from .entity_model_service import (
-    advance_state_for_event, authoritative_entity_aliases, classify_predicate,
-)
-from config.runtime_database import allowed_daily_connection, connection_mode, source_ref_allowed
+from .ingestion_gate import InputRecord, ProposedClaim
 
 KNOWN_PREDICATES = {
     "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
@@ -26,7 +16,7 @@ UNCERTAIN = ("かもしれない", "未確認", "不明", "ではなく", "訂�
 
 @dataclass(frozen=True)
 class WriteResult:
-    status: str  # inserted | replayed | review | rejected
+    status: str
     reason: str
     claim_id: str | None = None
     source_id: str | None = None
@@ -57,8 +47,8 @@ def payload_hash(record: InputRecord, claim: ProposedClaim) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
-    """Conservative *additional* gate, not general Japanese semantic validation."""
+def literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
+    """Conservative additional gate, not general Japanese semantic validation."""
     if claim.predicate not in KNOWN_PREDICATES:
         return "predicate_not_supported_by_first_slice"
     quote = claim.evidence_quote
@@ -71,129 +61,9 @@ def _literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
     return None
 
 
-def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
-    """Atomic initial write. DB connector is injected by the isolated test harness.
+# Backward-compatible internal name for existing tests/importers.
+_literal_gate = literal_gate
 
-    The DB login must be separately provisioned with restricted memory-write
-    privileges. The live DB name is rejected *before any write*. This method
-    handles one claim per input for the first prototype, not full episode
-    extraction, correction, or conflict resolution.
-    """
-    if not allowed_daily_connection(db):
-        raise ValueError("Refusing non-prototype or non-local PostgreSQL connection")
-    if not source_ref_allowed(db, record.source_ref):
-        return WriteResult("rejected", "fictional_fixture_only")
 
-    fingerprint = payload_hash(record, claim)
-    with db.transaction():
-        with db.cursor() as cur:
-            # Serialize retries with the same input ID. The PRIMARY KEY remains
-            # the final cross-process guard; hash collisions only add contention.
-            cur.execute(
-                "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                (record.input_id,),
-            )
-            # The advisory transaction lock already serializes this input ID.
-            # FOR UPDATE would unnecessarily require UPDATE privilege on the
-            # restricted prototype writer; SELECT is sufficient here.
-            cur.execute(
-                """SELECT payload_sha256, source_id, claim_id
-                   FROM secretary.pkb_input_receipts WHERE input_id=%s""",
-                (record.input_id,),
-            )
-            existing = cur.fetchone()
-            if existing:
-                digest, source_id, claim_id = existing
-                if digest != fingerprint:
-                    return WriteResult("rejected", "input_id_reused_with_different_payload")
-                return WriteResult("replayed", "same_input_already_written",
-                                   str(claim_id), str(source_id))
-
-            # Use authoritative entity IDs/names, never LLM-created identifiers.
-            aliases = authoritative_entity_aliases(cur)
-            outcome = assess(record, claim, aliases=aliases)
-            if outcome.route is not Route.AUTO_CANDIDATE:
-                return WriteResult(
-                    "rejected" if outcome.route is Route.REJECT else "review",
-                    outcome.reason,
-                )
-            literal_error = _literal_gate(record, claim)
-            if literal_error:
-                return WriteResult("review", literal_error)
-
-            semantic_kind = classify_predicate(claim.predicate)
-
-            # Historical Events are append-only by design. A later driver update
-            # is a new Event, not a conflict with the earlier update. State
-            # succession is handled separately by advance_state_for_event().
-            # Non-event predicates remain conservative until their replacement
-            # semantics are explicitly modeled.
-            if semantic_kind != "event":
-                cur.execute(
-                    """SELECT id FROM secretary.claims
-                       WHERE entity_id=%s AND predicate=%s
-                         AND retracted_at IS NULL
-                       LIMIT 1""",
-                    (UUID(claim.entity_key), claim.predicate),
-                )
-                if cur.fetchone():
-                    return WriteResult("review", "existing_claim_requires_conflict_resolution")
-
-            from psycopg.types.json import Jsonb
-
-            cur.execute(
-                """INSERT INTO secretary.sources
-                   (source_type, uri, citation, retrieved_at, recorded_at,
-                    confidentiality, metadata)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
-                   RETURNING id""",
-                (
-                    record.source_kind, record.source_ref, record.input_id,
-                    record.recorded_at, record.recorded_at,
-                    record.confidentiality,
-                    Jsonb({
-                        **({"fictional_only": True} if connection_mode(db) == "isolated" else {}),
-                        "input_id": record.input_id,
-                        "original_text": record.text,
-                    }),
-                ),
-            )
-            source_id = cur.fetchone()[0]
-            cur.execute(
-                """INSERT INTO secretary.claims
-                   (entity_id, source_id, claim_type, semantic_kind,
-                    predicate, value, evidence, origin, verification_status,
-                    valid_from, recorded_at)
-                   VALUES (%s,%s,'fact',%s,%s,%s,%s,'user_explicit','unverified',%s,%s)
-                   RETURNING id""",
-                (
-                    UUID(claim.entity_key), source_id,
-                    semantic_kind,
-                    claim.predicate, Jsonb(claim.value),
-                    claim.evidence_quote, record.occurred_at, record.recorded_at,
-                ),
-            )
-            claim_id = cur.fetchone()[0]
-            advance_state_for_event(
-                cur,
-                entity_id=UUID(claim.entity_key),
-                source_id=source_id,
-                event_predicate=claim.predicate,
-                value=claim.value,
-                evidence=claim.evidence_quote,
-                valid_from=record.occurred_at,
-                recorded_at=record.recorded_at,
-            )
-            cur.execute(
-                """INSERT INTO secretary.pkb_input_receipts
-                   (input_id, payload_sha256, source_id, claim_id)
-                   VALUES (%s,%s,%s,%s)""",
-                (record.input_id, fingerprint, source_id, claim_id),
-            )
-            return WriteResult(
-                "inserted",
-                "fictional_single_claim_committed"
-                if connection_mode(db) == "isolated"
-                else "single_claim_committed",
-                str(claim_id), str(source_id),
-            )
+def write_one(repository, record: InputRecord, claim: ProposedClaim) -> WriteResult:
+    return repository.write_one(record, claim)
