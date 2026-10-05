@@ -43,6 +43,7 @@ from bootstrap.web_runtime import (
     build_core_execution_repository,
     build_core_task_queries,
     build_entity_catalog_service,
+    build_magi_task_repository,
     build_pkb_repository,
     claim_core_cooperative_probe,
     connection,
@@ -104,18 +105,6 @@ from ritsuko.application.driver_compare import (
     web_latest_version_value,
 )
 from ritsuko.core.request_scope import core_answer, scope_core_request
-from ritsuko.tasks.magi_task_store import (
-    abort_proposal_review as abort_magi_proposal_review,
-    abort_user_resume as abort_magi_user_resume,
-    claim_proposal_review as claim_magi_proposal_review,
-    claim_user_resume as claim_magi_user_resume,
-    create_task as create_magi_core_task,
-    fail_task as fail_magi_core_task,
-    finalize_proposal_review as finalize_magi_proposal_review,
-    persist_session as persist_magi_core_session,
-    prepare_memory_intake as prepare_magi_memory_intake,
-    record_pkb_read as record_magi_pkb_read,
-)
 from ritsuko.magi.settings import (
     DEFAULT_RETRY_HTTP_CODES,
     DEFAULT_RETRY_WITHIN_TURN,
@@ -198,6 +187,7 @@ from infrastructure.system_debug import (
 )
 
 _pkb_repository = build_pkb_repository()
+_magi_task_repository = build_magi_task_repository()
 
 def _notify_client(client, message: str, *, type: str) -> None:
     """Send a notification through a stable client context.
@@ -922,43 +912,43 @@ def _execute_magi_pkb_request(
 
 
 def _create_magi_core_task_record(task_id: UUID, request: str, member_specs: list[dict]) -> None:
-    create_task_record(connection, task_id, request, member_specs)
+    create_task_record(_magi_task_repository, task_id, request, member_specs)
 
 
 def _claim_magi_user_resume_record(task_id: UUID, reply_length: int, reply_fingerprint: str):
-    return claim_user_resume_record(connection, task_id, reply_length, reply_fingerprint)
+    return claim_user_resume_record(_magi_task_repository, task_id, reply_length, reply_fingerprint)
 
 
 def _abort_magi_user_resume_record(task_id: UUID, error_type: str) -> None:
-    abort_user_resume_record(connection, task_id, error_type)
+    abort_user_resume_record(_magi_task_repository, task_id, error_type)
 
 
 def _claim_magi_proposal_review_record(task_id: UUID, decision: str, memory_result: dict | None):
-    return claim_proposal_review_record(connection, task_id, decision, memory_result)
+    return claim_proposal_review_record(_magi_task_repository, task_id, decision, memory_result)
 
 
 def _finalize_magi_proposal_review_record(task_id: UUID, session: dict, selected_capability: str | None) -> dict:
-    return finalize_proposal_review_record(connection, task_id, session, selected_capability)
+    return finalize_proposal_review_record(_magi_task_repository, task_id, session, selected_capability)
 
 
 def _abort_magi_proposal_review_record(task_id: UUID, error_type: str) -> None:
-    abort_proposal_review_record(connection, task_id, error_type)
+    abort_proposal_review_record(_magi_task_repository, task_id, error_type)
 
 
 def _prepare_magi_memory_intake_record(task_id: UUID) -> MemoryIntake:
-    return prepare_memory_intake_record(connection, task_id)
+    return prepare_memory_intake_record(_magi_task_repository, task_id)
 
 
 def _persist_magi_core_session_record(task_id: UUID, session: dict, selected_capability: str | None = None) -> dict:
-    return persist_session_record(connection, task_id, session, selected_capability)
+    return persist_session_record(_magi_task_repository, task_id, session, selected_capability)
 
 
 def _record_magi_pkb_read_record(task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
-    return record_pkb_read_record(connection, task_id, execution, pending_request)
+    return record_pkb_read_record(_magi_task_repository, task_id, execution, pending_request)
 
 
 def _fail_magi_core_task_record(task_id: UUID, error_type: str) -> None:
-    fail_task_record(connection, task_id, error_type)
+    fail_task_record(_magi_task_repository, task_id, error_type)
 
 
 def _execute_core_read(capability: str, text: str) -> dict:
