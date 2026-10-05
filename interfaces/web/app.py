@@ -43,6 +43,7 @@ from bootstrap.web_runtime import (
     build_core_execution_repository,
     build_core_task_queries,
     build_entity_catalog_service,
+    build_magi_settings_repository,
     build_magi_task_repository,
     build_pkb_repository,
     claim_core_cooperative_probe,
@@ -188,6 +189,7 @@ from infrastructure.system_debug import (
 
 _pkb_repository = build_pkb_repository()
 _magi_task_repository = build_magi_task_repository()
+_magi_settings_repository = build_magi_settings_repository()
 
 def _notify_client(client, message: str, *, type: str) -> None:
     """Send a notification through a stable client context.
@@ -639,20 +641,23 @@ def _load_magi_configuration(
     """Load DB settings, importing env defaults only when DB has no assignments."""
     with connection() as db:
         bootstrap_connection_auth_from_env(db)
-        sync_ollama_profiles(
-            db,
-            installed_ollama_models,
-            endpoint=os.environ.get("OLLAMA_HOST") or None,
-        )
-        bootstrap_member_assignments(
-            db, fallback_member_specs(default_local_model)
-        )
-        return list_llm_profiles(db), load_member_specs(db)
+    sync_ollama_profiles(
+        _magi_settings_repository,
+        installed_ollama_models,
+        endpoint=os.environ.get("OLLAMA_HOST") or None,
+    )
+    bootstrap_member_assignments(
+        _magi_settings_repository,
+        fallback_member_specs(default_local_model),
+    )
+    return (
+        list_llm_profiles(_magi_settings_repository),
+        load_member_specs(_magi_settings_repository),
+    )
 
 
 def _save_magi_assignments(assignments: list[dict]) -> list[dict]:
-    with connection() as db:
-        return save_member_assignments(db, assignments)
+    return save_member_assignments(_magi_settings_repository, assignments)
 
 
 def _register_magi_profile(
@@ -668,21 +673,20 @@ def _register_magi_profile(
     retry_http_codes: object | None = None,
     profile_id: str | None = None,
 ) -> dict:
-    with connection() as db:
-        return upsert_llm_profile(
-            db,
-            model=model,
-            connection_id=connection_id,
-            provider=provider,
-            display_name=display_name,
-            endpoint=endpoint,
-            credential_env=credential_env,
-            context_window_tokens=context_window_tokens,
-            ollama_num_predict=ollama_num_predict,
-            retry_http_codes=retry_http_codes,
-            enabled=True,
-            profile_id=profile_id,
-        )
+    return upsert_llm_profile(
+        _magi_settings_repository,
+        model=model,
+        connection_id=connection_id,
+        provider=provider,
+        display_name=display_name,
+        endpoint=endpoint,
+        credential_env=credential_env,
+        context_window_tokens=context_window_tokens,
+        ollama_num_predict=ollama_num_predict,
+        retry_http_codes=retry_http_codes,
+        enabled=True,
+        profile_id=profile_id,
+    )
 
 
 def _entities(_db=None) -> list[dict]:
