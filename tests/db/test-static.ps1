@@ -186,6 +186,9 @@ try {
     if ($launcherText -notmatch 'secretary_rebuild_') {
         throw 'Production daily launcher must allow an approved rebuilt production database.'
     }
+    if ($launcherText -notmatch "\$migrationSummary.*FROM secretary\.schema_migrations;") {
+        throw 'Daily launcher migration summary must count rows from secretary.schema_migrations.'
+    }
 
     $rebuildPath = Join-Path $root 'scripts/db/rebuild-production.ps1'
     $rebuildText = Get-Content -LiteralPath $rebuildPath -Raw
