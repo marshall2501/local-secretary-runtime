@@ -1954,7 +1954,7 @@ def main() -> None:
         host="127.0.0.1",
         port=resolve_daily_web_port(),
         reload=False,
-        show=False,
+        show=True,
         title="Local Secretary PKB",
     )
 
