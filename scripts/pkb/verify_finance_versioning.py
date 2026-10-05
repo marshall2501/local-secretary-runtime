@@ -12,10 +12,10 @@ from pathlib import Path
 
 import psycopg
 
-from capabilities.finance.finance_import import (
+from capabilities.finance.finance_import import SOURCE_SYSTEM
+from infrastructure.postgres.finance_repository import (
     EXPECTED_DB,
     EXPECTED_USER,
-    SOURCE_SYSTEM,
     commit_import,
 )
 from capabilities.finance.finance_preview import analyze_moneyforward_csv
