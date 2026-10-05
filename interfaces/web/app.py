@@ -747,9 +747,7 @@ _clarified_driver_web_target = clarified_driver_web_target
 def _resolve_driver_web_target(text: str) -> dict:
     return resolve_driver_web_target(
         text,
-        connection_factory=connection,
-        resolve_component=resolve_component_reference,
-        load_detail=load_entity_detail,
+        repository=_pkb_repository,
     )
 
 
