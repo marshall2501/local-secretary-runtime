@@ -11,6 +11,7 @@ reference. Legacy env values remain bootstrap/fallback only.
 from __future__ import annotations
 
 import os
+from typing import Protocol
 
 from integrations.connections.credential_resolver import env_name_to_credential_ref
 from integrations.llm.ollama_runtime import (
@@ -30,6 +31,23 @@ PROVIDERS = ("ollama", "openai", "gemini")
 DEFAULT_TIMEOUT_SECONDS = 120
 DEFAULT_RETRY_HTTP_CODES = (429, 500, 502, 503, 504)
 DEFAULT_RETRY_WITHIN_TURN = True
+
+
+class MagiSettingsRepository(Protocol):
+    def list_llm_profiles(
+        self, *, include_disabled: bool = False
+    ) -> list[dict]: ...
+    def upsert_llm_profile(self, **kwargs) -> dict: ...
+    def sync_ollama_profiles(
+        self, models: list[str], *, endpoint: str | None = None
+    ) -> list[dict]: ...
+    def load_member_specs(self) -> list[dict]: ...
+    def save_member_assignments(
+        self, assignments: list[dict]
+    ) -> list[dict]: ...
+    def bootstrap_member_assignments(
+        self, fallback_specs: list[dict]
+    ) -> list[dict]: ...
 
 
 def _env_bool(name: str, default: bool) -> bool:
