@@ -789,13 +789,12 @@ def _execute_cooperative_local_probe(
         else None
     )
     if target and target.get("id"):
-        with connection() as db:
-            detail = _json_safe(
-                _pkb_repository.load_entity_detail(str(target["id"])) or {}
-            )
-            items = _json_safe(
-                _pkb_repository.list_components(UUID(str(target["id"])))
-            )
+        detail = _json_safe(
+            _pkb_repository.load_entity_detail(str(target["id"])) or {}
+        )
+        items = _json_safe(
+            _pkb_repository.list_components(UUID(str(target["id"])))
+        )
         result = {
             "status": "ok",
             "result_kind": "components",
@@ -843,82 +842,81 @@ def _execute_magi_pkb_request(
     requested = str(pending_request.get("what") or "").strip()
     combined = (user_raw.strip() + "\n" + requested).strip()
 
-    with connection() as db:
-        entities = _entity_map(db)
-        parents = [
-            row for name, row in sorted(
-                entities.items(), key=lambda item: len(item[0]), reverse=True
-            )
-            if name and name in combined and row.get("entity_type") == "computer"
-        ]
-        roles = [token for token in COMPONENT_ROLE_TOKENS if token in combined]
+    entities = _entity_map()
+    parents = [
+        row for name, row in sorted(
+            entities.items(), key=lambda item: len(item[0]), reverse=True
+        )
+        if name and name in combined and row.get("entity_type") == "computer"
+    ]
+    roles = [token for token in COMPONENT_ROLE_TOKENS if token in combined]
 
-        if len(parents) == 1 and len(roles) == 1:
-            parent = parents[0]
-            component = _pkb_repository.resolve_component_reference(
-                parent["name"], roles[0]
+    if len(parents) == 1 and len(roles) == 1:
+        parent = parents[0]
+        component = _pkb_repository.resolve_component_reference(
+            parent["name"], roles[0]
+        )
+        if component is not None:
+            detail = _json_safe(
+                _pkb_repository.load_entity_detail(component["id"]) or {}
             )
-            if component is not None:
-                detail = _json_safe(
-                    _pkb_repository.load_entity_detail(component["id"]) or {}
+            current = [
+                item for item in (detail.get("current") or [])
+                if item.get("valid_to") is None
+            ][:20]
+            values = {
+                str(item.get("predicate")): item.get("value")
+                for item in current
+                if item.get("predicate")
+            }
+            manufacturer = str(values.get("manufacturer") or "").strip()
+            model = str(values.get("model") or "").strip()
+            driver = str(values.get("current_driver") or "").strip()
+            identity = model or component.get("name") or roles[0]
+            if manufacturer and manufacturer.lower() not in identity.lower():
+                identity = manufacturer + " " + identity
+            answer = (
+                f"PKBの記録では、{parent['name']}の{roles[0]}は {identity} です。"
+                if model
+                else (
+                    f"PKBには{parent['name']}の{roles[0]} Entity "
+                    f"{component.get('name')}がありますが、モデル属性は確認できませんでした。"
                 )
-                current = [
-                    item for item in (detail.get("current") or [])
-                    if item.get("valid_to") is None
-                ][:20]
-                values = {
-                    str(item.get("predicate")): item.get("value")
-                    for item in current
-                    if item.get("predicate")
-                }
-                manufacturer = str(values.get("manufacturer") or "").strip()
-                model = str(values.get("model") or "").strip()
-                driver = str(values.get("current_driver") or "").strip()
-                identity = model or component.get("name") or roles[0]
-                if manufacturer and manufacturer.lower() not in identity.lower():
-                    identity = manufacturer + " " + identity
-                answer = (
-                    f"PKBの記録では、{parent['name']}の{roles[0]}は {identity} です。"
-                    if model
-                    else (
-                        f"PKBには{parent['name']}の{roles[0]} Entity "
-                        f"{component.get('name')}がありますが、モデル属性は確認できませんでした。"
-                    )
-                )
-                if driver:
-                    answer += f" 現在ドライバーは {driver} です。"
-                result = {
-                    "status": "ok",
-                    "result_kind": "entity_detail",
-                    "total": len(current),
-                    "entity": detail.get("entity"),
-                    "parent": {
-                        "id": parent.get("id"),
-                        "name": parent.get("name"),
-                    },
-                    "component_role": component.get("relation_role"),
-                    "current": current,
-                    "relations": (detail.get("relations") or [])[:12],
-                    "events": (detail.get("events") or [])[:12],
-                }
-                return {
-                    "capability": "pkb_search",
-                    "result": result,
-                    "answer": answer,
-                    "total": len(current),
-                    "tool": "pkb",
-                    "operation": "entity_detail",
-                    "source_slug": "pkb-entity-detail",
-                    "citation": "RITSUKO bounded PKB Entity detail",
-                    "verified_by": "deterministic_pkb_query",
-                    "source_metadata": {
-                        "parent_entity_id": str(parent.get("id") or ""),
-                        "parent_entity_name": parent.get("name"),
-                        "component_entity_id": component.get("id"),
-                        "component_entity_name": component.get("name"),
-                        "relation_role": component.get("relation_role"),
-                    },
-                }
+            )
+            if driver:
+                answer += f" 現在ドライバーは {driver} です。"
+            result = {
+                "status": "ok",
+                "result_kind": "entity_detail",
+                "total": len(current),
+                "entity": detail.get("entity"),
+                "parent": {
+                    "id": parent.get("id"),
+                    "name": parent.get("name"),
+                },
+                "component_role": component.get("relation_role"),
+                "current": current,
+                "relations": (detail.get("relations") or [])[:12],
+                "events": (detail.get("events") or [])[:12],
+            }
+            return {
+                "capability": "pkb_search",
+                "result": result,
+                "answer": answer,
+                "total": len(current),
+                "tool": "pkb",
+                "operation": "entity_detail",
+                "source_slug": "pkb-entity-detail",
+                "citation": "RITSUKO bounded PKB Entity detail",
+                "verified_by": "deterministic_pkb_query",
+                "source_metadata": {
+                    "parent_entity_id": str(parent.get("id") or ""),
+                    "parent_entity_name": parent.get("name"),
+                    "component_entity_id": component.get("id"),
+                    "component_entity_name": component.get("name"),
+                    "relation_role": component.get("relation_role"),
+                },
+            }
 
     return _execute_core_read("pkb_search", requested or user_raw)
 
