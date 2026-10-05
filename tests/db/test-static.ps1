@@ -208,6 +208,26 @@ try {
         throw 'Fresh rebuild must not depend on legacy data restore.'
     }
 
+    $cutoverPath = Join-Path $root 'scripts/db/cutover-production.ps1'
+    if (-not (Test-Path -LiteralPath $cutoverPath -PathType Leaf)) {
+        throw 'Missing production cutover workflow.'
+    }
+    $cutoverText = Get-Content -LiteralPath $cutoverPath -Raw
+    foreach ($requiredMarker in @(
+        'Active connections remain on',
+        'ALTER DATABASE secretary RENAME TO',
+        'OldSecretaryPreserved = $true',
+        'Restore-DatabaseNames',
+        '008_runtime_privileges.sql'
+    )) {
+        if (-not $cutoverText.Contains($requiredMarker)) {
+            throw "Production cutover safety marker missing: $requiredMarker"
+        }
+    }
+    if ($cutoverText -match '(?i)pg_terminate_backend|dropdb|DROP\s+DATABASE') {
+        throw 'Production cutover must not terminate sessions or delete databases.'
+    }
+
     $dailyWebText = Get-Content -LiteralPath (Join-Path $root 'interfaces/web/app.py') -Raw
     if ($dailyWebText -notmatch 'resolve_daily_web_port\(\)') {
         throw 'Daily Web runtime must resolve the configured rehearsal port through the tested contract.'
