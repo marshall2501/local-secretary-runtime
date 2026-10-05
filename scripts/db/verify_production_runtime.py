@@ -196,26 +196,40 @@ def main() -> None:
     os.environ["LSA_PKB_DAILY_SECRET"] = str(args.runtime_secret_file)
 
     from infrastructure.postgres.pkb_runtime import connect_pkb_database
+    from infrastructure.postgres.pkb_repository import PostgresPkbRepository
+    from infrastructure.postgres.finance_repository import PostgresFinanceRepository
+    from infrastructure.postgres.service_connection_repository import (
+        PostgresServiceConnectionRepository,
+    )
+    from infrastructure.postgres.magi_settings_repository import (
+        PostgresMagiSettingsRepository,
+    )
+    from infrastructure.postgres.service_billing_settings_repository import (
+        PostgresServiceBillingSettingsRepository,
+    )
+    from infrastructure.postgres.magi_task_repository import (
+        PostgresMagiTaskRepository,
+    )
     from pkb.application.daily import register_text, search_text
-    from pkb.pending_service import list_pending
     from capabilities.finance.finance_preview import analyze_moneyforward_csv
-    from capabilities.finance.finance_import import commit_import, load_finance_dashboard
     from integrations.connections.service_connections import (
         LLM_INFERENCE,
         SERVICE_BILLING_READ,
-        list_service_connections,
-        upsert_service_connection,
-    )
-    from ritsuko.magi.settings import (
-        list_llm_profiles,
-        load_member_specs,
-        upsert_llm_profile,
-    )
-    from capabilities.service_billing.settings import (
-        list_service_billing_profiles,
-        upsert_service_billing_profile,
     )
     from ritsuko.application.task_records import create_task_record
+
+    pkb_repository = PostgresPkbRepository(connect_pkb_database)
+    finance_repository = PostgresFinanceRepository(connect_pkb_database)
+    service_connection_repository = PostgresServiceConnectionRepository(
+        connect_pkb_database
+    )
+    magi_settings_repository = PostgresMagiSettingsRepository(
+        connect_pkb_database
+    )
+    service_billing_repository = PostgresServiceBillingSettingsRepository(
+        connect_pkb_database
+    )
+    magi_task_repository = PostgresMagiTaskRepository(connect_pkb_database)
 
     expected_settings = None
     if args.settings_source_port is not None:
@@ -241,12 +255,22 @@ def main() -> None:
         if expected_settings is not None:
             actual_settings = {
                 "service_connections": len(
-                    list_service_connections(db, include_disabled=True)
+                    service_connection_repository.list_service_connections(
+                        include_disabled=True
+                    )
                 ),
-                "llm_profiles": len(list_llm_profiles(db, include_disabled=True)),
-                "magi_member_assignments": len(load_member_specs(db)),
+                "llm_profiles": len(
+                    magi_settings_repository.list_llm_profiles(
+                        include_disabled=True
+                    )
+                ),
+                "magi_member_assignments": len(
+                    magi_settings_repository.load_member_specs()
+                ),
                 "service_billing_profiles": len(
-                    list_service_billing_profiles(db, include_disabled=True)
+                    service_billing_repository.list_service_billing_profiles(
+                        include_disabled=True
+                    )
                 ),
             }
             if actual_settings != expected_settings:
@@ -266,7 +290,7 @@ def main() -> None:
 
     write_result = register_text(
         f"{entity_name}をDRV-RH1へ更新した。",
-        connection_factory=connect_pkb_database,
+        repository=pkb_repository,
         interpreter=_no_model,
     )
     if write_result.get("status") != "inserted":
@@ -287,26 +311,28 @@ def main() -> None:
 
     search_result = search_text(
         _pkb_event_read_query(entity_name),
-        connection_factory=connect_pkb_database,
+        repository=pkb_repository,
     )
     if int(search_result.get("total") or 0) < 1:
         raise RuntimeError("production PKB read probe did not find the written state")
 
     pending_result = register_text(
         "production rehearsal ambiguous input " + suffix,
-        connection_factory=connect_pkb_database,
+        repository=pkb_repository,
         interpreter=_no_model,
     )
     pending_id = pending_result.get("pending_id")
     if pending_result.get("status") != "review" or not pending_id:
         raise RuntimeError("production Pending probe did not create a review item")
-    with connect_pkb_database() as db:
-        if not any(str(row["id"]) == str(pending_id) for row in list_pending(db)):
-            raise RuntimeError("production Pending probe could not read its review item")
+    if not any(
+        str(row["id"]) == str(pending_id)
+        for row in pkb_repository.list_pending()
+    ):
+        raise RuntimeError("production Pending probe could not read its review item")
 
     task_id = uuid4()
     create_task_record(
-        connect_pkb_database,
+        magi_task_repository,
         task_id,
         "production runtime rehearsal task",
         [],
@@ -333,43 +359,42 @@ def main() -> None:
     preview = analyze_moneyforward_csv(
         csv_text.encode("utf-8"), "production-rehearsal.csv"
     )
-    with connect_pkb_database() as db:
-        finance_result = commit_import(
-            db, preview, csv_text.encode("utf-8"), "production-rehearsal.csv"
-        )
-        if finance_result.status != "committed" or finance_result.inserted != 1:
-            raise RuntimeError("Finance production import probe failed")
-        dashboard = load_finance_dashboard(
-            db, search_text="Production rehearsal", row_mode="all"
-        )
-        if dashboard.transaction_count != 1:
-            raise RuntimeError("Finance production read probe failed")
+    finance_result = finance_repository.commit_import(
+        preview,
+        csv_text.encode("utf-8"),
+        "production-rehearsal.csv",
+    )
+    if finance_result.status != "committed" or finance_result.inserted != 1:
+        raise RuntimeError("Finance production import probe failed")
+    dashboard = finance_repository.load_finance_dashboard(
+        search_text="Production rehearsal",
+        row_mode="all",
+    )
+    if dashboard.transaction_count != 1:
+        raise RuntimeError("Finance production read probe failed")
 
-    with connect_pkb_database() as db:
-        llm_connection = upsert_service_connection(
-            db,
-            adapter_key="ollama",
-            display_name="Rehearsal Ollama " + suffix,
-            endpoint="http://127.0.0.1:11434",
-            capabilities=[LLM_INFERENCE],
-            connection_type="none",
-            connection_role="llm",
-            enabled=True,
-        )
-        profile = upsert_llm_profile(
-            db,
-            connection_id=llm_connection["id"],
-            model="rehearsal-" + suffix,
-            display_name="Rehearsal Profile " + suffix,
-            context_window_tokens=4096,
-            ollama_num_predict=512,
-            enabled=True,
-        )
-        if not profile.get("id"):
-            raise RuntimeError("MAGI settings production write probe failed")
+    llm_connection = service_connection_repository.upsert_service_connection(
+        adapter_key="ollama",
+        display_name="Rehearsal Ollama " + suffix,
+        endpoint="http://127.0.0.1:11434",
+        capabilities=[LLM_INFERENCE],
+        connection_type="none",
+        connection_role="llm",
+        enabled=True,
+    )
+    profile = magi_settings_repository.upsert_llm_profile(
+        connection_id=llm_connection["id"],
+        model="rehearsal-" + suffix,
+        display_name="Rehearsal Profile " + suffix,
+        context_window_tokens=4096,
+        ollama_num_predict=512,
+        enabled=True,
+    )
+    if not profile.get("id"):
+        raise RuntimeError("MAGI settings production write probe failed")
 
-        billing_connection = upsert_service_connection(
-            db,
+    billing_connection = (
+        service_connection_repository.upsert_service_connection(
             adapter_key="openai",
             display_name="Rehearsal Billing " + suffix,
             endpoint="https://api.openai.com/v1",
@@ -380,14 +405,17 @@ def main() -> None:
             connection_role="service_billing",
             enabled=True,
         )
-        billing_profile = upsert_service_billing_profile(
-            db,
+    )
+    billing_profile = (
+        service_billing_repository.upsert_service_billing_profile(
             display_name="Rehearsal Billing Profile " + suffix,
             connection_id=billing_connection["id"],
             enabled=True,
         )
-        if not billing_profile.get("id"):
-            raise RuntimeError("Service Billing production write probe failed")
+    )
+    if not billing_profile.get("id"):
+        raise RuntimeError("Service Billing production write probe failed")
+
 
     web_port = _free_port()
     web_env = dict(os.environ)
