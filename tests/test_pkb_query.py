@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 import unittest
 
-from pkb.query_service import ClaimQuery, _sql, query_claims, validate
+from pkb.query_service import ClaimQuery, validate
+from infrastructure.postgres.pkb_query_repository import _sql, query_claims
 
 UTC = timezone.utc
 
