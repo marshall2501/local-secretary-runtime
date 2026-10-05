@@ -63,13 +63,16 @@ def register(portal_context: dict):
                         "connection_role / Capabilityは分類・技術情報であり、自動選択やRITSUKOの実行許可には使いません。"
                     ).classes("text-xs text-grey-7")
                     try:
-                        with connection() as db:
-                            bootstrap_connection_auth_from_env(db)
-                            bootstrap_openai_billing_profile(db)
-                            connection_rows = list_service_connections(
-                                db,
-                                include_disabled=True,
-                            )
+                        bootstrap_connection_auth_from_env(
+                            _service_connection_repository
+                        )
+                        bootstrap_openai_billing_profile(
+                            _service_billing_settings_repository
+                        )
+                        connection_rows = list_service_connections(
+                            _service_connection_repository,
+                            include_disabled=True,
+                        )
                     except Exception as exc:
                         connection_rows = []
                         ui.label(
@@ -309,9 +312,8 @@ def register(portal_context: dict):
                             if connection_cap_billing.value:
                                 capabilities.append(SERVICE_BILLING_READ)
     
-                            with connection() as db:
-                                saved = upsert_service_connection(
-                                    db,
+                            saved = upsert_service_connection(
+                                    _service_connection_repository,
                                     adapter_key=str(connection_adapter.value or ""),
                                     display_name=str(connection_name.value or "").strip(),
                                     endpoint=str(connection_endpoint.value or "").strip(),
@@ -397,16 +399,15 @@ def register(portal_context: dict):
                         "ConnectionのRoleやCapabilityから自動選択しません。"
                     ).classes("text-sm")
                     try:
-                        with connection() as db:
-                            billing_profiles = list_service_billing_profiles(
-                                db,
-                                include_disabled=True,
-                            )
-                            billing_connections = list_service_connections(
-                                db,
-                                include_disabled=True,
-                                capability=SERVICE_BILLING_READ,
-                            )
+                        billing_profiles = list_service_billing_profiles(
+                            _service_billing_settings_repository,
+                            include_disabled=True,
+                        )
+                        billing_connections = list_service_connections(
+                            _service_connection_repository,
+                            include_disabled=True,
+                            capability=SERVICE_BILLING_READ,
+                        )
                     except Exception as exc:
                         billing_profiles = []
                         billing_connections = []
@@ -459,9 +460,8 @@ def register(portal_context: dict):
     
                     def save_billing_profile():
                         try:
-                            with connection() as db:
-                                saved = upsert_service_billing_profile(
-                                    db,
+                            saved = upsert_service_billing_profile(
+                                    _service_billing_settings_repository,
                                     display_name=str(
                                         billing_profile_name.value or ""
                                     ).strip(),
@@ -511,16 +511,15 @@ def register(portal_context: dict):
                         "LLM Profileはmodel/runtime条件だけを持ち、接続・認証はService Connectionを参照します。"
                     ).classes("text-sm")
                     try:
-                        with connection() as db:
-                            editable_profiles = list_llm_profiles(
-                                db,
-                                include_disabled=True,
-                            )
-                            llm_connections = list_service_connections(
-                                db,
-                                include_disabled=True,
-                                capability=LLM_INFERENCE,
-                            )
+                        editable_profiles = list_llm_profiles(
+                            _magi_settings_repository,
+                            include_disabled=True,
+                        )
+                        llm_connections = list_service_connections(
+                            _service_connection_repository,
+                            include_disabled=True,
+                            capability=LLM_INFERENCE,
+                        )
                     except Exception as exc:
                         editable_profiles = []
                         llm_connections = []
