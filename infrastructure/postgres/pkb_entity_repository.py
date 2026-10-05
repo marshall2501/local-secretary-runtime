@@ -250,26 +250,30 @@ def authoritative_entity_aliases(cur) -> dict[str, set[str]]:
     return aliases
 
 
+def load_catalog_from_cursor(cur) -> list[dict]:
+    aliases = authoritative_entity_aliases(cur)
+    cur.execute(
+        "SELECT id,name,entity_type,retired_at,identification_evidence FROM secretary.entities"
+    )
+    rows = []
+    for identifier, name, kind, retired, evidence in cur.fetchall():
+        names = set(aliases.get(str(identifier), set())) | {name}
+        declared = evidence.get("aliases", []) if isinstance(evidence, dict) else []
+        if isinstance(declared, list):
+            names.update(a for a in declared if isinstance(a, str))
+        if kind in {"computer", "pc"}:
+            names.add("PC")
+        rows.append(
+            dict(id=str(identifier), names=names, kind=kind, retired=retired is not None)
+        )
+    return rows
+
+
 def load_catalog(db) -> list[dict]:
     if not _allowed(db):
         raise ValueError("Refusing non-isolated DB or non-dedicated writer")
     with db.cursor() as cur:
-        aliases = authoritative_entity_aliases(cur)
-        cur.execute(
-            "SELECT id,name,entity_type,retired_at,identification_evidence FROM secretary.entities"
-        )
-        rows = []
-        for identifier, name, kind, retired, evidence in cur.fetchall():
-            names = set(aliases.get(str(identifier), set())) | {name}
-            declared = evidence.get("aliases", []) if isinstance(evidence, dict) else []
-            if isinstance(declared, list):
-                names.update(a for a in declared if isinstance(a, str))
-            if kind in {"computer", "pc"}:
-                names.add("PC")
-            rows.append(
-                dict(id=str(identifier), names=names, kind=kind, retired=retired is not None)
-            )
-        return rows
+        return load_catalog_from_cursor(cur)
 
 
 def load_entity_detail(db, entity_id: str) -> dict | None:
