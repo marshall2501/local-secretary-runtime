@@ -5,7 +5,8 @@ import argparse
 from pathlib import Path
 from uuid import UUID
 
-from pkb.query_service import ClaimQuery, query_claims
+from pkb.query_service import ClaimQuery
+from infrastructure.postgres.pkb_query_repository import query_claims
 from scripts.pkb.smoke_correction import at
 from scripts.pkb.smoke_isolated import connection
 
