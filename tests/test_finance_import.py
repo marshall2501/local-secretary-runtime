@@ -5,11 +5,13 @@ from types import SimpleNamespace
 
 from capabilities.finance.finance_import import (
     SOURCE_SYSTEM,
-    _finance_filter_clause,
-    _guard_db,
     source_sha256,
     transaction_content_hash,
     transaction_payload,
+)
+from infrastructure.postgres.finance_repository import (
+    _finance_filter_clause,
+    _guard_db,
 )
 
 
