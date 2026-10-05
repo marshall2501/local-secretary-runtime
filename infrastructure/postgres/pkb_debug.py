@@ -12,15 +12,17 @@ def debug_database_summary(connection_factory, *, expected_database: str,
                 cur.execute("SELECT current_database(), current_user")
                 database, user = cur.fetchone()
             info = db.info
+            host = info.host or ""
+            port = info.port
         boundary_ok = (
             database == expected_database
             and user == expected_user
-            and (info.host or "") in ("127.0.0.1", "localhost", "::1")
+            and host in ("127.0.0.1", "localhost", "::1")
         )
         return {
             "status": "ok" if boundary_ok else "warning",
-            "database": database, "user": user, "host": info.host or "",
-            "port": info.port, "boundary_ok": boundary_ok,
+            "database": database, "user": user, "host": host,
+            "port": port, "boundary_ok": boundary_ok,
             "latest_migration": os.environ.get("LSA_PKB_DAILY_LATEST_MIGRATION") or "unknown",
         }
     except Exception:
