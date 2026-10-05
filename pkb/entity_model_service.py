@@ -65,10 +65,6 @@ def create_relation(repository, **kwargs) -> RelationResult:
     return repository.create_relation(**kwargs)
 
 
-def advance_state_for_event(repository, **kwargs) -> str | None:
-    return repository.advance_state_for_event(**kwargs)
-
-
 def list_components(repository, parent_entity_id: UUID) -> list[dict]:
     return repository.list_components(parent_entity_id)
 
