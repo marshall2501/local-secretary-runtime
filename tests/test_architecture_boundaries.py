@@ -111,6 +111,32 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                         violations.append(f"{path.relative_to(ROOT)} -> {name}")
         self.assertEqual([], violations)
 
+
+    def test_business_packages_have_no_postgres_persistence_details(self):
+        """Production business code must use persistence ports, not DB mechanics."""
+        violations = []
+        exempt = {
+            Path("pkb/episode_intake.py"),  # historical isolated fixture importer
+        }
+        markers = ("secretary.", ".cursor(", ".transaction(")
+        for package in ("pkb", "ritsuko", "capabilities", "integrations"):
+            root = ROOT / package
+            if not root.exists():
+                continue
+            for path in root.rglob("*.py"):
+                relative = path.relative_to(ROOT)
+                if relative in exempt:
+                    continue
+                imports = _imports(path)
+                for name in imports:
+                    if name == "psycopg" or name.startswith("psycopg."):
+                        violations.append(f"{relative} -> import {name}")
+                content = path.read_text(encoding="utf-8")
+                for marker in markers:
+                    if marker in content:
+                        violations.append(f"{relative} -> {marker}")
+        self.assertEqual([], violations)
+
     def test_mcp_adapter_has_no_database_dependency(self):
         violations = []
         for path in (ROOT / "mcp_adapter").rglob("*.py"):
