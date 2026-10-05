@@ -43,6 +43,7 @@ from bootstrap.web_runtime import (
     build_core_execution_repository,
     build_core_task_queries,
     build_entity_catalog_service,
+    build_pkb_repository,
     claim_core_cooperative_probe,
     connection,
     fail_core_cooperative_probe,
@@ -53,7 +54,6 @@ from bootstrap.web_runtime import (
     restore_core_cooperative_probe,
     write_core_advisor_shadow,
 )
-from pkb.correction_service import correct_entity
 from ritsuko.core.core_ooda import OODA_PHASES, derive_ooda
 from ritsuko.core.core_observation import build_observation_pack
 from ritsuko.core.core_advisor import advise as advise_core, choose_model as choose_advisor_model, list_chat_models as list_advisor_models
@@ -140,12 +140,7 @@ from integrations.llm.ollama_runtime import (
 )
 from pkb.daily_interpreter import interpret as interpret_daily
 
-from pkb.entity_model_service import (
-    COMPONENT_ROLE_TOKENS,
-    load_entity_detail,
-    list_components,
-    resolve_component_reference,
-)
+from pkb.entity_model_service import COMPONENT_ROLE_TOKENS
 from capabilities.finance.finance_preview import analyze_moneyforward_csv
 from capabilities.finance.finance_import import (
     commit_import,
@@ -153,9 +148,6 @@ from capabilities.finance.finance_import import (
     load_finance_dashboard,
     plan_import,
 )
-from pkb.ingestion_gate import InputRecord, ProposedClaim
-from pkb.query_service import ClaimQuery, query_claims
-from pkb.write_service import write_one
 from capabilities.web_research.web_research import research_web
 from capabilities.finance.application import (
     core_finance_filters as finance_filters,
@@ -166,8 +158,7 @@ from capabilities.web_research.application import (
     research_text,
     web_core_answer,
 )
-from pkb.pending_service import (accept_pending, acceptance_eligible, enqueue as enqueue_pending,
-    list_pending, list_reviewed, review_pending)
+from pkb.pending_service import acceptance_eligible
 from pkb.application.daily import (
     COMPONENT_STATE_QUERY_PATTERN,
     correct_text as pkb_correct_text,
@@ -205,6 +196,8 @@ from infrastructure.system_debug import (
     environment_snapshot as build_environment_snapshot,
     runtime_snapshot as build_runtime_snapshot,
 )
+
+_pkb_repository = build_pkb_repository()
 
 def _notify_client(client, message: str, *, type: str) -> None:
     """Send a notification through a stable client context.
@@ -702,30 +695,30 @@ def _register_magi_profile(
         )
 
 
-def _entities(db) -> list[dict]:
-    return pkb_list_entities(db)
+def _entities(_db=None) -> list[dict]:
+    return pkb_list_entities(_pkb_repository)
 
 
-def _entity_map(db) -> dict[str, dict]:
-    return pkb_entity_map(db)
+def _entity_map(_db=None) -> dict[str, dict]:
+    return pkb_entity_map(_pkb_repository)
 
 
 def register_text(text: str) -> dict:
     return pkb_register_text(
-        text, connection_factory=connection, interpreter=interpret_daily
+        text, repository=_pkb_repository, interpreter=interpret_daily
     )
 
 
 def correct_text(text: str) -> dict:
-    return pkb_correct_text(text, connection_factory=connection)
+    return pkb_correct_text(text, repository=_pkb_repository)
 
 
-def _search_text_with_db(db, text: str) -> dict:
-    return pkb_search_text_with_db(db, text)
+def _search_text_with_db(_db, text: str) -> dict:
+    return pkb_search_text_with_db(_pkb_repository, text)
 
 
 def search_text(text: str) -> dict:
-    return pkb_search_text(text, connection_factory=connection)
+    return pkb_search_text(text, repository=_pkb_repository)
 
 
 def _core_finance_filters(text: str) -> dict:
@@ -796,10 +789,10 @@ def _execute_cooperative_local_probe(
     if target and target.get("id"):
         with connection() as db:
             detail = _json_safe(
-                load_entity_detail(db, str(target["id"])) or {}
+                _pkb_repository.load_entity_detail(str(target["id"])) or {}
             )
             items = _json_safe(
-                list_components(db, UUID(str(target["id"])))
+                _pkb_repository.list_components(UUID(str(target["id"])))
             )
         result = {
             "status": "ok",
@@ -860,12 +853,12 @@ def _execute_magi_pkb_request(
 
         if len(parents) == 1 and len(roles) == 1:
             parent = parents[0]
-            component = resolve_component_reference(
-                db, parent["name"], roles[0]
+            component = _pkb_repository.resolve_component_reference(
+                parent["name"], roles[0]
             )
             if component is not None:
                 detail = _json_safe(
-                    load_entity_detail(db, component["id"]) or {}
+                    _pkb_repository.load_entity_detail(component["id"]) or {}
                 )
                 current = [
                     item for item in (detail.get("current") or [])
@@ -1115,8 +1108,8 @@ def _build_core_observation_pack(request: str, db, entities: dict[str, dict]) ->
     return build_observation_pack(
         request,
         entities,
-        detail_lookup=lambda entity_id: load_entity_detail(db, entity_id),
-        components_lookup=lambda entity_id: list_components(db, UUID(entity_id)),
+        detail_lookup=lambda entity_id: _pkb_repository.load_entity_detail(entity_id),
+        components_lookup=lambda entity_id: _pkb_repository.list_components(UUID(entity_id)),
     )
 
 
@@ -1603,13 +1596,11 @@ def resume_core_task(task_id: UUID, reply: str) -> dict:
 
 
 from pkb.memory_contracts import MemoryIntake
-from pkb.memory_intake import write_intake
 from pkb.application.memory_intake import register_memory_intake as write_checked_memory_intake
 
 
 def register_memory_intake(intake: MemoryIntake) -> dict:
-    with connection() as db:
-        return write_checked_memory_intake(db, intake)
+    return write_checked_memory_intake(_pkb_repository, intake)
 
 
 class TextInput(BaseModel):
@@ -1715,16 +1706,15 @@ def api_search(params: TextInput):
 @app.get("/api/pkb/pending")
 def api_pending():
     try:
-        with connection() as db:
-            rows = list_pending(db)
-            result = []
-            for row in rows:
-                item = dict(row)
-                item["id"] = str(item["id"])
-                if isinstance(item.get("recorded_at"), datetime):
-                    item["recorded_at"] = item["recorded_at"].isoformat()
-                result.append(item)
-            return result
+        rows = _pkb_repository.list_pending()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["id"] = str(item["id"])
+            if isinstance(item.get("recorded_at"), datetime):
+                item["recorded_at"] = item["recorded_at"].isoformat()
+            result.append(item)
+        return result
     except (RuntimeError, ValueError, DatabaseError) as exc:
         raise HTTPException(503, str(exc)) from exc
 
@@ -1732,8 +1722,9 @@ def api_pending():
 @app.post("/api/pkb/pending/{pending_id}/review")
 def api_pending_review(pending_id: str, params: PendingDecisionInput):
     try:
-        with connection() as db:
-            return asdict(review_pending(db, pending_id, params.decision))
+        return asdict(
+            _pkb_repository.review_pending(pending_id, params.decision)
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (RuntimeError, DatabaseError) as exc:
@@ -1743,8 +1734,7 @@ def api_pending_review(pending_id: str, params: PendingDecisionInput):
 @app.post("/api/pkb/pending/{pending_id}/accept")
 def api_pending_accept(pending_id: str):
     try:
-        with connection() as db:
-            return asdict(accept_pending(db, pending_id))
+        return asdict(_pkb_repository.accept_pending(pending_id))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (RuntimeError, DatabaseError) as exc:
@@ -1829,8 +1819,7 @@ def _portal_header(title: str, subtitle: str):
 
 def _pending_count() -> int | None:
     try:
-        with connection() as db:
-            return len(list_pending(db))
+        return len(_pkb_repository.list_pending())
     except Exception:
         return None
 
