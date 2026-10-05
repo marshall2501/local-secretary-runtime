@@ -11,8 +11,7 @@ def register(portal_context: dict):
     def entity_page(entity_id: str):
         globals().update(portal_context)
         try:
-            with connection() as db:
-                detail = load_entity_detail(db, entity_id)
+            detail = _pkb_repository.load_entity_detail(entity_id)
         except Exception as exc:
             detail = None
             error = str(exc)
