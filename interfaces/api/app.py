@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from bootstrap.api_runtime import (
     MEMORY_KINDS,
     api_config,
+    api_health_probe,
     build_candidate_service,
     build_read_service,
     build_task_service,
@@ -154,10 +155,7 @@ def read_authenticated(authorization: Annotated[str | None, Header()] = None) ->
 
 @app.get("/healthz")
 def healthz():
-    with connect() as db:
-        with db.cursor() as cur:
-            cur.execute("SELECT 1 AS ok")
-            cur.fetchone()
+    api_health_probe(connect)
     return {"status": "ok"}
 
 
