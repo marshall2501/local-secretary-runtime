@@ -1994,7 +1994,7 @@ def register(portal_context: dict):
                     try:
                         saved_trace = _portal("load_core_task_trace")(UUID(task_id))
                         select_saved_task(saved_trace["task"])
-                    except (ValueError, psycopg.Error) as exc:
+                    except Exception as exc:
                         ui.notify("Taskを開けません: " + str(exc), type="negative")
     
                 with ui.card().classes(
