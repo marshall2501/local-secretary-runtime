@@ -30,6 +30,7 @@ from infrastructure.postgres.core_advisor_repository import (
 from infrastructure.postgres.core_execution_repository import PostgresCoreExecutionRepository
 from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
 from infrastructure.postgres.entity_catalog_repository import PostgresEntityCatalogRepository
+from infrastructure.postgres.pkb_repository import PostgresPkbRepository
 from infrastructure.postgres.pkb_debug import debug_database_summary
 from infrastructure.postgres.pkb_runtime import DBNAME, HOST, WRITER, connect_pkb_database
 from ritsuko.application.task_queries import CoreTaskQueryService
@@ -50,6 +51,10 @@ def build_core_task_queries() -> CoreTaskQueryService:
 
 def build_entity_catalog_service() -> EntityCatalogService:
     return EntityCatalogService(PostgresEntityCatalogRepository(connection))
+
+
+def build_pkb_repository() -> PostgresPkbRepository:
+    return PostgresPkbRepository(connection)
 
 
 def write_core_advisor_shadow(task_id, shadow, event_type):
