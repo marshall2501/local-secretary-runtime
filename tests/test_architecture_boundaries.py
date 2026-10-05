@@ -156,6 +156,10 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                     or name.startswith("infrastructure.postgres.")
                 ):
                     violations.append(f"{path.relative_to(ROOT)} -> {name}")
+            content = path.read_text(encoding="utf-8")
+            for marker in ("psycopg.", "secretary.", ".cursor(", ".transaction("):
+                if marker in content:
+                    violations.append(f"{path.relative_to(ROOT)} -> {marker}")
         self.assertEqual([], violations)
 
     def test_application_and_domain_packages_do_not_import_infrastructure(self):
