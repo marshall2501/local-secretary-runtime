@@ -4,9 +4,14 @@
 
 新しい主要作業や作業選定時は、設計repo `local-secretary-ai/main` の現行 [START_HERE](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/START_HERE.md) を入口に、`PROJECT → ARCHITECTURE → STATUS → PLAN` を確認する。必要な個別設計、DesignDecisions、DevelopmentKnowledgeは今回の作業に関係する部分だけ追加確認する。
 
-作業を選定した後の変更レベル、change plan、traceability、安全・検証、同一plan内の不具合修正、完了条件は設計repoの [DEVELOPMENT_RULES](https://github.com/marshall2501/local-secretary-ai/blob/main/DEVELOPMENT_RULES.md) を正本とする。Level B / C の個別planは設計repoの `docs/templates/local-secretary-change-plan-template.md` を基準にする。
+作業を選定した後の**共通**の変更レベル、change plan approval、Agent loop、traceability、verification、same-lifecycle defect、完了条件は `ai-development-playbook/main` を正本とする。
 
-設計repoを取得できない場合は、その旨を明示する。ローカルに残る古い文書や過去の会話を「最新版」と呼ばず、高影響変更は正本を確認できるまで安全側で扱う。
+- Common rules: https://github.com/marshall2501/ai-development-playbook/blob/main/DEVELOPMENT_RULES.md
+- Standard Level B / C template: https://github.com/marshall2501/ai-development-playbook/blob/main/templates/change-plan.md
+
+Local Secretary固有の安全条件、WorkPlan保存先、machine / data / source boundaryは設計repoの [DEVELOPMENT_RULES](https://github.com/marshall2501/local-secretary-ai/blob/main/DEVELOPMENT_RULES.md) とDesignDecisionsを参照する。Level B / C の個別planは設計repoの `docs/05_Implementation/WorkPlans/YYYY-MM-DD-HHMM-<short-topic>.md` に保存する。
+
+設計repoまたはshared playbookを取得できない場合は、その旨を明示する。ローカルに残る古い文書や過去の会話を「最新版」と呼ばず、Level B / Cや高影響変更は正本を確認できるまでstaleなcommon ruleを前提に進めない。
 
 読了順は判断上の優先順位ではない。本人の最新指示とPROJECTの目的・要件、採用中のARCHITECTURE、安全条件、STATUSの実測を照合して作業を選ぶ。PLANや古いREADME、過去の「次の操作」を自動実行命令として扱わない。
 
@@ -28,7 +33,7 @@ source directoryの責務・dependency directionは設計repoの `docs/01_Archit
 
 ローカル内部Runtimeでは、機能ごとのDB writer role細分化を成果としない。管理・復旧用accessは通常Runtimeから分離するが、通常Runtimeは共通DB access boundaryを使える。ChatGPT / MCP / Web API等の外部入口、外部変更Action、Secret、高影響操作はApplication / API公開surface / RITSUKO Policy・Approval・Executor等の操作境界で制御する。内部DB roleを追加分割するのは具体的な運用上の必要性が確認できた場合だけとする。
 
-稼働中DBへ適用済みのmigration履歴は書き換えない。意図的にclean replacement DBを作る場合は、旧migration列を履歴資産として保全したうえで、現在採用schemaのbaselineを新しい正本として作り直してよい。運用DBや実データへ影響する変更はDEVELOPMENT_RULESとDesignDecisions D-08に従う。
+稼働中DBへ適用済みのmigration履歴は書き換えない。意図的にclean replacement DBを作る場合は、旧migration列を履歴資産として保全したうえで、現在採用schemaのbaselineを新しい正本として作り直してよい。運用DBや実データへ影響する変更はshared playbookのcommon rules、設計repoのproject-local DEVELOPMENT_RULES、DesignDecisions D-08に従う。
 
 ## Runtime-specific safety
 
@@ -45,6 +50,6 @@ PostgreSQL、FastAPI、Docker、Ollama、クラウドLLM、MCP、n8n等は目的
 
 ## Documentation
 
-大目標・製品要件はPROJECT、採用構成はARCHITECTURE、実装・検証の現在地はSTATUS、現在選定した主要作業と受入条件はPLAN、開発プロセスはDEVELOPMENT_RULES、個別のLevel B / C変更はWorkPlanを正本とする。
+大目標・製品要件はPROJECT、採用構成はARCHITECTURE、実装・検証の現在地はSTATUS、現在選定した主要作業と受入条件はPLANを正本とする。共通開発processは `ai-development-playbook/DEVELOPMENT_RULES.md`、Local Secretary固有の開発条件は設計repo root `DEVELOPMENT_RULES.md`、個別のLevel B / C変更はWorkPlanを正本とする。
 
 意味のある実装・検証結果が出ても、コード変更だけでSTATUSの実機成功を宣言しない。一次証拠を確認した後、設計repoの文書責務に従って更新する。
