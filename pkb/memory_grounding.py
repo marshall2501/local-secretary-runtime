@@ -1,24 +1,12 @@
 """Authoritative resolution, value normalization and time grounding."""
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from .entity_model_service import authoritative_entity_aliases
 from .memory_contracts import validate_draft
 from .memory_registry import PREDICATE_REGISTRY
 
 
-def load_catalog(cur):
-    aliases = authoritative_entity_aliases(cur)
-    cur.execute('SELECT id,name,entity_type,retired_at,identification_evidence FROM secretary.entities')
-    rows = []
-    for identifier, name, kind, retired, evidence in cur.fetchall():
-        names = set(aliases.get(str(identifier), set())) | {name}
-        declared = evidence.get('aliases', []) if isinstance(evidence, dict) else []
-        if isinstance(declared, list):
-            names.update(a for a in declared if isinstance(a, str))
-        if kind in {'computer', 'pc'}:
-            names.add('PC')
-        rows.append(dict(id=str(identifier), names=names, kind=kind, retired=retired is not None))
-    return rows
+def load_catalog(repository):
+    return repository.load_catalog()
 
 
 def resolve_entity(mention, catalog):
