@@ -84,20 +84,18 @@ def driver_web_query_from_detail(detail: dict | None) -> dict:
     }
 
 
-def resolve_driver_web_target(text: str, *, connection_factory,
-                              resolve_component, load_detail) -> dict:
+def resolve_driver_web_target(text: str, *, repository) -> dict:
     component_state = COMPONENT_STATE_QUERY_PATTERN.search(text.strip())
     if not component_state:
         return {"status": "missing_component_reference", "query": None,
                 "manufacturer": None, "model": None, "entity_name": None}
     parent_name = component_state.group("parent").strip()
     role_token = component_state.group("role")
-    with connection_factory() as db:
-        resolved = resolve_component(db, parent_name, role_token)
-        if resolved is None:
-            return {"status": "component_not_unique_or_missing", "query": None,
-                    "manufacturer": None, "model": None, "entity_name": None}
-        detail = load_detail(db, resolved["id"])
+    resolved = repository.resolve_component_reference(parent_name, role_token)
+    if resolved is None:
+        return {"status": "component_not_unique_or_missing", "query": None,
+                "manufacturer": None, "model": None, "entity_name": None}
+    detail = repository.load_entity_detail(resolved["id"])
     target = driver_web_query_from_detail(detail)
     target["parent_name"] = parent_name
     target["role_token"] = role_token
