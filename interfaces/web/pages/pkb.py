@@ -33,8 +33,7 @@ def register(portal_context: dict):
         @ui.refreshable
         def pending_panel():
             try:
-                with connection() as db:
-                    rows = list_pending(db)
+                rows = _pkb_repository.list_pending()
             except Exception as exc:
                 ui.label("確認待ち一覧を取得できません: " + str(exc)).classes(
                     "text-red-600"
@@ -52,8 +51,10 @@ def register(portal_context: dict):
     
             def decide(pending_id: str, decision: str):
                 try:
-                    with connection() as db:
-                        review_pending(db, pending_id, decision)
+                    _pkb_repository.review_pending(
+                        pending_id,
+                        decision,
+                    )
                     label = "却下" if decision == "rejected" else "要修正"
                     ui.notify(label + "として記録しました", type="positive")
                     pending_panel.refresh()
@@ -63,8 +64,7 @@ def register(portal_context: dict):
     
             def accept(pending_id: str):
                 try:
-                    with connection() as db:
-                        result = accept_pending(db, pending_id)
+                    result = _pkb_repository.accept_pending(pending_id)
                     if result.status == "accepted":
                         ui.notify("承認して正式Claimへ登録しました", type="positive")
                     else:
@@ -134,8 +134,7 @@ def register(portal_context: dict):
         @ui.refreshable
         def reviewed_panel():
             try:
-                with connection() as db:
-                    rows = list_reviewed(db)
+                rows = _pkb_repository.list_reviewed()
             except Exception as exc:
                 ui.label("処理履歴を取得できません: " + str(exc)).classes(
                     "text-red-600"
