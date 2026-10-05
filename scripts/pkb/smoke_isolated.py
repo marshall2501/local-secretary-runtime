@@ -9,7 +9,7 @@ from uuid import UUID
 import psycopg
 
 from pkb.ingestion_gate import InputRecord, ProposedClaim
-from pkb.write_service import write_one
+from infrastructure.postgres.pkb_write_repository import write_one
 
 WRITER = "secretary_pkb_proto_writer_20260927"
 DBNAME = "secretary_pkb_proto_20260927"
