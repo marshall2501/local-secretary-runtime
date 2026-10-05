@@ -10,12 +10,13 @@ import unittest
 import psycopg
 from psycopg import sql
 from pkb.memory_contracts import MemoryIntake
-from pkb.memory_intake import write_intake
+from infrastructure.postgres.pkb_memory_repository import write_intake
 from pkb.ingestion_gate import InputRecord, ProposedClaim
-from pkb.write_service import write_one
-from pkb.pending_service import enqueue, accept_pending, list_pending
-from pkb.correction_service import correct_entity
-from pkb.query_service import query_claims, ClaimQuery
+from infrastructure.postgres.pkb_write_repository import write_one
+from infrastructure.postgres.pkb_pending_repository import enqueue, accept_pending, list_pending
+from infrastructure.postgres.pkb_correction_repository import correct_entity
+from pkb.query_service import ClaimQuery
+from infrastructure.postgres.pkb_query_repository import query_claims
 
 DBNAME='secretary_pkb_proto_20260927'
 WRITER='secretary_pkb_proto_writer_20260927'
