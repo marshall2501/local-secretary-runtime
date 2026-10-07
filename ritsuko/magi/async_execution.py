@@ -1058,15 +1058,23 @@ def _private_observation_local_scope(
         for spec in (session.get("member_specs") or [])
         if spec.get("enabled") and spec.get("provider") != "ollama"
     ]
-    pkb_only = private_sources == ["pkb"]
+    read_private_sources = {
+        source
+        for source in private_sources
+        if source in {"pkb", "finance", "files"}
+    }
+    # Preserve the already-accepted PKB mode when later private Observations are
+    # workflow evidence (Proposal Review / Memory Intake) rather than a newly
+    # acquired private read Source.
+    pkb_only_read_context = read_private_sources == {"pkb"}
     mode = (
         "local_only_private_pkb"
-        if pkb_only
+        if pkb_only_read_context
         else "local_only_private_observation"
     )
     reason = (
         "verified_private_pkb_observation"
-        if pkb_only
+        if pkb_only_read_context
         else "verified_private_or_sensitive_observation"
     )
     base = {
