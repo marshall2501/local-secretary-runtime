@@ -404,6 +404,16 @@ def register(portal_context: dict):
                             "Cloud Context Gate: " + str(gate.get("status") or "-")
                             + " / " + str(gate.get("mode") or "-")
                         ).classes("font-mono text-xs text-purple-800")
+                    fallback = session.get("ritsuko_grounded_fallback") or {}
+                    if fallback:
+                        ui.label(
+                            "RITSUKO Grounded fallback: "
+                            + str(fallback.get("kind") or "-")
+                            + " / source="
+                            + str(fallback.get("source") or "-")
+                            + " / result_count="
+                            + str(fallback.get("result_count"))
+                        ).classes("font-mono text-xs text-teal-800")
                     proposal_review = saved_task.get("proposal_review")
                     if isinstance(proposal_review, dict):
                         ui.label(
@@ -904,10 +914,13 @@ def register(portal_context: dict):
                     stop_event = begin_guided_run(1)
                     state["guided_session"] = None
                     state["guided_history_read_only"] = False
+                    state["result"] = None
                     state["trace"] = None
                     state["trace_error"] = None
                     guided_button.disable()
                     guided_result_panel.refresh()
+                    core_result.refresh()
+                    trace_panel.refresh()
                     try:
                         state["guided_session"] = await run_observation_loop(
                             request_text,
@@ -921,6 +934,27 @@ def register(portal_context: dict):
                             stop_requested=stop_event.is_set,
                             on_turn_start=note_guided_turn,
                         )
+                        guided_task_id = str(
+                            (state.get("guided_session") or {}).get("task_id") or ""
+                        ).strip()
+                        if guided_task_id:
+                            try:
+                                saved_trace = await run.io_bound(
+                                    _portal("load_core_task_trace"),
+                                    UUID(guided_task_id),
+                                )
+                                state["trace"] = saved_trace
+                                state["trace_error"] = None
+                                state["result"] = core_task_selection_result(
+                                    saved_trace["task"]
+                                )
+                            except Exception as trace_exc:
+                                state["trace"] = None
+                                state["trace_error"] = (
+                                    type(trace_exc).__name__
+                                    + ": "
+                                    + str(trace_exc)[:160]
+                                )
                     except Exception as exc:
                         ui.notify(type(exc).__name__ + ": " + str(exc)[:160], type="negative")
                     finally:
@@ -928,6 +962,10 @@ def register(portal_context: dict):
                         state["guided_stop_event"] = None
                         guided_button.enable()
                         guided_result_panel.refresh()
+                        core_result.refresh()
+                        trace_panel.refresh()
+                        resume_panel.refresh()
+                        screen_log_panel.refresh()
                         open_tasks_panel.refresh()
                         completed_tasks_panel.refresh()
     
