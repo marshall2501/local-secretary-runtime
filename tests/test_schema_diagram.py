@@ -133,7 +133,8 @@ class SchemaDiagramTests(TestCase):
         status = provider.status(enabled=True)
         result = provider.generate()
 
-        self.assertTrue(status.available)
+        self.assertFalse(status.available)
+        self.assertIn("dependency detected", status.dependency_status)
         self.assertEqual(result.status, "unavailable")
         self.assertIn("explicitly accepted", result.warnings[0])
 
