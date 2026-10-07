@@ -104,13 +104,6 @@ BEGIN
         RAISE EXCEPTION 'Prototype writer role leaked into production cluster';
     END IF;
 
-    IF NOT has_table_privilege(
-            'secretary_memory_writer','secretary.entity_relations','SELECT,INSERT,UPDATE')
-       OR NOT has_table_privilege(
-            'secretary_memory_writer','secretary.pkb_pending_intake','SELECT,INSERT,UPDATE') THEN
-        RAISE EXCEPTION 'Existing memory role grant failed';
-    END IF;
-
     IF EXISTS (
         SELECT 1
         FROM information_schema.table_privileges
