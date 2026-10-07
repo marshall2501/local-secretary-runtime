@@ -112,8 +112,11 @@ class MagiTaskStoreTests(unittest.TestCase):
         scope = task_call[1][-2].obj
         self.assertEqual(checkpoint["core_slice"], "ritsuko_magi_observation_v1")
         self.assertTrue(scope["pkb_read"])
-        self.assertFalse(scope["web_research"])
-        self.assertFalse(scope["cloud_private_pkb_context"])
+        self.assertTrue(scope["web_research"])
+        self.assertTrue(scope["finance_read"])
+        self.assertFalse(scope["files_read"])
+        self.assertFalse(scope["external_actions"])
+        self.assertFalse(scope["cloud_private_context"])
 
     def test_claim_user_resume_requires_waiting_magi_task_and_preserves_snapshot(self):
         saved_session = {
