@@ -457,7 +457,17 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             side_effect=fake_loop,
         ), patch.object(
             daily, 'load_core_task_trace',
-            return_value=guided_trace,
+            side_effect=lambda task_id: (
+                guided_trace
+                if str(task_id) == new_session['task_id']
+                else {
+                    'task': next(
+                        item for item in self.waiting + self.done
+                        if item['id'] == str(task_id)
+                    ),
+                    'actions': [],
+                }
+            ),
         ):
             daily.core_page()
             await self.click('開く', 0)
