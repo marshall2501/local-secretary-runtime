@@ -74,6 +74,69 @@ def register(portal_context: dict):
                             + str(migration.get("source") or "unknown")
                         ).classes("text-xs text-grey-7")
     
+                enabled_map = dict(
+                    _UI_PREFERENCES.get("debug", {})
+                    .get("er_diagram_providers", {})
+                )
+                er_statuses = _schema_diagram_service.provider_statuses(
+                    enabled_map
+                )
+                native_status = next(
+                    (
+                        status
+                        for status in er_statuses
+                        if status.key == "native_mermaid"
+                    ),
+                    None,
+                )
+                external_enabled = sum(
+                    1
+                    for status in er_statuses
+                    if status.key != "native_mermaid" and status.enabled
+                )
+
+                ui.label("参照 / DB構造").classes(
+                    "text-sm font-bold text-grey-8 mt-1"
+                )
+                with ui.row().classes("w-full gap-3 flex-wrap"):
+                    with ui.card().classes(
+                        "min-w-72 border-2 border-cyan-200 bg-cyan-50"
+                    ):
+                        with ui.row().classes(
+                            "w-full items-start gap-3"
+                        ):
+                            ui.icon("account_tree").classes(
+                                "text-cyan-800 text-xl"
+                            )
+                            with ui.column().classes("gap-1 grow"):
+                                ui.label("DB ER図").classes(
+                                    "text-sm font-bold"
+                                )
+                                ui.label(
+                                    "現在DBのschema metadataから構造を可視化"
+                                ).classes("text-xs text-grey-7")
+                                if (
+                                    native_status is not None
+                                    and native_status.enabled
+                                    and native_status.available
+                                ):
+                                    ui.label(
+                                        "Native + Mermaid: 利用可能"
+                                    ).classes("text-xs text-green-800")
+                                else:
+                                    ui.label(
+                                        "Native + Mermaid: 要確認"
+                                    ).classes("text-xs text-orange-800")
+                                ui.label(
+                                    f"外部Provider有効: {external_enabled} / 3"
+                                ).classes("text-xs text-grey-7")
+                                ui.link(
+                                    "ER図を開く →",
+                                    "/debug/er",
+                                ).classes(
+                                    "text-sm text-cyan-800 font-bold"
+                                )
+
                 if database.get("error"):
                     ui.label(
                         "DB診断エラー: " + str(database["error"])
@@ -215,58 +278,6 @@ def register(portal_context: dict):
                             row_key="name",
                         ).classes("w-full")
     
-                enabled_map = dict(
-                    _UI_PREFERENCES.get("debug", {})
-                    .get("er_diagram_providers", {})
-                )
-                er_statuses = _schema_diagram_service.provider_statuses(
-                    enabled_map
-                )
-                native_status = next(
-                    (
-                        status
-                        for status in er_statuses
-                        if status.key == "native_mermaid"
-                    ),
-                    None,
-                )
-                external_enabled = sum(
-                    1
-                    for status in er_statuses
-                    if status.key != "native_mermaid" and status.enabled
-                )
-
-                with ui.card().classes(
-                    "w-full border-2 border-cyan-200 bg-cyan-50"
-                ):
-                    with ui.row().classes(
-                        "w-full items-center gap-4 flex-wrap"
-                    ):
-                        ui.icon("account_tree").classes("text-cyan-800")
-                        with ui.column().classes("gap-0 grow"):
-                            ui.label("DB ER図").classes("text-sm font-bold")
-                            if (
-                                native_status is not None
-                                and native_status.enabled
-                                and native_status.available
-                            ):
-                                ui.label(
-                                    "Native + Mermaid: 利用可能"
-                                ).classes("text-xs text-green-800")
-                            else:
-                                ui.label(
-                                    "Native + Mermaid: 要確認"
-                                ).classes("text-xs text-orange-800")
-                            ui.label(
-                                f"外部Provider有効: {external_enabled} / 3"
-                            ).classes("text-xs text-grey-7")
-                        ui.link(
-                            "ER図を開く",
-                            "/debug/er",
-                        ).classes(
-                            "text-sm text-cyan-800 font-bold"
-                        )
-
                 with ui.expansion(
                     "Environment",
                     value=False,
