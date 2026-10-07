@@ -163,6 +163,7 @@ Observationから最も近い候補が一意で反証がなければ、限定表
 曖昧参照で一意の強い候補が得られたなら、限定表現付きで参照解決することを検討してください。
 まだ不足する場合だけNEED_INFORMATIONを返し、前回より古い／広い履歴を漫然と掘り続けないでください。
 直前のverified PKB Observationが要求した属性を確認できなかったことを示している場合、同じPKB要求を言い換えて繰り返さないでください。別の既存情報源で解けないblocking情報ならsource=userへ切り替えてください。
+verified Observationのresult_count=0はread失敗ではなく、そのbounded queryに該当する保存済みデータが0件だったという検証済み結果です。同じ範囲を同じsourceへ再要求せず、0件という事実で依頼に答えられるならREADYでその不足を明示してください。
 内部情報で解けないblocking曖昧さならNEED_CLARIFICATIONに切り替えてください。""",
     "evaluate_review_result": """RITSUKOが追加したProposal Review / Memory Intake結果Observationを評価してください。
 本人が直接回答した事実と、その事実を永続記憶へ保存する処理結果は別物として扱ってください。
@@ -184,7 +185,8 @@ decision=auto_commit等で書込み結果が明示されている場合だけ、
 検索・確認・実行の予定をREADYの回答とみなさず、Observation後に同一情報要求を無根拠に繰り返さないでください。
 source=userを提案している場合は既存情報源で代替できないblocking情報だけを残してください。
 曖昧参照で一意の強い候補があるなら限定付き解決、候補が残るなら本人確認を選び、内部履歴を際限なく広げないでください。
-必要ならstateと要求内容を訂正し、進めない場合はその理由を具体化してください。""",
+verified Observationのresult_count=0を「未取得」と読み替えて同じsourceへ再要求しないでください。0件という検証済み結果自体が回答根拠になる場合は、その不足をanswer_candidateへ明示してください。
+必要ならstateと要求内容を訂正し、進めない場合はその理由を具体化してください.""",
 }
 
 _CLASSIFICATION_SCHEMA = {
@@ -986,6 +988,36 @@ def _latest_verified_pkb_observation(session: dict) -> dict | None:
     return None
 
 
+def _grounded_empty_finance_answer(
+    session: dict,
+    requests: list[dict],
+) -> str | None:
+    """Return a grounded no-data answer after a verified empty Finance read."""
+    if not requests or not all(
+        isinstance(item, dict) and item.get("source") == "finance"
+        for item in requests
+    ):
+        return None
+    for observation in reversed(session.get("observations") or []):
+        if not isinstance(observation, dict):
+            continue
+        if (
+            observation.get("source") == "finance"
+            and observation.get("verified") is True
+            and observation.get("result_kind") == "finance_summary"
+            and int(observation.get("result_count") or 0) == 0
+        ):
+            text = str(observation.get("text") or "").strip()
+            if not text:
+                return None
+            return (
+                text.rstrip("。")
+                + "。このため、現在保存されている家計データだけでは、"
+                "今回依頼された分析結果を判断できません。"
+            )[:4000]
+    return None
+
+
 def _wait_for_user_after_exhausted_pkb(session: dict, requests: list[dict]) -> dict:
     session["pending_requests"] = [
         {
@@ -1042,6 +1074,37 @@ def _apply_detail(session: dict, response: dict, caller, *, timeout: float, purp
             if reviewed is None:
                 return session
             return _apply_detail(session, reviewed, caller, timeout=timeout, purpose="review_or_repair", stop_requested=stop_requested, on_turn_start=on_turn_start)
+        empty_finance_answer = _grounded_empty_finance_answer(session, requests)
+        if empty_finance_answer is not None:
+            session["detail"] = {
+                "understood_request": str(
+                    response.get("understood_request")
+                    or (session.get("classification") or {}).get("understood_request")
+                    or ""
+                ),
+                "state": "READY",
+                "reason": (
+                    "verified Finance Observationで対象範囲の該当明細が0件と確認されたため、"
+                    "同じFinance readを繰り返さず、その不足を回答する"
+                ),
+                "information_requests": [],
+                "question_for_user": None,
+                "answer_candidate": empty_finance_answer,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            }
+            session["pending_requests"] = []
+            session["ritsuko_grounded_fallback"] = {
+                "kind": "verified_empty_finance",
+                "source": "finance",
+                "result_count": 0,
+            }
+            session.update(
+                status="candidate_ready",
+                next_step="review_answer_candidate",
+            )
+            return session
+
         latest_verified_pkb = _latest_verified_pkb_observation(session)
         if latest_verified_pkb is not None and requests:
             all_pkb = all(item.get("source") == "pkb" for item in requests)
