@@ -430,7 +430,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             daily, '_save_magi_assignments',
             side_effect=lambda assignments: deepcopy(assignments),
         ), patch.object(
-            daily, 'run_pkb_observation_loop',
+            daily, 'run_observation_loop',
             side_effect=fake_loop,
         ):
             daily.core_page()
