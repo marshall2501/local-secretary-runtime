@@ -84,6 +84,27 @@ class SchemaDiagramTests(TestCase):
         )
         self.assertNotIn("current_claims {", first)
 
+    def test_key_only_render_hides_non_key_columns(self):
+        full = render_mermaid(_snapshot(), keys_only=False)
+        key_only = render_mermaid(_snapshot(), keys_only=True)
+
+        self.assertIn("text name", full)
+        self.assertNotIn("text name", key_only)
+        self.assertIn("uuid id PK", key_only)
+        self.assertIn("uuid entity_id FK", key_only)
+
+    def test_service_passes_display_options_to_native_provider(self):
+        service = SchemaDiagramService((NativeMermaidProvider(_snapshot),))
+        result = service.generate(
+            "native_mermaid",
+            enabled={"native_mermaid": True},
+            options={"keys_only": True},
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertNotIn("text name", result.content)
+        self.assertIn("uuid id PK", result.content)
+
     def test_native_provider_reports_counts_and_warning_for_views(self):
         provider = NativeMermaidProvider(_snapshot)
         status = provider.status(enabled=True)
