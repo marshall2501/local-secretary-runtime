@@ -21,6 +21,8 @@ def execute_core_read(
             "tool": "pkb", "operation": "search", "source_slug": "pkb-search",
             "citation": "Secretary Core read-only PKB search result",
             "verified_by": "deterministic_pkb_query",
+            "status": "ok",
+            "confidentiality": "private",
         }
     if capability == "finance_read":
         result = finance_read(text)
@@ -30,6 +32,8 @@ def execute_core_read(
             "tool": "finance", "operation": "summary", "source_slug": "finance-read",
             "citation": "Secretary Core read-only finance summary",
             "verified_by": "deterministic_finance_query",
+            "status": "ok",
+            "confidentiality": "private",
         }
     if capability == "web_research":
         result = web_research(text)
@@ -39,6 +43,8 @@ def execute_core_read(
             "tool": "web", "operation": "research", "source_slug": "web-research",
             "citation": "Secretary Core bounded read-only web research result",
             "verified_by": "bounded_web_retrieval",
+            "status": "ok",
+            "confidentiality": "public",
             "source_metadata": {
                 "provider": result.get("provider"), "region": result.get("region"),
                 "web_sources": [
