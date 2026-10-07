@@ -62,11 +62,15 @@ def query_finance_text(text: str, *, repository) -> dict:
 
 
 def finance_core_answer(result: dict) -> str:
-    if int(result.get("total") or 0) == 0:
-        return "保存済み家計に該当する明細が見つかりませんでした。"
     period = ""
     if result.get("requested_start_date") or result.get("requested_end_date"):
         period = f"{result.get('requested_start_date') or '-'}〜{result.get('requested_end_date') or '-'}の"
+    if int(result.get("total") or 0) == 0:
+        return (
+            "保存済み家計では、"
+            + period
+            + "集計対象となる明細が見つかりませんでした。"
+        )
     return (
         f"保存済み家計では、{period}集計対象は{result['transaction_count']}件、"
         f"収入は¥{int(result['income_total']):,}、"
