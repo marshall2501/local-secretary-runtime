@@ -271,7 +271,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
              patch.object(
                  daily, '_save_magi_assignments',
                  side_effect=lambda assignments: deepcopy(assignments),
-             ), patch.object(daily, 'run_pkb_observation_loop', side_effect=fake_loop):
+             ), patch.object(daily, 'run_observation_loop', side_effect=fake_loop):
             daily.core_page()
             old = next(e for e in self.client.elements.values()
                        if isinstance(e, ui.expansion)
@@ -281,7 +281,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             await self.click('RITSUKOへ依頼')
             self.assertTrue(self.elements('対話結果を一括コピー'))
             self.assertTrue(self.elements('手動Observationで継続（開発用）'))
-            self.assertTrue(self.elements('未解決の情報要求（自動PKB read対象外または追加情報が必要）'))
+            self.assertTrue(self.elements('未解決の情報要求（利用不可Sourceまたは追加情報が必要）'))
 
     async def test_waiting_magi_task_open_restores_interactive_user_resume(self):
         saved_session = {
