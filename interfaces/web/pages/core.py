@@ -391,7 +391,7 @@ def register(portal_context: dict):
                         and session["status"] == "waiting_information"
                     ):
                         ui.label(
-                            "未解決の情報要求（自動PKB read対象外または追加情報が必要）"
+                            "未解決の情報要求（利用不可Sourceまたは追加情報が必要）"
                         ).classes("font-bold text-orange-900")
                         ui.code(json.dumps(
                             session["pending_requests"], ensure_ascii=False, indent=2
