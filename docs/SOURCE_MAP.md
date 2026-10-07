@@ -1,7 +1,7 @@
 # SOURCE_MAP — ソース構成と機能対応
 
 更新: 2026-10-07  
-参照runtime: `local-secretary-runtime` source確認対象 `b0204437...`
+参照runtime: behavior `05beac90...` / verification harness `969fb5f6...`
 
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
 
@@ -37,7 +37,7 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 | MoneyForward CSV取込 | Finance画面 | [../capabilities/finance/finance_import.py](../capabilities/finance/finance_import.py) | CSV → PostgreSQL |
 | 利用料金・契約 | [../interfaces/web/pages/service_billing.py](../interfaces/web/pages/service_billing.py) | [../capabilities/service_billing/service.py](../capabilities/service_billing/service.py) | OpenAI / Google Cloud等 |
 | Web Research | RITSUKO / Capability | [../capabilities/web_research/application.py](../capabilities/web_research/application.py) | Web Search / HTTP |
-| システム状態 / Debug | [../interfaces/web/pages/debug.py](../interfaces/web/pages/debug.py) | [../infrastructure/system_debug.py](../infrastructure/system_debug.py) | Git / Runtime / PostgreSQL read-only |
+| システム状態 / Debug | [../interfaces/web/pages/debug.py](../interfaces/web/pages/debug.py) | [../infrastructure/system_debug.py](../infrastructure/system_debug.py), [../application/schema_diagram.py](../application/schema_diagram.py) | Git / Runtime / PostgreSQL read-only / ER図 |
 | 開発Workbench | [../interfaces/workbench/app.py](../interfaces/workbench/app.py) | Workbench helpers | LLM / PKB / Core検証 |
 | Secretary REST API | [../interfaces/api/app.py](../interfaces/api/app.py) | [../application/read_service.py](../application/read_service.py), Task / Candidate services | FastAPI / PostgreSQL |
 | 外部ChatGPT read-only MCP | [../interfaces/mcp/server.py](../interfaces/mcp/server.py) | Secretary API read boundary | HTTP → Secretary API |
@@ -59,7 +59,8 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 ```text
 local-secretary-runtime/
 ├─ application/
-│  └─ read_service.py
+│  ├─ read_service.py
+│  └─ schema_diagram.py
 │
 ├─ ritsuko/
 │  ├─ application/
@@ -175,7 +176,10 @@ local-secretary-runtime/
 │  │  ├─ service_connection_repository.py
 │  │  ├─ service_billing_settings_repository.py
 │  │  ├─ pkb_runtime.py
-│  │  └─ pkb_debug.py
+│  │  ├─ pkb_debug.py
+│  │  └─ schema_introspection.py
+│  ├─ schema_diagram/
+│  │  └─ providers.py
 │  ├─ async_runtime/
 │  │  ├─ transport.py
 │  │  └─ background_jobs.py
@@ -219,6 +223,7 @@ local-secretary-runtime/
    ├─ test_service_billing.py
    ├─ test_service_connections.py
    ├─ test_system_debug.py
+   ├─ test_schema_diagram.py
    ├─ test_read_service.py
    ├─ test_mcp_adapter_static.py
    └─ db/
@@ -306,6 +311,24 @@ TOP
 `interfaces/web` はUIと利用者操作の入口を担当し、PostgreSQL実装そのものを所有しません。
 
 具象PostgreSQL adapterの組み立ては [../bootstrap/web_runtime.py](../bootstrap/web_runtime.py) が担当します。
+
+### Debug DB ER図
+
+Debug画面のER図は、UIからSQLやsubprocessを直接実行せず、次の責務へ分離しています。
+
+```text
+interfaces/web/pages/debug.py
+  ↓
+application/schema_diagram.py
+  ↓
+bootstrap/web_runtime.py
+  ↓
+infrastructure/postgres/schema_introspection.py
+  ↓
+infrastructure/schema_diagram/providers.py
+```
+
+Native + Mermaidは現在のDaily Runtime DBからschema metadataだけをread-only取得します。business row dataは読みません。SchemaCrawler / tbls / ERAlchemyは比較用Provider slotとして存在しますが、外部依存と安全なcredential handoffの受入前は自動実行・自動installしません。
 
 ---
 
