@@ -424,6 +424,29 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         async def fake_loop(*args, **kwargs):
             return deepcopy(new_session)
 
+        guided_trace = {
+            'task': {
+                'id': new_session['task_id'],
+                'status': 'completed',
+                'request': '新しい依頼',
+                'revision': 2,
+                'phase': 'completed',
+                'selected_capability': 'finance_read',
+                'message': '新しい依頼の結果',
+                'updated_at': 'fixture-new',
+            },
+            'actions': [{
+                'tool': 'finance',
+                'operation': 'summary',
+                'risk': 'read_only',
+                'action_status': 'succeeded',
+                'outcome': 'success',
+                'summary': 'finance fixture',
+                'source_uri': 'tool://ritsuko-magi/finance/test',
+                'verified_by': 'deterministic_finance_query',
+                'verified_at': 'fixture',
+            }],
+        }
         with self.client, patch.object(
             daily, 'list_magi_models', return_value=[]
         ), patch.object(
@@ -432,6 +455,9 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             daily, 'run_observation_loop',
             side_effect=fake_loop,
+        ), patch.object(
+            daily, 'load_core_task_trace',
+            return_value=guided_trace,
         ):
             daily.core_page()
             await self.click('開く', 0)
@@ -451,6 +477,13 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertFalse(self.elements('Post-review MAGI: READY'))
             self.assertFalse(self.elements('Memory Intake: committed / pending'))
+            self.assertTrue(self.elements(new_session['task_id']))
+            self.assertTrue(self.elements('Action / Result: 1件'))
+            self.assertTrue(any(
+                'finance.summary [read_only] → succeeded'
+                in getattr(e, 'text', '')
+                for e in self.client.elements.values()
+            ))
 
     async def test_proposal_ready_magi_task_offers_answer_only_and_memory_choices(self):
         saved_session = {
