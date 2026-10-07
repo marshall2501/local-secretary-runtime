@@ -17,6 +17,16 @@ CORE_SLICE = "ritsuko_magi_observation_v1"
 
 def pending_pkb_request(session: dict) -> dict | None:
     """Backward-compatible wrapper for the former PKB-only bridge."""
+    pending = [
+        item for item in (session.get("pending_requests") or [])
+        if isinstance(item, dict)
+    ]
+    if (
+        session.get("status") != "waiting_information"
+        or not pending
+        or any(item.get("source") != "pkb" for item in pending)
+    ):
+        return None
     groups, _ = pending_source_requests(
         session,
         resource_catalog={"pkb": {"available": True}},
