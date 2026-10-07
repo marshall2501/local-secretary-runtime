@@ -24,7 +24,7 @@ REQUESTED_RESULT_TYPES = (
 UNDERSTANDING_STATUSES = ("complete", "partial", "uninterpretable")
 INFORMATION_SUFFICIENCY_STATUSES = ("sufficient", "insufficient", "unknown")
 INFORMATION_SOURCES = (
-    "current_context", "pkb", "task_history", "web", "files",
+    "current_context", "pkb", "task_history", "web", "finance", "files",
     "external_service", "pc_observation", "user", "unknown",
 )
 RECOMMENDED_NEXT_TYPES = (
@@ -231,10 +231,26 @@ def default_resource_catalog() -> dict:
             "contains": ["対象","属性","関係","現在状態","過去状態","出来事","履歴","情報源"],
             "supports": ["対象検索","現在値検索","履歴検索","時点検索","関係検索","情報源確認"],
         },
-        "task_history": {"available": True, "access": "read_only_via_ritsuko"},
-        "web": {"available": True, "access": "read_only_via_ritsuko"},
-        "files": {"available": True, "access": "read_only_via_ritsuko"},
-        "external_services": {"available": False, "access": "permission_dependent"},
+        "task_history": {
+            "available": False,
+            "access": "not_connected_to_state_driven_loop",
+        },
+        "web": {
+            "available": True,
+            "access": "bounded_read_only_via_ritsuko",
+            "confidentiality": "public",
+        },
+        "finance": {
+            "available": True,
+            "access": "bounded_read_only_via_ritsuko",
+            "confidentiality": "private",
+        },
+        "files": {
+            "available": False,
+            "access": "not_implemented",
+            "description": "Files read Capabilityとallowlistは未実装",
+        },
+        "external_service": {"available": False, "access": "permission_dependent"},
         "pc_observation": {"available": False, "access": "permission_dependent"},
         "user": {"available": True, "access": "ask_user"},
     }
