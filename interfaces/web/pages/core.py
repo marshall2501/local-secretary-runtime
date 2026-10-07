@@ -2059,8 +2059,8 @@ def register(portal_context: dict):
                     icon="account_tree",
                 ).classes("w-full border"):
                     ui.label(
-                        "Protocol v1とは独立した過去の協調経路です。"
-                        "現在のRITSUKO→MAGI通信試験の処理順ではありません。"
+                        "過去のMAGI協調経路を比較・確認するために残しています。"
+                        "現在のRITSUKO ⇄ MAGI Observation Loopには使用しません。"
                     ).classes("text-xs text-grey-7")
                     with ui.row().classes("w-full items-center gap-2 flex-wrap"):
                         for index, step in enumerate(CORE_FLOW_STEPS):
@@ -2071,7 +2071,7 @@ def register(portal_context: dict):
                         "曖昧依頼の旧協調経路です。Cycle 1で限定PKB readを行い、"
                         "結果をObservation v2へ戻してCycle 2で再検討します。"
                         "Synthesisは中間提案。Coordinatorが反復・最大2 cycle・外部への拡張を制限します。"
-                        "明示的な能力指定と追加回答による再開も現行回帰経路側です。"
+                        "現在のObservation Loopの制御・Task状態・完了判定には使用しません。"
                     ).classes("text-sm")
     
     core_page._context_sync = sync
