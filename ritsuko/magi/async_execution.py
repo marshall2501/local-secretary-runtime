@@ -57,6 +57,7 @@ from .dialogue import (
     _normalized_member_specs,
     _request_signatures,
     _latest_verified_pkb_observation,
+    _grounded_empty_finance_answer,
     _wait_for_user_after_exhausted_pkb,
     _turn_limit,
     _extend_turn_limit_for_user_resume,
@@ -737,6 +738,37 @@ async def _apply_detail_async(
                 member_specs_override=member_specs_override,
                 context_policy=context_policy,
             )
+
+        empty_finance_answer = _grounded_empty_finance_answer(session, requests)
+        if empty_finance_answer is not None:
+            session["detail"] = {
+                "understood_request": str(
+                    response.get("understood_request")
+                    or (session.get("classification") or {}).get("understood_request")
+                    or ""
+                ),
+                "state": "READY",
+                "reason": (
+                    "verified Finance Observationで対象範囲の該当明細が0件と確認されたため、"
+                    "同じFinance readを繰り返さず、その不足を回答する"
+                ),
+                "information_requests": [],
+                "question_for_user": None,
+                "answer_candidate": empty_finance_answer,
+                "knowledge_candidate": None,
+                "action_candidate": None,
+            }
+            session["pending_requests"] = []
+            session["ritsuko_grounded_fallback"] = {
+                "kind": "verified_empty_finance",
+                "source": "finance",
+                "result_count": 0,
+            }
+            session.update(
+                status="candidate_ready",
+                next_step="review_answer_candidate",
+            )
+            return session
 
         latest_verified_pkb = _latest_verified_pkb_observation(session)
         if latest_verified_pkb is not None and requests:
