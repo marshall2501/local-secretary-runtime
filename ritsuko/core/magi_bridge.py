@@ -7,55 +7,32 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from ritsuko.application.observation_sources import (
+    pending_source_requests,
+    verified_source_observation,
+)
+
 CORE_SLICE = "ritsuko_magi_observation_v1"
 
 
 def pending_pkb_request(session: dict) -> dict | None:
-    """Return one bounded PKB request when the current MAGI state permits it."""
-    if session.get("status") != "waiting_information":
+    """Backward-compatible wrapper for the former PKB-only bridge."""
+    groups, _ = pending_source_requests(
+        session,
+        resource_catalog={"pkb": {"available": True}},
+    )
+    if len(groups) != 1 or groups[0].get("source") != "pkb":
         return None
-    pending = [
-        item for item in (session.get("pending_requests") or [])
-        if isinstance(item, dict)
-    ]
-    if not pending or any(item.get("source") != "pkb" for item in pending):
-        return None
-    return {
-        "source": "pkb",
-        "request_ids": [
-            str(item.get("request_id"))
-            for item in pending if item.get("request_id")
-        ],
-        "what": " / ".join(
-            str(item.get("what") or "").strip()
-            for item in pending if str(item.get("what") or "").strip()
-        )[:4000],
-        "reasons": [
-            str(item.get("reason") or "").strip()[:1000]
-            for item in pending if str(item.get("reason") or "").strip()
-        ],
-    }
+    return groups[0]
 
 
 def verified_pkb_observation(execution: dict, pending_request: dict) -> dict:
-    """Build a bounded private Observation from a deterministic PKB read."""
-    result = deepcopy(execution.get("result") or {})
-    evidence_preview = []
-    if isinstance(result.get("current"), list):
-        evidence_preview.extend(result["current"][:12])
-    if isinstance(result.get("items"), list):
-        evidence_preview.extend(result["items"][:12])
-    return {
-        "source": "pkb",
-        "verified": True,
-        "confidentiality": "private",
-        "text": str(execution.get("answer") or "").strip()[:4000],
-        "responds_to": list(pending_request.get("request_ids") or []),
-        "capability": "pkb_search",
-        "result_kind": result.get("result_kind"),
-        "result_count": int(execution.get("total") or 0),
-        "evidence_preview": evidence_preview[:12],
-    }
+    """Backward-compatible wrapper for PKB Observation construction."""
+    request = {"source": "pkb", **dict(pending_request)}
+    observation = verified_source_observation(execution, request)
+    if observation is None:
+        raise ValueError("verified_pkb_observation_required")
+    return observation
 
 
 def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
@@ -196,7 +173,12 @@ def task_projection(session: dict) -> dict:
         item for item in (session.get("observations") or [])
         if isinstance(item, dict)
         and item.get("verified") is True
-        and item.get("source") == "pkb"
+        and item.get("source") in {"pkb", "web", "finance"}
+    ]
+    unresolved_requests = [
+        item for item in (session.get("pending_requests") or [])
+        if isinstance(item, dict)
+        and item.get("request_id")
     ]
     if (
         status == "candidate_ready"
@@ -204,6 +186,7 @@ def task_projection(session: dict) -> dict:
         and answer.strip()
         and session.get("tool_read_executed") is True
         and verified_observations
+        and not unresolved_requests
     ):
         return {
             "task_status": "completed",
@@ -220,7 +203,7 @@ def task_projection(session: dict) -> dict:
             "next_step": "review_answer_candidate",
             "message": None,
             "question": None,
-            "reason": "answer_candidate_not_grounded_by_verified_pkb_observation",
+            "reason": "answer_candidate_not_grounded_by_verified_required_observation",
         }
 
     if status == "waiting_user":
