@@ -46,6 +46,10 @@ class MagiTaskRepository(Protocol):
 
     def abort_proposal_review(self, *, task_id: UUID, error: str) -> None: ...
 
+    def record_source_read(
+        self, *, task_id: UUID, execution: dict, pending_request: dict
+    ) -> tuple[str, str]: ...
+
     def record_pkb_read(
         self, *, task_id: UUID, execution: dict, pending_request: dict
     ) -> tuple[str, str]: ...
@@ -87,6 +91,10 @@ def finalize_proposal_review(
 
 def abort_proposal_review(repository: MagiTaskRepository, **kwargs) -> None:
     repository.abort_proposal_review(**kwargs)
+
+
+def record_source_read(repository: MagiTaskRepository, **kwargs) -> tuple[str, str]:
+    return repository.record_source_read(**kwargs)
 
 
 def record_pkb_read(repository: MagiTaskRepository, **kwargs) -> tuple[str, str]:
