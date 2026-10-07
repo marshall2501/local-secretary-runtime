@@ -21,14 +21,14 @@ SOURCE_CONFIDENTIALITY = {
 }
 
 _SECRET_QUERY_PATTERNS = (
-    re.compile(r"(?i)\\b(?:password|passwd|api[_ -]?key|access[_ -]?token|secret)\\b\\s*[:=]?\\s*\\S+"),
-    re.compile(r"(?i)\\bsk-[A-Za-z0-9_-]{12,}"),
-    re.compile(r"(?i)\\bAIza[A-Za-z0-9_-]{20,}"),
-    re.compile(r"(?i)\\b(?:bearer\\s+)[A-Za-z0-9._~+/-]{16,}"),
-    re.compile(r"\\b[A-Fa-f0-9]{32,}\\b"),
+    re.compile(r"(?i)\b(?:password|passwd|api[_ -]?key|access[_ -]?token|secret)\b\s*[:=]?\s*\S+"),
+    re.compile(r"(?i)\bsk-[A-Za-z0-9_-]{12,}"),
+    re.compile(r"(?i)\bAIza[A-Za-z0-9_-]{20,}"),
+    re.compile(r"(?i)\b(?:bearer\s+)[A-Za-z0-9._~+/-]{16,}"),
+    re.compile(r"\b[A-Fa-f0-9]{32,}\b"),
 )
 _ACCOUNT_QUERY_PATTERN = re.compile(
-    r"(?i)(?:口座番号|account\\s*(?:number|no\\.?))\\s*[:：=]?\\s*[0-9-]{5,}"
+    r"(?i)(?:口座番号|account\s*(?:number|no\.?))\s*[:：=]?\s*[0-9-]{5,}"
 )
 
 
