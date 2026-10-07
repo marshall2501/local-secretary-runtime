@@ -162,6 +162,45 @@ class MagiCoreBridgeTests(unittest.TestCase):
         self.assertEqual(projection["task_status"], "completed")
         self.assertEqual(projection["next_step"], "respond")
 
+    def test_web_or_finance_verified_observation_can_ground_completion(self):
+        for source in ("web", "finance"):
+            with self.subTest(source=source):
+                projection = task_projection({
+                    "status": "candidate_ready",
+                    "next_step": "review_answer_candidate",
+                    "tool_read_executed": True,
+                    "pending_requests": [],
+                    "observations": [{
+                        "source": source,
+                        "verified": True,
+                        "confidentiality": (
+                            "public" if source == "web" else "private"
+                        ),
+                        "text": "verified",
+                    }],
+                    "detail": {"answer_candidate": "grounded answer"},
+                })
+                self.assertEqual(projection["task_status"], "completed")
+
+    def test_unresolved_request_prevents_completion_even_with_verified_read(self):
+        projection = task_projection({
+            "status": "candidate_ready",
+            "tool_read_executed": True,
+            "pending_requests": [{
+                "request_id": "REQ-2",
+                "source": "web",
+                "what": "still blocking",
+            }],
+            "observations": [{
+                "source": "pkb",
+                "verified": True,
+                "confidentiality": "private",
+                "text": "partial",
+            }],
+            "detail": {"answer_candidate": "premature"},
+        })
+        self.assertEqual(projection["task_status"], "waiting_external")
+
     def test_unverified_answer_candidate_does_not_complete_task(self):
         projection = task_projection({
             "status": "candidate_ready",
