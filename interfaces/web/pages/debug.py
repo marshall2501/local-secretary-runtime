@@ -277,6 +277,14 @@ def register(portal_context: dict):
                             value=default_provider,
                             label="ER図 Provider",
                         ).classes("min-w-64")
+                        density_select = ui.select(
+                            options={
+                                "keys": "キー中心",
+                                "all": "全カラム",
+                            },
+                            value="keys",
+                            label="表示密度",
+                        ).classes("min-w-40")
                         generate_button = ui.button(
                             "生成 / 更新",
                             icon="refresh",
@@ -298,6 +306,9 @@ def register(portal_context: dict):
                                 lambda: _schema_diagram_service.generate(
                                     provider_key,
                                     enabled=enabled_map,
+                                    options={
+                                        "keys_only": density_select.value == "keys",
+                                    },
                                 )
                             )
                             result_area.clear()
