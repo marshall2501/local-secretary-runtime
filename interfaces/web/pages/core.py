@@ -353,7 +353,7 @@ def register(portal_context: dict):
                     ).classes("font-mono text-xs")
                     if session.get("tool_read_executed"):
                         ui.label(
-                            "実PKB read済み / Action・Result記録対象"
+                            "実Source read済み / Action・Result・Source・Audit記録対象"
                         ).classes("text-xs text-green-800")
                     gate = session.get("cloud_context_gate") or {}
                     if gate:
@@ -866,13 +866,13 @@ def register(portal_context: dict):
                     guided_button.disable()
                     guided_result_panel.refresh()
                     try:
-                        state["guided_session"] = await run_pkb_observation_loop(
+                        state["guided_session"] = await run_observation_loop(
                             request_text,
                             member_specs=specs,
                             timeout=guided_timeout_seconds(),
                             create_task_record=_create_magi_core_task_record,
-                            execute_pkb_request=_execute_magi_pkb_request,
-                            record_pkb_read_record=_record_magi_pkb_read_record,
+                            execute_source_request=_execute_magi_source_request,
+                            record_source_read_record=_record_magi_source_read_record,
                             persist_session_record=_persist_magi_core_session_record,
                             fail_task_record=_fail_magi_core_task_record,
                             stop_requested=stop_event.is_set,
