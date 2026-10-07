@@ -92,6 +92,30 @@ class ObservationSourceTests(unittest.TestCase):
                 session,
             )
 
+    def test_web_query_blocks_secret_like_value_even_if_user_wrote_it(self):
+        session = {
+            "user_raw": "api_key=sk-abcdefghijklmnop を検索して",
+            "observations": [],
+        }
+        with self.assertRaisesRegex(
+            ValueError,
+            "web_query_contains_secret_like_value",
+        ):
+            web_query_from_request(
+                {"what": "api_key=sk-abcdefghijklmnop status"},
+                session,
+            )
+
+    def test_web_query_blocks_account_identifier(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "web_query_contains_account_identifier",
+        ):
+            web_query_from_request(
+                {"what": "口座番号 1234567 の情報"},
+                {"user_raw": "口座番号 1234567 の情報", "observations": []},
+            )
+
     def test_web_query_allows_explicit_public_safe_term(self):
         session = {
             "user_raw": "メインPCのGPUと最新ドライバーを比較して",
