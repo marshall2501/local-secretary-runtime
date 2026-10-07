@@ -140,10 +140,14 @@ class RitsukoMagiProtocolTests(unittest.TestCase):
         self.assertIn("$.analysis.information_requests[0].request_id:invalid",
                       validate_analysis_result(response,self.request()))
 
-    def test_resource_catalog_is_ritsuko_mediated(self):
+    def test_resource_catalog_matches_executable_state_driven_sources(self):
         catalog=default_resource_catalog()
         self.assertEqual(catalog["pkb"]["access"],"read_only_via_ritsuko")
-        self.assertEqual(catalog["web"]["access"],"read_only_via_ritsuko")
+        self.assertTrue(catalog["web"]["available"])
+        self.assertTrue(catalog["finance"]["available"])
+        self.assertEqual(catalog["finance"]["confidentiality"],"private")
+        self.assertFalse(catalog["files"]["available"])
+        self.assertFalse(catalog["task_history"]["available"])
         self.assertEqual(catalog["user"]["access"],"ask_user")
 
     def test_sync_ollama_guided_disables_thinking(self):
