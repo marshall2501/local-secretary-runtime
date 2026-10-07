@@ -61,6 +61,8 @@ try {
     Invoke-TestDocker ($compose + @('exec','-T','secretary-postgres','psql','-X','-U','secretary_admin','-d','secretary',
         '-v','ON_ERROR_STOP=1','-v',"checksum=$checksum",'-f','/tmp/repair.sql'))
     Run-Sql (Join-Path $PSScriptRoot 'assertions.sql') 'secretary'
+    & python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -BackupPath $backup
     Invoke-TestDocker ($compose + @('restart','secretary-postgres'))
     Invoke-TestDocker ($compose + @('up','-d','--wait','--wait-timeout','120','secretary-postgres'))
