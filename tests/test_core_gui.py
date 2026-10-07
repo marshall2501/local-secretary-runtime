@@ -39,6 +39,44 @@ class CoreGuiTests(TestCase):
         finally:
             daily._apply_ui_preferences(old)
 
+    def test_er_diagram_preferences_validate_and_preserve_defaults(self):
+        prefs = daily._validate_ui_preferences({
+            "debug": {
+                "er_diagram_providers": {
+                    "native_mermaid": False,
+                    "schemacrawler": True,
+                    "tbls": True,
+                    "eralchemy": False,
+                    "unknown": True,
+                }
+            }
+        })
+
+        self.assertFalse(
+            prefs["debug"]["er_diagram_providers"]["native_mermaid"]
+        )
+        self.assertTrue(
+            prefs["debug"]["er_diagram_providers"]["schemacrawler"]
+        )
+        self.assertTrue(prefs["debug"]["er_diagram_providers"]["tbls"])
+        self.assertFalse(
+            prefs["debug"]["er_diagram_providers"]["eralchemy"]
+        )
+        self.assertNotIn(
+            "unknown",
+            prefs["debug"]["er_diagram_providers"],
+        )
+
+        defaults = daily._validate_ui_preferences(
+            {"debug": {"er_diagram_providers": {"native_mermaid": "yes"}}}
+        )
+        self.assertTrue(
+            defaults["debug"]["er_diagram_providers"]["native_mermaid"]
+        )
+        self.assertFalse(
+            defaults["debug"]["er_diagram_providers"]["schemacrawler"]
+        )
+
     def test_independent_windows_reach_beyond_fifty_and_stop_at_end(self):
         waiting = [{'id': f'waiting-{i}'} for i in range(73)]
         completed = [{'id': f'completed-{i}'} for i in range(8)]
