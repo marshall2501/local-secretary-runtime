@@ -49,6 +49,7 @@ from bootstrap.web_runtime import (
     build_pkb_repository,
     build_service_billing_settings_repository,
     build_service_connection_repository,
+    build_schema_diagram_service,
     claim_core_cooperative_probe,
     connection,
     fail_core_cooperative_probe,
@@ -196,6 +197,7 @@ _magi_settings_repository = build_magi_settings_repository()
 _service_connection_repository = build_service_connection_repository()
 _service_billing_settings_repository = build_service_billing_settings_repository()
 _finance_repository = build_finance_repository()
+_schema_diagram_service = build_schema_diagram_service()
 
 def _notify_client(client, message: str, *, type: str) -> None:
     """Send a notification through a stable client context.
@@ -272,6 +274,12 @@ CORE_FLOW_STEPS = (
     "Coordinator Guard", "FINAL CORE DECISION",
 )
 CORE_ADVISOR_TIMEOUT_OPTIONS = (30, 60, 120, 180, 300, 600, 900)
+ER_DIAGRAM_PROVIDER_DEFAULTS = {
+    "native_mermaid": True,
+    "schemacrawler": False,
+    "tbls": False,
+    "eralchemy": False,
+}
 
 UI_VISIBILITY_DEFAULT = {
     "pkb": {key: True for key in PKB_UI_DEFAULT_OPEN},
@@ -296,6 +304,9 @@ def _default_ui_preferences() -> dict:
             "recent_limit": FINANCE_PAGE_SIZE_DEFAULT,
         },
         "core": {**CORE_UI_DEFAULT_OPEN, **CORE_TASK_LIST_DEFAULTS},
+        "debug": {
+            "er_diagram_providers": dict(ER_DIAGRAM_PROVIDER_DEFAULTS),
+        },
         "core_advisor_model": None,
         "core_advisor_timeout": 60,
         "visibility": {
@@ -371,6 +382,15 @@ def _validate_ui_preferences(raw: object) -> dict:
             value = core.get(key)
             if type(value) is int and value in CORE_TASK_PAGE_SIZE_OPTIONS:
                 result["core"][key] = value
+
+    debug = raw.get("debug")
+    if isinstance(debug, dict):
+        providers = debug.get("er_diagram_providers")
+        if isinstance(providers, dict):
+            for key in ER_DIAGRAM_PROVIDER_DEFAULTS:
+                value = providers.get(key)
+                if isinstance(value, bool):
+                    result["debug"]["er_diagram_providers"][key] = value
 
     advisor_model = raw.get("core_advisor_model")
     if isinstance(advisor_model, str):
@@ -531,6 +551,11 @@ def _save_core_advisor_settings(model: str | None, timeout_seconds: int) -> tupl
         "entity": dict(_UI_PREFERENCES["entity"]),
         "finance": dict(_UI_PREFERENCES["finance"]),
         "core": dict(_UI_PREFERENCES["core"]),
+        "debug": {
+            "er_diagram_providers": dict(
+                _UI_PREFERENCES["debug"]["er_diagram_providers"]
+            ),
+        },
         "visibility": {
             section: dict(values)
             for section, values in _UI_PREFERENCES["visibility"].items()
