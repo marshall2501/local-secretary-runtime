@@ -943,6 +943,160 @@ def register(portal_context: dict):
     
                 ui.timer(1.0, refresh_guided_progress)
     
+            @ui.refreshable
+            def trace_panel():
+                result = state["result"] or {}
+                task_id = result.get("task_id")
+                if not task_id:
+                    return
+                trace = state["trace"]
+                if not trace:
+                    with ui.expansion(
+                        "Task検証・稼働ログ",
+                        value=_CORE_UI_OPEN["trace"],
+                        on_value_change=remember_core_expansion("trace"),
+                    ).classes(
+                        "w-full border border-red-200 bg-red-50"
+                        + _block_visibility_class("core", "trace")
+                    ):
+                        ui.label("Traceを取得できません: " + str(state["trace_error"] or "未取得")).classes(
+                            "text-red-700"
+                        )
+                    return
+    
+                task = trace["task"]
+                with ui.expansion(
+                    "Task検証・稼働ログ",
+                    value=_CORE_UI_OPEN["trace"],
+                    on_value_change=remember_core_expansion("trace"),
+                ).classes(
+                    "w-full border-2 border-slate-300 bg-slate-50"
+                    + _block_visibility_class("core", "trace")
+                ):
+                    ui.label(
+                        "この依頼Taskに属するDB上のAction / Result / Sourceを表示します。"
+                    ).classes("text-sm text-grey-7")
+                    with ui.grid(columns=2).classes("w-full gap-2"):
+                        ui.label("Task ID")
+                        ui.label(task["id"]).classes("font-mono text-xs")
+                        ui.label("Status / Revision")
+                        ui.label(f"{task['status']} / {task['revision']}")
+                        ui.label("Phase")
+                        ui.label(str(task.get("phase") or "-"))
+                        ui.label("能力")
+                        ui.label(str(task.get("selected_capability") or "-"))
+                        ui.label("元依頼")
+                        ui.label(task["request"])
+                        if task.get("effective_request"):
+                            ui.label("実効依頼")
+                            ui.label(task["effective_request"])
+                        if task.get("user_replies"):
+                            ui.label("追加回答")
+                            ui.label(" / ".join(task["user_replies"]))
+                        ui.label("更新時刻")
+                        ui.label(str(task["updated_at"]))
+    
+                    actions = trace["actions"]
+                    ui.separator()
+                    ui.label(f"Action / Result: {len(actions)}件").classes("font-bold")
+                    if not actions:
+                        ui.label(
+                            "まだActionはありません。追加確認待ちTaskでは正常です。"
+                        ).classes("text-sm")
+                    for index, item in enumerate(actions, start=1):
+                        with ui.card().classes("w-full bg-white"):
+                            ui.label(
+                                f"{index}. {item['tool']}.{item['operation']} "
+                                f"[{item['risk']}] → {item['action_status']}"
+                            ).classes("font-medium")
+                            if item.get("outcome"):
+                                ui.label(
+                                    f"Result: {item['outcome']} / "
+                                    f"{item.get('summary') or ''}"
+                                ).classes("text-sm")
+                            if item.get("source_uri"):
+                                ui.label(
+                                    "Source: " + item["source_uri"]
+                                ).classes("font-mono text-xs text-grey-7")
+                            if item.get("verified_by"):
+                                ui.label(
+                                    "Verified: "
+                                    + str(item["verified_by"])
+                                    + " / "
+                                    + str(item.get("verified_at") or "")
+                                ).classes("text-xs text-grey-7")
+    
+            trace_panel()
+
+            @ui.refreshable
+            def screen_log_panel():
+                try:
+                    rows = _portal("load_recent_core_tasks")(10)
+                except Exception as exc:
+                    with ui.expansion(
+                        "Core画面 全体稼働ログ",
+                        value=_CORE_UI_OPEN["screen_log"],
+                        on_value_change=remember_core_expansion("screen_log"),
+                    ).classes(
+                        "w-full border border-red-200 bg-red-50"
+                        + _block_visibility_class("core", "screen_log")
+                    ):
+                        ui.label("最近のTaskを取得できません: " + str(exc)).classes(
+                            "text-red-700"
+                        )
+                    return
+
+                with ui.expansion(
+                    "Core画面 全体稼働ログ",
+                    value=_CORE_UI_OPEN["screen_log"],
+                    on_value_change=remember_core_expansion("screen_log"),
+                ).classes(
+                    "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
+                    + _block_visibility_class("core", "screen_log")
+                ):
+                    ui.label(
+                        "この画面で扱った直近のCore Taskを横断表示します。"
+                        " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
+                    ).classes("text-sm text-grey-7")
+                    if not rows:
+                        ui.label("Core Taskはまだありません。")
+                        return
+                    for item in rows:
+                        with ui.row().classes(
+                            "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
+                        ):
+                            status_color = {
+                                "completed": "green",
+                                "waiting_external": "orange",
+                                "running": "blue",
+                                "paused": "grey",
+                                "failed": "red",
+                            }.get(item["status"], "grey")
+                            ui.badge(item["status"], color=status_color)
+                            with ui.column().classes("grow gap-0"):
+                                ui.label(item["request"]).classes("font-medium")
+                                ui.label(
+                                    f"Task {item['id']} / revision={item['revision']} / "
+                                    f"phase={item.get('phase') or '-'} / "
+                                    f"capability={item.get('selected_capability') or '-'}"
+                                ).classes("font-mono text-xs text-grey-7")
+                                ui.label(
+                                    f"Action={item['action_count']} / Result={item['result_count']} / "
+                                    f"updated={item['updated_at']}"
+                                ).classes("text-xs text-grey-7")
+
+            screen_log_panel()
+
+            with ui.card().classes(
+                "w-full" + _block_visibility_class("core", "limits")
+            ):
+                ui.label("この縦断でまだ行わないこと").classes("font-bold")
+                ui.label(
+                    "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
+                    "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
+                ).classes("text-sm")
+
+
             with ui.expansion(
                 "旧 Protocol v1 全項目一括分析（比較用）",
                 value=False, icon="history",
@@ -1106,13 +1260,13 @@ def register(portal_context: dict):
     
             ui.separator()
             with ui.expansion(
-                "旧MAGI v0・現行経路（回帰用）",
+                "旧MAGI v0（比較・確認用）",
                 value=False,
                 icon="history",
             ).classes("w-full border"):
                 ui.label(
-                    "旧経路のAdvisor設定・OODA・Task操作・フロー図です。"
-                    "Protocol v1のCycle 1試験とは独立しています。"
+                    "旧MAGI v0のAdvisor設定・OODA・旧処理フローです。"
+                    "現在のRITSUKO ⇄ MAGI Observation Loopには使用しません。"
                 ).classes("text-sm text-grey-7")
     
                 try:
@@ -1348,63 +1502,6 @@ def register(portal_context: dict):
                     if changed:
                         open_tasks_panel.refresh()
                         completed_tasks_panel.refresh()
-    
-                @ui.refreshable
-                def screen_log_panel():
-                    try:
-                        rows = _portal("load_recent_core_tasks")(10)
-                    except Exception as exc:
-                        with ui.expansion(
-                            "Core画面 全体稼働ログ",
-                            value=_CORE_UI_OPEN["screen_log"],
-                            on_value_change=remember_core_expansion("screen_log"),
-                        ).classes(
-                            "w-full border border-red-200 bg-red-50"
-                            + _block_visibility_class("core", "screen_log")
-                        ):
-                            ui.label("最近のTaskを取得できません: " + str(exc)).classes(
-                                "text-red-700"
-                            )
-                        return
-    
-                    with ui.expansion(
-                        "Core画面 全体稼働ログ",
-                        value=_CORE_UI_OPEN["screen_log"],
-                        on_value_change=remember_core_expansion("screen_log"),
-                    ).classes(
-                        "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
-                        + _block_visibility_class("core", "screen_log")
-                    ):
-                        ui.label(
-                            "この画面で扱った直近のCore Taskを横断表示します。"
-                            " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
-                        ).classes("text-sm text-grey-7")
-                        if not rows:
-                            ui.label("Core Taskはまだありません。")
-                            return
-                        for item in rows:
-                            with ui.row().classes(
-                                "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
-                            ):
-                                status_color = {
-                                    "completed": "green",
-                                    "waiting_external": "orange",
-                                    "running": "blue",
-                                    "paused": "grey",
-                                    "failed": "red",
-                                }.get(item["status"], "grey")
-                                ui.badge(item["status"], color=status_color)
-                                with ui.column().classes("grow gap-0"):
-                                    ui.label(item["request"]).classes("font-medium")
-                                    ui.label(
-                                        f"Task {item['id']} / revision={item['revision']} / "
-                                        f"phase={item.get('phase') or '-'} / "
-                                        f"capability={item.get('selected_capability') or '-'}"
-                                    ).classes("font-mono text-xs text-grey-7")
-                                    ui.label(
-                                        f"Action={item['action_count']} / Result={item['result_count']} / "
-                                        f"updated={item['updated_at']}"
-                                    ).classes("text-xs text-grey-7")
     
                 with task_drawer:
                     with ui.column().classes("w-full gap-2 no-wrap"):
@@ -1836,89 +1933,6 @@ def register(portal_context: dict):
                                         ).classes("text-sm")
     
                     @ui.refreshable
-                    def trace_panel():
-                        result = state["result"] or {}
-                        task_id = result.get("task_id")
-                        if not task_id:
-                            return
-                        trace = state["trace"]
-                        if not trace:
-                            with ui.expansion(
-                                "Task検証・稼働ログ",
-                                value=_CORE_UI_OPEN["trace"],
-                                on_value_change=remember_core_expansion("trace"),
-                            ).classes(
-                                "w-full border border-red-200 bg-red-50"
-                                + _block_visibility_class("core", "trace")
-                            ):
-                                ui.label("Traceを取得できません: " + str(state["trace_error"] or "未取得")).classes(
-                                    "text-red-700"
-                                )
-                            return
-    
-                        task = trace["task"]
-                        with ui.expansion(
-                            "Task検証・稼働ログ",
-                            value=_CORE_UI_OPEN["trace"],
-                            on_value_change=remember_core_expansion("trace"),
-                        ).classes(
-                            "w-full border-2 border-slate-300 bg-slate-50"
-                            + _block_visibility_class("core", "trace")
-                        ):
-                            ui.label(
-                                "この依頼Taskに属するDB上のAction / Result / Sourceを表示します。"
-                            ).classes("text-sm text-grey-7")
-                            with ui.grid(columns=2).classes("w-full gap-2"):
-                                ui.label("Task ID")
-                                ui.label(task["id"]).classes("font-mono text-xs")
-                                ui.label("Status / Revision")
-                                ui.label(f"{task['status']} / {task['revision']}")
-                                ui.label("Phase")
-                                ui.label(str(task.get("phase") or "-"))
-                                ui.label("能力")
-                                ui.label(str(task.get("selected_capability") or "-"))
-                                ui.label("元依頼")
-                                ui.label(task["request"])
-                                if task.get("effective_request"):
-                                    ui.label("実効依頼")
-                                    ui.label(task["effective_request"])
-                                if task.get("user_replies"):
-                                    ui.label("追加回答")
-                                    ui.label(" / ".join(task["user_replies"]))
-                                ui.label("更新時刻")
-                                ui.label(str(task["updated_at"]))
-    
-                            actions = trace["actions"]
-                            ui.separator()
-                            ui.label(f"Action / Result: {len(actions)}件").classes("font-bold")
-                            if not actions:
-                                ui.label(
-                                    "まだActionはありません。追加確認待ちTaskでは正常です。"
-                                ).classes("text-sm")
-                            for index, item in enumerate(actions, start=1):
-                                with ui.card().classes("w-full bg-white"):
-                                    ui.label(
-                                        f"{index}. {item['tool']}.{item['operation']} "
-                                        f"[{item['risk']}] → {item['action_status']}"
-                                    ).classes("font-medium")
-                                    if item.get("outcome"):
-                                        ui.label(
-                                            f"Result: {item['outcome']} / "
-                                            f"{item.get('summary') or ''}"
-                                        ).classes("text-sm")
-                                    if item.get("source_uri"):
-                                        ui.label(
-                                            "Source: " + item["source_uri"]
-                                        ).classes("font-mono text-xs text-grey-7")
-                                    if item.get("verified_by"):
-                                        ui.label(
-                                            "Verified: "
-                                            + str(item["verified_by"])
-                                            + " / "
-                                            + str(item.get("verified_at") or "")
-                                        ).classes("text-xs text-grey-7")
-    
-                    @ui.refreshable
                     def resume_panel():
                         result = state["result"] or {}
                         if result.get("status") != "waiting_external" or not result.get("task_id"):
@@ -2028,10 +2042,8 @@ def register(portal_context: dict):
                     )
                     core_result()
                     resume_panel()
-                    trace_panel()
                     ui.timer(2.0, poll_advisor_shadow)
     
-                screen_log_panel()
     
                 if task_id:
                     try:
@@ -2040,18 +2052,9 @@ def register(portal_context: dict):
                     except Exception as exc:
                         ui.notify("Taskを開けません: " + str(exc), type="negative")
     
-                with ui.card().classes(
-                    "w-full" + _block_visibility_class("core", "limits")
-                ):
-                    ui.label("この縦断でまだ行わないこと").classes("font-bold")
-                    ui.label(
-                        "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
-                        "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
-                    ).classes("text-sm")
-    
-                # The legacy MAGI v0 flow is regression context, not the current v1 path.
+                # The legacy MAGI v0 flow is comparison/reference context, not the current path.
                 with ui.expansion(
-                    "旧MAGI v0 処理フロー（回帰用）",
+                    "旧MAGI v0 処理フロー（比較・確認用）",
                     value=False,
                     icon="account_tree",
                 ).classes("w-full border"):
