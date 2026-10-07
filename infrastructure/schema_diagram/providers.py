@@ -51,7 +51,7 @@ def render_mermaid(snapshot: SchemaSnapshot, *, keys_only: bool = False) -> str:
                 flags.append("PK")
             if column.foreign_key:
                 flags.append("FK")
-            suffix = (" " + ",".join(flags)) if flags else ""
+            suffix = (" " + ", ".join(flags)) if flags else ""
             lines.append(
                 f"        {_mermaid_type(column.data_type)} "
                 f"{_mermaid_id(column.name)}{suffix}"
@@ -156,12 +156,17 @@ class OptionalToolProvider:
         return True, version, "dependency detected; execution awaits approved local setup"
 
     def status(self, *, enabled: bool) -> ProviderStatus:
-        available, version, detail = self._probe()
+        dependencies_found, version, detail = self._probe()
+        if dependencies_found:
+            detail = (
+                "dependency detected; execution awaits approved local setup "
+                "and safe credential handoff"
+            )
         return ProviderStatus(
             key=self.key,
             display_name=self.display_name,
             enabled=enabled,
-            available=available,
+            available=False,
             version=version,
             dependency_status=detail,
         )
