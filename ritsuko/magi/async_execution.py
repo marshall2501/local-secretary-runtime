@@ -1030,16 +1030,18 @@ async def continue_with_observation_async(
     )
 
 
-def _private_pkb_local_scope(session: dict) -> tuple[list[dict] | None, dict | None]:
-    """Keep every later turn local while private verified PKB remains in context."""
-    has_private_pkb = any(
-        isinstance(item, dict)
-        and item.get("source") == "pkb"
-        and item.get("verified") is True
-        and item.get("confidentiality", "private") == "private"
+def _private_observation_local_scope(
+    session: dict,
+) -> tuple[list[dict] | None, dict | None]:
+    """Keep later turns local while verified private/sensitive Observations exist."""
+    private_sources = sorted({
+        str(item.get("source") or "")
         for item in (session.get("observations") or [])
-    )
-    if not has_private_pkb:
+        if isinstance(item, dict)
+        and item.get("verified") is True
+        and item.get("confidentiality") in {"private", "sensitive"}
+    })
+    if not private_sources:
         return None, None
 
     local_specs = [
@@ -1056,11 +1058,26 @@ def _private_pkb_local_scope(session: dict) -> tuple[list[dict] | None, dict | N
         for spec in (session.get("member_specs") or [])
         if spec.get("enabled") and spec.get("provider") != "ollama"
     ]
+    pkb_only = private_sources == ["pkb"]
+    mode = (
+        "local_only_private_pkb"
+        if pkb_only
+        else "local_only_private_observation"
+    )
+    reason = (
+        "verified_private_pkb_observation"
+        if pkb_only
+        else "verified_private_or_sensitive_observation"
+    )
+    base = {
+        "mode": mode,
+        "reason": reason,
+        "private_sources": private_sources,
+        "withheld_members": withheld,
+    }
     if not local_specs:
         session["cloud_context_gate"] = {
-            "mode": "local_only_private_pkb",
-            "reason": "verified_private_pkb_observation",
-            "withheld_members": withheld,
+            **deepcopy(base),
             "status": "blocked_no_local_member",
         }
         session.update(
@@ -1069,62 +1086,76 @@ def _private_pkb_local_scope(session: dict) -> tuple[list[dict] | None, dict | N
         )
         return [], None
 
-    context_policy = {
-        "mode": "local_only_private_pkb",
-        "reason": "verified_private_pkb_observation",
-        "withheld_members": withheld,
-    }
     session["cloud_context_gate"] = {
-        **deepcopy(context_policy),
+        **deepcopy(base),
         "status": "applied",
     }
-    return local_specs, context_policy
+    return local_specs, base
 
 
-async def continue_with_verified_observation_async(
+def _private_pkb_local_scope(session: dict):
+    """Compatibility alias for older tests/callers."""
+    return _private_observation_local_scope(session)
+
+
+async def continue_with_verified_observations_async(
     session: dict,
-    observation: dict,
+    observations: list[dict],
     *,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
 ) -> dict:
-    """Continue from one RITSUKO-verified private PKB Observation.
-
-    Until Cloud Context Gate is explicitly accepted for personal PKB data, the
-    post-read turn is sent only to enabled local Ollama members from the Task
-    snapshot. Cloud members remain part of the Task snapshot but are withheld
-    from this turn.
-    """
+    """Continue from one bounded batch of RITSUKO-verified read Observations."""
     updated = deepcopy(session)
     if updated.get("status") != "waiting_information":
         raise ValueError("not_waiting_for_information")
-    if not isinstance(observation, dict):
-        raise ValueError("invalid_observation")
-    if observation.get("source") != "pkb" or observation.get("verified") is not True:
-        raise ValueError("verified_pkb_observation_required")
-    text = str(observation.get("text") or "").strip()
-    if not text:
-        raise ValueError("empty_observation")
+    if not isinstance(observations, list) or not observations:
+        raise ValueError("verified_observations_required")
     if len(updated["turns"]) >= _turn_limit(updated):
         updated.update(status="stopped", next_step="max_turns_reached")
         return updated
 
-    safe_observation = deepcopy(observation)
-    safe_observation["text"] = text[:4000]
-    if isinstance(safe_observation.get("evidence_preview"), list):
-        safe_observation["evidence_preview"] = safe_observation["evidence_preview"][:12]
-    safe_observation["responds_to"] = [
-        str(value) for value in (safe_observation.get("responds_to") or [])
-    ][:12]
-    updated["observations"].append(safe_observation)
-    updated["pending_requests"] = []
+    safe_observations = []
+    resolved_ids: set[str] = set()
+    for observation in observations[:12]:
+        if not isinstance(observation, dict):
+            raise ValueError("invalid_observation")
+        if (
+            observation.get("source") not in {"pkb", "web", "finance"}
+            or observation.get("verified") is not True
+        ):
+            raise ValueError("verified_read_observation_required")
+        text_value = str(observation.get("text") or "").strip()
+        if not text_value:
+            raise ValueError("empty_observation")
+        safe = deepcopy(observation)
+        safe["text"] = text_value[:4000]
+        if isinstance(safe.get("evidence_preview"), list):
+            safe["evidence_preview"] = safe["evidence_preview"][:12]
+        safe["responds_to"] = [
+            str(value)
+            for value in (safe.get("responds_to") or [])
+            if str(value).strip()
+        ][:20]
+        resolved_ids.update(safe["responds_to"])
+        safe_observations.append(safe)
+
+    updated["observations"].extend(safe_observations)
+    updated["pending_requests"] = [
+        item
+        for item in (updated.get("pending_requests") or [])
+        if not (
+            isinstance(item, dict)
+            and str(item.get("request_id") or "") in resolved_ids
+        )
+    ]
     updated["tool_read_executed"] = True
     updated["status"] = "running"
     updated["next_step"] = "evaluate_observation"
 
-    local_specs, context_policy = _private_pkb_local_scope(updated)
+    local_specs, context_policy = _private_observation_local_scope(updated)
     if local_specs == []:
         return updated
     return await _advance_async(
@@ -1135,6 +1166,19 @@ async def continue_with_verified_observation_async(
         on_turn_start=on_turn_start,
         member_specs_override=local_specs,
         context_policy=context_policy,
+    )
+
+
+async def continue_with_verified_observation_async(
+    session: dict,
+    observation: dict,
+    **kwargs,
+) -> dict:
+    """Compatibility wrapper for the former single-PKB Observation API."""
+    return await continue_with_verified_observations_async(
+        session,
+        [observation],
+        **kwargs,
     )
 
 
@@ -1179,7 +1223,7 @@ async def continue_with_proposal_review_async(
     updated["status"] = "running"
     updated["next_step"] = "evaluate_review_result"
 
-    local_specs, context_policy = _private_pkb_local_scope(updated)
+    local_specs, context_policy = _private_observation_local_scope(updated)
     if local_specs == []:
         return updated
 
@@ -1233,7 +1277,7 @@ async def continue_with_user_clarification_async(
     updated["status"] = "running"
     _extend_turn_limit_for_user_resume(updated)
 
-    local_specs, context_policy = _private_pkb_local_scope(updated)
+    local_specs, context_policy = _private_observation_local_scope(updated)
     if local_specs == []:
         return updated
 
