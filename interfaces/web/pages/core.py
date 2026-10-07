@@ -127,7 +127,7 @@ def register(portal_context: dict):
                 ui.notify(label + "をコピーしました", type="positive")
     
             with ui.card().classes("w-full border-2 border-teal-300 bg-teal-50"):
-                ui.label("RITSUKO ⇄ MAGI Observation Loop v1").classes(
+                ui.label("RITSUKO ⇄ MAGI Observation Loop").classes(
                     "text-lg font-bold text-teal-900"
                 )
                 ui.label(
@@ -136,11 +136,28 @@ def register(portal_context: dict):
                 ).classes("text-sm")
                 ui.label(
                     "MELCHIOR / CASPER / BALTHASARはProvider非依存のLLM席です。"
-                    "分類・分析でPKB readが必要と判断された場合、RITSUKOがread-onlyで実PKBを取得し、"
-                    "Task / Action / Result / Source / Auditへ記録してObservationとして再投入します。"
-                    "個人PKB Observationを含む再分析はCloud Context Gateによりlocal席だけへ送信します。"
-                    "このv1ではWeb・家計・記憶書込・外部操作は自動実行しません。"
+                    "MAGIが不足情報を要求すると、RITSUKOが利用可能なPKB / Web / Financeをread-onlyで取得し、"
+                    "Task / Action / Result / Source / Auditへ記録してverified Observationとして再投入します。"
+                    "PKB / Finance等のprivate Observationを含む再分析はCloud Context Gateによりlocal席だけへ送信します。"
+                    "Files・外部変更操作・記憶書込はこの経路では自動実行しません。"
                 ).classes("text-xs text-orange-800")
+                source_catalog = default_resource_catalog()
+                available_sources = [
+                    name
+                    for name in ("pkb", "web", "finance")
+                    if (source_catalog.get(name) or {}).get("available")
+                ]
+                unavailable_sources = [
+                    name
+                    for name in ("files", "task_history", "external_service", "pc_observation")
+                    if not (source_catalog.get(name) or {}).get("available")
+                ]
+                ui.label(
+                    "自動観測Source: "
+                    + " / ".join(available_sources)
+                    + "　｜　未対応・未接続: "
+                    + " / ".join(unavailable_sources)
+                ).classes("text-xs font-mono text-teal-900")
                 guided_input = ui.textarea(
                     label="RITSUKOへ依頼",
                     value="メインPCのGPUの種類は？",
@@ -352,9 +369,35 @@ def register(portal_context: dict):
                         f" / RITSUKO next={session['next_step']}"
                     ).classes("font-mono text-xs")
                     if session.get("tool_read_executed"):
+                        verified_sources = list(dict.fromkeys(
+                            str(item.get("source") or "")
+                            for item in (session.get("observations") or [])
+                            if isinstance(item, dict)
+                            and item.get("verified") is True
+                            and str(item.get("source") or "")
+                        ))
                         ui.label(
                             "実Source read済み / Action・Result・Source・Audit記録対象"
+                            + (
+                                " / verified=" + ", ".join(verified_sources)
+                                if verified_sources else ""
+                            )
                         ).classes("text-xs text-green-800")
+                    unavailable_requests = [
+                        item
+                        for item in (
+                            session.get("unavailable_source_requests") or []
+                        )
+                        if isinstance(item, dict)
+                    ]
+                    if unavailable_requests:
+                        ui.label(
+                            "利用不可Source要求: "
+                            + ", ".join(dict.fromkeys(
+                                str(item.get("source") or "unknown")
+                                for item in unavailable_requests
+                            ))
+                        ).classes("text-xs text-orange-800")
                     gate = session.get("cloud_context_gate") or {}
                     if gate:
                         ui.label(
