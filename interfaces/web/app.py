@@ -83,6 +83,7 @@ from ritsuko.magi.async_execution import (
 )
 from ritsuko.core.observation_loop import (
     review_proposal as review_magi_proposal,
+    run_observation_loop,
     run_pkb_observation_loop,
     resume_user_answer,
 )
@@ -98,8 +99,13 @@ from ritsuko.application.task_records import (
     persist_session_record,
     prepare_memory_intake_record,
     record_pkb_read_record,
+    record_source_read_record,
 )
 from ritsuko.application.read_dispatch import execute_core_read
+from ritsuko.application.observation_sources import (
+    finance_query_from_request,
+    web_query_from_request,
+)
 from ritsuko.application.entry import RitsukoApplicationEntry, contextualize_reply
 from ritsuko.application.driver_compare import (
     clarified_driver_web_target,
@@ -941,10 +947,35 @@ def _execute_magi_pkb_request(
                     "component_entity_id": component.get("id"),
                     "component_entity_name": component.get("name"),
                     "relation_role": component.get("relation_role"),
+                    "public_query_terms": [
+                        value
+                        for value in (manufacturer, model)
+                        if str(value or "").strip()
+                    ],
                 },
             }
 
     return _execute_core_read("pkb_search", requested or user_raw)
+
+
+def _execute_magi_source_request(
+    user_raw: str,
+    pending_request: dict,
+    session: dict,
+) -> dict:
+    """Execute one Source-neutral bounded read selected by RITSUKO."""
+    source = str(pending_request.get("source") or "").strip()
+    if source == "pkb":
+        return _execute_magi_pkb_request(user_raw, pending_request)
+    if source == "web":
+        query = web_query_from_request(pending_request, session)
+        result = _execute_core_read("web_research", query)
+        return {"source": "web", **result}
+    if source == "finance":
+        query = finance_query_from_request(pending_request)
+        result = _execute_core_read("finance_read", query)
+        return {"source": "finance", **result}
+    raise ValueError("unsupported_observation_source")
 
 
 def _create_magi_core_task_record(task_id: UUID, request: str, member_specs: list[dict]) -> None:
@@ -977,6 +1008,15 @@ def _prepare_magi_memory_intake_record(task_id: UUID) -> MemoryIntake:
 
 def _persist_magi_core_session_record(task_id: UUID, session: dict, selected_capability: str | None = None) -> dict:
     return persist_session_record(_magi_task_repository, task_id, session, selected_capability)
+
+
+def _record_magi_source_read_record(task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
+    return record_source_read_record(
+        _magi_task_repository,
+        task_id,
+        execution,
+        pending_request,
+    )
 
 
 def _record_magi_pkb_read_record(task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
