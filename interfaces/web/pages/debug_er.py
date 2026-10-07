@@ -156,17 +156,35 @@ def register(portal_context: dict):
                                     def apply_zoom(value: float) -> None:
                                         zoom["value"] = max(
                                             0.5,
-                                            min(2.5, round(value, 2)),
+                                            min(3.0, round(value, 2)),
                                         )
                                         zoom_label.set_text(
                                             f"{int(zoom['value'] * 100)}%"
                                         )
                                         ui.run_javascript(
-                                            "const el = document.querySelector("
-                                            "'.er-diagram-canvas'); "
-                                            "if (el) { el.style.zoom = "
+                                            "const svg = document.querySelector("
+                                            "'.er-diagram-canvas svg'); "
+                                            "if (svg && svg.viewBox && svg.viewBox.baseVal.width) { "
+                                            "svg.style.maxWidth = 'none'; "
+                                            "svg.style.height = 'auto'; "
+                                            "svg.style.width = (svg.viewBox.baseVal.width * "
                                             + repr(str(zoom["value"]))
-                                            + "; }"
+                                            + ") + 'px'; }"
+                                        )
+
+                                    def fit_diagram() -> None:
+                                        zoom_label.set_text("全体")
+                                        ui.run_javascript(
+                                            "const viewport = document.querySelector("
+                                            "'.er-diagram-viewport'); "
+                                            "const svg = document.querySelector("
+                                            "'.er-diagram-canvas svg'); "
+                                            "if (viewport && svg) { "
+                                            "svg.style.maxWidth = 'none'; "
+                                            "svg.style.height = 'auto'; "
+                                            "svg.style.width = Math.max("
+                                            "100, viewport.clientWidth - 24"
+                                            ") + 'px'; }"
                                         )
 
                                     ui.button(
@@ -186,6 +204,11 @@ def register(portal_context: dict):
                                         ),
                                     ).props("dense outline")
                                     ui.button(
+                                        "全体",
+                                        icon="fit_screen",
+                                        on_click=fit_diagram,
+                                    ).props("dense outline")
+                                    ui.button(
                                         "全画面",
                                         icon="fullscreen",
                                         on_click=lambda: ui.run_javascript(
@@ -196,19 +219,23 @@ def register(portal_context: dict):
                                         ),
                                     ).props("dense outline")
                                     ui.label(
-                                        "50〜250% / 全画面はEscで解除"
+                                        "50〜300% / 全体=画面幅に合わせる / 全画面はEscで解除"
                                     ).classes("text-xs text-grey-7")
 
                                 with ui.element("div").classes(
                                     "er-diagram-viewport w-full "
-                                    "h-[65vh] min-h-[520px] overflow-auto "
+                                    "h-[70vh] min-h-[640px] overflow-auto "
                                     "bg-white border border-grey-300 p-2"
                                 ):
                                     ui.mermaid(result.content).classes(
                                         "er-diagram-canvas inline-block"
-                                    ).style(
-                                        "transform-origin: top left; zoom: 1;"
                                     )
+
+                                ui.timer(
+                                    0.25,
+                                    lambda: apply_zoom(1.0),
+                                    once=True,
+                                )
                             elif result.content:
                                 ui.code(result.content).classes(
                                     "w-full text-xs"
