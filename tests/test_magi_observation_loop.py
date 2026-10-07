@@ -4,6 +4,7 @@ import unittest
 
 from ritsuko.core.observation_loop import (
     review_proposal,
+    run_observation_loop,
     run_pkb_observation_loop,
 )
 
@@ -93,12 +94,12 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[-1][2], "pkb_search")
         self.assertFalse(any(item[0] == "fail" for item in calls))
 
-    async def test_mixed_information_sources_wait_without_auto_read(self):
+    async def test_mixed_pkb_and_web_sources_execute_in_one_bounded_batch(self):
         calls = []
         specs = [{"name": "MELCHIOR", "provider": "ollama", "enabled": True}]
 
         def create_task(*args):
-            calls.append("create")
+            calls.append(("create",))
 
         async def starter(request, **kwargs):
             return {
@@ -113,33 +114,131 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
                 "turns": [{}, {}],
             }
 
-        def execute(*args):
-            calls.append("execute")
-            raise AssertionError("mixed request must not auto execute")
+        def execute(_request, pending, _session):
+            source = pending["source"]
+            calls.append(("execute", source))
+            if source == "pkb":
+                return {
+                    "status": "ok",
+                    "source": "pkb",
+                    "capability": "pkb_search",
+                    "confidentiality": "private",
+                    "tool": "pkb",
+                    "operation": "search",
+                    "total": 1,
+                    "answer": "local fact",
+                    "verified_by": "deterministic_pkb_query",
+                    "result": {"result_kind": "search", "items": [{"v": "local"}]},
+                }
+            return {
+                "status": "ok",
+                "source": "web",
+                "capability": "web_research",
+                "confidentiality": "public",
+                "tool": "web",
+                "operation": "research",
+                "total": 1,
+                "answer": "fresh public fact",
+                "verified_by": "bounded_web_retrieval",
+                "result": {"result_kind": "web_research", "hits": [{"title": "official"}]},
+            }
 
-        def record(*args):
-            calls.append("record")
+        def record(_task_id, execution, pending):
+            calls.append(("record", pending["source"], execution["status"]))
+            return ("a", "r")
 
-        def persist(task_id, session, capability):
+        async def continue_batch(session, observations, **kwargs):
+            calls.append(("continue", sorted(x["source"] for x in observations)))
+            updated = dict(session)
+            updated.update({
+                "status": "candidate_ready",
+                "next_step": "review_answer_candidate",
+                "tool_read_executed": True,
+                "pending_requests": [],
+                "observations": list(observations),
+                "detail": {"answer_candidate": "comparison"},
+            })
+            return updated
+
+        def persist(_task_id, session, capability):
             calls.append(("persist", capability, session["status"]))
 
         def fail(*args):
-            calls.append("fail")
+            calls.append(("fail",))
 
-        session = await run_pkb_observation_loop(
+        session = await run_observation_loop(
             "比較して",
             member_specs=specs,
             timeout=10,
             create_task_record=create_task,
-            execute_pkb_request=execute,
-            record_pkb_read_record=record,
+            execute_source_request=execute,
+            record_source_read_record=record,
             persist_session_record=persist,
             fail_task_record=fail,
             dialogue_starter=starter,
+            observation_continuation=continue_batch,
+            resource_catalog={
+                "pkb": {"available": True},
+                "web": {"available": True},
+                "finance": {"available": True},
+            },
+        )
+        self.assertEqual(session["status"], "candidate_ready")
+        self.assertEqual(
+            {item[1] for item in calls if item[0] == "execute"},
+            {"pkb", "web"},
+        )
+        self.assertIn(("continue", ["pkb", "web"]), calls)
+        self.assertIn(("persist", "observation_read", "candidate_ready"), calls)
+        self.assertNotIn(("fail",), calls)
+
+    async def test_unavailable_files_are_not_executed_or_faked(self):
+        specs = [{"name": "MELCHIOR", "provider": "ollama", "enabled": True}]
+        calls = []
+
+        async def starter(request, **kwargs):
+            return {
+                "task_id": kwargs["task_id"],
+                "status": "waiting_information",
+                "pending_requests": [{
+                    "request_id": "REQ-F",
+                    "source": "files",
+                    "what": "document",
+                }],
+                "member_specs": specs,
+                "observations": [],
+                "turns": [{}, {}],
+            }
+
+        def persist(_task_id, session, capability):
+            calls.append(("persist", capability, session["status"]))
+            self.assertEqual(session["observations"], [])
+            self.assertEqual(
+                session["unavailable_source_requests"][0]["source"],
+                "files",
+            )
+
+        session = await run_observation_loop(
+            "ファイルを見て",
+            member_specs=specs,
+            timeout=10,
+            create_task_record=lambda *args: None,
+            execute_source_request=lambda *args: (_ for _ in ()).throw(
+                AssertionError("files must not execute")
+            ),
+            record_source_read_record=lambda *args: None,
+            persist_session_record=persist,
+            fail_task_record=lambda *args: None,
+            dialogue_starter=starter,
+            resource_catalog={
+                "pkb": {"available": True},
+                "web": {"available": True},
+                "finance": {"available": True},
+                "files": {"available": False},
+            },
         )
         self.assertEqual(session["status"], "waiting_information")
-        self.assertNotIn("execute", calls)
-        self.assertIn(("persist", None, "waiting_information"), calls)
+        self.assertEqual(calls, [("persist", None, "waiting_information")])
 
 
     async def test_review_proposal_claims_re_evaluates_and_finalizes(self):
