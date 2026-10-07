@@ -79,7 +79,7 @@ class ObservationSourceTests(unittest.TestCase):
                 "verified": True,
                 "confidentiality": "private",
                 "evidence_preview": [
-                    {"predicate": "model", "value": "Secret Model 1234"},
+                    {"predicate": "model", "value": "Internal Model 1234"},
                 ],
             }],
         }
@@ -88,7 +88,7 @@ class ObservationSourceTests(unittest.TestCase):
             "web_query_requires_private_context_approval",
         ):
             web_query_from_request(
-                {"what": "Secret Model 1234 最新ドライバー"},
+                {"what": "Internal Model 1234 最新ドライバー"},
                 session,
             )
 
