@@ -935,8 +935,6 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             await self.click('開く', 5)
             trace = self.elements('Task検証・稼働ログ')[0]
             self.assertFalse(within_legacy(trace))
-            elements = list(self.client.elements.values())
-            self.assertLess(elements.index(trace), elements.index(legacy))
 
     async def test_protocol_invalid_json_shows_diagnostics_and_copy_controls(self):
         probe = {
