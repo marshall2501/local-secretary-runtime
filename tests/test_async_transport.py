@@ -732,6 +732,164 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(updated["turns"]), 4)
 
+    async def test_private_finance_observation_withholds_cloud_members(self):
+        seen = {}
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen["members"] = [item["provider"] for item in member_specs]
+            seen["policy"] = envelope.get("context_policy")
+            return {
+                "status": "ok",
+                "response": {
+                    "understood_request": "先月の収支を知りたい",
+                    "state": "READY",
+                    "reason": "Finance Observationで回答可能",
+                    "information_requests": [],
+                    "question_for_user": None,
+                    "answer_candidate": "先月の収支はプラスです。",
+                    "knowledge_candidate": None,
+                    "action_candidate": None,
+                },
+                "errors": [],
+                "diagnostic": {},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-finance",
+            "user_raw": "先月の家計の収支は？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+                {"name": "CASPER", "provider": "openai", "model": "cloud",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+            ],
+            "status": "waiting_information",
+            "next_step": "review_information_requests",
+            "classification": {
+                "category": "INFORMATION",
+                "understood_request": "先月の収支を知りたい",
+            },
+            "detail": {
+                "state": "NEED_INFORMATION",
+                "information_requests": [],
+            },
+            "observations": [],
+            "pending_requests": [{
+                "request_id": "F1",
+                "source": "finance",
+                "what": "先月の収支",
+            }],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "identify_missing_information",
+            "turns": [],
+            "legacy_router_used": False,
+            "tool_read_executed": False,
+        }
+        updated = await continue_with_verified_observation_async(
+            session,
+            {
+                "source": "finance",
+                "verified": True,
+                "confidentiality": "private",
+                "text": "先月は収入10万円、支出8万円。",
+                "responds_to": ["F1"],
+            },
+            timeout=10,
+            caller=caller,
+        )
+        self.assertEqual(seen["members"], ["ollama"])
+        self.assertEqual(
+            seen["policy"]["mode"],
+            "local_only_private_observation",
+        )
+        self.assertEqual(seen["policy"]["private_sources"], ["finance"])
+        self.assertEqual(updated["status"], "candidate_ready")
+
+    async def test_public_web_observation_does_not_withhold_cloud_members(self):
+        seen = {}
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen["members"] = [item["provider"] for item in member_specs]
+            seen["policy"] = envelope.get("context_policy")
+            return {
+                "status": "ok",
+                "response": {
+                    "understood_request": "最新公開情報を知りたい",
+                    "state": "READY",
+                    "reason": "Web Observationで回答可能",
+                    "information_requests": [],
+                    "question_for_user": None,
+                    "answer_candidate": "公開情報では最新版です。",
+                    "knowledge_candidate": None,
+                    "action_candidate": None,
+                },
+                "errors": [],
+                "diagnostic": {},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-web",
+            "user_raw": "最新公開情報を調べて",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+                {"name": "CASPER", "provider": "openai", "model": "cloud",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+            ],
+            "status": "waiting_information",
+            "next_step": "review_information_requests",
+            "classification": {
+                "category": "INFORMATION",
+                "understood_request": "最新公開情報を知りたい",
+            },
+            "detail": {
+                "state": "NEED_INFORMATION",
+                "information_requests": [],
+            },
+            "observations": [],
+            "pending_requests": [{
+                "request_id": "W1",
+                "source": "web",
+                "what": "最新公開情報",
+            }],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "identify_missing_information",
+            "turns": [],
+            "legacy_router_used": False,
+            "tool_read_executed": False,
+        }
+        updated = await continue_with_verified_observation_async(
+            session,
+            {
+                "source": "web",
+                "verified": True,
+                "confidentiality": "public",
+                "text": "official public result",
+                "responds_to": ["W1"],
+            },
+            timeout=10,
+            caller=caller,
+        )
+        self.assertEqual(seen["members"], ["ollama", "openai"])
+        self.assertIsNone(seen["policy"])
+        self.assertEqual(updated["status"], "candidate_ready")
+
     async def test_verified_private_pkb_observation_fails_closed_without_local_member(self):
         session = {
             "task_id": "task-1",
