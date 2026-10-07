@@ -19,7 +19,7 @@ def register(portal_context: dict):
         with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
             _portal_header(
                 "システム状態 / デバッグ",
-                "現在のRuntime・PostgreSQL・DB件数・ER図・環境変数をread-onlyで確認します。",
+                "現在のRuntime・PostgreSQL・DB件数・環境変数をread-onlyで確認する診断ダッシュボードです。",
             )
             ui.label(
                 "この画面は状態表示だけを行い、DB・環境変数・Docker設定を変更しません。"
@@ -215,159 +215,57 @@ def register(portal_context: dict):
                             row_key="name",
                         ).classes("w-full")
     
-                with ui.expansion(
-                    "DB ER図",
-                    value=False,
-                    icon="account_tree",
-                ).classes("w-full border-2 border-cyan-200 bg-cyan-50"):
-                    ui.label(
-                        "現在のDaily Runtimeが接続しているDBのschema metadataだけを読み取り、"
-                        "table / column / PK / FKを可視化します。実データ行やSecretは読みません。"
-                    ).classes("text-sm text-grey-7")
+                enabled_map = dict(
+                    _UI_PREFERENCES.get("debug", {})
+                    .get("er_diagram_providers", {})
+                )
+                er_statuses = _schema_diagram_service.provider_statuses(
+                    enabled_map
+                )
+                native_status = next(
+                    (
+                        status
+                        for status in er_statuses
+                        if status.key == "native_mermaid"
+                    ),
+                    None,
+                )
+                external_enabled = sum(
+                    1
+                    for status in er_statuses
+                    if status.key != "native_mermaid" and status.enabled
+                )
 
-                    enabled_map = dict(
-                        _UI_PREFERENCES.get("debug", {})
-                        .get("er_diagram_providers", {})
-                    )
-                    provider_statuses = _schema_diagram_service.provider_statuses(
-                        enabled_map
-                    )
-
-                    with ui.row().classes("w-full gap-3 flex-wrap"):
-                        for status in provider_statuses:
-                            if not status.enabled:
-                                border = "border-grey-300 bg-grey-50"
-                                state_text = "DISABLED"
-                            elif status.available:
-                                border = "border-green-300 bg-green-50"
-                                state_text = "AVAILABLE"
-                            else:
-                                border = "border-orange-300 bg-orange-50"
-                                state_text = "UNAVAILABLE"
-                            with ui.card().classes(
-                                "min-w-56 border-2 " + border
-                            ):
-                                ui.label(status.display_name).classes(
-                                    "text-sm font-bold"
-                                )
-                                ui.label(state_text).classes("text-xs")
-                                if status.version:
-                                    ui.label(
-                                        "version: " + str(status.version)
-                                    ).classes("text-xs text-grey-7")
-                                if status.dependency_status:
-                                    ui.label(
-                                        str(status.dependency_status)
-                                    ).classes("text-xs text-grey-7")
-
-                    provider_options = {
-                        status.key: status.display_name
-                        for status in provider_statuses
-                    }
-                    default_provider = (
-                        "native_mermaid"
-                        if "native_mermaid" in provider_options
-                        else next(iter(provider_options), None)
-                    )
+                with ui.card().classes(
+                    "w-full border-2 border-cyan-200 bg-cyan-50"
+                ):
                     with ui.row().classes(
-                        "w-full gap-2 items-end flex-wrap"
+                        "w-full items-center gap-4 flex-wrap"
                     ):
-                        provider_select = ui.select(
-                            options=provider_options,
-                            value=default_provider,
-                            label="ER図 Provider",
-                        ).classes("min-w-64")
-                        density_select = ui.select(
-                            options={
-                                "keys": "キー中心",
-                                "all": "全カラム",
-                            },
-                            value="keys",
-                            label="表示密度",
-                        ).classes("min-w-40")
-                        generate_button = ui.button(
-                            "生成 / 更新",
-                            icon="refresh",
-                            color="cyan",
-                        )
-
-                    ui.label(
-                        "外部Providerは設定で有効化しても、依存toolと安全な認証受け渡しが"
-                        "確認できるまでは実行しません。自動installもしません。"
-                    ).classes("text-xs text-grey-7")
-
-                    result_area = ui.column().classes("w-full gap-2")
-
-                    async def generate_er_diagram():
-                        provider_key = str(provider_select.value or "")
-                        generate_button.disable()
-                        try:
-                            result = await run.io_bound(
-                                lambda: _schema_diagram_service.generate(
-                                    provider_key,
-                                    enabled=enabled_map,
-                                    options={
-                                        "keys_only": density_select.value == "keys",
-                                    },
-                                )
-                            )
-                            result_area.clear()
-                            with result_area:
-                                if result.status == "ok":
-                                    with ui.row().classes(
-                                        "w-full gap-2 items-center flex-wrap"
-                                    ):
-                                        ui.badge("OK", color="green")
-                                        ui.label(
-                                            f"DB: {result.database} / "
-                                            f"schema: {result.schema}"
-                                        ).classes("text-sm")
-                                        ui.label(
-                                            f"tables={result.table_count} / "
-                                            f"FK={result.relation_count} / "
-                                            f"{result.duration_ms} ms"
-                                        ).classes("text-xs text-grey-7")
-                                    for warning in result.warnings:
-                                        ui.label(
-                                            "注意: " + str(warning)
-                                        ).classes("text-xs text-orange-800")
-                                    if (
-                                        result.output_format == "mermaid"
-                                        and result.content
-                                    ):
-                                        ui.mermaid(result.content).classes(
-                                            "w-full overflow-auto bg-white p-2"
-                                        )
-                                    elif result.content:
-                                        ui.code(result.content).classes(
-                                            "w-full text-xs"
-                                        )
-                                else:
-                                    color = (
-                                        "grey"
-                                        if result.status == "disabled"
-                                        else "orange"
-                                    )
-                                    ui.badge(
-                                        result.status.upper(),
-                                        color=color,
-                                    )
-                                    for warning in result.warnings:
-                                        ui.label(
-                                            str(warning)
-                                        ).classes("text-sm text-grey-7")
-                        except Exception as exc:
-                            result_area.clear()
-                            with result_area:
-                                ui.badge("ERROR", color="red")
+                        ui.icon("account_tree").classes("text-cyan-800")
+                        with ui.column().classes("gap-0 grow"):
+                            ui.label("DB ER図").classes("text-sm font-bold")
+                            if (
+                                native_status is not None
+                                and native_status.enabled
+                                and native_status.available
+                            ):
                                 ui.label(
-                                    "ER図を生成できません: "
-                                    + type(exc).__name__
-                                ).classes("text-sm text-red-700")
-                        finally:
-                            generate_button.enable()
-
-                    generate_button.on_click(generate_er_diagram)
+                                    "Native + Mermaid: 利用可能"
+                                ).classes("text-xs text-green-800")
+                            else:
+                                ui.label(
+                                    "Native + Mermaid: 要確認"
+                                ).classes("text-xs text-orange-800")
+                            ui.label(
+                                f"外部Provider有効: {external_enabled} / 3"
+                            ).classes("text-xs text-grey-7")
+                        ui.link(
+                            "ER図を開く",
+                            "/debug/er",
+                        ).classes(
+                            "text-sm text-cyan-800 font-bold"
+                        )
 
                 with ui.expansion(
                     "Environment",
