@@ -813,6 +813,104 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen["policy"]["private_sources"], ["finance"])
         self.assertEqual(updated["status"], "candidate_ready")
 
+    async def test_empty_finance_observation_becomes_grounded_answer_without_reread(self):
+        seen = {}
+
+        async def caller(envelope, *, model, timeout, member_specs):
+            seen["members"] = [item["provider"] for item in member_specs]
+            seen["purpose"] = envelope["question_purpose"]
+            return {
+                "status": "ok",
+                "response": {
+                    "understood_request": "先月の使いすぎを確認したい",
+                    "state": "NEED_INFORMATION",
+                    "reason": "Financeの明細がまだ必要",
+                    "information_requests": [{
+                        "source": "finance",
+                        "what": "先月の支出明細",
+                        "reason": "分析に必要",
+                    }],
+                    "question_for_user": None,
+                    "answer_candidate": None,
+                    "knowledge_candidate": None,
+                    "action_candidate": None,
+                },
+                "errors": [],
+                "diagnostic": {},
+                "member_results": [],
+                "consensus": None,
+            }
+
+        session = {
+            "task_id": "task-finance-empty",
+            "user_raw": "先月の家計で何に使いすぎた？",
+            "model": "",
+            "prompt_version": "test",
+            "member_specs": [
+                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+                {"name": "CASPER", "provider": "openai", "model": "cloud",
+                 "enabled": True, "weight": 1.0, "timeout_seconds": 10},
+            ],
+            "status": "waiting_information",
+            "next_step": "review_information_requests",
+            "classification": {
+                "category": "INVESTIGATION",
+                "understood_request": "先月の使いすぎを確認したい",
+            },
+            "detail": {
+                "state": "NEED_INFORMATION",
+                "information_requests": [],
+            },
+            "observations": [],
+            "pending_requests": [{
+                "request_id": "F1",
+                "source": "finance",
+                "what": "先月の支出明細",
+            }],
+            "previous_request_signatures": [],
+            "conversation_context": [],
+            "user_question": None,
+            "magi_disagreement": None,
+            "user_source_reviewed": False,
+            "last_question_purpose": "identify_missing_information",
+            "turns": [],
+            "legacy_router_used": False,
+            "tool_read_executed": False,
+        }
+        updated = await continue_with_verified_observation_async(
+            session,
+            {
+                "source": "finance",
+                "verified": True,
+                "confidentiality": "private",
+                "text": (
+                    "保存済み家計では、2026-09-01〜2026-09-30の"
+                    "集計対象となる明細が見つかりませんでした。"
+                ),
+                "responds_to": ["F1"],
+                "result_kind": "finance_summary",
+                "result_count": 0,
+            },
+            timeout=10,
+            caller=caller,
+        )
+        self.assertEqual(seen["members"], ["ollama"])
+        self.assertEqual(seen["purpose"], "evaluate_observation")
+        self.assertEqual(updated["status"], "candidate_ready")
+        self.assertEqual(updated["next_step"], "review_answer_candidate")
+        self.assertEqual(updated["pending_requests"], [])
+        self.assertEqual(updated["detail"]["state"], "READY")
+        self.assertIn("明細が見つかりませんでした", updated["detail"]["answer_candidate"])
+        self.assertEqual(
+            updated["ritsuko_grounded_fallback"]["kind"],
+            "verified_empty_finance",
+        )
+        self.assertEqual(
+            updated["cloud_context_gate"]["mode"],
+            "local_only_private_observation",
+        )
+
     async def test_public_web_observation_does_not_withhold_cloud_members(self):
         seen = {}
 
