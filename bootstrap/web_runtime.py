@@ -37,6 +37,12 @@ from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQ
 from infrastructure.postgres.entity_catalog_repository import PostgresEntityCatalogRepository
 from infrastructure.postgres.pkb_repository import PostgresPkbRepository
 from infrastructure.postgres.pkb_debug import debug_database_summary
+from infrastructure.postgres.schema_introspection import load_schema_snapshot
+from infrastructure.schema_diagram.providers import (
+    NativeMermaidProvider,
+    OptionalToolProvider,
+)
+from application.schema_diagram import SchemaDiagramService
 from infrastructure.postgres.pkb_runtime import DBNAME, HOST, WRITER, connect_pkb_database
 from ritsuko.application.task_queries import CoreTaskQueryService
 from pkb.application.entity_catalog import EntityCatalogService
@@ -80,6 +86,32 @@ def build_service_billing_settings_repository() -> PostgresServiceBillingSetting
 
 def build_finance_repository() -> PostgresFinanceRepository:
     return PostgresFinanceRepository(connection)
+
+
+def build_schema_diagram_service() -> SchemaDiagramService:
+    snapshot_loader = lambda: load_schema_snapshot(connection, schema="secretary")
+    return SchemaDiagramService(
+        (
+            NativeMermaidProvider(snapshot_loader),
+            OptionalToolProvider(
+                key="schemacrawler",
+                display_name="SchemaCrawler",
+                executable="schemacrawler",
+                additional_executable="java",
+            ),
+            OptionalToolProvider(
+                key="tbls",
+                display_name="tbls",
+                executable="tbls",
+            ),
+            OptionalToolProvider(
+                key="eralchemy",
+                display_name="ERAlchemy",
+                python_package="eralchemy",
+                additional_executable="dot",
+            ),
+        )
+    )
 
 
 def write_core_advisor_shadow(task_id, shadow, event_type):
