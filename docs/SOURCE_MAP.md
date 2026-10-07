@@ -1,7 +1,7 @@
 # SOURCE_MAP — ソース構成と機能対応
 
 更新: 2026-10-07  
-参照runtime: `local-secretary-runtime` source確認対象 `8f9c43f6...`
+参照runtime: `local-secretary-runtime` source確認対象 `b0204437...`
 
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
 
