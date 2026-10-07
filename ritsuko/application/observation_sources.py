@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from datetime import date
+import re
 from typing import Iterable
 
 
@@ -18,6 +19,17 @@ SOURCE_CONFIDENTIALITY = {
     "web": "public",
     "finance": "private",
 }
+
+_SECRET_QUERY_PATTERNS = (
+    re.compile(r"(?i)\\b(?:password|passwd|api[_ -]?key|access[_ -]?token|secret)\\b\\s*[:=]?\\s*\\S+"),
+    re.compile(r"(?i)\\bsk-[A-Za-z0-9_-]{12,}"),
+    re.compile(r"(?i)\\bAIza[A-Za-z0-9_-]{20,}"),
+    re.compile(r"(?i)\\b(?:bearer\\s+)[A-Za-z0-9._~+/-]{16,}"),
+    re.compile(r"\\b[A-Fa-f0-9]{32,}\\b"),
+)
+_ACCOUNT_QUERY_PATTERN = re.compile(
+    r"(?i)(?:口座番号|account\\s*(?:number|no\\.?))\\s*[:：=]?\\s*[0-9-]{5,}"
+)
 
 
 def source_capability(source: str) -> str | None:
@@ -189,6 +201,10 @@ def web_query_from_request(
     query = str(pending_request.get("what") or "").strip()
     if not query:
         raise ValueError("empty_web_query")
+    if any(pattern.search(query) for pattern in _SECRET_QUERY_PATTERNS):
+        raise ValueError("web_query_contains_secret_like_value")
+    if _ACCOUNT_QUERY_PATTERN.search(query):
+        raise ValueError("web_query_contains_account_identifier")
 
     original = str(session.get("user_raw") or "")
     safe_terms: set[str] = set()
