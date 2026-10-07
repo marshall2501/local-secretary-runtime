@@ -905,7 +905,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             protocol_button = self.elements('MELCHIORへ分析依頼')[0]
             legacy = next(e for e in self.client.elements.values()
                           if isinstance(e, ui.expansion)
-                          and e._props.get('label') == '旧MAGI v0・現行経路（回帰用）')
+                          and e._props.get('label') == '旧MAGI v0（比較・確認用）')
             self.assertFalse(legacy.value)
             def within_legacy(element):
                 while element is not None:
@@ -918,15 +918,25 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                                 if e._props.get('label') == 'Legacy CASPER Advisor Model')
             self.assertTrue(within_legacy(legacy_model))
             self.assertTrue(within_legacy(self.elements('OODA')[0]))
-            self.assertTrue(within_legacy(self.elements('この縦断でまだ行わないこと')[0]))
+            limits = self.elements('この縦断でまだ行わないこと')[0]
+            screen_log = self.elements('Core画面 全体稼働ログ')[0]
+            self.assertFalse(within_legacy(limits))
+            self.assertFalse(within_legacy(screen_log))
             old_flow = next(e for e in self.client.elements.values()
                             if isinstance(e, ui.expansion)
-                            and e._props.get('label') == '旧MAGI v0 処理フロー（回帰用）')
+                            and e._props.get('label') == '旧MAGI v0 処理フロー（比較・確認用）')
             self.assertTrue(within_legacy(old_flow))
             self.assertFalse(old_flow.value)
             elements = list(self.client.elements.values())
             self.assertGreater(elements.index(legacy), elements.index(protocol_button))
+            self.assertLess(elements.index(limits), elements.index(legacy))
+            self.assertLess(elements.index(screen_log), elements.index(legacy))
             self.assertTrue(self.elements('既存Task'))
+            await self.click('開く', 5)
+            trace = self.elements('Task検証・稼働ログ')[0]
+            self.assertFalse(within_legacy(trace))
+            elements = list(self.client.elements.values())
+            self.assertLess(elements.index(trace), elements.index(legacy))
 
     async def test_protocol_invalid_json_shows_diagnostics_and_copy_controls(self):
         probe = {
