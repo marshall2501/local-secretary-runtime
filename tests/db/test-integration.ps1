@@ -75,6 +75,8 @@ try {
     try { & $dbScript -Action Restore -Project $project -BackupPath $backup -RestoreDatabase 'secretary_restore_test' }
     catch { $rejected = $true }
     if (-not $rejected) { throw 'Existing restore destination was not rejected.' }
+    & python (Join-Path $PSScriptRoot 'verify-observation-sources.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Observation source persistence verification failed.' }
     Write-Host 'PASS: port conflict, migrations/reapply/drift rejection, constraints/roles, restart, binary backup/restore, overwrite refusal.'
 } finally {
     # Exactly the random test project created by this run; never prune or target another project.
