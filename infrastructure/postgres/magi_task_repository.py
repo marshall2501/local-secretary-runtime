@@ -36,13 +36,14 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
             (
                 task_id,
                 request,
-                "Return a grounded answer from bounded PKB evidence or stop safely.",
+                "Return a grounded answer from bounded verified read Observations or stop safely.",
                 Jsonb({
                     "pkb_read": True,
-                    "finance_read": False,
-                    "web_research": False,
+                    "finance_read": True,
+                    "web_research": True,
+                    "files_read": False,
                     "external_actions": False,
-                    "cloud_private_pkb_context": False,
+                    "cloud_private_context": False,
                 }),
                 Jsonb(checkpoint),
             ),
@@ -754,16 +755,48 @@ def abort_proposal_review(
         )
 
 
-def record_pkb_read(
+def record_source_read(
     db,
     *,
     task_id: UUID,
     execution: dict,
     pending_request: dict,
 ) -> tuple[str, str]:
-    request_ids = list(pending_request.get("request_ids") or [])
-    request_key = request_ids[0] if request_ids else "pkb"
-    idempotency_key = f"ritsuko-magi:{task_id}:pkb:{request_key}"
+    source = str(
+        pending_request.get("source")
+        or execution.get("source")
+        or "unknown"
+    ).strip()
+    request_ids = [
+        str(value)
+        for value in (pending_request.get("request_ids") or [])
+        if str(value).strip()
+    ][:20]
+    request_key = request_ids[0] if request_ids else source
+    capability = str(
+        execution.get("capability")
+        or pending_request.get("capability")
+        or source
+    ).strip()
+    confidentiality = str(
+        execution.get("confidentiality")
+        or pending_request.get("confidentiality")
+        or ("public" if source == "web" else "private")
+    ).strip()
+    if confidentiality not in {"public", "private", "restricted"}:
+        confidentiality = "private"
+
+    idempotency_key = f"ritsuko-magi:{task_id}:{source}:{request_key}"
+    execution_status = str(execution.get("status") or "ok")
+    succeeded = execution_status == "ok"
+    result_payload = execution.get("result") or {}
+    result_count = int(execution.get("total") or 0)
+    context_gate = (
+        "public_web_only"
+        if confidentiality == "public"
+        else "local_only_private_observation"
+    )
+
     with db.transaction(), db.cursor() as cur:
         cur.execute(
             """SELECT a.id, r.id
@@ -779,18 +812,21 @@ def record_pkb_read(
         cur.execute(
             """INSERT INTO secretary.sources
                (source_type, uri, citation, retrieved_at, confidentiality, metadata)
-               VALUES ('tool', %s, %s, now(), 'private', %s)
+               VALUES ('tool', %s, %s, now(), %s, %s)
                RETURNING id""",
             (
-                f"tool://ritsuko-magi/pkb/{task_id}/{request_key}",
+                f"tool://ritsuko-magi/{source}/{task_id}/{request_key}",
                 execution.get("citation")
-                or "RITSUKO bounded read-only PKB result",
+                or f"RITSUKO bounded read-only {source} result",
+                confidentiality,
                 Jsonb({
                     "task_id": str(task_id),
-                    "capability": "pkb_search",
+                    "source": source,
+                    "capability": capability,
                     "request_ids": request_ids,
                     "what": pending_request.get("what"),
-                    "result_count": int(execution.get("total") or 0),
+                    "result_count": result_count,
+                    "status": execution_status,
                     **(execution.get("source_metadata") or {}),
                 }),
             ),
@@ -803,46 +839,59 @@ def record_pkb_read(
                 authorization_basis, status, idempotency_key,
                 reversible, started_at, finished_at)
                VALUES (%s, 'ritsuko_core', %s, %s, %s,
-                       'read_only', 'ritsuko_magi_pkb_read_v1',
-                       'succeeded', %s, true, now(), now())
+                       'read_only', 'ritsuko_magi_source_read_v2',
+                       %s, %s, true, now(), now())
                RETURNING id""",
             (
                 task_id,
-                execution.get("tool") or "pkb",
-                execution.get("operation") or "search",
+                execution.get("tool") or source,
+                execution.get("operation") or "read",
                 Jsonb({
+                    "source": source,
                     "what": pending_request.get("what"),
                     "request_ids": request_ids,
                     "bounded": True,
-                    "cloud_context_gate": "local_only_private_pkb",
+                    "context_gate": context_gate,
                 }),
+                "succeeded" if succeeded else "failed",
                 idempotency_key,
             ),
         )
         action_id = cur.fetchone()[0]
 
-        result = execution.get("result") or {}
+        if succeeded:
+            outcome = "success" if result_count > 0 else "inconclusive"
+            error_text = None
+        else:
+            outcome = "failure"
+            error_text = str(execution.get("error_type") or "source_read_error")[:500]
+
         cur.execute(
             """INSERT INTO secretary.results
                (action_id, source_id, outcome, summary, evidence,
-                verified_by, verified_at)
-               VALUES (%s, %s, %s, %s, %s, %s, now())
+                error, verified_by, verified_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s,
+                       CASE WHEN %s THEN now() ELSE NULL END)
                RETURNING id""",
             (
                 action_id,
                 source_id,
-                "success" if int(execution.get("total") or 0) > 0 else "inconclusive",
-                str(execution.get("answer") or ""),
+                outcome,
+                str(execution.get("answer") or "")[:4000],
                 Jsonb({
-                    "result_kind": result.get("result_kind"),
-                    "total": int(execution.get("total") or 0),
-                    "data": result,
+                    "source": source,
+                    "result_kind": result_payload.get("result_kind"),
+                    "total": result_count,
+                    "data": result_payload,
                     "responds_to": request_ids,
                 }),
-                execution.get("verified_by") or "deterministic_pkb_query",
+                error_text,
+                execution.get("verified_by") if succeeded else None,
+                succeeded,
             ),
         )
         result_id = cur.fetchone()[0]
+
         cur.execute(
             """SELECT checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE""",
             (task_id,),
@@ -850,10 +899,11 @@ def record_pkb_read(
         checkpoint = (cur.fetchone() or [{}])[0] or {}
         checkpoint.update({
             "phase": "observe",
-            "selected_capability": "pkb_search",
+            "selected_capability": capability,
             "action_id": str(action_id),
             "result_id": str(result_id),
-            "result_count": int(execution.get("total") or 0),
+            "result_count": result_count,
+            "last_observation_source": source,
         })
         cur.execute(
             "UPDATE secretary.tasks SET checkpoint=%s WHERE id=%s",
@@ -863,20 +913,47 @@ def record_pkb_read(
             """INSERT INTO secretary.audit_events
                (actor, event_type, task_id, action_id,
                 object_type, object_id, details)
-               VALUES ('ritsuko_core', 'core.magi.pkb_observed',
+               VALUES ('ritsuko_core', 'core.magi.source_observed',
                        %s, %s, 'task', %s, %s)""",
             (
                 task_id,
                 action_id,
                 task_id,
                 Jsonb({
+                    "source": source,
+                    "capability": capability,
                     "request_ids": request_ids,
-                    "result_count": int(execution.get("total") or 0),
-                    "cloud_context_gate": "local_only_private_pkb",
+                    "status": execution_status,
+                    "result_count": result_count,
+                    "confidentiality": confidentiality,
+                    "context_gate": context_gate,
                 }),
             ),
         )
     return str(action_id), str(result_id)
+
+
+def record_pkb_read(
+    db,
+    *,
+    task_id: UUID,
+    execution: dict,
+    pending_request: dict,
+) -> tuple[str, str]:
+    """Compatibility wrapper for pre-generalization callers."""
+    request = {"source": "pkb", **dict(pending_request)}
+    execution = {
+        "source": "pkb",
+        "capability": "pkb_search",
+        "confidentiality": "private",
+        **dict(execution),
+    }
+    return record_source_read(
+        db,
+        task_id=task_id,
+        execution=execution,
+        pending_request=request,
+    )
 
 
 def fail_task(db, *, task_id: UUID, error: str) -> None:
@@ -968,6 +1045,13 @@ class PostgresMagiTaskRepository:
     def abort_proposal_review(self, *, task_id: UUID, error: str) -> None:
         with self._connection_factory() as db:
             abort_proposal_review(db, task_id=task_id, error=error)
+
+    def record_source_read(self, *, task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
+        with self._connection_factory() as db:
+            return record_source_read(
+                db, task_id=task_id, execution=execution,
+                pending_request=pending_request,
+            )
 
     def record_pkb_read(self, *, task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
         with self._connection_factory() as db:
