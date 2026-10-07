@@ -254,6 +254,28 @@ PostgreSQL
 
 `pkb/episode_intake.py` はhistorical isolated fixture importerであり、通常Production business pathのPersistence Port化対象から除外しています。再流入防止は `tests/test_architecture_boundaries.py` が検査します。
 
+### Persistence機能を追加するときの標準
+
+新しい永続化機能は、原則として次の経路へ追加します。
+
+```text
+Application / Domain
+  ↓ business-oriented Port / Repository contract
+bootstrap
+  ↓ binds
+infrastructure/postgres/*Repository
+  ↓
+PostgreSQL
+```
+
+- Port / Repositoryはtable単位の薄いSQL wrapperではなく、ownerと業務操作・transaction boundaryを基準に置きます。
+- PostgreSQL固有型、SQL、cursor、transaction primitive、JSONBやadvisory lock等の最適化はadapter内部へ閉じます。
+- 将来別backendが必要になった場合も、既存Application / Domain / Interfaceの変更を原則増やさず、adapter、Composition Root binding、adapter-specific testの追加を中心に対応します。使う予定のない第2backend分岐は先行実装しません。
+- 旧直接SQL pathや互換shimを残す場合は用途と削除条件を明示し、Productionに恒久的な二重Persistence pathを作りません。
+- testはarchitecture boundary、Repository semantics、PostgreSQL integration、DB運用・role assertionの責務を区別します。
+
+DB権限については、信頼されたローカルRuntime内部でfeatureごとにwriter roleを細分化すること自体を目的にしません。現行のshared runtime boundaryを基本とし、外部read/write/action、Secret、高影響操作はAPI / MCP / RITSUKO Policy / Approval等の適切な境界で制御します。新しいrole / grant境界は、具体的な脅威・運用要件・復旧性・使い勝手との釣り合いがある場合に評価します。
+
 ---
 
 ## 3. 日常Web GUI
