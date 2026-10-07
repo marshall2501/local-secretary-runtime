@@ -141,9 +141,74 @@ def register(portal_context: dict):
                                 result.output_format == "mermaid"
                                 and result.content
                             ):
-                                ui.mermaid(result.content).classes(
-                                    "w-full overflow-auto bg-white p-2"
-                                )
+                                zoom = {"value": 1.0}
+
+                                with ui.row().classes(
+                                    "w-full gap-2 items-center flex-wrap"
+                                ):
+                                    ui.label("図のズーム").classes(
+                                        "text-xs text-grey-7"
+                                    )
+                                    zoom_label = ui.label("100%").classes(
+                                        "text-sm font-bold min-w-12"
+                                    )
+
+                                    def apply_zoom(value: float) -> None:
+                                        zoom["value"] = max(
+                                            0.5,
+                                            min(2.5, round(value, 2)),
+                                        )
+                                        zoom_label.set_text(
+                                            f"{int(zoom['value'] * 100)}%"
+                                        )
+                                        ui.run_javascript(
+                                            "const el = document.querySelector("
+                                            "'.er-diagram-canvas'); "
+                                            "if (el) { el.style.zoom = "
+                                            + repr(str(zoom["value"]))
+                                            + "; }"
+                                        )
+
+                                    ui.button(
+                                        "－",
+                                        on_click=lambda: apply_zoom(
+                                            zoom["value"] - 0.25
+                                        ),
+                                    ).props("dense outline")
+                                    ui.button(
+                                        "100%",
+                                        on_click=lambda: apply_zoom(1.0),
+                                    ).props("dense outline")
+                                    ui.button(
+                                        "＋",
+                                        on_click=lambda: apply_zoom(
+                                            zoom["value"] + 0.25
+                                        ),
+                                    ).props("dense outline")
+                                    ui.button(
+                                        "全画面",
+                                        icon="fullscreen",
+                                        on_click=lambda: ui.run_javascript(
+                                            "const el = document.querySelector("
+                                            "'.er-diagram-viewport'); "
+                                            "if (el && el.requestFullscreen) { "
+                                            "el.requestFullscreen(); }"
+                                        ),
+                                    ).props("dense outline")
+                                    ui.label(
+                                        "50〜250% / 全画面はEscで解除"
+                                    ).classes("text-xs text-grey-7")
+
+                                with ui.element("div").classes(
+                                    "er-diagram-viewport w-full "
+                                    "h-[65vh] min-h-[520px] overflow-auto "
+                                    "bg-white border border-grey-300 p-2"
+                                ):
+                                    ui.mermaid(result.content).classes(
+                                        "er-diagram-canvas inline-block"
+                                    ).style(
+                                        "transform-origin: top left; zoom: 1;"
+                                    )
                             elif result.content:
                                 ui.code(result.content).classes(
                                     "w-full text-xs"
