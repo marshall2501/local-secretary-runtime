@@ -1021,6 +1021,21 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertIn("2026-09-01〜2026-09-30", answer)
         self.assertNotIn("2026-09-03〜2026-09-28", answer)
 
+    def test_finance_core_answer_empty_result_keeps_requested_period(self):
+        answer = finance_core_answer({
+            "total": 0,
+            "transaction_count": 0,
+            "requested_start_date": "2026-09-01",
+            "requested_end_date": "2026-09-30",
+            "data_start_date": None,
+            "data_end_date": None,
+            "income_total": 0,
+            "expense_total": 0,
+            "net_total": 0,
+        })
+        self.assertIn("2026-09-01〜2026-09-30", answer)
+        self.assertIn("明細が見つかりませんでした", answer)
+
     def test_finance_core_answer_formats_deterministic_totals(self):
         answer = finance_core_answer({
             "total": 3,
