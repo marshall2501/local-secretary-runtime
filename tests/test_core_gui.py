@@ -39,6 +39,10 @@ class CoreGuiTests(TestCase):
         finally:
             daily._apply_ui_preferences(old)
 
+    def test_er_diagram_has_dedicated_debug_page(self):
+        self.assertTrue(hasattr(daily, "debug_page"))
+        self.assertTrue(hasattr(daily, "debug_er_page"))
+
     def test_er_diagram_preferences_validate_and_preserve_defaults(self):
         prefs = daily._validate_ui_preferences({
             "debug": {
