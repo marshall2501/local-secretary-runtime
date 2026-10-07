@@ -32,6 +32,12 @@ def register(portal_context: dict):
             "screen_log": "画面全体の最近のCore稼働ログ",
             "limits": "この縦断でまだ行わないこと",
         }
+        er_provider_labels = {
+            "native_mermaid": "Native + Mermaid",
+            "schemacrawler": "SchemaCrawler",
+            "tbls": "tbls",
+            "eralchemy": "ERAlchemy",
+        }
     
         with ui.column().classes("w-full max-w-5xl mx-auto gap-4 p-4"):
             _portal_header(
@@ -806,6 +812,30 @@ def register(portal_context: dict):
                                     value=_UI_PREFERENCES["core"][key],
                                 )
     
+                er_provider_controls = {}
+                with ui.expansion(
+                    "デバッグ — ER図Provider",
+                    value=False,
+                    icon="account_tree",
+                ).classes("w-full border-2 border-cyan-200 bg-cyan-50"):
+                    ui.label(
+                        "Debug画面で使用するER図Providerを選びます。"
+                        "Native + Mermaidは内蔵、外部Providerは依存toolを自動installしません。"
+                    ).classes("text-sm text-grey-7")
+                    for key, label in er_provider_labels.items():
+                        with ui.row().classes(
+                            "w-full items-center gap-4 border-b border-grey-300 py-2"
+                        ):
+                            ui.label(label).classes("grow")
+                            er_provider_controls[key] = ui.switch(
+                                "有効",
+                                value=bool(
+                                    _UI_PREFERENCES["debug"][
+                                        "er_diagram_providers"
+                                    ].get(key, False)
+                                ),
+                            )
+
                 ui.label(
                     "保存後、別画面へ移動するかページを再読み込みすると表示/非表示が反映されます。"
                     "現在のアコーディオン開閉状態と保存済み初期値は別管理です。"
@@ -838,6 +868,12 @@ def register(portal_context: dict):
                         "core": {
                             **{key: bool(control.value) for key, control in core_open_controls.items()},
                             **{key: int(control.value) for key, control in core_list_controls.items()},
+                        },
+                        "debug": {
+                            "er_diagram_providers": {
+                                key: bool(control.value)
+                                for key, control in er_provider_controls.items()
+                            },
                         },
                         "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
                         "core_advisor_timeout": _UI_PREFERENCES.get("core_advisor_timeout", 60),
@@ -882,6 +918,10 @@ def register(portal_context: dict):
                         control.value = preferences["core"][key]
                     for key, control in core_list_controls.items():
                         control.value = preferences["core"][key]
+                    for key, control in er_provider_controls.items():
+                        control.value = preferences["debug"][
+                            "er_diagram_providers"
+                        ][key]
                     page_size_select.value = preferences["finance"]["recent_limit"]
     
                 def save_and_apply():
