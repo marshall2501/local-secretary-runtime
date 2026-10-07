@@ -72,6 +72,10 @@ jobs:
       - run: python -m unittest discover -s tests -p test_core_synthesis.py -v
       - run: python -m unittest discover -s tests -p test_ritsuko_magi_protocol.py -v
       - run: python -m unittest discover -s tests -p test_magi_settings.py -v
+      - run: python -m unittest discover -s tests -p test_magi_core_bridge.py -v
+      - run: python -m unittest discover -s tests -p test_magi_observation_loop.py -v
+      - run: python -m unittest discover -s tests -p test_magi_task_store.py -v
+      - run: python -m unittest discover -s tests -p test_observation_sources.py -v
       - run: python -m unittest discover -s tests -p test_async_transport.py -v
       - run: python -m unittest discover -s tests -p test_web_research.py -v
       - run: python -m unittest discover -s tests -p test_finance_preview.py -v
