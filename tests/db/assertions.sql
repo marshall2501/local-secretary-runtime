@@ -60,7 +60,6 @@ BEGIN
 END $review_test$;
 
 DO $promotion_test$
-DECLARE role_name text;
 BEGIN
     IF to_regclass('secretary.entity_relations') IS NULL
        OR to_regclass('secretary.pkb_pending_intake') IS NULL
@@ -86,16 +85,17 @@ BEGIN
         RAISE EXCEPTION 'Legacy LLM connection snapshot columns leaked into production schema';
     END IF;
 
-    FOREACH role_name IN ARRAY ARRAY[
-        'secretary_finance_writer',
-        'secretary_magi_settings_writer',
-        'secretary_connection_writer',
-        'secretary_billing_writer'
-    ] LOOP
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name AND NOT rolcanlogin) THEN
-            RAISE EXCEPTION 'Missing production group role: %', role_name;
-        END IF;
-    END LOOP;
+    IF EXISTS (
+        SELECT 1 FROM pg_roles
+        WHERE rolname = ANY(ARRAY[
+            'secretary_finance_writer',
+            'secretary_magi_settings_writer',
+            'secretary_connection_writer',
+            'secretary_billing_writer'
+        ])
+    ) THEN
+        RAISE EXCEPTION 'Legacy feature-specific runtime role leaked into fresh production cluster';
+    END IF;
 
     IF EXISTS (
         SELECT 1 FROM pg_roles
@@ -107,25 +107,25 @@ BEGIN
     IF NOT has_table_privilege(
             'secretary_memory_writer','secretary.entity_relations','SELECT,INSERT,UPDATE')
        OR NOT has_table_privilege(
-            'secretary_memory_writer','secretary.pkb_pending_intake','SELECT,INSERT,UPDATE')
-       OR NOT has_table_privilege(
-            'secretary_finance_writer','secretary.finance_transactions','SELECT,INSERT,UPDATE')
-       OR NOT has_table_privilege(
-            'secretary_magi_settings_writer','secretary.llm_profiles','SELECT,INSERT,UPDATE,DELETE')
-       OR NOT has_table_privilege(
-            'secretary_connection_writer','secretary.service_connections','SELECT,INSERT,UPDATE,DELETE')
-       OR NOT has_table_privilege(
-            'secretary_billing_writer','secretary.service_billing_profiles','SELECT,INSERT,UPDATE,DELETE') THEN
-        RAISE EXCEPTION 'Production promotion role grant failed';
+            'secretary_memory_writer','secretary.pkb_pending_intake','SELECT,INSERT,UPDATE') THEN
+        RAISE EXCEPTION 'Existing memory role grant failed';
     END IF;
 
-    IF has_table_privilege('secretary_reader','secretary.finance_transactions','SELECT')
-       OR has_table_privilege('secretary_reader','secretary.service_connections','SELECT')
-       OR has_table_privilege('secretary_reader','secretary.llm_profiles','SELECT')
-       OR has_table_privilege('secretary_reader','secretary.service_billing_profiles','SELECT')
-       OR has_table_privilege('secretary_finance_writer','secretary.service_connections','SELECT')
-       OR has_table_privilege('secretary_connection_writer','secretary.finance_transactions','SELECT') THEN
-        RAISE EXCEPTION 'Production promotion least-privilege boundary failed';
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.table_privileges
+        WHERE table_schema='secretary'
+          AND table_name IN (
+              'finance_transactions',
+              'llm_profiles',
+              'magi_member_assignments',
+              'service_connections',
+              'service_billing_profiles'
+          )
+          AND grantee='PUBLIC'
+          AND privilege_type IN ('SELECT','INSERT','UPDATE','DELETE')
+    ) THEN
+        RAISE EXCEPTION 'PUBLIC privilege leaked into protected runtime tables';
     END IF;
 END $promotion_test$;
 ROLLBACK;
