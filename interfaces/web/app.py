@@ -1956,7 +1956,7 @@ def main() -> None:
         port=resolve_daily_web_port(),
         reload=False,
         show=True,
-        title="Local Secretary PKB",
+        title="Local Secretary",
     )
 
 
