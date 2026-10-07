@@ -280,6 +280,8 @@ DB権限については、信頼されたローカルRuntime内部でfeatureご�
 
 ## 3. 日常Web GUI
 
+画面全体のRoute・現行ワイヤーフレームは設計repoの [`UIOverview_画面構成.md`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/UIOverview_%E7%94%BB%E9%9D%A2%E6%A7%8B%E6%88%90.md) を参照します。本資料は画面と実装責務の対応を担当し、画面図そのものを重複管理しません。
+
 起動:
 
 ```text
