@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from nicegui import app, context, run, ui
 from interfaces.web.pages.top import register as register_top_page
 from interfaces.web.pages.debug import register as register_debug_page
+from interfaces.web.pages.debug_er import register as register_debug_er_page
 from interfaces.web.pages.service_billing import register as register_service_billing_page
 from interfaces.web.pages.features import register as register_features_page
 from interfaces.web.pages.core_history import register as register_core_history_page
@@ -1961,6 +1962,7 @@ def _register_page(register):
 
 top_page = _register_page(register_top_page)
 debug_page = _register_page(register_debug_page)
+debug_er_page = _register_page(register_debug_er_page)
 service_billing_page = _register_page(register_service_billing_page)
 features_page = _register_page(register_features_page)
 core_history_page = _register_page(register_core_history_page)
