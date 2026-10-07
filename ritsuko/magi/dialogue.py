@@ -44,7 +44,7 @@ STATES = (
     "KNOWLEDGE_CANDIDATE", "ACTION_PROPOSAL", "UNABLE",
 )
 SOURCES = (
-    "current_context", "pkb", "task_history", "web", "files",
+    "current_context", "pkb", "task_history", "web", "finance", "files",
     "external_service", "pc_observation", "user",
 )
 MAX_TURNS = 4
@@ -90,8 +90,8 @@ PREREQUISITE_KNOWLEDGE = """前提知識：
 このシステムは、現在の依頼と取得済み情報で判断し、必要な事実が不足する場合は情報を取得し、その結果をObservationとして後続の判断へ渡しながら処理を進めます。
 Resource Catalogは今回利用可能な情報源・能力とアクセス条件を示します。利用可能であることは、その内容を取得済みという意味ではありません。
 Observationは、今回までに実際に取得・受理され、判断材料として提示された事実・結果です。
-PKBはユーザー本人について蓄積されたPersonal Knowledge Base、Task Historyは過去・進行中Taskの状態や結果、Webは公開情報、Filesは利用可能な文書・ファイルを確認する情報源です。
-Userは必要事項を本人へ確認する場合の情報源です。
+PKBはユーザー本人について蓄積されたPersonal Knowledge Base、Webは公開情報、Financeは保存済み家計のread-only集計です。
+Task HistoryやFiles等はResource Catalogでavailable=trueのときだけ利用可能です。Userは必要事項を本人へ確認する場合の情報源です。
 「利用可能」「要求済み」「取得済み」「検証済み」「実行済み」は別の状態です。"""
 
 COMMON_INSTRUCTIONS = """共通指示：
@@ -135,7 +135,7 @@ DETAIL_RULES = """初回分類は方向付けであり、後続の証拠と矛�
 request_id等の管理IDはRITSUKOが採番するので生成しないでください。
 時間依存の公開情報で「最新・現在・本日」等の鮮度が要求される場合、鮮度を示すObservationが無ければPKBだけを最新情報の根拠にせず、web等のfresh external sourceを要求してください。
 本人固有の既知情報・履歴・過去取得値はPKBやtask_historyを優先できますが、公開情報の現在性そのものとは区別してください。
-source=userは通常のread sourceではありません。PKB / task_history / files / web等で解けないblocking情報にだけ使い、既存情報源で解決できる可能性があれば先にそちらを要求してください。
+source=userは通常のread sourceではありません。Resource Catalogでavailable=trueのPKB / web / finance等で解けないblocking情報にだけ使い、利用可能な情報源で解決できる可能性があれば先にそちらを要求してください。
 明確で低リスクな本人申告や訂正は、ユーザーが明示した記録に必要な事実だけでKNOWLEDGE_CANDIDATEにできます。理由・経緯・利用目的・製品仕様等の補足を記録候補化の必須条件にしないでください。
 曖昧な参照語は、内部Observationから最も近い候補が一意で反証がない場合、その候補を「〜のことなら」のような限定表現付きで参照先として扱えます。候補が複数残る、または誤認の影響が大きい場合はNEED_CLARIFICATIONにしてください。過去履歴を無制限に広げ続けないでください。
 追加Observationがある場合は必ず内容を検討し、前回と同じ情報要求を理由なく繰り返さないでください。
