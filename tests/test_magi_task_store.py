@@ -13,6 +13,7 @@ from infrastructure.postgres.magi_task_repository import (
     persist_session,
     prepare_memory_intake,
     record_pkb_read,
+    record_source_read,
 )
 
 
@@ -690,7 +691,50 @@ class MagiTaskStoreTests(unittest.TestCase):
         self.assertIn("INSERT INTO secretary.sources", sql)
         self.assertIn("INSERT INTO secretary.actions", sql)
         self.assertIn("INSERT INTO secretary.results", sql)
-        self.assertIn("core.magi.pkb_observed", sql)
+        self.assertIn("core.magi.source_observed", sql)
+
+    def test_record_web_read_uses_public_source_and_generic_audit(self):
+        db = _DB(fetches=[
+            None,
+            (SOURCE_ID,),
+            (ACTION_ID,),
+            (RESULT_ID,),
+            ({"core_slice": "ritsuko_magi_observation_v1"},),
+        ])
+        action_id, result_id = record_source_read(
+            db,
+            task_id=TASK_ID,
+            pending_request={
+                "source": "web",
+                "request_ids": ["REQ-W"],
+                "what": "official driver",
+            },
+            execution={
+                "status": "ok",
+                "source": "web",
+                "capability": "web_research",
+                "confidentiality": "public",
+                "tool": "web",
+                "operation": "research",
+                "citation": "fixture web",
+                "verified_by": "bounded_web_retrieval",
+                "total": 1,
+                "answer": "official result",
+                "result": {
+                    "result_kind": "web_research",
+                    "hits": [{"title": "official"}],
+                },
+            },
+        )
+        self.assertEqual(action_id, str(ACTION_ID))
+        self.assertEqual(result_id, str(RESULT_ID))
+        source_call = next(
+            call for call in db.cur.calls
+            if "INSERT INTO secretary.sources" in call[0]
+        )
+        self.assertEqual(source_call[1][2], "public")
+        audit_sql = "\n".join(call[0] for call in db.cur.calls)
+        self.assertIn("core.magi.source_observed", audit_sql)
 
 
 if __name__ == "__main__":
