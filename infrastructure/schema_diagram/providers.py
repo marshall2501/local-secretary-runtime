@@ -88,10 +88,16 @@ class NativeMermaidProvider:
             dependency_status="psycopg + NiceGUI Mermaid",
         )
 
-    def generate(self) -> SchemaDiagramResult:
+    def generate(
+        self,
+        *,
+        options: dict[str, object] | None = None,
+    ) -> SchemaDiagramResult:
         started = time.perf_counter()
         snapshot = self._snapshot_loader()
-        content = render_mermaid(snapshot, keys_only=self._keys_only)
+        requested = options or {}
+        keys_only = bool(requested.get("keys_only", self._keys_only))
+        content = render_mermaid(snapshot, keys_only=keys_only)
         elapsed = int((time.perf_counter() - started) * 1000)
         return SchemaDiagramResult(
             status="ok",
@@ -171,7 +177,11 @@ class OptionalToolProvider:
             dependency_status=detail,
         )
 
-    def generate(self) -> SchemaDiagramResult:
+    def generate(
+        self,
+        *,
+        options: dict[str, object] | None = None,
+    ) -> SchemaDiagramResult:
         return SchemaDiagramResult(
             status="unavailable",
             provider=self.key,
