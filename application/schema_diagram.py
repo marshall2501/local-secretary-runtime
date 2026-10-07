@@ -89,7 +89,11 @@ class SchemaDiagramProvider(Protocol):
 
     def status(self, *, enabled: bool) -> ProviderStatus: ...
 
-    def generate(self) -> SchemaDiagramResult: ...
+    def generate(
+        self,
+        *,
+        options: dict[str, object] | None = None,
+    ) -> SchemaDiagramResult: ...
 
 
 class SchemaDiagramService:
@@ -110,6 +114,7 @@ class SchemaDiagramService:
         provider_key: str,
         *,
         enabled: dict[str, bool] | None = None,
+        options: dict[str, object] | None = None,
     ) -> SchemaDiagramResult:
         provider = self._providers.get(provider_key)
         if provider is None:
@@ -133,4 +138,4 @@ class SchemaDiagramService:
                 provider=provider_key,
                 warnings=(status.dependency_status or "provider dependency unavailable",),
             )
-        return provider.generate()
+        return provider.generate(options=options)
