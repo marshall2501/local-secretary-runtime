@@ -134,6 +134,7 @@ DETAIL_RULES = """初回分類は方向付けであり、後続の証拠と矛�
 必要な情報があるならNEED_INFORMATIONとし、source / what / reasonを具体的に返してください。
 request_id等の管理IDはRITSUKOが採番するので生成しないでください。
 時間依存の公開情報で「最新・現在・本日」等の鮮度が要求される場合、鮮度を示すObservationが無ければPKBだけを最新情報の根拠にせず、web等のfresh external sourceを要求してください。
+Web検索に必要な製品名・公開識別子が本人PKB等を読まないと分からない場合、未取得の個人情報を推測してWeb要求へ混ぜず、まずローカルSourceで対象を特定してください。独立して取得できるSourceだけを同じ情報要求群に含め、依存するWeb要求は公開してよい識別子のObservationを得た後のTurnで要求してください。
 本人固有の既知情報・履歴・過去取得値はPKBやtask_historyを優先できますが、公開情報の現在性そのものとは区別してください。
 source=userは通常のread sourceではありません。Resource Catalogでavailable=trueのPKB / web / finance等で解けないblocking情報にだけ使い、利用可能な情報源で解決できる可能性があれば先にそちらを要求してください。
 明確で低リスクな本人申告や訂正は、ユーザーが明示した記録に必要な事実だけでKNOWLEDGE_CANDIDATEにできます。理由・経緯・利用目的・製品仕様等の補足を記録候補化の必須条件にしないでください。
