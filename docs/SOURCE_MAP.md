@@ -1,11 +1,11 @@
 # SOURCE_MAP — ソース構成と機能対応
 
-更新: 2026-10-04  
-参照runtime: `local-secretary-runtime main`（source確認時 `7b594a19...`、以後は文書のみ更新）
+更新: 2026-10-07  
+参照runtime: `local-secretary-runtime` source確認対象 `8f9c43f6...`
 
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
 
-source directoryの役割・dependency direction・重要な配置原則の設計正本は [`local-secretary-ai/docs/01_Architecture/RuntimeSourceArchitecture_実装ソース構造.md`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/RuntimeSourceArchitecture_%E5%AE%9F%E8%A3%85%E3%82%BD%E3%83%BC%E3%82%B9%E6%A7%8B%E9%80%A0.md) です。本資料は、その設計を**現在どのfileが実装しているか**を追跡します。
+source directoryの役割・dependency direction・重要な配置原則の設計マスタは [`local-secretary-ai/docs/01_Architecture/RuntimeSourceArchitecture_実装ソース構造.md`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/RuntimeSourceArchitecture_%E5%AE%9F%E8%A3%85%E3%82%BD%E3%83%BC%E3%82%B9%E6%A7%8B%E9%80%A0.md) です。本資料は、その設計を**現在どのfileが実装しているか**を追跡します。
 
 本資料は「どこに何が実装されているか」を示すものであり、機能が実機受入済みであることを意味しません。
 
@@ -92,6 +92,7 @@ local-secretary-runtime/
 │  ├─ application/
 │  │  ├─ daily.py
 │  │  └─ memory_intake.py
+│  ├─ persistence.py              # PKB persistence Port
 │  ├─ query_service.py
 │  ├─ write_service.py
 │  ├─ candidate_service.py
@@ -160,6 +161,19 @@ local-secretary-runtime/
 │  │  ├─ core_execution_repository.py
 │  │  ├─ core_task_query_repository.py
 │  │  ├─ core_advisor_repository.py
+│  │  ├─ entity_catalog_repository.py
+│  │  ├─ pkb_repository.py
+│  │  ├─ pkb_write_repository.py
+│  │  ├─ pkb_query_repository.py
+│  │  ├─ pkb_pending_repository.py
+│  │  ├─ pkb_correction_repository.py
+│  │  ├─ pkb_entity_repository.py
+│  │  ├─ pkb_memory_repository.py
+│  │  ├─ magi_task_repository.py
+│  │  ├─ magi_settings_repository.py
+│  │  ├─ finance_repository.py
+│  │  ├─ service_connection_repository.py
+│  │  ├─ service_billing_settings_repository.py
 │  │  ├─ pkb_runtime.py
 │  │  └─ pkb_debug.py
 │  ├─ async_runtime/
@@ -211,6 +225,34 @@ local-secretary-runtime/
 ```
 
 </details>
+
+### Persistence境界（現行）
+
+Productionの業務/Application codeは、DB driver・SQL・cursor・transactionを直接所有せず、業務上意味のあるPort / Repository contractを介して永続化を利用します。具象PostgreSQL adapterの生成・bindingは `bootstrap` が担当します。
+
+```text
+interfaces / RITSUKO
+  ↓
+Application / Domain
+  ↓ Port / Repository contract
+bootstrap
+  ↓ binds
+infrastructure/postgres/*Repository
+  ↓
+PostgreSQL
+```
+
+主な対応:
+
+| Owner | Port / 上位contract | PostgreSQL adapter |
+|---|---|---|
+| PKB | `pkb/persistence.py` と各PKB service | `infrastructure/postgres/pkb_repository.py` + `pkb_*_repository.py` |
+| RITSUKO Task / MAGI | `ritsuko/tasks/magi_task_store.py`, `ritsuko/magi/settings.py` | `magi_task_repository.py`, `magi_settings_repository.py` |
+| Finance | `capabilities/finance/` | `finance_repository.py` |
+| Service Connection | `integrations/connections/service_connections.py` | `service_connection_repository.py` |
+| Service Billing settings | `capabilities/service_billing/settings.py` | `service_billing_settings_repository.py` |
+
+`pkb/episode_intake.py` はhistorical isolated fixture importerであり、通常Production business pathのPersistence Port化対象から除外しています。再流入防止は `tests/test_architecture_boundaries.py` が検査します。
 
 ---
 
