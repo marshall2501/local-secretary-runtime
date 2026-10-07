@@ -37,7 +37,8 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 | MoneyForward CSV取込 | Finance画面 | [../capabilities/finance/finance_import.py](../capabilities/finance/finance_import.py) | CSV → PostgreSQL |
 | 利用料金・契約 | [../interfaces/web/pages/service_billing.py](../interfaces/web/pages/service_billing.py) | [../capabilities/service_billing/service.py](../capabilities/service_billing/service.py) | OpenAI / Google Cloud等 |
 | Web Research | RITSUKO / Capability | [../capabilities/web_research/application.py](../capabilities/web_research/application.py) | Web Search / HTTP |
-| システム状態 / Debug | [../interfaces/web/pages/debug.py](../interfaces/web/pages/debug.py) | [../infrastructure/system_debug.py](../infrastructure/system_debug.py), [../application/schema_diagram.py](../application/schema_diagram.py) | Git / Runtime / PostgreSQL read-only / ER図 |
+| システム状態 / Debug | [../interfaces/web/pages/debug.py](../interfaces/web/pages/debug.py) | [../infrastructure/system_debug.py](../infrastructure/system_debug.py) | Git / Runtime / PostgreSQL read-only dashboard |
+| DB ER図 | [../interfaces/web/pages/debug_er.py](../interfaces/web/pages/debug_er.py) | [../application/schema_diagram.py](../application/schema_diagram.py) | PostgreSQL schema metadata / Mermaid / optional ER providers |
 | 開発Workbench | [../interfaces/workbench/app.py](../interfaces/workbench/app.py) | Workbench helpers | LLM / PKB / Core検証 |
 | Secretary REST API | [../interfaces/api/app.py](../interfaces/api/app.py) | [../application/read_service.py](../application/read_service.py), Task / Candidate services | FastAPI / PostgreSQL |
 | 外部ChatGPT read-only MCP | [../interfaces/mcp/server.py](../interfaces/mcp/server.py) | Secretary API read boundary | HTTP → Secretary API |
@@ -140,7 +141,8 @@ local-secretary-runtime/
 │  │     ├─ finance.py
 │  │     ├─ service_billing.py
 │  │     ├─ settings.py
-│  │     └─ debug.py
+│  │     ├─ debug.py
+│  │     └─ debug_er.py
 │  ├─ api/
 │  │  └─ app.py
 │  ├─ mcp/
@@ -314,10 +316,14 @@ TOP
 
 ### Debug DB ER図
 
-Debug画面のER図は、UIからSQLやsubprocessを直接実行せず、次の責務へ分離しています。
+`/debug` はシステム状態ダッシュボードとして保ち、ER図の生成・Provider比較・表示密度切替は専用 `/debug/er` へ分離します。ダッシュボード側はER図の利用可否サマリーと詳細画面への入口だけを持ちます。
+
+UIからSQLやsubprocessを直接実行せず、次の責務へ分離しています。
 
 ```text
 interfaces/web/pages/debug.py
+  ↓ link / status summary
+interfaces/web/pages/debug_er.py
   ↓
 application/schema_diagram.py
   ↓
