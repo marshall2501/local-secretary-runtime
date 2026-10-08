@@ -448,11 +448,116 @@ def register(portal_context: dict):
                 @ui.refreshable
                 def guided_result_panel():
                     session = state.get("guided_session")
+                    saved_task = saved_task_for_session(session) if session else {}
+                    presentation = build_task_presentation(
+                        session,
+                        saved_task=saved_task,
+                        fallback_request=state.get("guided_request") or "",
+                        busy=bool(state.get("guided_busy")),
+                        read_only=bool(state.get("guided_history_read_only")),
+                        live_member_states=state.get("guided_member_progress") or {},
+                    )
+
+                    if (
+                        presentation["request_text"]
+                        or session is not None
+                        or state.get("guided_busy")
+                    ):
+                        with ui.card().classes(
+                            "w-full border-2 border-teal-300 bg-white shadow-none"
+                        ):
+                            ui.label("現在のTask").classes("font-bold text-teal-900")
+                            with ui.grid(columns=2).classes("w-full gap-2"):
+                                ui.label("依頼").classes("text-xs text-grey-7")
+                                ui.label(
+                                    presentation["request_text"] or "読み込み中"
+                                ).classes("font-medium")
+                                ui.label("現在").classes("text-xs text-grey-7")
+                                ui.label(presentation["status_label"]).classes("font-medium")
+                                ui.label("最新結果").classes("text-xs text-grey-7")
+                                ui.label(
+                                    presentation["latest_result_summary"]
+                                ).classes("text-sm")
+                                ui.label("次の操作").classes("text-xs text-grey-7")
+                                ui.label(
+                                    presentation["system_next_action"]
+                                ).classes(
+                                    "text-sm font-medium"
+                                    + (
+                                        " text-orange-900"
+                                        if presentation["user_action_required"]
+                                        else ""
+                                    )
+                                )
+
+                            live_states = presentation["live_member_states"]
+                            enabled_specs = {
+                                str(item.get("name") or ""): item
+                                for item in (state.get("magi_member_specs") or [])
+                                if item.get("enabled")
+                            }
+                            if state.get("guided_busy") and (live_states or enabled_specs):
+                                ui.label(
+                                    "MAGI 進行状況 — 現在のTurn"
+                                ).classes("font-bold text-sm text-blue-900")
+                                with ui.element("div").classes(
+                                    "w-full grid grid-cols-3 gap-2 items-stretch"
+                                ):
+                                    for member in MEMBER_NAMES:
+                                        progress = live_states.get(member)
+                                        spec = enabled_specs.get(member) or {}
+                                        if progress is None and not spec:
+                                            continue
+                                        progress = progress or {
+                                            "state": "queued",
+                                            "state_label": "待機中",
+                                            "provider": str(spec.get("provider") or ""),
+                                            "model": str(spec.get("model") or ""),
+                                            "summary": "",
+                                            "elapsed_seconds": None,
+                                        }
+                                        color = {
+                                            "running": "blue",
+                                            "completed": "green",
+                                            "withheld": "grey",
+                                            "invalid": "orange",
+                                            "unavailable": "red",
+                                        }.get(progress.get("state"), "grey")
+                                        with ui.card().classes(
+                                            "w-full border border-blue-grey-200 bg-grey-50 shadow-none"
+                                        ):
+                                            with ui.row().classes(
+                                                "w-full items-center justify-between gap-2"
+                                            ):
+                                                ui.label(member).classes("font-bold text-sm")
+                                                ui.badge(
+                                                    str(progress.get("state_label") or "-"),
+                                                    color=color,
+                                                )
+                                            ui.label(
+                                                str(progress.get("provider") or "-")
+                                                + " / "
+                                                + str(progress.get("model") or "-")
+                                            ).classes("text-xs text-grey-7")
+                                            if progress.get("elapsed_seconds") is not None:
+                                                ui.label(
+                                                    "elapsed="
+                                                    + str(progress["elapsed_seconds"])
+                                                    + "s"
+                                                ).classes("text-xs text-grey-7")
+                                            if progress.get("summary"):
+                                                ui.label(
+                                                    str(progress["summary"])
+                                                ).classes("text-xs")
+
+                            if presentation["recent_updates"]:
+                                ui.label("最新の更新").classes("font-bold text-sm")
+                                for update in presentation["recent_updates"][:4]:
+                                    ui.label("• " + update).classes("text-xs text-grey-8")
+
                     if state["guided_busy"]:
-                        ui.label("RITSUKO ⇄ MAGI 対話中...").classes("font-bold text-teal-900")
                         ui.label(
-                            f"Turn {int(state.get('guided_turn') or 1)}"
-                            f"（各resume cycle最大{MAX_TURNS} Turn）"
+                            f"Turn {int(state.get('guided_turn') or 1)} を実行中"
                         ).classes("font-mono text-sm")
                         if state.get("guided_stop_requested"):
                             ui.label(
@@ -467,11 +572,10 @@ def register(portal_context: dict):
                             ).props("outline")
                         return
                     if session is None:
-                        ui.label("初回はLLMに分類だけを聞き、回答に合わせて次の問いを送ります。").classes(
-                            "text-sm text-grey-7"
-                        )
+                        ui.label(
+                            "表示中のTaskはありません。下の「新しい依頼」から開始できます。"
+                        ).classes("text-sm text-grey-7")
                         return
-                    saved_task = saved_task_for_session(session)
                     if state.get("guided_history_read_only"):
                         ui.label("保存済みTaskのMAGI対話を閲覧中（read-only）").classes(
                             "font-bold text-blue-grey-800"
@@ -578,7 +682,11 @@ def register(portal_context: dict):
                             if not str(observation_input.value or "").strip():
                                 ui.notify("試験用Observationを入力してください", type="warning")
                                 return
-                            stop_event = begin_guided_run(len(session["turns"]) + 1)
+                            stop_event = begin_guided_run(
+                                len(session["turns"]) + 1,
+                                task_id_value=str(session.get("task_id") or ""),
+                                request_text=str(session.get("user_raw") or ""),
+                            )
                             guided_button.disable()
                             guided_result_panel.refresh()
                             try:
@@ -586,6 +694,7 @@ def register(portal_context: dict):
                                     session,
                                     observation_input.value,
                                     timeout=guided_timeout_seconds(session),
+                                    caller=guided_panel_caller,
                                     stop_requested=stop_event.is_set,
                                     on_turn_start=note_guided_turn,
                                 )
@@ -629,7 +738,7 @@ def register(portal_context: dict):
                             if question:
                                 ui.label("質問: " + question).classes("text-sm")
                             clarification_input = ui.textarea(
-                                label="追加説明・選択",
+                                label="このTaskへ回答",
                                 placeholder="回答や追加説明を自然な言葉で入力",
                             ).props("rows=2 outlined dense").classes("w-full")
     
@@ -653,6 +762,7 @@ def register(portal_context: dict):
                                         fail_task_record=_fail_magi_core_task_record,
                                         stop_requested=stop_event.is_set,
                                         on_turn_start=note_guided_turn,
+                                        user_continuation=guided_user_continuation,
                                     )
                                 except Exception as exc:
                                     ui.notify(
@@ -685,7 +795,7 @@ def register(portal_context: dict):
                                     resume_panel.refresh()
     
                             ui.button(
-                                "追加説明を渡して対話継続",
+                                "このTaskへ回答して続行",
                                 icon="chat",
                                 on_click=continue_with_user,
                             ).props("outline")
@@ -840,6 +950,7 @@ def register(portal_context: dict):
                                                 memory_result=memory_result,
                                                 stop_requested=stop_event.is_set,
                                                 on_turn_start=note_guided_turn,
+                                                review_continuation=guided_review_continuation,
                                             )
                                         )
                                         await load_after_proposal_review()
@@ -1029,7 +1140,12 @@ def register(portal_context: dict):
                     specs = save_guided_assignments(notify=False)
                     if not specs:
                         return
-                    stop_event = begin_guided_run(1)
+                    task_uuid = uuid4()
+                    stop_event = begin_guided_run(
+                        1,
+                        task_id_value=str(task_uuid),
+                        request_text=request_text,
+                    )
                     state["guided_session"] = None
                     state["guided_history_read_only"] = False
                     state["result"] = None
@@ -1051,6 +1167,9 @@ def register(portal_context: dict):
                             fail_task_record=_fail_magi_core_task_record,
                             stop_requested=stop_event.is_set,
                             on_turn_start=note_guided_turn,
+                            task_id=task_uuid,
+                            dialogue_starter=guided_dialogue_starter,
+                            observation_continuation=guided_observation_continuation,
                         )
                         guided_task_id = str(
                             (state.get("guided_session") or {}).get("task_id") or ""
@@ -1087,11 +1206,15 @@ def register(portal_context: dict):
                         open_tasks_panel.refresh()
                         completed_tasks_panel.refresh()
     
-                guided_button = ui.button(
-                    "RITSUKOへ依頼", icon="play_arrow",
-                    color="teal", on_click=start_guided,
-                )
-                guided_result_panel()
+                with new_request_slot:
+                    guided_button = ui.button(
+                        "新しい依頼を開始",
+                        icon="play_arrow",
+                        color="teal",
+                        on_click=start_guided,
+                    )
+                with current_task_slot:
+                    guided_result_panel()
     
                 def refresh_guided_progress() -> None:
                     if state.get("guided_busy"):
