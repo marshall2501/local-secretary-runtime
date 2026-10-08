@@ -248,6 +248,19 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["visibility"]["core"]["trace"]
         )
 
+    def test_core_resource_catalog_separates_user_clarification_route(self):
+        summary = __import__(
+            "interfaces.web.core_ui", fromlist=["resource_catalog_summary"]
+        ).resource_catalog_summary({
+            "pkb": {"available": True, "access": "read_only_via_ritsuko"},
+            "web": {"available": True, "access": "bounded_read_only_via_ritsuko"},
+            "user": {"available": True, "access": "ask_user"},
+            "files": {"available": False, "access": "not_implemented"},
+        })
+        self.assertEqual(summary[0], ["pkb", "web"])
+        self.assertEqual(summary[1], ["user"])
+        self.assertEqual(summary[2], ["files"])
+
     def test_core_task_presentation_surfaces_user_action_without_turn_json(self):
         presentation = __import__(
             "interfaces.web.core_ui", fromlist=["build_task_presentation"]
