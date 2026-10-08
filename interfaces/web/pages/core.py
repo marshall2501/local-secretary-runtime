@@ -1696,6 +1696,15 @@ def register(portal_context: dict):
                         saved_session = saved_task.get("magi_session")
                         if isinstance(saved_session, dict):
                             state["guided_session"] = saved_session
+                            state["guided_task_id"] = str(
+                                saved_session.get("task_id") or saved_task.get("id") or ""
+                            )
+                            state["guided_request"] = str(
+                                saved_session.get("user_raw") or saved_task.get("request") or ""
+                            )
+                            state["guided_member_progress"] = {}
+                            if isinstance(saved_session.get("member_specs"), list):
+                                state["magi_member_specs"] = saved_session["member_specs"]
                             state["guided_history_read_only"] = (
                                 saved_task.get("status") == "completed"
                             )
