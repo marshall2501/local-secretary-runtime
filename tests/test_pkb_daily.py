@@ -248,6 +248,47 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["visibility"]["core"]["trace"]
         )
 
+    def test_core_task_presentation_surfaces_user_action_without_turn_json(self):
+        presentation = __import__(
+            "interfaces.web.core_ui", fromlist=["build_task_presentation"]
+        ).build_task_presentation(
+            {
+                "status": "waiting_user",
+                "user_raw": "メインPCのGPUを調べて",
+                "user_question": "GPUの種類を教えてください",
+                "observations": [],
+                "turns": [],
+            },
+            live_member_states={},
+        )
+        self.assertEqual(presentation["status_label"], "追加情報待ち")
+        self.assertEqual(
+            presentation["user_action_kind"],
+            "clarification",
+        )
+        self.assertIn("このTaskへ回答", presentation["system_next_action"])
+        self.assertEqual(
+            presentation["user_prompt"],
+            "GPUの種類を教えてください",
+        )
+
+    def test_read_only_core_presentation_prefers_persisted_completed_status(self):
+        presentation = __import__(
+            "interfaces.web.core_ui", fromlist=["build_task_presentation"]
+        ).build_task_presentation(
+            {
+                "status": "candidate_ready",
+                "user_raw": "履歴Task",
+                "detail": {"answer_candidate": "完了済み回答"},
+                "observations": [],
+                "turns": [],
+            },
+            saved_task={"status": "completed", "request": "履歴Task"},
+            read_only=True,
+        )
+        self.assertEqual(presentation["status_label"], "完了")
+        self.assertTrue(presentation["is_read_only"])
+
     def test_ui_preferences_round_trip_json_outside_pkb(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ui_preferences.json"
