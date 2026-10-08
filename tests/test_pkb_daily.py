@@ -683,6 +683,108 @@ class DailyPKBParserTests(unittest.TestCase):
         resolve_mock.assert_called_once()
         detail_mock.assert_called_once()
 
+    @patch("interfaces.web.app._execute_core_read")
+    @patch("interfaces.web.app._entity_map")
+    def test_magi_pkb_request_unresolved_component_does_not_broaden_to_all_claims(
+        self, entity_map_mock, core_read_mock
+    ):
+        entity_map_mock.return_value = {
+            "サブPC": ENTITIES["サブPC"],
+        }
+        result = _execute_magi_pkb_request(
+            "メインPCのGPUについて、今の最新ドライバーと比較して。",
+            {
+                "source": "pkb",
+                "request_ids": ["REQ-1"],
+                "what": "メインPCに搭載されているGPUの種類（モデル）",
+            },
+        )
+        self.assertEqual(result["operation"], "target_resolution")
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(
+            result["result"]["result_kind"],
+            "pkb_target_unresolved",
+        )
+        self.assertEqual(
+            result["result"]["reason"],
+            "parent_computer_not_unique_or_missing",
+        )
+        self.assertIn("GPUの対象PCを一意に確認できませんでした", result["answer"])
+        core_read_mock.assert_not_called()
+
+    @patch("interfaces.web.app._execute_core_read")
+    @patch("interfaces.web.app._pkb_repository.resolve_component_reference")
+    @patch("interfaces.web.app._entity_map")
+    def test_magi_pkb_request_missing_component_relation_does_not_broaden(
+        self, entity_map_mock, resolve_mock, core_read_mock
+    ):
+        entity_map_mock.return_value = ENTITIES
+        resolve_mock.return_value = None
+        result = _execute_magi_pkb_request(
+            "メインPCのGPUについて教えて。",
+            {
+                "source": "pkb",
+                "request_ids": ["REQ-1"],
+                "what": "メインPCのGPUモデル",
+            },
+        )
+        self.assertEqual(result["operation"], "target_resolution")
+        self.assertEqual(
+            result["result"]["reason"],
+            "component_relation_not_unique_or_missing",
+        )
+        self.assertIn("メインPCのGPUを一意に確認できませんでした", result["answer"])
+        core_read_mock.assert_not_called()
+
+    @patch("interfaces.web.app._execute_core_read")
+    @patch("interfaces.web.app._entity_map")
+    def test_magi_pkb_request_exposes_only_scoped_public_os_terms(
+        self, entity_map_mock, core_read_mock
+    ):
+        entity_map_mock.return_value = ENTITIES
+        core_read_mock.return_value = {
+            "capability": "pkb_search",
+            "result": {
+                "status": "ok",
+                "result_kind": "claims",
+                "total": 2,
+                "items": [
+                    {
+                        "entity_name": "サブPC",
+                        "predicate": "os_release_changed",
+                        "value": {
+                            "product": "Windows 11",
+                            "to_release": "26H2",
+                            "transition_hint": "upgrade",
+                        },
+                    },
+                    {
+                        "entity_name": "サブPC",
+                        "predicate": "current_os_release",
+                        "value": "26H2",
+                    },
+                ],
+            },
+            "answer": "PKBの記録では、サブPCの現在OSは26H2です。",
+            "total": 2,
+            "tool": "pkb",
+            "operation": "search",
+            "status": "ok",
+            "confidentiality": "private",
+        }
+        result = _execute_magi_pkb_request(
+            "サブPCの現在のOSと、そのバージョンの最新既知不具合を比較して。",
+            {
+                "source": "pkb",
+                "request_ids": ["REQ-1"],
+                "what": "サブPCの現在のOSバージョン",
+            },
+        )
+        self.assertEqual(
+            result["source_metadata"]["public_query_terms"],
+            ["Windows 11", "26H2"],
+        )
+
     @patch("interfaces.web.app._pkb_repository.list_components")
     @patch("interfaces.web.app._pkb_repository.load_entity_detail")
     def test_cooperative_pkb_probe_expands_known_pc_to_component_overview(
