@@ -15,6 +15,7 @@ Properties:
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import json
 import os
 import time
@@ -622,6 +623,7 @@ async def _send_async(
         return None
 
     turn_number = len(session["turns"]) + 1
+    turn_started_at = datetime.now(timezone.utc).isoformat()
     envelope = {
         "protocol_variant": "state_driven_question_experiment",
         "prompt_version": session["prompt_version"],
@@ -670,8 +672,11 @@ async def _send_async(
         "disagreement" if result_status == "disagreement" else
         "unavailable" if result_status == "unavailable" else "invalid"
     )
+    turn_finished_at = datetime.now(timezone.utc).isoformat()
     session["turns"].append({
         "stage": stage,
+        "started_at": turn_started_at,
+        "finished_at": turn_finished_at,
         "question_purpose": question_purpose,
         "request_envelope": envelope,
         "status": status,
