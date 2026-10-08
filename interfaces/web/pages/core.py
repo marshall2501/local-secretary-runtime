@@ -681,7 +681,7 @@ def register(portal_context: dict):
                                                 ).classes("text-xs")
 
                             if presentation["recent_updates"]:
-                                ui.label("最新の更新").classes("font-bold text-sm")
+                                ui.label("更新履歴").classes("font-bold text-sm")
                                 for update in presentation["recent_updates"][:4]:
                                     ui.label("• " + update).classes("text-xs text-grey-8")
 
