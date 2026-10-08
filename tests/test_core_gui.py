@@ -1115,7 +1115,10 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 control = next(e for e in self.client.elements.values() if e._props.get('label') == label)
                 self.assertIs(expansion_for(control), expansion_for(counts))
             limit_row = limits.parent_slot.parent
-            self.assertEqual(len([e for e in limit_row if isinstance(e, ui.switch)]), 1)
+            self.assertEqual(
+                len([e for e in limit_row if isinstance(e, ui.switch)]),
+                2,
+            )
             self.assertFalse(any(isinstance(e, ui.select) for e in limit_row))
 
     async def test_settings_controls_save_both_counts_without_restart(self):
