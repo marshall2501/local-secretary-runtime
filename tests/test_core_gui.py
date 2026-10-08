@@ -973,7 +973,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                                 if e._props.get('label') == 'Legacy CASPER Advisor Model')
             self.assertTrue(within_legacy(legacy_model))
             self.assertTrue(within_legacy(self.elements('OODA')[0]))
-            safety_setting = self.elements('動作・安全境界')[0]
+            safety_setting = self.elements('MAGI / Observation / 安全境界')[0]
             self.assertFalse(within_legacy(safety_setting))
             self.assertFalse(self.elements('Core画面 全体稼働ログ'))
             old_flow = next(e for e in self.client.elements.values()
