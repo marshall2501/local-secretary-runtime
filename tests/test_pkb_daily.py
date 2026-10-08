@@ -305,6 +305,47 @@ class DailyPKBParserTests(unittest.TestCase):
         })
         self.assertIn("時刻記録なし", presentation["recent_updates"][0])
 
+    def test_core_clarification_guidance_explains_magi_disagreement(self):
+        guidance = __import__(
+            "interfaces.web.core_ui", fromlist=["clarification_guidance"]
+        ).clarification_guidance({
+            "magi_disagreement": {
+                "status": "disagreement",
+                "reason": "weighted_vote_tie",
+            },
+            "turns": [{
+                "stage": "classify",
+                "status": "disagreement",
+                "member_results": [
+                    {
+                        "name": "MELCHIOR",
+                        "status": "ok",
+                        "response": {
+                            "category": "INVESTIGATION",
+                            "understood_request": "GPUと最新ドライバーを調査する",
+                        },
+                    },
+                    {
+                        "name": "CASPER",
+                        "status": "ok",
+                        "response": {
+                            "category": "COMPARISON",
+                            "understood_request": "現在GPUと最新ドライバーを比較する",
+                        },
+                    },
+                ],
+            }],
+        })
+        self.assertIn("何を対象に", guidance["input_hint"])
+        self.assertEqual(
+            [item["member"] for item in guidance["member_interpretations"]],
+            ["MELCHIOR", "CASPER"],
+        )
+        self.assertEqual(
+            guidance["member_interpretations"][0]["kind"],
+            "INVESTIGATION",
+        )
+
     def test_core_task_presentation_surfaces_user_action_without_turn_json(self):
         presentation = __import__(
             "interfaces.web.core_ui", fromlist=["build_task_presentation"]
