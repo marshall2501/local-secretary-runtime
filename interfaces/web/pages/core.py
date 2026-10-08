@@ -23,7 +23,9 @@ def register(portal_context: dict):
                  "guided_session": None, "guided_busy": False,
                  "guided_turn": 0, "guided_stop_event": None,
                  "guided_stop_requested": False,
-                 "guided_history_read_only": False}
+                 "guided_history_read_only": False,
+                 "guided_request": "", "guided_task_id": "",
+                 "guided_member_progress": {}}
     
         list_limits = {key: _UI_PREFERENCES["core"][key] for key in CORE_TASK_LIST_DEFAULTS}
         list_defaults = dict(list_limits)
@@ -127,41 +129,43 @@ def register(portal_context: dict):
                 ui.notify(label + "をコピーしました", type="positive")
     
             with ui.card().classes("w-full border-2 border-teal-300 bg-teal-50"):
-                ui.label("RITSUKO ⇄ MAGI Observation Loop").classes(
-                    "text-lg font-bold text-teal-900"
-                )
-                ui.label(
-                    "RITSUKOが分類を入口に、Task状態・前回返答・Observationから"
-                    "次の質問目的を選び、問いを組み立て直します。"
-                ).classes("text-sm")
-                ui.label(
-                    "MELCHIOR / CASPER / BALTHASARはProvider非依存のLLM席です。"
-                    "MAGIが不足情報を要求すると、RITSUKOが利用可能なPKB / Web / Financeをread-onlyで取得し、"
-                    "Task / Action / Result / Source / Auditへ記録してverified Observationとして再投入します。"
-                    "PKB / Finance等のprivate Observationを含む再分析はCloud Context Gateによりlocal席だけへ送信します。"
-                    "Files・外部変更操作・記憶書込はこの経路では自動実行しません。"
-                ).classes("text-xs text-orange-800")
+                ui.label("RITSUKO").classes("text-lg font-bold text-teal-900")
+                current_task_slot = ui.column().classes("w-full gap-2")
+                new_request_slot = ui.column().classes("w-full gap-2")
+                with new_request_slot:
+                    ui.label("新しい依頼").classes("font-bold text-teal-900")
+                    guided_input = ui.textarea(
+                        label="新しいTaskとして依頼",
+                        placeholder="自然言語で依頼を入力",
+                    ).classes("w-full")
+
                 source_catalog = default_resource_catalog()
-                available_sources = [
-                    name
-                    for name in ("pkb", "web", "finance")
-                    if (source_catalog.get(name) or {}).get("available")
-                ]
-                unavailable_sources = [
-                    name
-                    for name in ("files", "task_history", "external_service", "pc_observation")
-                    if not (source_catalog.get(name) or {}).get("available")
-                ]
-                ui.label(
-                    "自動観測Source: "
-                    + " / ".join(available_sources)
-                    + "　｜　未対応・未接続: "
-                    + " / ".join(unavailable_sources)
-                ).classes("text-xs font-mono text-teal-900")
-                guided_input = ui.textarea(
-                    label="RITSUKOへ依頼",
-                    value="メインPCのGPUの種類は？",
-                ).classes("w-full")
+                available_sources, unavailable_sources = resource_catalog_summary(
+                    source_catalog
+                )
+                with ui.expansion(
+                    "MAGI / Observation / 安全境界",
+                    value=_CORE_UI_OPEN["limits"],
+                    on_value_change=remember_core_expansion("limits"),
+                    icon="info",
+                ).classes(
+                    "w-full border border-teal-200 bg-white"
+                    + _block_visibility_class("core", "limits")
+                ):
+                    ui.label(
+                        "RITSUKOはTask状態とObservationから次の判断を選び、"
+                        "MELCHIOR / CASPER / BALTHASARをProvider非依存slotとして利用します。"
+                    ).classes("text-sm")
+                    ui.label(
+                        "private / sensitive Observationを含む再分析はCloud Context Gateでlocal-only。"
+                        "外部変更操作や未接続Sourceを利用可能とは扱いません。"
+                    ).classes("text-xs text-orange-800")
+                    ui.label(
+                        "利用可能Source: "
+                        + (" / ".join(available_sources) or "なし")
+                        + "　｜　未接続: "
+                        + (" / ".join(unavailable_sources) or "なし")
+                    ).classes("text-xs font-mono text-teal-900")
     
                 try:
                     magi_profiles, configured_specs = _load_magi_configuration(
@@ -191,55 +195,73 @@ def register(portal_context: dict):
                 }
                 guided_member_controls = {}
     
-                if state.get("magi_settings_error"):
-                    ui.label(
-                        "DBのMAGI設定を読み込めません。bootstrap値を表示中: "
-                        + state["magi_settings_error"][:180]
-                    ).classes("text-xs text-red-700")
-    
-                ui.label("MAGI member configuration").classes("font-medium text-teal-900")
-                with ui.element("div").classes("w-full grid grid-cols-3 gap-3 items-stretch"):
-                    for member in MEMBER_NAMES:
-                        spec = spec_by_member.get(member) or {
-                            "profile_id": None, "enabled": False,
-                            "weight": 1.0, "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
-                        }
-                        with ui.card().classes("w-full min-w-0 border border-teal-200 bg-white"):
-                            ui.label(member).classes("font-bold")
-                            enabled_control = ui.switch(
-                                "有効", value=bool(spec.get("enabled"))
-                            )
-                            profile_control = ui.select(
-                                options=profile_options,
-                                value=spec.get("profile_id"),
-                                label=f"{member} / LLM profile",
-                            ).classes("w-full")
-                            weight_control = ui.number(
-                                label="Weight",
-                                value=float(spec.get("weight") or 1.0),
-                                min=0.1, max=100, step=0.1,
-                            ).classes("w-full")
-                            timeout_control = ui.select(
-                                options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
-                                value=int(spec.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
-                                label="Timeout（秒）",
-                            ).classes("w-full")
-                            retry_control = ui.switch(
-                                "Turn内リトライ",
-                                value=bool(
-                                    spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)
-                                ),
-                            )
-                            ui.label(
-                                "Retry時間上限はTimeoutの50%・最大3回"
-                            ).classes("text-xs text-grey-7")
-                            guided_member_controls[member] = {
-                                "enabled": enabled_control,
-                                "profile": profile_control,
-                                "weight": weight_control,
-                                "timeout": timeout_control,
-                                "retry": retry_control,
+                with ui.expansion(
+                    "MAGI設定",
+                    value=_CORE_UI_OPEN["magi_configuration"],
+                    on_value_change=remember_core_expansion("magi_configuration"),
+                    icon="psychology",
+                ).classes(
+                    "w-full border border-teal-200 bg-white"
+                    + _block_visibility_class("core", "magi_configuration")
+                ):
+                    if state.get("magi_settings_error"):
+                        ui.label(
+                            "DBのMAGI設定を読み込めません。bootstrap値を表示中: "
+                            + state["magi_settings_error"][:180]
+                        ).classes("text-xs text-red-700")
+
+                    with ui.element("div").classes("w-full grid grid-cols-3 gap-3 items-start"):
+                        for member in MEMBER_NAMES:
+                            spec = spec_by_member.get(member) or {
+                                "profile_id": None, "enabled": False,
+                                "weight": 1.0, "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+                                "provider": "-", "model": "-",
                             }
+                            member_key = "magi_" + member.lower()
+                            member_summary = (
+                                ("有効" if spec.get("enabled") else "無効")
+                                + " / " + str(spec.get("provider") or "-")
+                                + " / " + str(spec.get("model") or "-")
+                            )
+                            with ui.expansion(
+                                member + " — " + member_summary,
+                                value=_CORE_UI_OPEN[member_key],
+                                on_value_change=remember_core_expansion(member_key),
+                            ).classes("w-full min-w-0 border border-teal-200 bg-white"):
+                                enabled_control = ui.switch(
+                                    "有効", value=bool(spec.get("enabled"))
+                                )
+                                profile_control = ui.select(
+                                    options=profile_options,
+                                    value=spec.get("profile_id"),
+                                    label=f"{member} / LLM profile",
+                                ).classes("w-full")
+                                weight_control = ui.number(
+                                    label="Weight",
+                                    value=float(spec.get("weight") or 1.0),
+                                    min=0.1, max=100, step=0.1,
+                                ).classes("w-full")
+                                timeout_control = ui.select(
+                                    options=list(CORE_ADVISOR_TIMEOUT_OPTIONS),
+                                    value=int(spec.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS),
+                                    label="Timeout（秒）",
+                                ).classes("w-full")
+                                retry_control = ui.switch(
+                                    "Turn内リトライ",
+                                    value=bool(
+                                        spec.get("retry_within_turn", DEFAULT_RETRY_WITHIN_TURN)
+                                    ),
+                                )
+                                ui.label(
+                                    "Retry時間上限はTimeoutの50%・最大3回"
+                                ).classes("text-xs text-grey-7")
+                                guided_member_controls[member] = {
+                                    "enabled": enabled_control,
+                                    "profile": profile_control,
+                                    "weight": weight_control,
+                                    "timeout": timeout_control,
+                                    "retry": retry_control,
+                                }
     
                 def collect_guided_assignments() -> list[dict]:
                     return [
@@ -276,7 +298,7 @@ def register(portal_context: dict):
     
                 with ui.row().classes("w-full gap-2 items-center"):
                     ui.button(
-                        "LLM設定を保存",
+                        "MAGI設定を保存",
                         icon="save",
                         on_click=lambda: save_guided_assignments(notify=True),
                     ).props("outline dense")
@@ -294,16 +316,112 @@ def register(portal_context: dict):
                         max(enabled) if enabled else DEFAULT_TIMEOUT_SECONDS
                     )
     
-                def begin_guided_run(next_turn: int) -> Event:
+                def begin_guided_run(
+                    next_turn: int,
+                    *,
+                    task_id_value: str | None = None,
+                    request_text: str | None = None,
+                ) -> Event:
                     stop_event = Event()
                     state["guided_stop_event"] = stop_event
                     state["guided_stop_requested"] = False
                     state["guided_turn"] = max(1, int(next_turn))
                     state["guided_busy"] = True
+                    state["guided_member_progress"] = {}
+                    if task_id_value is not None:
+                        state["guided_task_id"] = str(task_id_value)
+                    if request_text is not None:
+                        state["guided_request"] = str(request_text)
                     return stop_event
-    
+
                 def note_guided_turn(turn_number: int) -> None:
                     state["guided_turn"] = max(1, int(turn_number))
+
+                def note_member_progress(event: dict) -> None:
+                    normalized = normalize_member_progress_event(event)
+                    if (
+                        normalized["task_id"]
+                        and normalized["task_id"] != str(state.get("guided_task_id") or "")
+                    ):
+                        return
+                    member = normalized["member"]
+                    if member:
+                        state["guided_member_progress"][member] = normalized
+                        guided_result_panel.refresh()
+
+                async def guided_panel_caller(
+                    envelope: dict,
+                    *,
+                    model: str = "",
+                    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+                    member_specs: list[dict] | None = None,
+                ) -> dict:
+                    active_specs = list(member_specs or [])
+                    active_names = {
+                        str(item.get("name") or "")
+                        for item in active_specs
+                        if item.get("enabled")
+                    }
+                    for spec in state.get("magi_member_specs") or []:
+                        member = str(spec.get("name") or "")
+                        if (
+                            spec.get("enabled")
+                            and member
+                            and member not in active_names
+                        ):
+                            note_member_progress({
+                                "task_id": str(envelope.get("task_id") or ""),
+                                "turn": int(envelope.get("turn") or 0),
+                                "member": member,
+                                "provider": str(spec.get("provider") or ""),
+                                "model": str(spec.get("model") or ""),
+                                "state": "withheld",
+                                "validated_summary": "Cloud Context Gate / local-only",
+                            })
+                    return await call_guided_panel_async(
+                        envelope,
+                        model=model,
+                        timeout=timeout,
+                        member_specs=active_specs,
+                        on_member_progress=note_member_progress,
+                    )
+
+                async def guided_dialogue_starter(user_raw: str, **kwargs) -> dict:
+                    return await start_dialogue_async(
+                        user_raw,
+                        caller=guided_panel_caller,
+                        **kwargs,
+                    )
+
+                async def guided_observation_continuation(
+                    session: dict, observations: list[dict], **kwargs
+                ) -> dict:
+                    return await continue_with_verified_observations_async(
+                        session,
+                        observations,
+                        caller=guided_panel_caller,
+                        **kwargs,
+                    )
+
+                async def guided_user_continuation(
+                    session: dict, user_text: str, **kwargs
+                ) -> dict:
+                    return await continue_with_user_clarification_async(
+                        session,
+                        user_text,
+                        caller=guided_panel_caller,
+                        **kwargs,
+                    )
+
+                async def guided_review_continuation(
+                    session: dict, observation: dict, **kwargs
+                ) -> dict:
+                    return await continue_with_proposal_review_async(
+                        session,
+                        observation,
+                        caller=guided_panel_caller,
+                        **kwargs,
+                    )
     
                 def request_guided_stop() -> None:
                     stop_event = state.get("guided_stop_event")
