@@ -1462,6 +1462,8 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(calls, [1])
         self.assertEqual(len(session["turns"]), 1)
+        self.assertTrue(session["turns"][0].get("started_at"))
+        self.assertTrue(session["turns"][0].get("finished_at"))
         self.assertEqual(session["status"], "stopped")
         self.assertEqual(session["next_step"], "user_requested_stop")
 
