@@ -278,6 +278,11 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                        and e._props.get('label') == '旧 Protocol v1 全項目一括分析（比較用）')
             self.assertFalse(old.value)
             self.assertTrue(self.elements('新しい依頼を開始'))
+            request_input = next(
+                e for e in self.client.elements.values()
+                if e._props.get('label') == '新しいTaskとして依頼'
+            )
+            request_input.value = 'メインPCのGPUの種類は？'
             await self.click('新しい依頼を開始')
             self.assertTrue(self.elements('対話結果を一括コピー'))
             self.assertTrue(self.elements('手動Observationで継続（開発用）'))
@@ -477,6 +482,11 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('Post-review MAGI: READY'))
             self.assertTrue(self.elements('Memory Intake: committed / pending'))
 
+            request_input = next(
+                e for e in self.client.elements.values()
+                if e._props.get('label') == '新しいTaskとして依頼'
+            )
+            request_input.value = '新しい依頼'
             await self.click('新しい依頼を開始')
 
             self.assertTrue(self.elements(
