@@ -335,7 +335,11 @@ def register(portal_context: dict):
                     return stop_event
 
                 def note_guided_turn(turn_number: int) -> None:
-                    state["guided_turn"] = max(1, int(turn_number))
+                    next_turn = max(1, int(turn_number))
+                    if next_turn != int(state.get("guided_turn") or 0):
+                        state["guided_member_progress"] = {}
+                    state["guided_turn"] = next_turn
+                    guided_result_panel.refresh()
 
                 def note_member_progress(event: dict) -> None:
                     normalized = normalize_member_progress_event(event)
