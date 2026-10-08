@@ -172,6 +172,7 @@ from interfaces.web.core_ui import (
     CORE_UI_SETTING_GROUPS,
     CORE_UI_VISIBILITY_DEFAULT,
     build_task_presentation,
+    clarification_guidance,
     member_response_summary,
     normalize_member_progress_event,
     resource_catalog_summary,
