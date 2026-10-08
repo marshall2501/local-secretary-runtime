@@ -385,6 +385,28 @@ RITSUKOは最終Action、Task状態、権限・停止・再開・完了を管理
 
 MAGIの出力だけでTask完了を確定しません。
 
+現行のread-only Observation Source経路は次です。
+
+```text
+MAGI information_requests
+ ↓
+ritsuko/application/observation_sources.py
+ ↓ Source / privacy / availability / outbound query gate
+ ├─ pkb      → 既存PKB read
+ ├─ web      → capabilities/web_research
+ └─ finance  → capabilities/finance
+ ↓
+ritsuko/core/observation_loop.py
+ ↓
+Action / Result / Source / Audit
+ ↓
+verified Observation
+ ↓
+MAGI evaluate_observation
+```
+
+PKB / Finance等のprivate・sensitive Observationを含む再分析はlocal-onlyです。Webへは、scope済みPKB結果から公開してよいと決定できる技術識別子だけを `public_query_terms` として渡せます。対象を一意に解決できないPKB要求はglobal Claim検索へ広げません。Files / task_history / external_service / pc_observationは現時点ではこの自動read経路へ未接続です。
+
 ---
 
 ## 5. MAGI System
