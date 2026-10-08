@@ -12,7 +12,7 @@ if (Test-Path -LiteralPath $venv -PathType Leaf) {
     $python = 'py'
     $pythonArgs = @('-3.12')
 }
-& $python @pythonArgs -c 'import nicegui, fastapi; print("Web dependencies present")'
+& $python @pythonArgs -c 'import nicegui, fastapi'
 if ($LASTEXITCODE -ne 0) {
     throw 'NiceGUI is missing. Install requirements-web.txt explicitly in the chosen Python environment; this launcher does not install anything.'
 }
