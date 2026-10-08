@@ -861,6 +861,85 @@ def _execute_cooperative_local_probe(
     return _execute_core_read("pkb_search", text)
 
 
+def _pkb_unresolved_target_execution(
+    *,
+    parent_name: str | None,
+    role_token: str | None,
+    reason: str,
+) -> dict:
+    """Return a bounded verified PKB miss without broadening to unrelated claims."""
+    if parent_name and role_token:
+        answer = (
+            f"PKBでは{parent_name}の{role_token}を一意に確認できませんでした。"
+        )
+    elif role_token:
+        answer = (
+            f"PKBでは{role_token}の対象PCを一意に確認できませんでした。"
+        )
+    else:
+        answer = "PKBでは要求対象を一意に確認できませんでした。"
+    return {
+        "capability": "pkb_search",
+        "result": {
+            "status": "ok",
+            "result_kind": "pkb_target_unresolved",
+            "total": 0,
+            "items": [],
+            "reason": reason,
+            "parent_name": parent_name,
+            "role_token": role_token,
+        },
+        "answer": answer,
+        "total": 0,
+        "tool": "pkb",
+        "operation": "target_resolution",
+        "source_slug": "pkb-target-unresolved",
+        "citation": "RITSUKO bounded PKB target resolution",
+        "verified_by": "deterministic_pkb_query",
+        "status": "ok",
+        "confidentiality": "private",
+        "source_metadata": {
+            "target_resolution": reason,
+            "parent_entity_name": parent_name,
+            "role_token": role_token,
+        },
+    }
+
+
+def _public_query_terms_from_pkb_result(result: dict, combined_request: str) -> list[str]:
+    """Expose only allowlisted public technical identifiers from one scoped PKB result."""
+    rows = [
+        item for item in (result.get("items") or [])
+        if isinstance(item, dict)
+    ]
+    entity_names = {
+        str(item.get("entity_name") or "").strip()
+        for item in rows
+        if str(item.get("entity_name") or "").strip()
+    }
+    # Never derive outbound terms from a broad/global PKB result.
+    if len(entity_names) != 1:
+        return []
+    entity_name = next(iter(entity_names))
+    if entity_name not in combined_request:
+        return []
+
+    terms: list[str] = []
+    for item in rows[:12]:
+        predicate = str(item.get("predicate") or "").strip()
+        value = item.get("value")
+        if predicate in {"manufacturer", "model", "current_os_release"}:
+            text = str(value or "").strip()
+            if text:
+                terms.append(text)
+        elif predicate == "os_release_changed" and isinstance(value, dict):
+            for key in ("product", "to_release"):
+                text = str(value.get(key) or "").strip()
+                if text:
+                    terms.append(text)
+    return list(dict.fromkeys(terms))[:20]
+
+
 def _execute_magi_pkb_request(
     user_raw: str,
     pending_request: dict,
@@ -883,79 +962,106 @@ def _execute_magi_pkb_request(
     ]
     roles = [token for token in COMPONENT_ROLE_TOKENS if token in combined]
 
-    if len(parents) == 1 and len(roles) == 1:
+    if roles:
+        if len(roles) != 1:
+            return _pkb_unresolved_target_execution(
+                parent_name=(parents[0].get("name") if len(parents) == 1 else None),
+                role_token=None,
+                reason="component_role_not_unique",
+            )
+        role = roles[0]
+        if len(parents) != 1:
+            return _pkb_unresolved_target_execution(
+                parent_name=None,
+                role_token=role,
+                reason="parent_computer_not_unique_or_missing",
+            )
+
         parent = parents[0]
         component = _pkb_repository.resolve_component_reference(
-            parent["name"], roles[0]
+            parent["name"], role
         )
-        if component is not None:
-            detail = _json_safe(
-                _pkb_repository.load_entity_detail(component["id"]) or {}
+        if component is None:
+            return _pkb_unresolved_target_execution(
+                parent_name=parent["name"],
+                role_token=role,
+                reason="component_relation_not_unique_or_missing",
             )
-            current = [
-                item for item in (detail.get("current") or [])
-                if item.get("valid_to") is None
-            ][:20]
-            values = {
-                str(item.get("predicate")): item.get("value")
-                for item in current
-                if item.get("predicate")
-            }
-            manufacturer = str(values.get("manufacturer") or "").strip()
-            model = str(values.get("model") or "").strip()
-            driver = str(values.get("current_driver") or "").strip()
-            identity = model or component.get("name") or roles[0]
-            if manufacturer and manufacturer.lower() not in identity.lower():
-                identity = manufacturer + " " + identity
-            answer = (
-                f"PKBの記録では、{parent['name']}の{roles[0]}は {identity} です。"
-                if model
-                else (
-                    f"PKBには{parent['name']}の{roles[0]} Entity "
-                    f"{component.get('name')}がありますが、モデル属性は確認できませんでした。"
-                )
-            )
-            if driver:
-                answer += f" 現在ドライバーは {driver} です。"
-            result = {
-                "status": "ok",
-                "result_kind": "entity_detail",
-                "total": len(current),
-                "entity": detail.get("entity"),
-                "parent": {
-                    "id": parent.get("id"),
-                    "name": parent.get("name"),
-                },
-                "component_role": component.get("relation_role"),
-                "current": current,
-                "relations": (detail.get("relations") or [])[:12],
-                "events": (detail.get("events") or [])[:12],
-            }
-            return {
-                "capability": "pkb_search",
-                "result": result,
-                "answer": answer,
-                "total": len(current),
-                "tool": "pkb",
-                "operation": "entity_detail",
-                "source_slug": "pkb-entity-detail",
-                "citation": "RITSUKO bounded PKB Entity detail",
-                "verified_by": "deterministic_pkb_query",
-                "source_metadata": {
-                    "parent_entity_id": str(parent.get("id") or ""),
-                    "parent_entity_name": parent.get("name"),
-                    "component_entity_id": component.get("id"),
-                    "component_entity_name": component.get("name"),
-                    "relation_role": component.get("relation_role"),
-                    "public_query_terms": [
-                        value
-                        for value in (manufacturer, model)
-                        if str(value or "").strip()
-                    ],
-                },
-            }
 
-    return _execute_core_read("pkb_search", requested or user_raw)
+        detail = _json_safe(
+            _pkb_repository.load_entity_detail(component["id"]) or {}
+        )
+        current = [
+            item for item in (detail.get("current") or [])
+            if item.get("valid_to") is None
+        ][:20]
+        values = {
+            str(item.get("predicate")): item.get("value")
+            for item in current
+            if item.get("predicate")
+        }
+        manufacturer = str(values.get("manufacturer") or "").strip()
+        model = str(values.get("model") or "").strip()
+        driver = str(values.get("current_driver") or "").strip()
+        identity = model or component.get("name") or role
+        if manufacturer and manufacturer.lower() not in identity.lower():
+            identity = manufacturer + " " + identity
+        answer = (
+            f"PKBの記録では、{parent['name']}の{role}は {identity} です。"
+            if model
+            else (
+                f"PKBには{parent['name']}の{role} Entity "
+                f"{component.get('name')}がありますが、モデル属性は確認できませんでした。"
+            )
+        )
+        if driver:
+            answer += f" 現在ドライバーは {driver} です。"
+        result = {
+            "status": "ok",
+            "result_kind": "entity_detail",
+            "total": len(current),
+            "entity": detail.get("entity"),
+            "parent": {
+                "id": parent.get("id"),
+                "name": parent.get("name"),
+            },
+            "component_role": component.get("relation_role"),
+            "current": current,
+            "relations": (detail.get("relations") or [])[:12],
+            "events": (detail.get("events") or [])[:12],
+        }
+        return {
+            "capability": "pkb_search",
+            "result": result,
+            "answer": answer,
+            "total": len(current),
+            "tool": "pkb",
+            "operation": "entity_detail",
+            "source_slug": "pkb-entity-detail",
+            "citation": "RITSUKO bounded PKB Entity detail",
+            "verified_by": "deterministic_pkb_query",
+            "source_metadata": {
+                "parent_entity_id": str(parent.get("id") or ""),
+                "parent_entity_name": parent.get("name"),
+                "component_entity_id": component.get("id"),
+                "component_entity_name": component.get("name"),
+                "relation_role": component.get("relation_role"),
+                "public_query_terms": [
+                    value
+                    for value in (manufacturer, model)
+                    if str(value or "").strip()
+                ],
+            },
+        }
+
+    execution = _execute_core_read("pkb_search", requested or user_raw)
+    result = execution.get("result") or {}
+    public_terms = _public_query_terms_from_pkb_result(result, combined)
+    if public_terms:
+        metadata = dict(execution.get("source_metadata") or {})
+        metadata["public_query_terms"] = public_terms
+        execution["source_metadata"] = metadata
+    return execution
 
 
 def _execute_magi_source_request(
