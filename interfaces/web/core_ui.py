@@ -270,7 +270,11 @@ def build_task_presentation(
     saved_task = saved_task if isinstance(saved_task, dict) else {}
 
     status = str(
-        session.get("status")
+        (
+            saved_task.get("status")
+            if read_only and saved_task.get("status")
+            else session.get("status")
+        )
         or saved_task.get("status")
         or ("running" if busy else "")
     )
