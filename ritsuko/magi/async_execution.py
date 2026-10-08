@@ -474,12 +474,23 @@ async def _call_panel_member_async(
     }
 
 
+def _emit_member_progress(callback, event: dict) -> None:
+    if callback is None:
+        return
+    try:
+        callback(deepcopy(event))
+    except Exception:
+        # Progress is presentation-only and must never fail MAGI execution.
+        return
+
+
 async def call_guided_panel_async(
     envelope: dict,
     *,
     model: str = "",
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     member_specs: list[dict] | None = None,
+    on_member_progress=None,
 ) -> dict:
     """Run enabled provider-independent MAGI members concurrently and cancellably."""
     specs = [
@@ -487,8 +498,28 @@ async def call_guided_panel_async(
         if spec["enabled"]
     ]
     member_results: list[dict | None] = [None] * len(specs)
+    task_id = str(envelope.get("task_id") or "")
+    turn = int(envelope.get("turn") or 0)
+
+    for spec in specs:
+        _emit_member_progress(on_member_progress, {
+            "task_id": task_id,
+            "turn": turn,
+            "member": spec["name"],
+            "provider": spec["provider"],
+            "model": spec["model"],
+            "state": "queued",
+        })
 
     async def run_one(index: int, spec: dict) -> None:
+        _emit_member_progress(on_member_progress, {
+            "task_id": task_id,
+            "turn": turn,
+            "member": spec["name"],
+            "provider": spec["provider"],
+            "model": spec["model"],
+            "state": "running",
+        })
         try:
             member_results[index] = await _call_panel_member_async(
                 spec, envelope, timeout=timeout
@@ -511,6 +542,28 @@ async def call_guided_panel_async(
                 "errors": [type(exc).__name__],
                 "diagnostic": {"error": type(exc).__name__},
             }
+
+        item = member_results[index] or {}
+        result_state = str(item.get("status") or "unavailable")
+        _emit_member_progress(on_member_progress, {
+            "task_id": task_id,
+            "turn": turn,
+            "member": spec["name"],
+            "provider": spec["provider"],
+            "model": spec["model"],
+            "state": "completed" if result_state == "ok" else result_state,
+            "elapsed_seconds": item.get("elapsed_seconds"),
+            "validated_summary": (
+                (item.get("response") or {}).get("reason")
+                or (item.get("response") or {}).get("understood_request")
+                or (item.get("response") or {}).get("answer_candidate")
+                or ""
+            ) if isinstance(item.get("response"), dict) else "",
+            "error_kind": (
+                str((item.get("errors") or [""])[0])
+                if item.get("errors") else ""
+            ),
+        })
 
     async with anyio.create_task_group() as tg:
         for index, spec in enumerate(specs):
