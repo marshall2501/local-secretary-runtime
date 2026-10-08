@@ -140,8 +140,8 @@ def register(portal_context: dict):
                     ).classes("w-full")
 
                 source_catalog = default_resource_catalog()
-                available_sources, unavailable_sources = resource_catalog_summary(
-                    source_catalog
+                available_sources, user_routes, unavailable_sources = (
+                    resource_catalog_summary(source_catalog)
                 )
                 with ui.expansion(
                     "MAGI / Observation / 安全境界",
@@ -161,8 +161,10 @@ def register(portal_context: dict):
                         "外部変更操作や未接続Sourceを利用可能とは扱いません。"
                     ).classes("text-xs text-orange-800")
                     ui.label(
-                        "利用可能Source: "
+                        "利用可能read Source: "
                         + (" / ".join(available_sources) or "なし")
+                        + "　｜　本人確認経路: "
+                        + (" / ".join(user_routes) or "なし")
                         + "　｜　未接続: "
                         + (" / ".join(unavailable_sources) or "なし")
                     ).classes("text-xs font-mono text-teal-900")
