@@ -262,6 +262,9 @@ def register(portal_context: dict):
                                     "timeout": timeout_control,
                                     "retry": retry_control,
                                 }
+                    magi_settings_actions_slot = ui.row().classes(
+                        "w-full gap-2 items-center"
+                    )
     
                 def collect_guided_assignments() -> list[dict]:
                     return [
