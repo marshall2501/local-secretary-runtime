@@ -261,6 +261,50 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(summary[1], ["user"])
         self.assertEqual(summary[2], ["files"])
 
+    def test_core_updates_are_chronological_and_show_turn_timing(self):
+        presentation = __import__(
+            "interfaces.web.core_ui", fromlist=["build_task_presentation"]
+        ).build_task_presentation({
+            "status": "candidate_ready",
+            "user_raw": "test",
+            "turns": [
+                {
+                    "question_purpose": "classify",
+                    "status": "ok",
+                    "started_at": "2026-10-08T05:00:01+00:00",
+                    "finished_at": "2026-10-08T05:00:03+00:00",
+                    "request_envelope": {"turn": 1},
+                },
+                {
+                    "question_purpose": "evaluate_observation",
+                    "status": "ok",
+                    "started_at": "2026-10-08T05:00:04+00:00",
+                    "finished_at": "2026-10-08T05:00:06+00:00",
+                    "request_envelope": {"turn": 2},
+                },
+            ],
+            "observations": [],
+        })
+        self.assertTrue(presentation["recent_updates"][0].startswith("Turn 1:"))
+        self.assertTrue(presentation["recent_updates"][1].startswith("Turn 2:"))
+        self.assertIn("開始 ", presentation["recent_updates"][0])
+        self.assertIn(" / 終了 ", presentation["recent_updates"][0])
+
+    def test_core_updates_do_not_invent_missing_legacy_turn_timing(self):
+        presentation = __import__(
+            "interfaces.web.core_ui", fromlist=["build_task_presentation"]
+        ).build_task_presentation({
+            "status": "completed",
+            "user_raw": "legacy",
+            "turns": [{
+                "question_purpose": "classify",
+                "status": "ok",
+                "request_envelope": {"turn": 1},
+            }],
+            "observations": [],
+        })
+        self.assertIn("時刻記録なし", presentation["recent_updates"][0])
+
     def test_core_task_presentation_surfaces_user_action_without_turn_json(self):
         presentation = __import__(
             "interfaces.web.core_ui", fromlist=["build_task_presentation"]
