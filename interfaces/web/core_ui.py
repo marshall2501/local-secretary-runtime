@@ -139,6 +139,62 @@ def member_response_summary(response: object) -> str:
     return state
 
 
+def clarification_guidance(session: dict | None) -> dict:
+    session = session if isinstance(session, dict) else {}
+    disagreement = session.get("magi_disagreement")
+    turns = [
+        item for item in (session.get("turns") or [])
+        if isinstance(item, dict)
+    ]
+    latest_turn = turns[-1] if turns else {}
+    is_disagreement = (
+        isinstance(disagreement, dict)
+        and str(disagreement.get("status") or "") == "disagreement"
+    ) or str(latest_turn.get("status") or "") == "disagreement"
+
+    if not is_disagreement:
+        return {
+            "input_hint": "",
+            "member_interpretations": [],
+        }
+
+    stage = str(latest_turn.get("stage") or "")
+    interpretations = []
+    for item in latest_turn.get("member_results") or []:
+        if not isinstance(item, dict) or item.get("status") != "ok":
+            continue
+        response = item.get("response")
+        if not isinstance(response, dict):
+            continue
+        member = str(item.get("name") or "MAGI")
+        if stage == "classify":
+            kind = str(response.get("category") or "-")
+        else:
+            kind = str(response.get("state") or "-")
+        understood = short_text(response.get("understood_request"), 180)
+        interpretations.append({
+            "member": member,
+            "kind": kind,
+            "understood_request": understood,
+        })
+
+    if stage == "classify":
+        hint = (
+            "「何を対象に」「最終的に何を知りたい・比較したい・してほしい」を"
+            "1文で具体化してください。例: 「対象の現在状態を確認し、最新公開情報と比較してほしい」"
+        )
+    else:
+        hint = (
+            "どの解釈・進め方を希望するか、または不足している事実を"
+            "1文で具体的に入力してください。"
+        )
+
+    return {
+        "input_hint": hint,
+        "member_interpretations": interpretations,
+    }
+
+
 def normalize_member_progress_event(event: dict) -> dict:
     state = str(event.get("state") or "queued")
     return {
