@@ -277,8 +277,8 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                        if isinstance(e, ui.expansion)
                        and e._props.get('label') == '旧 Protocol v1 全項目一括分析（比較用）')
             self.assertFalse(old.value)
-            self.assertTrue(self.elements('RITSUKOへ依頼'))
-            await self.click('RITSUKOへ依頼')
+            self.assertTrue(self.elements('新しい依頼を開始'))
+            await self.click('新しい依頼を開始')
             self.assertTrue(self.elements('対話結果を一括コピー'))
             self.assertTrue(self.elements('手動Observationで継続（開発用）'))
             self.assertTrue(self.elements('未解決の情報要求（利用不可Sourceまたは追加情報が必要）'))
@@ -346,16 +346,18 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             )
             clarification = next(
                 e for e in self.client.elements.values()
-                if e._props.get('label') == '追加説明・選択'
+                if e._props.get('label') == 'このTaskへ回答'
             )
             self.assertIsNotNone(clarification)
             self.assertEqual(str(clarification._props.get('rows')), '2')
             self.assertTrue(self.elements('RITSUKOからの確認'))
-            self.assertTrue(self.elements('追加説明を渡して対話継続'))
+            self.assertTrue(self.elements('このTaskへ回答して続行'))
+            self.assertTrue(self.elements('現在のTask'))
+            self.assertTrue(self.elements('次の操作'))
             turn = next(
                 e for e in self.client.elements.values()
                 if isinstance(e, ui.expansion)
-                and str(e._props.get('label') or '').startswith('Turn 4:')
+                and str(e._props.get('label') or '').startswith('Turn 4 —')
             )
             self.assertLess(clarification.id, turn.id)
 
@@ -475,7 +477,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('Post-review MAGI: READY'))
             self.assertTrue(self.elements('Memory Intake: committed / pending'))
 
-            await self.click('RITSUKOへ依頼')
+            await self.click('新しい依頼を開始')
 
             self.assertTrue(self.elements(
                 'Task: ' + new_session['task_id']
@@ -921,7 +923,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 for e in self.client.elements.values()
             ))
             self.assertFalse(self.elements('手動Observationで継続（開発用）'))
-            self.assertFalse(self.elements('追加説明を渡して対話継続'))
+            self.assertFalse(self.elements('このTaskへ回答して続行'))
             self.assertFalse(self.elements('回答だけで完了'))
             self.assertFalse(self.elements('記憶にも反映して完了'))
 
@@ -961,10 +963,9 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                                 if e._props.get('label') == 'Legacy CASPER Advisor Model')
             self.assertTrue(within_legacy(legacy_model))
             self.assertTrue(within_legacy(self.elements('OODA')[0]))
-            limits = self.elements('この縦断でまだ行わないこと')[0]
-            screen_log = self.elements('Core画面 全体稼働ログ')[0]
-            self.assertFalse(within_legacy(limits))
-            self.assertFalse(within_legacy(screen_log))
+            safety_setting = self.elements('動作・安全境界')[0]
+            self.assertFalse(within_legacy(safety_setting))
+            self.assertFalse(self.elements('Core画面 全体稼働ログ'))
             old_flow = next(e for e in self.client.elements.values()
                             if isinstance(e, ui.expansion)
                             and e._props.get('label') == '旧MAGI v0 処理フロー（比較・確認用）')
@@ -972,11 +973,10 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(old_flow.value)
             elements = list(self.client.elements.values())
             self.assertGreater(elements.index(legacy), elements.index(protocol_button))
-            self.assertLess(elements.index(limits), elements.index(legacy))
-            self.assertLess(elements.index(screen_log), elements.index(legacy))
+            self.assertLess(elements.index(safety_setting), elements.index(legacy))
             self.assertTrue(self.elements('既存Task'))
             await self.click('開く', 5)
-            trace = self.elements('Task検証・稼働ログ')[0]
+            trace = self.elements('Task詳細・実行記録')[0]
             self.assertFalse(within_legacy(trace))
 
     async def test_protocol_invalid_json_shows_diagnostics_and_copy_controls(self):
@@ -1094,7 +1094,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                     element = element.parent_slot.parent
                 return element
             counts = self.elements('RITSUKO — Task表示件数')[0]
-            limits = self.elements('この縦断でまだ行わないこと')[0]
+            limits = self.elements('動作・安全境界')[0]
             retry_codes = next(
                 e for e in self.client.elements.values()
                 if e._props.get('label') == 'Retry HTTP codes'
