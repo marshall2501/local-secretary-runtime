@@ -588,7 +588,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             turn = next(
                 e for e in self.client.elements.values()
                 if isinstance(e, ui.expansion)
-                and str(e._props.get('label') or '').startswith('Turn 5:')
+                and str(e._props.get('label') or '').startswith('Turn 5 —')
             )
             self.assertLess(review_heading.id, turn.id)
             self.assertFalse(
