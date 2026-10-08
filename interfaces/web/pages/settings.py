@@ -27,11 +27,7 @@ def register(portal_context: dict):
             "imports": "Import履歴 / Source",
             "csv": "MoneyForward CSV 取込",
         }
-        core_labels = {
-            "trace": "Task単位の検証・稼働ログ",
-            "screen_log": "画面全体の最近のCore稼働ログ",
-            "limits": "この縦断でまだ行わないこと",
-        }
+        core_labels = dict(CORE_UI_LABELS)
         er_provider_labels = {
             "native_mermaid": "Native + Mermaid",
             "schemacrawler": "SchemaCrawler",
@@ -792,25 +788,48 @@ def register(portal_context: dict):
                         ).classes("min-w-64")
     
                 with ui.expansion(
-                    "RITSUKO — 検証・補足の表示",
+                    "RITSUKO — 通常表示",
                     value=False,
-                    icon="fact_check",
-                ).classes("w-full border-2 border-slate-200 bg-slate-50"):
+                    icon="smart_toy",
+                ).classes("w-full border-2 border-teal-200 bg-teal-50"):
                     ui.label(
-                        "主操作の依頼ブロックは常時表示。検証・補足ブロックだけ非表示にできます。"
+                        "現在Task、最新結果、次の操作、本人回答・Review、実行中MAGI状態は常時表示で非表示にできません。"
                     ).classes("text-sm text-grey-7")
-                    for key, label in core_labels.items():
+                    for key in CORE_UI_SETTING_GROUPS["normal"]:
+                        label = core_labels[key]
                         with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
                             ui.label(label).classes("grow")
-                            core_visible_controls[key] = ui.switch(
-                                "表示",
-                                value=_UI_PREFERENCES["visibility"]["core"][key],
-                            )
-                            if key in CORE_UI_DEFAULT_OPEN:
-                                core_open_controls[key] = ui.switch(
-                                    "初期展開",
-                                    value=_UI_PREFERENCES["core"][key],
+                            if key in _UI_PREFERENCES["visibility"]["core"]:
+                                core_visible_controls[key] = ui.switch(
+                                    "表示",
+                                    value=_UI_PREFERENCES["visibility"]["core"][key],
                                 )
+                            core_open_controls[key] = ui.switch(
+                                "初期展開",
+                                value=_UI_PREFERENCES["core"][key],
+                            )
+
+                with ui.expansion(
+                    "RITSUKO — 検証表示",
+                    value=False,
+                    icon="fact_check",
+                ).classes("w-full border-2 border-purple-200 bg-purple-50"):
+                    ui.label(
+                        "通常運用では最新情報を上に表示し、ここで有効にする検証情報では実行経緯を古い順に追えます。"
+                    ).classes("text-sm text-grey-7")
+                    for key in CORE_UI_SETTING_GROUPS["verification"]:
+                        label = core_labels[key]
+                        with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
+                            ui.label(label).classes("grow")
+                            if key in _UI_PREFERENCES["visibility"]["core"]:
+                                core_visible_controls[key] = ui.switch(
+                                    "表示",
+                                    value=_UI_PREFERENCES["visibility"]["core"][key],
+                                )
+                            core_open_controls[key] = ui.switch(
+                                "初期展開",
+                                value=_UI_PREFERENCES["core"][key],
+                            )
     
                 er_provider_controls = {}
                 with ui.expansion(
