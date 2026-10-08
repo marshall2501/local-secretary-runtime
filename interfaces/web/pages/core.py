@@ -867,6 +867,25 @@ def register(portal_context: dict):
                             )
                             if question:
                                 ui.label("質問: " + question).classes("text-sm")
+                            guidance = clarification_guidance(session)
+                            if guidance.get("input_hint"):
+                                ui.label(
+                                    "入力の目安: " + str(guidance["input_hint"])
+                                ).classes("text-sm font-medium text-orange-900")
+                            interpretations = guidance.get("member_interpretations") or []
+                            if interpretations:
+                                with ui.expansion(
+                                    "MAGIの解釈差を見る",
+                                    value=False,
+                                ).classes("w-full border border-orange-200 bg-white"):
+                                    for item in interpretations:
+                                        ui.label(
+                                            str(item.get("member") or "MAGI")
+                                            + ": "
+                                            + str(item.get("kind") or "-")
+                                            + " — "
+                                            + str(item.get("understood_request") or "-")
+                                        ).classes("text-xs")
                             clarification_input = ui.textarea(
                                 label="このTaskへ回答",
                                 placeholder="回答や追加説明を自然な言葉で入力",
