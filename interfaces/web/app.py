@@ -79,7 +79,12 @@ from ritsuko.magi.client import (
 from ritsuko.magi.dialogue import MAX_TURNS, export_dialogue
 from ritsuko.core.magi_bridge import reviewable_user_knowledge_proposal
 from ritsuko.magi.async_execution import (
+    call_guided_panel_async,
     continue_with_observation_async,
+    continue_with_proposal_review_async,
+    continue_with_user_clarification_async,
+    continue_with_verified_observations_async,
+    start_dialogue_async,
 )
 from ritsuko.core.observation_loop import (
     review_proposal as review_magi_proposal,
@@ -160,6 +165,17 @@ from capabilities.web_research.application import (
     web_core_answer,
 )
 from pkb.pending_service import acceptance_eligible
+from interfaces.web.core_ui import (
+    CORE_UI_DEFAULT_OPEN,
+    CORE_UI_LABELS,
+    CORE_UI_PREFERENCE_SPEC,
+    CORE_UI_SETTING_GROUPS,
+    CORE_UI_VISIBILITY_DEFAULT,
+    build_task_presentation,
+    member_response_summary,
+    normalize_member_progress_event,
+    resource_catalog_summary,
+)
 from pkb.application.daily import (
     COMPONENT_STATE_QUERY_PATTERN,
     correct_text as pkb_correct_text,
@@ -267,10 +283,6 @@ FINANCE_UI_DEFAULT_OPEN = {
     "imports": False,
     "csv": False,
 }
-CORE_UI_DEFAULT_OPEN = {
-    "trace": True,
-    "screen_log": True,
-}
 FINANCE_PAGE_SIZE_DEFAULT = 25
 FINANCE_PAGE_SIZE_OPTIONS = (25, 50, 100)
 CORE_TASK_PAGE_SIZE_OPTIONS = tuple(range(1, 11))
@@ -292,11 +304,7 @@ UI_VISIBILITY_DEFAULT = {
     "pkb": {key: True for key in PKB_UI_DEFAULT_OPEN},
     "entity": dict(ENTITY_TAB_DEFAULT_VISIBLE),
     "finance": {key: True for key in FINANCE_UI_DEFAULT_OPEN},
-    "core": {
-        "trace": True,
-        "screen_log": True,
-        "limits": True,
-    },
+    "core": dict(CORE_UI_VISIBILITY_DEFAULT),
 }
 
 
