@@ -227,7 +227,7 @@ class DailyPKBParserTests(unittest.TestCase):
         self.assertEqual(prefs["finance"]["recent_limit"], 100)
 
         self.assertFalse(prefs["core"]["trace"])
-        self.assertTrue(prefs["core"]["screen_log"])
+        self.assertNotIn("screen_log", prefs["core"])
         self.assertEqual(
             prefs["core_advisor_model"],
             "gemma4:12b",
@@ -262,7 +262,6 @@ class DailyPKBParserTests(unittest.TestCase):
             prefs["finance"]["recent_limit"] = 50
 
             prefs["core"]["trace"] = False
-            prefs["core"]["screen_log"] = False
             prefs["core_advisor_model"] = "gpt-oss:20b"
             prefs["core_advisor_timeout"] = 120
 
@@ -296,9 +295,6 @@ class DailyPKBParserTests(unittest.TestCase):
 
             self.assertFalse(
                 loaded["core"]["trace"]
-            )
-            self.assertFalse(
-                loaded["core"]["screen_log"]
             )
             self.assertEqual(
                 loaded["core_advisor_model"],
