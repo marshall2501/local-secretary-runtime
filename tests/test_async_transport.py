@@ -417,6 +417,121 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "weighted_panel_async",
         )
 
+    async def test_member_progress_reports_independent_completion(self):
+        events = []
+
+        async def fake_member(spec, envelope, *, timeout):
+            if spec["name"] == "MELCHIOR":
+                await anyio.sleep(0.01)
+            else:
+                await anyio.sleep(0.04)
+            return {
+                "name": spec["name"],
+                "profile_id": spec.get("profile_id"),
+                "provider": spec["provider"],
+                "model": spec["model"],
+                "weight": spec["weight"],
+                "timeout_seconds": spec["timeout_seconds"],
+                "status": "ok",
+                "response": {
+                    "category": "INFORMATION",
+                    "understood_request": spec["name"] + " done",
+                    "reason": "ok",
+                    "confidence": "high",
+                    "multiple_requests": False,
+                },
+                "errors": [],
+                "diagnostic": {},
+                "elapsed_seconds": 0.01,
+            }
+
+        specs = [
+            {
+                "name": "MELCHIOR",
+                "profile_id": "p1",
+                "provider": "ollama",
+                "model": "local-a",
+                "weight": 1.0,
+                "timeout_seconds": 1,
+                "enabled": True,
+            },
+            {
+                "name": "CASPER",
+                "profile_id": "p2",
+                "provider": "openai",
+                "model": "cloud-b",
+                "weight": 1.0,
+                "timeout_seconds": 1,
+                "enabled": True,
+            },
+        ]
+
+        with patch(
+            "ritsuko.magi.async_execution._call_panel_member_async",
+            side_effect=fake_member,
+        ):
+            await call_guided_panel_async(
+                {"stage": "classify", "task_id": "task-progress", "turn": 2},
+                member_specs=specs,
+                timeout=1,
+                on_member_progress=lambda event: events.append(event),
+            )
+
+        finished = [
+            event for event in events
+            if event["state"] == "completed"
+        ]
+        self.assertEqual([event["member"] for event in finished], ["MELCHIOR", "CASPER"])
+        self.assertTrue(all(event["task_id"] == "task-progress" for event in events))
+        self.assertTrue(all(event["turn"] == 2 for event in events))
+
+    async def test_member_progress_callback_failure_does_not_fail_panel(self):
+        async def fake_member(spec, envelope, *, timeout):
+            return {
+                "name": spec["name"],
+                "profile_id": spec.get("profile_id"),
+                "provider": spec["provider"],
+                "model": spec["model"],
+                "weight": spec["weight"],
+                "timeout_seconds": spec["timeout_seconds"],
+                "status": "ok",
+                "response": {
+                    "category": "INFORMATION",
+                    "understood_request": "done",
+                    "reason": "ok",
+                    "confidence": "high",
+                    "multiple_requests": False,
+                },
+                "errors": [],
+                "diagnostic": {},
+            }
+
+        specs = [{
+            "name": "MELCHIOR",
+            "profile_id": "p1",
+            "provider": "ollama",
+            "model": "local-a",
+            "weight": 1.0,
+            "timeout_seconds": 1,
+            "enabled": True,
+        }]
+
+        def broken_progress(_event):
+            raise RuntimeError("ui gone")
+
+        with patch(
+            "ritsuko.magi.async_execution._call_panel_member_async",
+            side_effect=fake_member,
+        ):
+            result = await call_guided_panel_async(
+                {"stage": "classify", "task_id": "task-progress", "turn": 1},
+                member_specs=specs,
+                timeout=1,
+                on_member_progress=broken_progress,
+            )
+
+        self.assertEqual(result["status"], "ok")
+
     async def test_one_member_timeout_does_not_discard_other_valid_member(self):
         async def fake_member(spec, envelope, *, timeout):
             if spec["name"] == "CASPER":
