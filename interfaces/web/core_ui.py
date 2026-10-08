@@ -154,15 +154,26 @@ def normalize_member_progress_event(event: dict) -> dict:
     }
 
 
-def resource_catalog_summary(catalog: dict) -> tuple[list[str], list[str]]:
-    available = []
+def resource_catalog_summary(
+    catalog: dict,
+) -> tuple[list[str], list[str], list[str]]:
+    read_sources = []
+    user_routes = []
     unavailable = []
     for name, spec in (catalog or {}).items():
         if not isinstance(spec, dict):
             continue
-        target = available if spec.get("available") else unavailable
-        target.append(str(name))
-    return available, unavailable
+        source_name = str(name)
+        access = str(spec.get("access") or "")
+        if access == "ask_user":
+            if spec.get("available"):
+                user_routes.append(source_name)
+            continue
+        if spec.get("available"):
+            read_sources.append(source_name)
+        else:
+            unavailable.append(source_name)
+    return read_sources, user_routes, unavailable
 
 
 def _latest_observation_summary(session: dict) -> str:
