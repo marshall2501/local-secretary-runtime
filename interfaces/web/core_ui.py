@@ -7,6 +7,7 @@ and preference metadata.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 
 
 CORE_UI_PREFERENCE_SPEC = {
@@ -241,10 +242,23 @@ def _next_action(status: str, busy: bool, read_only: bool) -> tuple[str, str | N
     return "RITSUKOの状態を確認しています。", None
 
 
+def _local_clock(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone()
+        return parsed.strftime("%H:%M:%S")
+    except ValueError:
+        return ""
+
+
 def _recent_updates(session: dict, limit: int = 6) -> list[str]:
     updates: list[str] = []
 
-    for turn in reversed(session.get("turns") or []):
+    for turn in session.get("turns") or []:
         if not isinstance(turn, dict):
             continue
         envelope = turn.get("request_envelope") or {}
@@ -256,9 +270,19 @@ def _recent_updates(session: dict, limit: int = 6) -> list[str]:
             or "analysis"
         )
         status = turn.get("status") or "-"
-        updates.append(f"Turn {number}: {purpose} / {status}")
+        started = _local_clock(turn.get("started_at"))
+        finished = _local_clock(turn.get("finished_at"))
+        if started or finished:
+            timing = (
+                f"開始 {started or '-'} / 終了 {finished or '-'}"
+            )
+        else:
+            timing = "時刻記録なし"
+        updates.append(
+            f"Turn {number}: {timing} / {purpose} / {status}"
+        )
 
-    for item in reversed(session.get("observations") or []):
+    for item in session.get("observations") or []:
         if not isinstance(item, dict):
             continue
         source = str(item.get("source") or "Observation")
