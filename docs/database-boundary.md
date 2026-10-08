@@ -8,14 +8,14 @@ Normal structured runtime data uses one physical PostgreSQL database, `secretary
 
 Logical ownership remains useful for design and code responsibility:
 
-| No.  Owner | Tables / views |
-| ---  --- | --- |
-| 1  PKB | `entities`, `sources`, `claims`, `current_claims`, `pending_claims`, `issues`, `hypotheses`, `decisions`, `entity_relations`, `pkb_*` receipts/intake |
-| 2  RITSUKO | `tasks`, `task_steps`, task dependency tables, `approvals`, `actions`, `results`, `audit_events` |
-| 3  Finance | `finance_*` |
-| 4  MAGI runtime settings | `llm_profiles`, `magi_member_assignments` |
-| 5  Service Connections | `service_connections` |
-| 6  Service Billing | `service_billing_profiles` |
+| No. | Owner | Tables / views |
+| --- | --- | --- |
+| 1 | PKB | `entities`, `sources`, `claims`, `current_claims`, `pending_claims`, `issues`, `hypotheses`, `decisions`, `entity_relations`, `pkb_*` receipts/intake |
+| 2 | RITSUKO | `tasks`, `task_steps`, task dependency tables, `approvals`, `actions`, `results`, `audit_events` |
+| 3 | Finance | `finance_*` |
+| 4 | MAGI runtime settings | `llm_profiles`, `magi_member_assignments` |
+| 5 | Service Connections | `service_connections` |
+| 6 | Service Billing | `service_billing_profiles` |
 
 Intentional cross-owner references include RITSUKO Task/Result records pointing at PKB Entity/Source data and MAGI/Billing settings pointing at Service Connections. These references preserve consistency; they are not a reason to duplicate persistence or access code.
 

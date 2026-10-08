@@ -19,36 +19,36 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 
 ## 1. 利用者機能と主な実装
 
-| No.  利用者から見える処理 | Interface / Entry | 主なApplication / Domain | Infrastructure / 外部I/O |
+| No. | 利用者から見える処理 | Interface / Entry | 主なApplication / Domain | Infrastructure / 外部I/O |
 | --- ---|---|---|---|
-| 1  日常Web GUI起動 | [../interfaces/web/app.py](../interfaces/web/app.py) | [../bootstrap/web_runtime.py](../bootstrap/web_runtime.py) | NiceGUI / PostgreSQL |
-| 2  TOP / 機能一覧 | [../interfaces/web/pages/top.py](../interfaces/web/pages/top.py), [../interfaces/web/pages/features.py](../interfaces/web/pages/features.py) | Web Runtime | read-only status |
-| 3  PKB登録・訂正・検索 | [../interfaces/web/pages/pkb.py](../interfaces/web/pages/pkb.py) | [../pkb/application/daily.py](../pkb/application/daily.py), PKB services | PostgreSQL |
-| 4  PKB Entity詳細 | [../interfaces/web/pages/entity.py](../interfaces/web/pages/entity.py) | PKB query / entity model | PostgreSQL |
-| 5  Pending確認 | [../interfaces/web/pages/pkb.py](../interfaces/web/pages/pkb.py) | [../pkb/pending_service.py](../pkb/pending_service.py) | PostgreSQL |
-| 6  Memory Intake | Web / RITSUKO | [../pkb/application/memory_intake.py](../pkb/application/memory_intake.py), [../pkb/memory_intake.py](../pkb/memory_intake.py) | PostgreSQL |
-| 7  RITSUKOへ自然言語依頼 | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | [../ritsuko/application/entry.py](../ritsuko/application/entry.py) | Task / MAGI / PKB / Capability |
-| 8  RITSUKO Task再開 | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | `RitsukoApplicationEntry.resume()` | PostgreSQL |
-| 9  RITSUKO Task履歴・trace | [../interfaces/web/pages/core_history.py](../interfaces/web/pages/core_history.py) | [../ritsuko/application/task_queries.py](../ritsuko/application/task_queries.py) | PostgreSQL |
-| 10  MAGI分析 | RITSUKO経由 | [../ritsuko/magi/](../ritsuko/magi/) | Ollama / OpenAI / Gemini等 |
-| 11  MAGI設定 | [../interfaces/web/pages/settings.py](../interfaces/web/pages/settings.py) | [../ritsuko/magi/settings.py](../ritsuko/magi/settings.py) | PostgreSQL |
-| 12  Service Connection設定 | [../interfaces/web/pages/settings.py](../interfaces/web/pages/settings.py) | [../integrations/connections/service_connections.py](../integrations/connections/service_connections.py) | PostgreSQL / Secret |
-| 13  家計・資産 | [../interfaces/web/pages/finance.py](../interfaces/web/pages/finance.py) | [../capabilities/finance/application.py](../capabilities/finance/application.py) | PostgreSQL / CSV |
-| 14  MoneyForward CSV取込 | Finance画面 | [../capabilities/finance/finance_import.py](../capabilities/finance/finance_import.py) | CSV → PostgreSQL |
-| 15  利用料金・契約 | [../interfaces/web/pages/service_billing.py](../interfaces/web/pages/service_billing.py) | [../capabilities/service_billing/service.py](../capabilities/service_billing/service.py) | OpenAI / Google Cloud等 |
-| 16  Web Research | RITSUKO / Capability | [../capabilities/web_research/application.py](../capabilities/web_research/application.py) | Web Search / HTTP |
-| 17  システム状態 / Debug | [../interfaces/web/pages/debug.py](../interfaces/web/pages/debug.py) | [../infrastructure/system_debug.py](../infrastructure/system_debug.py) | Git / Runtime / PostgreSQL read-only dashboard |
-| 18  DB ER図 | [../interfaces/web/pages/debug_er.py](../interfaces/web/pages/debug_er.py) | [../application/schema_diagram.py](../application/schema_diagram.py) | PostgreSQL schema metadata / Mermaid / optional ER providers |
-| 19  開発Workbench | [../interfaces/workbench/app.py](../interfaces/workbench/app.py) | Workbench helpers | LLM / PKB / Core検証 |
-| 20  Secretary REST API | [../interfaces/api/app.py](../interfaces/api/app.py) | [../application/read_service.py](../application/read_service.py), Task / Candidate services | FastAPI / PostgreSQL |
-| 21  外部ChatGPT read-only MCP | [../interfaces/mcp/server.py](../interfaces/mcp/server.py) | Secretary API read boundary | HTTP → Secretary API |
-| 22  MCP互換entry | [../mcp_adapter/server.py](../mcp_adapter/server.py) | `interfaces.mcp.server`へ委譲 | stdio MCP |
-| 23  DB migration | [../scripts/db/migrate.sh](../scripts/db/migrate.sh) | migration管理 | PostgreSQL |
-| 24  DB Backup / Restore | [../scripts/db/postgres.ps1](../scripts/db/postgres.ps1) | DB運用 | pg_dump / pg_restore |
-| 25  DB再構築検証 | [../scripts/db/promotion-preflight.ps1](../scripts/db/promotion-preflight.ps1), [../scripts/db/promotion-rehearsal.ps1](../scripts/db/promotion-rehearsal.ps1) | fresh schema + settings-only rehearsal | PostgreSQL |
-| 26  Fresh Production初期化 | [../scripts/db/initialize-fresh-production.ps1](../scripts/db/initialize-fresh-production.ps1) | migration 001-008 / existing cluster role reuse | PostgreSQL |
-| 27  Production DB再構築 | [../scripts/db/rebuild-production.ps1](../scripts/db/rebuild-production.ps1) | fresh schema + settings only → replacement DB | PostgreSQL |
-| 28  旧昇格entry互換 | [../scripts/db/promote-production.ps1](../scripts/db/promote-production.ps1) | clean rebuildへ委譲 | PowerShell |
+| 1 | 日常Web GUI起動 | [../interfaces/web/app.py](../interfaces/web/app.py) | [../bootstrap/web_runtime.py](../bootstrap/web_runtime.py) | NiceGUI / PostgreSQL |
+| 2 | TOP / 機能一覧 | [../interfaces/web/pages/top.py](../interfaces/web/pages/top.py), [../interfaces/web/pages/features.py](../interfaces/web/pages/features.py) | Web Runtime | read-only status |
+| 3 | PKB登録・訂正・検索 | [../interfaces/web/pages/pkb.py](../interfaces/web/pages/pkb.py) | [../pkb/application/daily.py](../pkb/application/daily.py), PKB services | PostgreSQL |
+| 4 | PKB Entity詳細 | [../interfaces/web/pages/entity.py](../interfaces/web/pages/entity.py) | PKB query / entity model | PostgreSQL |
+| 5 | Pending確認 | [../interfaces/web/pages/pkb.py](../interfaces/web/pages/pkb.py) | [../pkb/pending_service.py](../pkb/pending_service.py) | PostgreSQL |
+| 6 | Memory Intake | Web / RITSUKO | [../pkb/application/memory_intake.py](../pkb/application/memory_intake.py), [../pkb/memory_intake.py](../pkb/memory_intake.py) | PostgreSQL |
+| 7 | RITSUKOへ自然言語依頼 | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | [../ritsuko/application/entry.py](../ritsuko/application/entry.py) | Task / MAGI / PKB / Capability |
+| 8 | RITSUKO Task再開 | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | `RitsukoApplicationEntry.resume()` | PostgreSQL |
+| 9 | RITSUKO Task履歴・trace | [../interfaces/web/pages/core_history.py](../interfaces/web/pages/core_history.py) | [../ritsuko/application/task_queries.py](../ritsuko/application/task_queries.py) | PostgreSQL |
+| 10 | MAGI分析 | RITSUKO経由 | [../ritsuko/magi/](../ritsuko/magi/) | Ollama / OpenAI / Gemini等 |
+| 11 | MAGI設定 | [../interfaces/web/pages/settings.py](../interfaces/web/pages/settings.py) | [../ritsuko/magi/settings.py](../ritsuko/magi/settings.py) | PostgreSQL |
+| 12 | Service Connection設定 | [../interfaces/web/pages/settings.py](../interfaces/web/pages/settings.py) | [../integrations/connections/service_connections.py](../integrations/connections/service_connections.py) | PostgreSQL / Secret |
+| 13 | 家計・資産 | [../interfaces/web/pages/finance.py](../interfaces/web/pages/finance.py) | [../capabilities/finance/application.py](../capabilities/finance/application.py) | PostgreSQL / CSV |
+| 14 | MoneyForward CSV取込 | Finance画面 | [../capabilities/finance/finance_import.py](../capabilities/finance/finance_import.py) | CSV → PostgreSQL |
+| 15 | 利用料金・契約 | [../interfaces/web/pages/service_billing.py](../interfaces/web/pages/service_billing.py) | [../capabilities/service_billing/service.py](../capabilities/service_billing/service.py) | OpenAI / Google Cloud等 |
+| 16 | Web Research | RITSUKO / Capability | [../capabilities/web_research/application.py](../capabilities/web_research/application.py) | Web Search / HTTP |
+| 17 | システム状態 / Debug | [../interfaces/web/pages/debug.py](../interfaces/web/pages/debug.py) | [../infrastructure/system_debug.py](../infrastructure/system_debug.py) | Git / Runtime / PostgreSQL read-only dashboard |
+| 18 | DB ER図 | [../interfaces/web/pages/debug_er.py](../interfaces/web/pages/debug_er.py) | [../application/schema_diagram.py](../application/schema_diagram.py) | PostgreSQL schema metadata / Mermaid / optional ER providers |
+| 19 | 開発Workbench | [../interfaces/workbench/app.py](../interfaces/workbench/app.py) | Workbench helpers | LLM / PKB / Core検証 |
+| 20 | Secretary REST API | [../interfaces/api/app.py](../interfaces/api/app.py) | [../application/read_service.py](../application/read_service.py), Task / Candidate services | FastAPI / PostgreSQL |
+| 21 | 外部ChatGPT read-only MCP | [../interfaces/mcp/server.py](../interfaces/mcp/server.py) | Secretary API read boundary | HTTP → Secretary API |
+| 22 | MCP互換entry | [../mcp_adapter/server.py](../mcp_adapter/server.py) | `interfaces.mcp.server`へ委譲 | stdio MCP |
+| 23 | DB migration | [../scripts/db/migrate.sh](../scripts/db/migrate.sh) | migration管理 | PostgreSQL |
+| 24 | DB Backup / Restore | [../scripts/db/postgres.ps1](../scripts/db/postgres.ps1) | DB運用 | pg_dump / pg_restore |
+| 25 | DB再構築検証 | [../scripts/db/promotion-preflight.ps1](../scripts/db/promotion-preflight.ps1), [../scripts/db/promotion-rehearsal.ps1](../scripts/db/promotion-rehearsal.ps1) | fresh schema + settings-only rehearsal | PostgreSQL |
+| 26 | Fresh Production初期化 | [../scripts/db/initialize-fresh-production.ps1](../scripts/db/initialize-fresh-production.ps1) | migration 001-008 / existing cluster role reuse | PostgreSQL |
+| 27 | Production DB再構築 | [../scripts/db/rebuild-production.ps1](../scripts/db/rebuild-production.ps1) | fresh schema + settings only → replacement DB | PostgreSQL |
+| 28 | 旧昇格entry互換 | [../scripts/db/promote-production.ps1](../scripts/db/promote-production.ps1) | clean rebuildへ委譲 | PowerShell |
 
 ---
 
@@ -251,13 +251,13 @@ PostgreSQL
 
 主な対応:
 
-| No.  Owner | Port / 上位contract | PostgreSQL adapter |
+| No. | Owner | Port / 上位contract | PostgreSQL adapter |
 | --- ---|---|---|
-| 1  PKB | `pkb/persistence.py` と各PKB service | `infrastructure/postgres/pkb_repository.py` + `pkb_*_repository.py` |
-| 2  RITSUKO Task / MAGI | `ritsuko/tasks/magi_task_store.py`, `ritsuko/magi/settings.py` | `magi_task_repository.py`, `magi_settings_repository.py` |
-| 3  Finance | `capabilities/finance/` | `finance_repository.py` |
-| 4  Service Connection | `integrations/connections/service_connections.py` | `service_connection_repository.py` |
-| 5  Service Billing settings | `capabilities/service_billing/settings.py` | `service_billing_settings_repository.py` |
+| 1 | PKB | `pkb/persistence.py` と各PKB service | `infrastructure/postgres/pkb_repository.py` + `pkb_*_repository.py` |
+| 2 | RITSUKO Task / MAGI | `ritsuko/tasks/magi_task_store.py`, `ritsuko/magi/settings.py` | `magi_task_repository.py`, `magi_settings_repository.py` |
+| 3 | Finance | `capabilities/finance/` | `finance_repository.py` |
+| 4 | Service Connection | `integrations/connections/service_connections.py` | `service_connection_repository.py` |
+| 5 | Service Billing settings | `capabilities/service_billing/settings.py` | `service_billing_settings_repository.py` |
 
 `pkb/episode_intake.py` はhistorical isolated fixture importerであり、通常Production business pathのPersistence Port化対象から除外しています。再流入防止は `tests/test_architecture_boundaries.py` が検査します。
 
@@ -369,17 +369,17 @@ PostgreSQL / PKB / Capability
 
 RITSUKO内部の主な責務:
 
-| No.  責務 | 実装 |
+| No. | 責務 | 実装 |
 | --- ---|---|
-| 1  Core coordination | `ritsuko/core/core_coordinator.py` |
-| 2  OODA / 制御 | `ritsuko/core/core_ooda.py` |
-| 3  Observation | `ritsuko/core/core_observation.py` |
-| 4  Observation Loop | `ritsuko/core/observation_loop.py` |
-| 5  Capability判断 | `ritsuko/core/core_capabilities.py` |
-| 6  MAGI接続 | `ritsuko/core/magi_bridge.py` |
-| 7  結果統合 | `ritsuko/core/core_synthesis.py` |
-| 8  Task保存 | `ritsuko/tasks/` |
-| 9  Application Entry | `ritsuko/application/entry.py` |
+| 1 | Core coordination | `ritsuko/core/core_coordinator.py` |
+| 2 | OODA / 制御 | `ritsuko/core/core_ooda.py` |
+| 3 | Observation | `ritsuko/core/core_observation.py` |
+| 4 | Observation Loop | `ritsuko/core/observation_loop.py` |
+| 5 | Capability判断 | `ritsuko/core/core_capabilities.py` |
+| 6 | MAGI接続 | `ritsuko/core/magi_bridge.py` |
+| 7 | 結果統合 | `ritsuko/core/core_synthesis.py` |
+| 8 | Task保存 | `ritsuko/tasks/` |
+| 9 | Application Entry | `ritsuko/application/entry.py` |
 
 RITSUKOは最終Action、Task状態、権限・停止・再開・完了を管理します。
 
@@ -429,17 +429,17 @@ Ollama / OpenAI / Gemini / ...
 
 主要実装:
 
-| No.  責務 | ソース |
+| No. | 責務 | ソース |
 | --- ---|---|
-| 1  RITSUKO-MAGI契約 | `ritsuko/magi/protocol.py` |
-| 2  Member呼出し | `ritsuko/magi/client.py` |
-| 3  async実行 | `ritsuko/magi/async_execution.py` |
-| 4  transport契約 | `ritsuko/magi/transport_contract.py` |
-| 5  Profile / Assignment | `ritsuko/magi/settings.py` |
-| 6  Service Connection | `integrations/connections/service_connections.py` |
-| 7  Secret解決 | `integrations/connections/credential_resolver.py` |
-| 8  Ollama固有runtime | `integrations/llm/ollama_runtime.py` |
-| 9  HTTP async transport | `infrastructure/async_runtime/transport.py` |
+| 1 | RITSUKO-MAGI契約 | `ritsuko/magi/protocol.py` |
+| 2 | Member呼出し | `ritsuko/magi/client.py` |
+| 3 | async実行 | `ritsuko/magi/async_execution.py` |
+| 4 | transport契約 | `ritsuko/magi/transport_contract.py` |
+| 5 | Profile / Assignment | `ritsuko/magi/settings.py` |
+| 6 | Service Connection | `integrations/connections/service_connections.py` |
+| 7 | Secret解決 | `integrations/connections/credential_resolver.py` |
+| 8 | Ollama固有runtime | `integrations/llm/ollama_runtime.py` |
+| 9 | HTTP async transport | `infrastructure/async_runtime/transport.py` |
 
 MELCHIOR / BALTHASAR / CASPER はProvider名ではなく論理slotです。
 
@@ -463,18 +463,18 @@ PostgreSQL repository / connection
 
 主な責務:
 
-| No.  機能 | 実装 |
+| No. | 機能 | 実装 |
 | --- ---|---|
-| 1  日常PKB操作 | `pkb/application/daily.py` |
-| 2  厳密検索 | `pkb/query_service.py` |
-| 3  登録 | `pkb/write_service.py` |
-| 4  Pending | `pkb/pending_service.py` |
-| 5  訂正 | `pkb/correction_service.py` |
-| 6  Entity | `pkb/entity_model_service.py` |
-| 7  抽出 | `pkb/extraction_service.py` |
-| 8  Memory Intake | `pkb/memory_intake.py` |
-| 9  Grounding | `pkb/memory_grounding.py` |
-| 10  Memory契約 | `pkb/memory_contracts.py` |
+| 1 | 日常PKB操作 | `pkb/application/daily.py` |
+| 2 | 厳密検索 | `pkb/query_service.py` |
+| 3 | 登録 | `pkb/write_service.py` |
+| 4 | Pending | `pkb/pending_service.py` |
+| 5 | 訂正 | `pkb/correction_service.py` |
+| 6 | Entity | `pkb/entity_model_service.py` |
+| 7 | 抽出 | `pkb/extraction_service.py` |
+| 8 | Memory Intake | `pkb/memory_intake.py` |
+| 9 | Grounding | `pkb/memory_grounding.py` |
+| 10 | Memory契約 | `pkb/memory_contracts.py` |
 
 厳密条件・全件・履歴・時点・集計はPostgreSQL / SQLを正本とします。
 
@@ -641,18 +641,18 @@ DB境界と昇格手順の正本:
 
 主要entry:
 
-| No.  処理 | 実装 |
+| No. | 処理 | 実装 |
 | --- ---|---|
-| 1  PostgreSQL Setup / Start / Doctor | `scripts/db/postgres.ps1` |
-| 2  production migration | `scripts/db/migrate.sh` |
-| 3  2DB read-only比較 | `scripts/db/compare-runtime-databases.ps1` |
-| 4  promotion事前検査 | `scripts/db/promotion-preflight.ps1` |
-| 5  fresh production初期化 | `scripts/db/initialize-fresh-production.ps1` |
-| 6  settings-only rehearsal | `scripts/db/promotion-rehearsal.ps1` |
-| 7  fresh replacement DB作成 | `scripts/db/rebuild-production.ps1` |
-| 8  production promotion互換entry | `scripts/db/promote-production.ps1` |
-| 9  production runtime検証 | `scripts/db/verify_production_runtime.py` |
-| 10  runtime設定移送 | `scripts/db/runtime_settings_transfer.py` |
+| 1 | PostgreSQL Setup / Start / Doctor | `scripts/db/postgres.ps1` |
+| 2 | production migration | `scripts/db/migrate.sh` |
+| 3 | 2DB read-only比較 | `scripts/db/compare-runtime-databases.ps1` |
+| 4 | promotion事前検査 | `scripts/db/promotion-preflight.ps1` |
+| 5 | fresh production初期化 | `scripts/db/initialize-fresh-production.ps1` |
+| 6 | settings-only rehearsal | `scripts/db/promotion-rehearsal.ps1` |
+| 7 | fresh replacement DB作成 | `scripts/db/rebuild-production.ps1` |
+| 8 | production promotion互換entry | `scripts/db/promote-production.ps1` |
+| 9 | production runtime検証 | `scripts/db/verify_production_runtime.py` |
+| 10 | runtime設定移送 | `scripts/db/runtime_settings_transfer.py` |
 
 本番DB変更と隔離検証は別の受入段階として扱います。
 
@@ -692,25 +692,25 @@ Application / DomainからConcrete Infrastructureへの逆依存を増やしま�
 
 ## 13. テスト対応
 
-| No.  テスト | 主な対象 |
+| No. | テスト | 主な対象 |
 | --- ---|---|
-| 1  `test_architecture_boundaries.py` | package依存境界、旧runtime path |
-| 2  `test_ritsuko_application_entry.py` | RITSUKO共通Application Entry |
-| 3  `test_ritsuko_magi_protocol.py` | RITSUKO-MAGI契約 |
-| 4  `test_magi_observation_loop.py` | MAGI → Observation → 再判断 |
-| 5  `test_async_transport.py` | async / timeout / cancel / retry |
-| 6  `test_magi_settings.py` | LLM Profile / Member Assignment |
-| 7  `test_memory_intake.py` | Memory Intake |
-| 8  `test_pkb_daily.py` | 日常PKB |
-| 9  `test_pkb_corrections.py` | 訂正 |
-| 10  `test_pkb_query.py` | SQL-first検索 |
-| 11  `test_finance_import.py` | Finance import |
-| 12  `test_service_billing.py` | Service Billing |
-| 13  `test_service_connections.py` | Service Connection |
-| 14  `test_system_debug.py` | Debug snapshot |
-| 15  `test_read_service.py` | 共通read Application |
-| 16  `test_mcp_adapter_static.py` | MCP read-only境界 |
-| 17  `tests/db/` | PostgreSQL / migration / privilege |
+| 1 | `test_architecture_boundaries.py` | package依存境界、旧runtime path |
+| 2 | `test_ritsuko_application_entry.py` | RITSUKO共通Application Entry |
+| 3 | `test_ritsuko_magi_protocol.py` | RITSUKO-MAGI契約 |
+| 4 | `test_magi_observation_loop.py` | MAGI → Observation → 再判断 |
+| 5 | `test_async_transport.py` | async / timeout / cancel / retry |
+| 6 | `test_magi_settings.py` | LLM Profile / Member Assignment |
+| 7 | `test_memory_intake.py` | Memory Intake |
+| 8 | `test_pkb_daily.py` | 日常PKB |
+| 9 | `test_pkb_corrections.py` | 訂正 |
+| 10 | `test_pkb_query.py` | SQL-first検索 |
+| 11 | `test_finance_import.py` | Finance import |
+| 12 | `test_service_billing.py` | Service Billing |
+| 13 | `test_service_connections.py` | Service Connection |
+| 14 | `test_system_debug.py` | Debug snapshot |
+| 15 | `test_read_service.py` | 共通read Application |
+| 16 | `test_mcp_adapter_static.py` | MCP read-only境界 |
+| 17 | `tests/db/` | PostgreSQL / migration / privilege |
 
 代表的なPython回帰:
 

@@ -4,15 +4,15 @@
 
 ## 通常構成
 
-| No.  項目 | 値 |
-| ---  --- | --- |
-| 1  Compose project | `local-secretary-runtime-db` |
-| 2  service | `secretary-postgres` |
-| 3  volume | `local-secretary-runtime-db_secretary_pgdata` |
-| 4  network | `local-secretary-runtime-db_secretary_db` |
-| 5  host接続 | `127.0.0.1:55432` 既定 |
-| 6  DB / 管理用user | `secretary` / `secretary_admin` |
-| 7  image | `postgres:17-bookworm` |
+| No. | 項目 | 値 |
+| --- | --- | --- |
+| 1 | Compose project | `local-secretary-runtime-db` |
+| 2 | service | `secretary-postgres` |
+| 3 | volume | `local-secretary-runtime-db_secretary_pgdata` |
+| 4 | network | `local-secretary-runtime-db_secretary_db` |
+| 5 | host接続 | `127.0.0.1:55432` 既定 |
+| 6 | DB / 管理用user | `secretary` / `secretary_admin` |
+| 7 | image | `postgres:17-bookworm` |
 
 通常運用先はサブPC、メインPCは手動復旧先です。ポート等の実値は `.env.postgres` と起動中containerを正本として確認してください。
 
