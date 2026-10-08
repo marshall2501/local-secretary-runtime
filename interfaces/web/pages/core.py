@@ -296,7 +296,7 @@ def register(portal_context: dict):
                         )
                         return None
     
-                with ui.row().classes("w-full gap-2 items-center"):
+                with magi_settings_actions_slot:
                     ui.button(
                         "MAGI設定を保存",
                         icon="save",
@@ -445,6 +445,127 @@ def register(portal_context: dict):
                         return {}
                     return trace_task
     
+                def render_guided_verification(session: dict) -> None:
+                    session_text = json.dumps(
+                        export_dialogue(session),
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                    ui.button(
+                        "対話結果を一括コピー",
+                        icon="content_copy",
+                        on_click=lambda value=session_text: copy_protocol_json(
+                            value, "対話結果"
+                        ),
+                    ).props("outline dense")
+                    ui.label(
+                        "Prompt: " + str(session.get("prompt_version") or "-")
+                        + " / 最終Question Purpose: "
+                        + str(session.get("last_question_purpose") or "-")
+                    ).classes("font-mono text-xs text-grey-7")
+                    for turn in session.get("turns") or []:
+                        envelope = turn.get("request_envelope") or {}
+                        purpose = (
+                            turn.get("question_purpose")
+                            or envelope.get("question_purpose")
+                            or "analysis"
+                        )
+                        with ui.expansion(
+                            "Turn "
+                            + str(envelope.get("turn") or "?")
+                            + " — "
+                            + (
+                                "classify"
+                                if turn.get("stage") == "classify"
+                                else str(purpose)
+                            )
+                            + " / "
+                            + str(turn.get("status") or "-"),
+                            value=False,
+                        ).classes("w-full border"):
+                            ui.label(
+                                "RITSUKOからの問い: "
+                                + str(envelope.get("question_from_ritsuko") or "-")
+                            ).classes("text-sm")
+                            member_results = [
+                                item
+                                for item in (turn.get("member_results") or [])
+                                if isinstance(item, dict)
+                            ]
+                            if member_results:
+                                with ui.element("div").classes(
+                                    "w-full grid grid-cols-3 gap-2 items-start"
+                                ):
+                                    by_member = {
+                                        str(item.get("name") or ""): item
+                                        for item in member_results
+                                    }
+                                    for member in MEMBER_NAMES:
+                                        item = by_member.get(member)
+                                        if item is None:
+                                            continue
+                                        with ui.card().classes(
+                                            "w-full border border-blue-grey-200 shadow-none"
+                                        ):
+                                            ui.label(member).classes("font-bold")
+                                            ui.label(
+                                                str(item.get("provider") or "-")
+                                                + " / "
+                                                + str(item.get("model") or "-")
+                                                + " / "
+                                                + str(item.get("status") or "-")
+                                            ).classes("text-xs text-grey-7")
+                                            summary = member_response_summary(
+                                                item.get("response")
+                                            )
+                                            if summary:
+                                                ui.label(summary).classes("text-sm")
+                                            with ui.expansion(
+                                                "member技術詳細", value=False
+                                            ).classes("w-full"):
+                                                ui.code(
+                                                    json.dumps(
+                                                        {
+                                                            "response": item.get("response"),
+                                                            "errors": item.get("errors"),
+                                                            "diagnostic": item.get("diagnostic"),
+                                                        },
+                                                        ensure_ascii=False,
+                                                        indent=2,
+                                                    ),
+                                                    language="json",
+                                                ).classes("w-full")
+                            if turn.get("consensus") is not None:
+                                with ui.expansion(
+                                    "MAGI統合結果", value=False
+                                ).classes("w-full"):
+                                    ui.code(
+                                        json.dumps(
+                                            turn.get("consensus"),
+                                            ensure_ascii=False,
+                                            indent=2,
+                                        ),
+                                        language="json",
+                                    ).classes("w-full")
+                            with ui.expansion(
+                                "Turn技術詳細", value=False
+                            ).classes("w-full"):
+                                ui.label(
+                                    "Envelope / 通信診断。hidden reasoning / thinking本文は表示しません。"
+                                ).classes("text-xs text-grey-7")
+                                ui.code(
+                                    json.dumps(
+                                        {
+                                            "request_envelope": envelope,
+                                            "diagnostic": turn.get("diagnostic") or {},
+                                            "errors": turn.get("errors") or [],
+                                        },
+                                        ensure_ascii=False,
+                                        indent=2,
+                                    ),
+                                    language="json",
+                                ).classes("w-full")
+
                 @ui.refreshable
                 def guided_result_panel():
                     session = state.get("guided_session")
@@ -748,7 +869,11 @@ def register(portal_context: dict):
                                 if not str(clarification_input.value or "").strip():
                                     ui.notify("追加説明を入力してください", type="warning")
                                     return
-                                stop_event = begin_guided_run(len(session["turns"]) + 1)
+                                stop_event = begin_guided_run(
+                                    len(session["turns"]) + 1,
+                                    task_id_value=str(session.get("task_id") or ""),
+                                    request_text=str(session.get("user_raw") or ""),
+                                )
                                 guided_button.disable()
                                 guided_result_panel.refresh()
                                 try:
@@ -914,7 +1039,9 @@ def register(portal_context: dict):
                                     notification_message = None
                                     notification_type = None
                                     stop_event = begin_guided_run(
-                                        len(session["turns"]) + 1
+                                        len(session["turns"]) + 1,
+                                        task_id_value=str(session.get("task_id") or ""),
+                                        request_text=str(session.get("user_raw") or ""),
                                     )
                                     answer_only_button.disable()
                                     remember_button.disable()
@@ -1070,64 +1197,19 @@ def register(portal_context: dict):
                             ui.label(
                                 "このProposal種別の実行経路はまだ接続していません。"
                             ).classes("text-sm text-orange-900")
-                    session_text = json.dumps(export_dialogue(session), ensure_ascii=False, indent=2)
-                    ui.button(
-                        "対話結果を一括コピー", icon="content_copy",
-                        on_click=lambda value=session_text: copy_protocol_json(value, "対話結果"),
-                    ).props("outline dense")
-                    ui.label(
-                        "Prompt: " + str(session.get("prompt_version") or "-")
-                        + " / 最終Question Purpose: " + str(session.get("last_question_purpose") or "-")
-                    ).classes("font-mono text-xs text-grey-7")
-                    if session.get("classification"):
+                    with ui.expansion(
+                        "検証情報 / 実行経緯",
+                        value=_CORE_UI_OPEN["verification"],
+                        on_value_change=remember_core_expansion("verification"),
+                        icon="fact_check",
+                    ).classes(
+                        "w-full border border-purple-200 bg-purple-50"
+                        + _block_visibility_class("core", "verification")
+                    ):
                         ui.label(
-                            "分類: " + session["classification"]["category"]
-                            + " / 理解: " + session["classification"]["understood_request"]
-                        ).classes("font-bold")
-                    if session.get("detail"):
-                        detail = session["detail"]
-                        ui.label(
-                            "次の分析: " + detail["state"] + " / " + detail["reason"]
-                        ).classes("font-medium")
-                    for turn in session["turns"]:
-                        purpose = turn.get("question_purpose") or turn["request_envelope"].get("question_purpose")
-                        with ui.expansion(
-                            f"Turn {turn['request_envelope']['turn']}: "
-                            + ("大まかな分類" if turn["stage"] == "classify" else
-                               f"{purpose or 'analysis'} / 再分析"),
-                            value=turn is session["turns"][-1],
-                        ).classes("w-full border"):
-                            ui.label(f"status={turn['status']} / errors={turn['errors']}").classes(
-                                "font-mono text-xs"
-                            )
-                            ui.label("MAGI統合結果").classes("font-bold text-sm")
-                            ui.code(
-                                json.dumps(turn["response"], ensure_ascii=False, indent=2)
-                                if turn["response"] is not None else "null",
-                                language="json",
-                            ).classes("w-full")
-                            if turn.get("consensus") is not None:
-                                ui.label("重み付き投票").classes("font-bold text-sm")
-                                ui.code(
-                                    json.dumps(turn["consensus"], ensure_ascii=False, indent=2),
-                                    language="json",
-                                ).classes("w-full")
-                            if turn.get("member_results"):
-                                ui.label("各MAGI member返答").classes("font-bold text-sm")
-                                ui.code(
-                                    json.dumps(turn["member_results"], ensure_ascii=False, indent=2),
-                                    language="json",
-                                ).classes("w-full")
-                            ui.label("RITSUKOからの質問・Envelope").classes("font-bold text-sm")
-                            ui.code(
-                                json.dumps(turn["request_envelope"], ensure_ascii=False, indent=2),
-                                language="json",
-                            ).classes("w-full")
-                            ui.label("通信診断").classes("font-bold text-sm")
-                            ui.code(
-                                json.dumps(turn["diagnostic"], ensure_ascii=False, indent=2),
-                                language="json",
-                            ).classes("w-full")
+                            "検証では古いTurnから新しいTurnへ順番に追います。"
+                        ).classes("text-xs text-grey-7")
+                        render_guided_verification(session)
     
     
                 async def start_guided():
@@ -1231,7 +1313,7 @@ def register(portal_context: dict):
                 trace = state["trace"]
                 if not trace:
                     with ui.expansion(
-                        "Task検証・稼働ログ",
+                        "Task詳細・実行記録",
                         value=_CORE_UI_OPEN["trace"],
                         on_value_change=remember_core_expansion("trace"),
                     ).classes(
@@ -1245,7 +1327,7 @@ def register(portal_context: dict):
     
                 task = trace["task"]
                 with ui.expansion(
-                    "Task検証・稼働ログ",
+                    "Task詳細・実行記録",
                     value=_CORE_UI_OPEN["trace"],
                     on_value_change=remember_core_expansion("trace"),
                 ).classes(
@@ -1309,77 +1391,18 @@ def register(portal_context: dict):
 
             @ui.refreshable
             def screen_log_panel():
-                try:
-                    rows = _portal("load_recent_core_tasks")(10)
-                except Exception as exc:
-                    with ui.expansion(
-                        "Core画面 全体稼働ログ",
-                        value=_CORE_UI_OPEN["screen_log"],
-                        on_value_change=remember_core_expansion("screen_log"),
-                    ).classes(
-                        "w-full border border-red-200 bg-red-50"
-                        + _block_visibility_class("core", "screen_log")
-                    ):
-                        ui.label("最近のTaskを取得できません: " + str(exc)).classes(
-                            "text-red-700"
-                        )
-                    return
-
-                with ui.expansion(
-                    "Core画面 全体稼働ログ",
-                    value=_CORE_UI_OPEN["screen_log"],
-                    on_value_change=remember_core_expansion("screen_log"),
-                ).classes(
-                    "w-full border-2 border-blue-grey-200 bg-blue-grey-1"
-                    + _block_visibility_class("core", "screen_log")
-                ):
-                    ui.label(
-                        "この画面で扱った直近のCore Taskを横断表示します。"
-                        " 詳細なAction / Result / Sourceは各Taskのログで確認します。"
-                    ).classes("text-sm text-grey-7")
-                    if not rows:
-                        ui.label("Core Taskはまだありません。")
-                        return
-                    for item in rows:
-                        with ui.row().classes(
-                            "w-full items-start gap-3 border-b border-blue-grey-100 py-2"
-                        ):
-                            status_color = {
-                                "completed": "green",
-                                "waiting_external": "orange",
-                                "running": "blue",
-                                "paused": "grey",
-                                "failed": "red",
-                            }.get(item["status"], "grey")
-                            ui.badge(item["status"], color=status_color)
-                            with ui.column().classes("grow gap-0"):
-                                ui.label(item["request"]).classes("font-medium")
-                                ui.label(
-                                    f"Task {item['id']} / revision={item['revision']} / "
-                                    f"phase={item.get('phase') or '-'} / "
-                                    f"capability={item.get('selected_capability') or '-'}"
-                                ).classes("font-mono text-xs text-grey-7")
-                                ui.label(
-                                    f"Action={item['action_count']} / Result={item['result_count']} / "
-                                    f"updated={item['updated_at']}"
-                                ).classes("text-xs text-grey-7")
-
-            screen_log_panel()
-
-            with ui.card().classes(
-                "w-full" + _block_visibility_class("core", "limits")
-            ):
-                ui.label("この縦断でまだ行わないこと").classes("font-bold")
-                ui.label(
-                    "承認付き外部変更、任意Toolからの汎用再計画、条件待ち自動再開は未実装です。"
-                    "保存済みTaskは選択して閲覧でき、確認待ちTaskへ追加回答すると同じTaskを再開します。"
-                ).classes("text-sm")
-
+                # Cross-Task history belongs to the right drawer and /core/history.
+                return
 
             with ui.expansion(
                 "旧 Protocol v1 全項目一括分析（比較用）",
-                value=False, icon="history",
-            ).classes("w-full border"):
+                value=_CORE_UI_OPEN["legacy_protocol"],
+                on_value_change=remember_core_expansion("legacy_protocol"),
+                icon="history",
+            ).classes(
+                "w-full border"
+                + _block_visibility_class("core", "legacy_protocol")
+            ):
                 ui.label(
                     "前の通信方式は比較用に保存。今回の分類対話には使いません。"
                 ).classes("text-xs text-grey-7")
@@ -1540,9 +1563,13 @@ def register(portal_context: dict):
             ui.separator()
             with ui.expansion(
                 "旧MAGI v0（比較・確認用）",
-                value=False,
+                value=_CORE_UI_OPEN["legacy_protocol"],
+                on_value_change=remember_core_expansion("legacy_protocol"),
                 icon="history",
-            ).classes("w-full border"):
+            ).classes(
+                "w-full border"
+                + _block_visibility_class("core", "legacy_protocol")
+            ):
                 ui.label(
                     "旧MAGI v0のAdvisor設定・OODA・旧処理フローです。"
                     "現在のRITSUKO ⇄ MAGI Observation Loopには使用しません。"
