@@ -667,6 +667,75 @@ class GuidedDialogueTests(unittest.TestCase):
         self.assertEqual(result["decision_signature"],
                          "category=INFORMATION;multiple_requests=false")
 
+    def test_information_investigation_weight_tie_uses_two_member_compatible_majority(self):
+        info=self.classification("INFORMATION")
+        investigation=self.classification("INVESTIGATION")
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":investigation},
+            {"name":"CASPER","weight":2.0,"status":"ok","response":info},
+            {"name":"BALTHASAR","weight":1.0,"status":"ok","response":investigation},
+        ])
+        self.assertEqual(result["status"],"ok")
+        self.assertEqual(result["response"]["category"],"INVESTIGATION")
+        self.assertEqual(result["reason"],
+                         "compatible_classification_tie_member_majority")
+        self.assertEqual(result["votes"],{
+            "category=INVESTIGATION;multiple_requests=false":2.0,
+            "category=INFORMATION;multiple_requests=false":2.0,
+        })
+        self.assertEqual(result["selected_member"],"MELCHIOR")
+        self.assertEqual(result["valid_members"],
+                         ["MELCHIOR","CASPER","BALTHASAR"])
+
+    def test_information_investigation_tie_requires_all_three_unique_slots(self):
+        info=self.classification("INFORMATION")
+        investigation=self.classification("INVESTIGATION")
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":investigation},
+            {"name":"CASPER","weight":2.0,"status":"ok","response":info},
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":investigation},
+        ])
+        self.assertEqual(result["status"],"disagreement")
+        self.assertEqual(result["reason"],"weighted_vote_tie")
+
+    def test_information_investigation_tie_rejects_multiple_request_difference(self):
+        info=self.classification("INFORMATION")
+        investigation=self.classification("INVESTIGATION")
+        investigation["multiple_requests"]=True
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":investigation},
+            {"name":"CASPER","weight":2.0,"status":"ok","response":info},
+            {"name":"BALTHASAR","weight":1.0,"status":"ok",
+             "response":self.classification("INVESTIGATION")},
+        ])
+        self.assertEqual(result["status"],"ok")
+        # There is no compatible 2/2 category tie here: the strict signature
+        # keeps the multi-request decision distinct and preserves weighted vote.
+        self.assertEqual(result["response"]["category"],"INFORMATION")
+        self.assertEqual(result["reason"],"weighted_vote")
+
+    def test_information_investigation_tie_does_not_cover_action(self):
+        info=self.classification("INFORMATION")
+        action=self.classification("ACTION")
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":1.0,"status":"ok","response":action},
+            {"name":"CASPER","weight":2.0,"status":"ok","response":info},
+            {"name":"BALTHASAR","weight":1.0,"status":"ok","response":action},
+        ])
+        self.assertEqual(result["status"],"disagreement")
+        self.assertEqual(result["reason"],"weighted_vote_tie")
+
+    def test_information_investigation_tie_needs_three_valid_members(self):
+        info=self.classification("INFORMATION")
+        investigation=self.classification("INVESTIGATION")
+        result=select_weighted_consensus("classify",[
+            {"name":"MELCHIOR","weight":2.0,"status":"ok","response":investigation},
+            {"name":"CASPER","weight":2.0,"status":"ok","response":info},
+            {"name":"BALTHASAR","weight":1.0,"status":"unavailable","response":None},
+        ])
+        self.assertEqual(result["status"],"disagreement")
+        self.assertEqual(result["reason"],"weighted_vote_tie")
+
     def test_weight_can_override_member_count(self):
         info=self.classification("INFORMATION")
         problem=self.classification("PROBLEM")
