@@ -417,6 +417,60 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             "weighted_panel_async",
         )
 
+    async def test_async_panel_uses_compatible_information_investigation_tie_break(self):
+        async def fake_member(spec, envelope, *, timeout):
+            category = "INFORMATION" if spec["name"] == "CASPER" else "INVESTIGATION"
+            return {
+                "name": spec["name"],
+                "profile_id": spec.get("profile_id"),
+                "provider": spec["provider"],
+                "model": spec["model"],
+                "weight": spec["weight"],
+                "timeout_seconds": spec["timeout_seconds"],
+                "status": "ok",
+                "response": {
+                    "category": category,
+                    "understood_request": "GPUドライバーを比較したい",
+                    "reason": "比較に必要な情報を確認する",
+                    "confidence": "high",
+                    "multiple_requests": False,
+                },
+                "errors": [],
+                "diagnostic": {},
+            }
+
+        specs = [
+            {"name": "MELCHIOR", "provider": "ollama", "model": "local-a",
+             "weight": 1.0, "timeout_seconds": 1, "enabled": True},
+            {"name": "CASPER", "provider": "openai", "model": "cloud-b",
+             "weight": 2.0, "timeout_seconds": 1, "enabled": True},
+            {"name": "BALTHASAR", "provider": "gemini", "model": "cloud-c",
+             "weight": 1.0, "timeout_seconds": 1, "enabled": True},
+        ]
+        with patch(
+            "ritsuko.magi.async_execution._call_panel_member_async",
+            side_effect=fake_member,
+        ):
+            result = await call_guided_panel_async(
+                {"stage": "classify", "task_id": "task-tie", "turn": 1},
+                member_specs=specs,
+                timeout=1,
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["response"]["category"], "INVESTIGATION")
+        self.assertEqual(
+            result["consensus"]["reason"],
+            "compatible_classification_tie_member_majority",
+        )
+        self.assertEqual(
+            result["consensus"]["votes"],
+            {
+                "category=INVESTIGATION;multiple_requests=false": 2.0,
+                "category=INFORMATION;multiple_requests=false": 2.0,
+            },
+        )
+
     async def test_member_progress_reports_independent_completion(self):
         events = []
 
