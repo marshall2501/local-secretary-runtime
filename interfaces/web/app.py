@@ -1087,7 +1087,7 @@ def _execute_magi_source_request(
         result = _execute_core_read("web_research", query)
         return {"source": "web", **result}
     if source == "finance":
-        query = finance_query_from_request(pending_request)
+        query = finance_query_from_request(pending_request, session=session)
         result = _execute_core_read("finance_read", query)
         return {"source": "finance", **result}
     raise ValueError("unsupported_observation_source")
