@@ -700,10 +700,67 @@ def select_weighted_consensus(stage: str, member_results: list[dict]) -> dict:
         if abs(score - best_score) < 1e-9
     ]
     if len(winners) != 1:
+        # INFORMATION and INVESTIGATION are both initial, read-only direction
+        # hints and currently lead to the same follow-up question purpose.
+        # Resolve only the proven 3-slot / 2-vs-1 case; every other tie remains
+        # fail-closed so action, multi-request, and detail-state differences are
+        # never weakened by this compatibility rule.
+        if stage == "classify" and len(valid) == len(MEMBER_NAMES) == 3:
+            names = [str(item.get("name") or "") for item in valid]
+            responses = [item["response"] for item in valid]
+            categories = [response.get("category") for response in responses]
+            single_request = all(
+                response.get("multiple_requests") is False
+                for response in responses
+            )
+            compatible_categories = (
+                set(categories) == {"INFORMATION", "INVESTIGATION"}
+            )
+            unique_slots = (
+                len(set(names)) == len(MEMBER_NAMES)
+                and set(names) == set(MEMBER_NAMES)
+            )
+            category_members = {
+                category: [
+                    item for item in valid
+                    if item["response"].get("category") == category
+                ]
+                for category in {"INFORMATION", "INVESTIGATION"}
+            }
+            majority = [
+                (category, items)
+                for category, items in category_members.items()
+                if len(items) == 2
+            ]
+            if single_request and compatible_categories and unique_slots and len(majority) == 1:
+                majority_category, agreeing = majority[0]
+                majority_signature = (
+                    "category=" + majority_category + ";multiple_requests=false"
+                )
+                # This is still a weight tie: do not apply the member-count
+                # compatibility rule unless both category groups are winners.
+                if majority_signature in winners and len(winners) == 2:
+                    representative = max(
+                        agreeing,
+                        key=lambda item: (
+                            float(item["weight"]),
+                            -_MEMBER_PRIORITY.get(str(item.get("name")), 99),
+                        ),
+                    )
+                    return {
+                        "status": "ok",
+                        "response": deepcopy(representative["response"]),
+                        "reason": "compatible_classification_tie_member_majority",
+                        "votes": votes,
+                        "selected_member": representative.get("name"),
+                        "decision_signature": majority_signature,
+                        "valid_members": names,
+                    }
         return {
             "status": "disagreement", "response": None,
             "reason": "weighted_vote_tie", "votes": votes,
             "selected_member": None, "decision_signature": None,
+            "valid_members": [item.get("name") for item in valid],
         }
 
     winner = winners[0]
