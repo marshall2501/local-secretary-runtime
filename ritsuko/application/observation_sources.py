@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from datetime import date
+from ritsuko.magi.runtime_context import task_reference_date
 import re
 from typing import Iterable
 
@@ -242,21 +243,34 @@ def finance_query_from_request(
     pending_request: dict,
     *,
     today: date | None = None,
+    session: dict | None = None,
 ) -> str:
-    """Normalize relative month wording without changing Finance capability."""
+    """Use a Task's fixed reference month for relative Finance reads.
+
+    Legacy sessions without a recorded Task clock keep the former current-date
+    behavior; their stored sessions are never retroactively given a clock.
+    """
     query = str(pending_request.get("what") or "").strip()
     if not query:
         raise ValueError("empty_finance_query")
-    if "先月" not in query:
-        return query[:1000]
 
-    current = today or date.today()
+    current = (task_reference_date(session) if session is not None else None) or today or date.today()
     if current.month == 1:
         year, month = current.year - 1, 12
     else:
         year, month = current.year, current.month - 1
-    return (f"{year}年{month}月 " + query)[:1000]
 
+    # RITSUKO owns the calendar boundary, not a model's recalled year. Reject
+    # an explicit month that conflicts with a pure 'last month' user request.
+    original = str((session or {}).get("user_raw") or "")
+    if "先月" in original and not re.search(r"\d{4}年\s*\d{1,2}月", original):
+        mentioned = re.findall(r"(\d{4})年\s*(\d{1,2})月", query)
+        if any((int(y), int(m)) != (year, month) for y, m in mentioned):
+            raise ValueError("finance_query_conflicts_task_reference_period")
+
+    if "先月" not in query:
+        return query[:1000]
+    return (f"{year}年{month}月 " + query)[:1000]
 
 def selected_capability_for_batch(executions: list[dict]) -> str | None:
     successful = [
