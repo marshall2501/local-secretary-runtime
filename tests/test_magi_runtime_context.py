@@ -147,5 +147,141 @@ class AsyncTaskClockContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("runtime_context", session["turns"][0]["request_envelope"])
 
 
+    async def test_task_checkpoint_resume_keeps_month_end_clock_and_legacy_compatible(self):
+        """JSON-backed Task checkpoint -> user-resume -> MAGI Turn, without DB or providers."""
+        import json
+        from uuid import UUID
+        from unittest.mock import patch
+
+        from ritsuko.core.observation_loop import resume_user_answer
+        from ritsuko.magi.async_execution import continue_with_user_clarification_async
+
+        task_id = UUID("11111111-1111-4111-8111-111111111111")
+        frozen = create_runtime_context(
+            now=datetime(2026, 10, 31, 23, 59, tzinfo=ZoneInfo("Asia/Tokyo"))
+        )
+        self.assertEqual(frozen["reference_datetime"], "2026-10-31T23:59:00+09:00")
+
+        for label, context, expected_month in (
+            ("new_task", frozen, "2026年9月"),
+            ("legacy_task", None, "2026年10月"),
+        ):
+            with self.subTest(label=label):
+                # Simulate the persisted JSONB checkpoint restored after November 1.
+                session = {
+                    "task_id": str(task_id),
+                    "user_raw": "先月の家計について",
+                    "model": "",
+                    "prompt_version": "d19-state-driven-v5-datetime" if context else "d19-state-driven-v4",
+                    "member_specs": SPECS,
+                    "status": "waiting_user",
+                    "next_step": "ask_user_for_information",
+                    "classification": {
+                        "category": "INFORMATION",
+                        "understood_request": "先月の家計について知りたい",
+                        "reason": "fixture",
+                        "confidence": "high",
+                        "multiple_requests": False,
+                    },
+                    "detail": {"state": "NEED_CLARIFICATION", "question_for_user": "詳細は？"},
+                    "observations": [],
+                    "pending_requests": [{"request_id": "REQ-1", "source": "user", "what": "詳細"}],
+                    "previous_request_signatures": [],
+                    "conversation_context": [],
+                    "user_question": "詳細は？",
+                    "magi_disagreement": None,
+                    "user_source_reviewed": False,
+                    "last_question_purpose": "identify_missing_information",
+                    "turns": [
+                        {"stage": "classify", "request_envelope": {"turn": 1}},
+                        {"stage": "analyze", "request_envelope": {"turn": 2}},
+                    ],
+                    "turn_limit": 4,
+                    "legacy_router_used": False,
+                    "tool_read_executed": False,
+                }
+                if context is not None:
+                    session["runtime_context"] = context
+                checkpoint_json = json.dumps({"magi_session": session}, ensure_ascii=False)
+                captured, persisted, aborted = [], [], []
+
+                def claim(claimed_id, reply_length, reply_fingerprint):
+                    self.assertEqual(claimed_id, task_id)
+                    self.assertEqual(reply_length, len("支出について"))
+                    self.assertEqual(len(reply_fingerprint), 64)
+                    return json.loads(checkpoint_json)["magi_session"], "finance_read"
+
+                async def caller(envelope, *, model, timeout, member_specs):
+                    captured.append(envelope)
+                    self.assertEqual(len(member_specs), 3)
+                    return {
+                        "status": "ok",
+                        "response": {
+                            "understood_request": "先月の家計について知りたい",
+                            "state": "READY",
+                            "reason": "本人が補足したので応答できる",
+                            "information_requests": [],
+                            "question_for_user": None,
+                            "answer_candidate": "追加情報を確認しました。",
+                            "knowledge_candidate": None,
+                            "action_candidate": None,
+                        },
+                        "errors": [],
+                    }
+
+                async def continue_with_stub(saved, text, **kwargs):
+                    return await continue_with_user_clarification_async(
+                        saved, text, caller=caller, **kwargs
+                    )
+
+                def persist(saved_id, updated_session, capability):
+                    self.assertEqual(saved_id, task_id)
+                    self.assertEqual(capability, "finance_read")
+                    persisted.append(json.loads(json.dumps(updated_session, ensure_ascii=False)))
+
+                def abort(*args):
+                    aborted.append(args)
+
+                # Resume must not call the new-Task constructor to replace the old clock.
+                with patch("ritsuko.magi.async_execution.create_runtime_context",
+                           side_effect=AssertionError("resume must not set a new clock")):
+                    result = await resume_user_answer(
+                        task_id,
+                        "支出について",
+                        timeout=10,
+                        claim_user_resume_record=claim,
+                        persist_session_record=persist,
+                        abort_user_resume_record=abort,
+                        user_continuation=continue_with_stub,
+                    )
+
+                self.assertFalse(aborted)
+                self.assertEqual(len(captured), 1)
+                self.assertEqual(result["status"], "candidate_ready")
+                self.assertEqual(result["task_id"], str(task_id))
+                self.assertEqual(len(result["turns"]), 3)
+                self.assertEqual(captured[0]["turn"], 3)
+                self.assertEqual(len(persisted), 1)
+                self.assertEqual(persisted[0]["task_id"], str(task_id))
+                self.assertEqual(
+                    finance_query_from_request(
+                        {"what": "先月の支出"}, session=persisted[0],
+                        today=date(2026, 11, 1),
+                    ).startswith(expected_month + " "),
+                    True,
+                )
+                if context is None:
+                    self.assertNotIn("runtime_context", result)
+                    self.assertNotIn("runtime_context", captured[0])
+                else:
+                    self.assertEqual(result["runtime_context"], frozen)
+                    self.assertEqual(captured[0]["runtime_context"], frozen)
+                    self.assertEqual(persisted[0]["runtime_context"], frozen)
+                    self.assertEqual(
+                        result["turns"][2]["request_envelope"]["runtime_context"],
+                        frozen,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()
