@@ -430,16 +430,20 @@ Ollama / OpenAI / Gemini / ...
 主要実装:
 
 | No. | 責務 | ソース |
-| --- ---|---|
+| ---: | --- | --- |
 | 1 | RITSUKO-MAGI契約 | `ritsuko/magi/protocol.py` |
 | 2 | Member呼出し | `ritsuko/magi/client.py` |
-| 3 | async実行 | `ritsuko/magi/async_execution.py` |
+| 3 | async実行・全memberへ共通日時を送信 | `ritsuko/magi/async_execution.py` |
 | 4 | transport契約 | `ritsuko/magi/transport_contract.py` |
 | 5 | Profile / Assignment | `ritsuko/magi/settings.py` |
 | 6 | Service Connection | `integrations/connections/service_connections.py` |
 | 7 | Secret解決 | `integrations/connections/credential_resolver.py` |
 | 8 | Ollama固有runtime | `integrations/llm/ollama_runtime.py` |
 | 9 | HTTP async transport | `infrastructure/async_runtime/transport.py` |
+| 10 | Task基準日時の生成・再開時読取 | `ritsuko/magi/runtime_context.py` |
+| 11 | 同期／legacy MAGI入力 | `ritsuko/magi/dialogue.py` |
+| 12 | Finance「先月」のTask基準月検証 | `ritsuko/application/observation_sources.py`, `interfaces/web/app.py` |
+| 13 | MAGI Task checkpointの保存 | `infrastructure/postgres/magi_task_repository.py` |
 
 MELCHIOR / BALTHASAR / CASPER はProvider名ではなく論理slotです。
 
