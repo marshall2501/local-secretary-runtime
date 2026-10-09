@@ -422,7 +422,7 @@ class GuidedDialogueTests(unittest.TestCase):
         prompt=seen[1]["question_from_ritsuko"]
         self.assertIn("fresh external source",prompt)
         self.assertIn("source=userは通常のread sourceではありません",prompt)
-        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v4")
+        self.assertEqual(PROMPT_VERSION,"d19-state-driven-v5-datetime")
 
     def test_user_source_is_reviewed_once_before_waiting_on_user(self):
         first=self.detail(source="user",what="症状の詳細")
