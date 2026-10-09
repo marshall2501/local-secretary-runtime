@@ -34,6 +34,7 @@ from integrations.llm.ollama_runtime import (
     normalize_magi_num_predict,
 )
 from .protocol import default_resource_catalog
+from .runtime_context import create_runtime_context, runtime_context_from_session
 
 CATEGORIES = (
     "INFORMATION", "PROBLEM", "INVESTIGATION", "ACTION", "KNOWLEDGE",
@@ -70,7 +71,7 @@ def _extend_turn_limit_for_user_resume(session: dict) -> None:
     )
 
 
-PROMPT_VERSION = "d19-state-driven-v4"
+PROMPT_VERSION = "d19-state-driven-v5-datetime"
 QUESTION_PURPOSES = (
     "understand_or_disambiguate",
     "identify_missing_information",
@@ -98,7 +99,8 @@ COMMON_INSTRUCTIONS = """共通指示：
 現在与えられている入力を使い、今回指定された判断だけを行ってください。
 今回要求された判断の範囲を超えて、別の目的へ処理を広げないでください。
 取得済み情報と未取得情報を区別し、与えられていない事実を既知の事実として推測で補完しないでください。
-指定されたJSON Schema、許可値、必須項目に厳密に従い、JSONだけを返してください。"""
+指定されたJSON Schema、許可値、必須項目に厳密に従い、JSONだけを返してください。
+入力のruntime_contextがある場合、reference_datetimeをTaskでの現在の基準日時とし、timezoneとlocaleに従って相対日時を解釈してください。モデルの学習時点や自身の現在時刻から日時を推測しないでください。Observationの対象期間・取得日時はTask基準日時とは別です。"""
 
 SYSTEM = PREREQUISITE_KNOWLEDGE + "\n\n" + COMMON_INSTRUCTIONS
 
@@ -916,6 +918,9 @@ def _send(session: dict, stage: str, question_purpose: str, prompt: str, caller,
         "question_from_ritsuko": prompt,
         "user_input": {"raw": session["user_raw"]},
     }
+    runtime_context = runtime_context_from_session(session)
+    if runtime_context is not None:
+        envelope["runtime_context"] = runtime_context
     if stage == "classify" and session.get("conversation_context"):
         envelope["conversation_context"] = deepcopy(session["conversation_context"][-4:])
     if stage != "classify":
@@ -1215,6 +1220,8 @@ def start_dialogue(
     caller=call_guided_panel,
     stop_requested=None,
     on_turn_start=None,
+    task_timezone: str = "Asia/Tokyo",
+    task_locale: str = "ja-JP",
 ) -> dict:
     specs = _normalized_member_specs(member_specs, model) if caller is call_guided_panel else (
         deepcopy(member_specs) if member_specs is not None else []
@@ -1222,6 +1229,7 @@ def start_dialogue(
     session = {
         "task_id": str(uuid4()), "user_raw": user_raw.strip(), "model": model,
         "prompt_version": PROMPT_VERSION, "magi_mode": "weighted_panel",
+        "runtime_context": create_runtime_context(timezone_name=task_timezone, locale=task_locale),
         "member_specs": specs,
         "status": "running", "next_step": "classify",
         "classification": None, "detail": None,
