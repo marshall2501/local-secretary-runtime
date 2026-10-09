@@ -74,6 +74,7 @@ from .settings import (
 )
 from integrations.llm.ollama_runtime import configured_magi_num_predict, normalize_context_tokens, normalize_magi_num_predict
 from .protocol import default_resource_catalog
+from .runtime_context import create_runtime_context, runtime_context_from_session
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -635,6 +636,9 @@ async def _send_async(
         "question_from_ritsuko": prompt,
         "user_input": {"raw": session["user_raw"]},
     }
+    runtime_context = runtime_context_from_session(session)
+    if runtime_context is not None:
+        envelope["runtime_context"] = runtime_context
     if stage == "classify" and session.get("conversation_context"):
         envelope["conversation_context"] = deepcopy(session["conversation_context"][-4:])
     if stage != "classify":
@@ -1024,6 +1028,8 @@ async def start_dialogue_async(
     stop_requested=None,
     on_turn_start=None,
     task_id: str | None = None,
+    task_timezone: str = "Asia/Tokyo",
+    task_locale: str = "ja-JP",
 ) -> dict:
     specs = _normalized_member_specs(member_specs, model)
     from uuid import uuid4
@@ -1033,6 +1039,7 @@ async def start_dialogue_async(
         "user_raw": user_raw.strip(),
         "model": model,
         "prompt_version": PROMPT_VERSION,
+        "runtime_context": create_runtime_context(timezone_name=task_timezone, locale=task_locale),
         "magi_mode": "weighted_panel_async",
         "member_specs": specs,
         "status": "running",
