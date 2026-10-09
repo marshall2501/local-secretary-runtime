@@ -19,7 +19,7 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
     checkpoint = {
         "core_slice": CORE_SLICE,
         "phase": "orient",
-        "protocol": "d19-state-driven-v4",
+        "protocol": "d19-state-driven-v5-datetime",
         "selected_capability": None,
         "question": None,
         "message": None,
