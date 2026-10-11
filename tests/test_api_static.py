@@ -82,6 +82,49 @@ class ApiStaticTests(unittest.TestCase):
                 from interfaces.api.app import authenticated
                 authenticated(header)
 
+    def test_tasks_accepts_legacy_status_filter_without_changing_api_default(self):
+        from unittest.mock import Mock
+        from fastapi import HTTPException
+        from interfaces.api.app import app, tasks
+
+        route = next(route for route in app.routes
+                     if getattr(route, "path", None) == "/tasks"
+                     and "GET" in getattr(route, "methods", set()))
+        parameter_names = {field.name for field in route.dependant.query_params}
+        self.assertIn("task_status", parameter_names)
+        self.assertIn("status", parameter_names)
+        self.assertIn("limit", parameter_names)
+
+        fake_service = Mock()
+        fake_service.list_tasks.return_value = []
+        with patch("interfaces.api.app.read_service", return_value=fake_service):
+            self.assertEqual(tasks(task_status="running", status=None, limit=10), [])
+            fake_service.list_tasks.assert_called_with(task_status="running", limit=10)
+            self.assertEqual(tasks(task_status=None, status="pending", limit=20), [])
+            fake_service.list_tasks.assert_called_with(task_status="pending", limit=20)
+            self.assertEqual(tasks(task_status="completed", status="completed", limit=3), [])
+            fake_service.list_tasks.assert_called_with(task_status="completed", limit=3)
+            self.assertEqual(tasks(task_status=None, status=None, limit=5), [])
+            fake_service.list_tasks.assert_called_with(task_status=None, limit=5)
+            previous_calls = fake_service.list_tasks.call_count
+            with self.assertRaises(HTTPException) as error:
+                tasks(task_status="running", status="completed", limit=10)
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertEqual(fake_service.list_tasks.call_count, previous_calls)
+
+    def test_external_read_query_limits_remain_bounded(self):
+        from fastapi.routing import APIRoute
+        from interfaces.api.app import app
+        for endpoint in ("/tasks", "/memory/search"):
+            with self.subTest(endpoint=endpoint):
+                route = next(route for route in app.routes
+                             if isinstance(route, APIRoute)
+                             and route.path == endpoint and "GET" in route.methods)
+                limit = next(param for param in route.dependant.query_params
+                             if param.name == "limit")
+                self.assertTrue(any(getattr(meta, "le", None) == 100
+                                    for meta in limit.field_info.metadata))
+
     def test_task_requires_completion_criteria(self):
         with self.assertRaises(ValidationError):
             CreateTask(request="check PC", domain="pc", completion_criteria="")

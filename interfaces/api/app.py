@@ -182,8 +182,14 @@ def current_claims(
 def tasks(
     task_status: TaskStatus | None = None,
     limit: int = Query(default=50, ge=1, le=100),
+    status: TaskStatus | None = None,
 ):
-    return read_service().list_tasks(task_status=task_status, limit=limit)
+    # Existing external MCP callers use "status"; retain task_status as the
+    # canonical REST parameter and reject ambiguous conflicting filters.
+    if task_status is not None and status is not None and task_status != status:
+        raise HTTPException(status_code=422, detail="Conflicting task status filters.")
+    selected_status = task_status if task_status is not None else status
+    return read_service().list_tasks(task_status=selected_status, limit=limit)
 
 
 @app.get("/memory/search", dependencies=[Depends(read_authenticated)])

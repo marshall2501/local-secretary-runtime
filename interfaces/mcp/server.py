@@ -60,8 +60,8 @@ def _get(path: str, params: dict[str, Any]) -> Any:
 @mcp.tool()
 def tasks(status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """List Secretary tasks. Read-only."""
-    if not 1 <= limit <= 200:
-        raise ValueError("limit must be between 1 and 200")
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
     return _get("/tasks", {"status": status, "limit": limit})
 
 
@@ -77,8 +77,8 @@ def memory_search(
     """Search structured Secretary memory. Read-only and deterministic."""
     if kind is not None and kind not in {"claim", "issue", "hypothesis", "source"}:
         raise ValueError("kind must be claim, issue, hypothesis, or source")
-    if not 1 <= limit <= 200:
-        raise ValueError("limit must be between 1 and 200")
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
     if offset < 0:
         raise ValueError("offset must be >= 0")
     return _get(

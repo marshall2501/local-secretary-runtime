@@ -20,6 +20,12 @@ class McpAdapterStaticTests(unittest.TestCase):
         self.assertIn('method="GET"', SERVER)
         self.assertNotIn("psycopg", SERVER)
 
+    def test_mcp_read_limits_match_rest_and_legacy_filter_name(self):
+        self.assertEqual(SERVER.count("limit must be between 1 and 100"), 2)
+        self.assertNotIn("limit must be between 1 and 200", SERVER)
+        self.assertIn('"status": status', SERVER)
+        self.assertIn('return _get("/tasks", {"status": status, "limit": limit})', SERVER)
+
     def test_stdio_entrypoint_has_no_stdout_logging(self):
         self.assertIn("mcp.run()", SERVER)
         self.assertNotIn("print(", SERVER)
