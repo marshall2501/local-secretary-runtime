@@ -2,7 +2,7 @@
 
 Personal Local Secretary AI の実装リポジトリです。PC専用Botではなく、記憶・調査・計画・安全な実行・検証・記録・継続対応を、利用者の依頼を起点に扱う統合秘書AIを実装します。
 
-設計・優先順位・検証済み現在地の正本は `local-secretary-ai` 側です。
+設計・優先順位・検証済み現在地のマスタは `local-secretary-ai` 側です。
 
 - [START_HERE](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/START_HERE.md)
 - [PROJECT](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/PROJECT.md)
@@ -17,7 +17,7 @@ Personal Local Secretary AI の実装リポジトリです。PC専用Botでは�
 
 - **RITSUKO / Secretary Core**: Task、状態遷移、権限、Observation、Action/Result、停止・再開、最終判断を管理するプログラム側の制御層。
 - **MAGI**: MELCHIOR / BALTHASAR / CASPER の最大3スロットに、ローカルまたはクラウドLLMを割り当てて意味理解・分析・提案を行う交換可能な判断層。
-- **PKB**: PostgreSQLを構造化記憶の正本とし、SQL-firstの検索、Memory Intake、訂正、履歴、Pending例外処理を実装。
+- **PKB**: PostgreSQLを構造化記憶のマスタとし、SQL-firstの検索、Memory Intake、訂正、履歴、Pending例外処理を実装。
 - **API / UI**: FastAPI、NiceGUI、開発Workbench、日常用ポータル。
 - **Service Connections**: LLM Providerや将来の外部／ローカルServiceについて、adapter / endpoint / credential参照 / 技術Capabilityを共通管理。Secret値そのものやRITSUKOの操作承認は別境界。
 - **Runtime**: Docker、PowerShell、設定、診断、バックアップ・復元、テスト。
@@ -69,4 +69,4 @@ cd D:\AI\projects\local-secretary-runtime
 
 ## 文書の扱い
 
-runtime側の文書は現在使う運用方法・API境界・安全条件だけを扱います。過去の「次の作業」「当時は未実装」「特定モデルで成功」といった時点依存の記録は現行仕様として使わず、必要な実験知見は設計repoの `DevelopmentKnowledge`、現在地は `STATUS`、優先作業は `PLAN` を正本とします。
+runtime側の文書は現在使う運用方法・API境界・安全条件だけを扱います。過去の「次の作業」「当時は未実装」「特定モデルで成功」といった時点依存の記録は現行仕様として使わず、必要な実験知見は設計repoの `DevelopmentKnowledge`、現在地は `STATUS`、優先作業は `PLAN` をマスタとします。
