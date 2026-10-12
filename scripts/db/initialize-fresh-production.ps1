@@ -16,7 +16,8 @@ $migrations = @(
     'db/migrations/005_pkb_runtime_schema.sql',
     'db/migrations/006_finance_runtime_schema.sql',
     'db/migrations/007_runtime_settings_schema.sql',
-    'db/migrations/008_runtime_privileges.sql'
+    'db/migrations/008_runtime_privileges.sql',
+    'db/migrations/009_runtime_policy_profiles.sql'
 )
 foreach ($relative in $migrations) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) {
@@ -99,11 +100,11 @@ try {
     }
 
     $state = & docker exec $container psql -X -A -t -U secretary_admin -d $Database -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-    if ($LASTEXITCODE -ne 0 -or ($state | Out-String).Trim() -ne '8|008_runtime_privileges.sql') {
+    if ($LASTEXITCODE -ne 0 -or ($state | Out-String).Trim() -ne '9|009_runtime_policy_profiles.sql') {
         throw "Fresh production migration state is unexpected: $(($state | Out-String).Trim())"
     }
 
-    Write-Host "PASS: $Database initialized from production migrations 001-008 with existing cluster roles reused."
+    Write-Host "PASS: $Database initialized from production migrations 001-009 with existing cluster roles reused."
 } finally {
     if (Test-Path -LiteralPath $localTmp) {
         Remove-Item -LiteralPath $localTmp -Force
