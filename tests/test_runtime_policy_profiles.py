@@ -1,6 +1,7 @@
 """Isolated owner-managed policy tests. No PostgreSQL or cloud requests."""
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 import tempfile
 import unittest
@@ -263,7 +264,7 @@ class RuntimePolicyRealAsyncPathTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def waiting_session(policy):
-        s = session(policy)
+        s = session(deepcopy(policy))
         s["member_specs"] = specs()
         s["member_specs"][2].update(
             provider="gemini",
