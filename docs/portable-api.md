@@ -1,6 +1,6 @@
 # Secretary API — portable localhost deployment
 
-`api/Dockerfile` と `docker/compose.api.yml` は、Secretary APIをDBとは別のCompose projectとして起動するための構成です。通常運用先はサブPC、メインPCは手動復旧先です。自動フェイルオーバーや2台の正本DBへの同時書込みは行いません。
+`api/Dockerfile` と `docker/compose.api.yml` は、Secretary APIをDBとは別のCompose projectとして起動するための構成です。通常運用先はサブPC、メインPCは手動復旧先です。自動フェイルオーバーや2台のマスタDBへの同時書込みは行いません。
 
 ## 構成
 
@@ -86,6 +86,6 @@ docker @composeArgs stop secretary-api
 
 ## PC間の手動復旧
 
-ComposeソースをコピーしてもDB volume、Secret、個人原本は移りません。復旧時は正本側の書込みを止め、DBをバックアップし、新しい環境へ復元し、migration・代表件数・Task/Claim等を照合してから切り替えます。独立した正本DBを2台で同時更新しません。
+ComposeソースをコピーしてもDB volume、Secret、個人原本は移りません。復旧時はマスタ側の書込みを止め、DBをバックアップし、新しい環境へ復元し、migration・代表件数・Task/Claim等を照合してから切り替えます。独立したマスタDBを2台で同時更新しません。
 
-バックアップ・復元は [`postgres.md`](postgres.md) を参照してください。実機でどこまで確認済みかはこの文書へ固定せず、設計repo `STATUS` を正本とします。
+バックアップ・復元は [`postgres.md`](postgres.md) を参照してください。実機でどこまで確認済みかはこの文書へ固定せず、設計repo `STATUS` をマスタとします。
