@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from psycopg.errors import UndefinedTable
 from psycopg.types.json import Jsonb
 
 from ritsuko.application.context_policy import CONTEXT_LABELS, DECISIONS, EXPOSURES
@@ -89,6 +90,13 @@ class PostgresRuntimePolicyRepository:
             "revision": int(profile[2]), "exposure": exposure,
             "grants": grants,
         }
+
+    def load_snapshot_or_none(self, exposure: str = "lan") -> dict | None:
+        """Only a pre-009 database uses the legacy context restriction."""
+        try:
+            return self.load_snapshot(exposure)
+        except UndefinedTable:
+            return None
 
     def activate(self, exposure: str, profile_id: str) -> dict:
         if exposure not in EXPOSURES:
