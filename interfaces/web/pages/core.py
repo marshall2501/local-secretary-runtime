@@ -1,6 +1,6 @@
-from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
-
 """core page for the daily portal."""
+
+from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
 
 
 def sync(portal_context: dict) -> None:
