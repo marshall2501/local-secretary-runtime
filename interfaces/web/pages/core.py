@@ -1,3 +1,5 @@
+from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
+
 """core page for the daily portal."""
 
 
@@ -15,6 +17,23 @@ def register(portal_context: dict):
     @ui.page("/core")
     def core_page(task_id: str = ""):
         globals().update(portal_context)
+        task_app = StateDrivenTaskApplication(
+            TaskRuntimePorts(
+                create_task_record=_create_magi_core_task_record,
+                execute_source_request=_execute_magi_source_request,
+                record_source_read_record=_record_magi_source_read_record,
+                persist_session_record=_persist_magi_core_session_record,
+                fail_task_record=_fail_magi_core_task_record,
+                claim_user_resume_record=_claim_magi_user_resume_record,
+                abort_user_resume_record=_abort_magi_user_resume_record,
+                claim_proposal_review_record=_claim_magi_proposal_review_record,
+                finalize_proposal_review_record=_finalize_magi_proposal_review_record,
+                abort_proposal_review_record=_abort_magi_proposal_review_record,
+            ),
+            start_runner=run_observation_loop,
+            resume_runner=resume_user_answer,
+            review_runner=review_magi_proposal,
+        )
         state = {"result": None, "busy": False, "resume_busy": False,
                  "trace": None, "trace_error": None,
                  "advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
@@ -905,14 +924,12 @@ def register(portal_context: dict):
                                 guided_button.disable()
                                 guided_result_panel.refresh()
                                 try:
-                                    state["guided_session"] = await resume_user_answer(
+                                    state["guided_session"] = await task_app.answer(
                                         UUID(session["task_id"]),
                                         clarification_input.value,
                                         timeout=guided_timeout_seconds(session),
-                                        claim_user_resume_record=_claim_magi_user_resume_record,
-                                        persist_session_record=_persist_magi_core_session_record,
-                                        abort_user_resume_record=_abort_magi_user_resume_record,
-                                        fail_task_record=_fail_magi_core_task_record,
+
+
                                         stop_requested=stop_event.is_set,
                                         on_turn_start=note_guided_turn,
                                         user_continuation=guided_user_continuation,
@@ -1087,21 +1104,13 @@ def register(portal_context: dict):
                                                 intake,
                                             )
                                         state["guided_session"] = (
-                                            await review_magi_proposal(
+                                            await task_app.review(
                                                 UUID(session["task_id"]),
                                                 decision,
                                                 timeout=guided_timeout_seconds(
                                                     session
                                                 ),
-                                                claim_proposal_review_record=(
-                                                    _claim_magi_proposal_review_record
-                                                ),
-                                                finalize_proposal_review_record=(
-                                                    _finalize_magi_proposal_review_record
-                                                ),
-                                                abort_proposal_review_record=(
-                                                    _abort_magi_proposal_review_record
-                                                ),
+
                                                 memory_result=memory_result,
                                                 stop_requested=stop_event.is_set,
                                                 on_turn_start=note_guided_turn,
@@ -1266,15 +1275,11 @@ def register(portal_context: dict):
                     core_result.refresh()
                     trace_panel.refresh()
                     try:
-                        state["guided_session"] = await run_observation_loop(
+                        state["guided_session"] = await task_app.start(
                             request_text,
                             member_specs=specs,
                             timeout=guided_timeout_seconds(),
-                            create_task_record=_create_magi_core_task_record,
-                            execute_source_request=_execute_magi_source_request,
-                            record_source_read_record=_record_magi_source_read_record,
-                            persist_session_record=_persist_magi_core_session_record,
-                            fail_task_record=_fail_magi_core_task_record,
+
                             stop_requested=stop_event.is_set,
                             on_turn_start=note_guided_turn,
                             task_id=task_uuid,
