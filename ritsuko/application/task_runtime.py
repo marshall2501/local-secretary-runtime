@@ -35,11 +35,12 @@ class StateDrivenTaskApplication:
 
     def __init__(self, ports: TaskRuntimePorts, *,
                  start_runner: Callable, resume_runner: Callable,
-                 review_runner: Callable):
+                 review_runner: Callable, action_service=None):
         self._ports = ports
         self._start_runner = start_runner
         self._resume_runner = resume_runner
         self._review_runner = review_runner
+        self._action_service = action_service
 
     async def start(self, request: str, *, member_specs: list[dict],
                     timeout: float, task_id: UUID | None = None,
@@ -95,3 +96,33 @@ class StateDrivenTaskApplication:
         if review_continuation is not None:
             options["review_continuation"] = review_continuation
         return await self._review_runner(task_id, decision, **options)
+
+    def _require_actions(self):
+        if self._action_service is None:
+            raise RuntimeError("external_action_service_not_configured")
+        return self._action_service
+
+    async def propose_action(self, *, task_id: UUID, operation_id: str,
+                             value: str) -> dict:
+        """Only a trusted isolated caller may supply the registered fixture args.
+
+        The persisted Task scope and MAGI ACTION_PROPOSAL are checked by
+        ExternalActionStore; this does not publish a GUI/REST/MCP write route.
+        """
+        return await self._require_actions().offer(
+            task_id=task_id, operation_id=operation_id, value=value,
+        )
+
+    async def decide_action(self, *, task_id: UUID, approval_id: UUID,
+                            approved: bool, actor: str) -> dict:
+        """Trusted fixture context only; not a substitute for real identity."""
+        return await self._require_actions().decide(
+            task_id=task_id, approval_id=approval_id,
+            approved=approved, actor=actor,
+        )
+
+    async def execute_action(self, *, task_id: UUID, approval_id: UUID,
+                             timeout: float = 5.0) -> dict:
+        return await self._require_actions().execute(
+            task_id=task_id, approval_id=approval_id, timeout=timeout,
+        )
