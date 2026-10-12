@@ -78,7 +78,7 @@ try {
     }
 
     $state = & docker exec $container psql -X -A -t -U secretary_admin -d $ReplacementDatabase -v ON_ERROR_STOP=1 -c "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-    if ($LASTEXITCODE -ne 0 -or ($state | Out-String).Trim() -ne '8|008_runtime_privileges.sql') {
+    if ($LASTEXITCODE -ne 0 -or ($state | Out-String).Trim() -ne '9|009_runtime_policy_profiles.sql') {
         throw "Replacement database migration state is unexpected: $(($state | Out-String).Trim())"
     }
 
