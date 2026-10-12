@@ -61,6 +61,10 @@ try {
     Invoke-TestDocker ($compose + @('exec','-T','secretary-postgres','psql','-X','-U','secretary_admin','-d','secretary',
         '-v','ON_ERROR_STOP=1','-v',"checksum=$checksum",'-f','/tmp/repair.sql'))
     Run-Sql (Join-Path $PSScriptRoot 'assertions.sql') 'secretary'
+    # The same freshly migrated disposable DB also exercises the RITSUKO
+    # external Action repository, not the in-memory test double.
+    & python (Join-Path $PSScriptRoot 'verify-external-action.py') $project $script:container
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated external Action PostgreSQL verification failed.' }
     & python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -BackupPath $backup
