@@ -498,7 +498,7 @@ PostgreSQL repository / connection
 | 9 | Grounding | `pkb/memory_grounding.py` |
 | 10 | Memory契約 | `pkb/memory_contracts.py` |
 
-厳密条件・全件・履歴・時点・集計はPostgreSQL / SQLを正本とします。
+厳密条件・全件・履歴・時点・集計はPostgreSQL / SQLをマスタとします。
 
 ---
 
@@ -653,7 +653,7 @@ db/isolated/pkb_proto/
 
 `db/isolated/pkb_proto/` は検証・証拠資産であり、production `secretary` へ直接適用しません。
 
-DB境界と昇格手順の正本:
+DB境界と昇格手順のマスタ:
 
 [database-boundary.md](database-boundary.md)
 
@@ -786,4 +786,4 @@ PKB、Finance、Service Billing等は独立利用可能なApplication Capability
 7. 対応する自動テストはどれか
 8. 本資料の「機能 ↔ ソース」対応が古くなっていないか
 
-SOURCE_MAPは現在の実装ソース索引です。directory責務・dependency boundaryは設計repoの `RuntimeSourceArchitecture_実装ソース構造.md`、設計理由はDesignDecisions、実装・実機受入状況はSTATUS、現在選択中の作業はPLANを正本とします。
+SOURCE_MAPは現在の実装ソース索引です。directory責務・dependency boundaryは設計repoの `RuntimeSourceArchitecture_実装ソース構造.md`、設計理由はDesignDecisions、実装・実機受入状況はSTATUS、現在選択中の作業はPLANをマスタとします。
