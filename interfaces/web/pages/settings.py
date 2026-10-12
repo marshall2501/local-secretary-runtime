@@ -681,6 +681,175 @@ def register(portal_context: dict):
                     ).classes("text-xs text-grey-7")
     
             with ui.expansion(
+                "RITSUKO — 権限Profile（DB設定）",
+                value=True,
+                icon="admin_panel_settings",
+            ).classes("w-full border-2 border-indigo-300 bg-indigo-50"):
+                ui.label(
+                    "検証／本番とLAN／公開の設定セットをDBで切り替えます。"
+                    "登録済みMAGIの個人情報送信にはTask開始時のProfileを使用します。"
+                ).classes("text-sm")
+                try:
+                    policy_profiles = _list_runtime_policy_profiles()
+                    policy_labels = _list_runtime_policy_labels()
+                    current_policy = _load_magi_policy_snapshot("lan")
+                    if current_policy is None:
+                        raise ValueError("Migration 009 が未適用です")
+                except Exception as exc:
+                    ui.label(
+                        "権限Profile設定を読み込めません: " + str(exc)[:160]
+                    ).classes("text-sm text-orange-800")
+                    ui.label(
+                        "運用DBのMigrationが未適用なら従来のCloud Context Gateのままです。"
+                    ).classes("text-xs text-grey-7")
+                else:
+                    policy_exposure = ui.select(
+                        {"lan": "個人LAN", "local": "ローカル", "public": "外部公開"},
+                        value="lan", label="接続／公開範囲"
+                    ).classes("min-w-56")
+                    active_profile_text = ui.label(
+                        "現在有効: " + str(current_policy.get("profile_name"))
+                        + " / rev=" + str(current_policy.get("revision"))
+                    ).classes("text-sm font-medium")
+                    policy_profile_select = ui.select(
+                        options={
+                            p["id"]: p["name"] + " [" + p["purpose"] + "]"
+                            for p in policy_profiles if p["exposure"] == "lan"
+                        },
+                        value=current_policy["profile_id"],
+                        label="適用または編集する設定セット",
+                    ).classes("min-w-72")
+                    policy_label_select = ui.select(
+                        options={
+                            item["label"]: item["label"]
+                            for item in policy_labels
+                        },
+                        value="llm.send_context.private",
+                        label="権限ラベル",
+                    ).classes("min-w-72")
+                    with ui.row().classes("w-full gap-3 flex-wrap"):
+                        grant_scope = ui.select(
+                            {"any": "すべての送信先", "local": "ローカル接続",
+                             "remote": "リモート接続"},
+                            value="remote", label="送信先"
+                        ).classes("min-w-48")
+                        grant_decision = ui.select(
+                            {"allow": "許可", "deny": "禁止",
+                             "require_confirmation": "実行前確認",
+                             "redact": "指定値をマスクして許可"},
+                            value="deny", label="このラベルの権限"
+                        ).classes("min-w-60")
+                    mask_values = ui.input(
+                        "マスク対象（カンマ区切り、redact時のみ）",
+                        placeholder="例：特定の数字,固有名詞",
+                    ).classes("w-full")
+                    ui.label(
+                        "変更は選択中の設定セットに保存されます。"
+                        "進行中Taskの権限は勝手に切り替わりません。"
+                    ).classes("text-xs text-grey-7")
+
+                    def refresh_policy_choices(_event=None):
+                        exposure = str(policy_exposure.value or "lan")
+                        try:
+                            snapshot = _load_magi_policy_snapshot(exposure)
+                        except Exception as exc:
+                            ui.notify("Profile読込失敗: " + str(exc)[:160],
+                                      type="negative")
+                            return
+                        policy_profile_select.options = {
+                            p["id"]: p["name"] + " [" + p["purpose"] + "]"
+                            for p in policy_profiles if p["exposure"] == exposure
+                        }
+                        policy_profile_select.value = (
+                            snapshot["profile_id"] if snapshot else None
+                        )
+                        policy_profile_select.update()
+                        active_profile_text.text = (
+                            "現在有効: " + str(snapshot.get("profile_name"))
+                            + " / rev=" + str(snapshot.get("revision"))
+                        )
+                        active_profile_text.update()
+                        refresh_selected_grant()
+
+                    def refresh_selected_grant(_event=None):
+                        profile_id = str(policy_profile_select.value or "")
+                        if not profile_id:
+                            return
+                        try:
+                            grants = _list_runtime_policy_grants(profile_id)
+                        except Exception as exc:
+                            ui.notify("Grant読込失敗: " + str(exc)[:160],
+                                      type="negative")
+                            return
+                        label = str(policy_label_select.value or "")
+                        scope = str(grant_scope.value or "remote")
+                        selected = next(
+                            (g for g in grants if g["label"] == label
+                             and g["destination_scope"] == scope), None
+                        )
+                        if selected:
+                            grant_decision.value = selected["decision"]
+                            mask_values.value = ",".join(
+                                (selected.get("mask_rules") or {}).get("tokens") or []
+                            )
+                        else:
+                            grant_decision.value = "deny"
+                            mask_values.value = ""
+                        grant_decision.update()
+                        mask_values.update()
+
+                    policy_exposure.on_value_change(refresh_policy_choices)
+                    policy_profile_select.on_value_change(refresh_selected_grant)
+                    policy_label_select.on_value_change(refresh_selected_grant)
+                    grant_scope.on_value_change(refresh_selected_grant)
+                    refresh_selected_grant()
+
+                    def activate_selected_profile():
+                        try:
+                            snapshot = _activate_runtime_policy(
+                                str(policy_exposure.value),
+                                str(policy_profile_select.value or ""),
+                            )
+                            active_profile_text.text = (
+                                "現在有効: " + snapshot["profile_name"]
+                                + " / rev=" + str(snapshot["revision"])
+                            )
+                            active_profile_text.update()
+                            ui.notify("権限Profileを切り替えました", type="positive")
+                        except Exception as exc:
+                            ui.notify("Profile切替失敗: " + str(exc)[:180],
+                                      type="negative")
+
+                    def save_selected_policy_grant():
+                        try:
+                            raw = str(mask_values.value or "")
+                            tokens = [token.strip() for token in raw.split(",")
+                                      if token.strip()]
+                            _save_runtime_policy_grant(
+                                str(policy_profile_select.value or ""),
+                                str(policy_label_select.value or ""),
+                                str(grant_scope.value or ""),
+                                str(grant_decision.value or ""),
+                                tokens,
+                            )
+                            ui.notify("権限Grantを保存しました", type="positive")
+                            # Snapshot/revision is read again at the next Task.
+                            refresh_policy_choices()
+                        except Exception as exc:
+                            ui.notify("Grant保存失敗: " + str(exc)[:180],
+                                      type="negative")
+
+                    with ui.row().classes("w-full gap-2 flex-wrap"):
+                        ui.button(
+                            "この設定セットを適用", icon="check_circle",
+                            on_click=activate_selected_profile, color="indigo",
+                        )
+                        ui.button(
+                            "権限Grantを保存", icon="save",
+                            on_click=save_selected_policy_grant, color="teal",
+                        )
+
+            with ui.expansion(
                 "画面レイアウト設定",
                 value=False,
                 icon="dashboard_customize",
