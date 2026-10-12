@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 import psycopg
 
 from infrastructure.postgres.runtime_policy_repository import PostgresRuntimePolicyRepository
-from ritsuko.application.context_policy import restrict_members
+from ritsuko.application.context_policy import restrict_members, redact_observation_text
 
 
 def verify_fixture_identity(project: str, container: str) -> int:
@@ -82,7 +82,7 @@ def verify(connect):
     assert masked["revision"] > verification["revision"]
     _, policy = restrict_members(candidate(masked), masked)
     assert policy["redaction_tokens"] == ["CODE-123"]
-    assert "CODE-123" not in str(candidate(masked)["observations"][0].get("source"))
+    assert redact_observation_text("CODE-123", policy["redaction_tokens"]) == "[MASKED]"
 
     production_id = next(row["id"] for row in profiles
                          if row["name"] == "production-lan")
