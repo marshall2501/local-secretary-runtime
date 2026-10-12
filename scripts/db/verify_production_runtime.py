@@ -247,10 +247,10 @@ def main() -> None:
         with db.cursor() as cur:
             cur.execute(
                 """SELECT count(*) FROM secretary.schema_migrations
-                   WHERE version='008_runtime_privileges.sql'"""
+                   WHERE version='009_runtime_policy_profiles.sql'"""
             )
             if cur.fetchone()[0] != 1:
-                raise RuntimeError("production runtime target is missing migration 008")
+                raise RuntimeError("production runtime target is missing migration 009")
 
         if expected_settings is not None:
             actual_settings = {
