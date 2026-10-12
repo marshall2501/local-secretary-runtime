@@ -833,11 +833,40 @@ def register(portal_context: dict):
                                 tokens,
                             )
                             ui.notify("権限Grantを保存しました", type="positive")
-                            # Snapshot/revision is read again at the next Task.
-                            refresh_policy_choices()
+                            # Do not reset selection to the active profile when
+                            # editing a different (inactive) environment set.
+                            refresh_selected_grant()
                         except Exception as exc:
                             ui.notify("Grant保存失敗: " + str(exc)[:180],
                                       type="negative")
+
+                    with ui.row().classes("w-full gap-2 items-end flex-wrap"):
+                        new_label_name = ui.input(
+                            "新しい権限ラベル（必要な場合のみ）",
+                            placeholder="例: service.action",
+                        ).classes("min-w-64")
+                        new_label_category = ui.input(
+                            "分類", value="operation",
+                        ).classes("min-w-40")
+
+                        def create_policy_label():
+                            try:
+                                created = _create_runtime_policy_label(
+                                    str(new_label_name.value or "").strip(),
+                                    str(new_label_category.value or "").strip(),
+                                )
+                                policy_label_select.options[created["label"]] = created["label"]
+                                policy_label_select.value = created["label"]
+                                policy_label_select.update()
+                                ui.notify("権限ラベルを登録しました", type="positive")
+                            except Exception as exc:
+                                ui.notify("登録失敗: " + str(exc)[:180],
+                                          type="negative")
+
+                        ui.button(
+                            "ラベルを登録", icon="add", color="indigo",
+                            on_click=create_policy_label,
+                        )
 
                     with ui.row().classes("w-full gap-2 flex-wrap"):
                         ui.button(
