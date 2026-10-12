@@ -11,6 +11,9 @@ from scripts.db.probe_runtime_policy_readonly import (
     configured_port,
     evaluate_synthetic_observations,
 )
+from scripts.db.probe_magi_cloud_synthetic import (
+    ProbeError, select_cloud_specs, synthetic_session, validate_endpoint,
+)
 
 from ritsuko.application.context_policy import (
     endpoint_scope, restrict_members, resolve_grant, validate_policy_snapshot,
@@ -183,6 +186,69 @@ class RuntimePolicyPureTests(unittest.TestCase):
         _, context = restrict_members(s, s["policy_snapshot"])
         self.assertEqual(context["redaction_tokens"], ["SENSITIVE-123"])
         self.assertNotIn("SENSITIVE-123", str(s["cloud_context_gate"]))
+
+
+class RuntimePolicyLiveSyntheticPreflightTests(unittest.TestCase):
+    """Preflight is entirely offline and never resolves credentials."""
+
+    @staticmethod
+    def configured_cloud_members():
+        return [
+            {"name": "MELCHIOR", "provider": "ollama",
+             "endpoint": "http://secretary-ollama:11434",
+             "model": "fixture-local", "enabled": True},
+            {"name": "CASPER", "provider": "openai",
+             "endpoint": "https://api.openai.com/v1",
+             "connection_id": "fixture-o", "model": "fixture-openai",
+             "enabled": True},
+            {"name": "BALTHASAR", "provider": "gemini",
+             "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+             "connection_id": "fixture-g", "model": "fixture-gemini",
+             "enabled": True},
+        ]
+
+    def test_approved_profile_only_selects_two_cloud_members(self):
+        specs, ctx = select_cloud_specs(
+            self.configured_cloud_members(), profile()
+        )
+        self.assertEqual([x["name"] for x in specs],
+                         ["CASPER", "BALTHASAR"])
+        self.assertTrue(all(not x["retry_within_turn"] for x in specs))
+        self.assertTrue(all(x["timeout_seconds"] == 60 for x in specs))
+        self.assertEqual(ctx["profile_name"], "verification-lan")
+        state = synthetic_session(specs, profile())
+        texts = " ".join(x["text"] for x in state["observations"])
+        self.assertIn("FICTIONAL-", texts)
+        self.assertEqual(len(state["turns"]), 0)
+
+    def test_rejects_production_profile_even_with_cloud_members(self):
+        with self.assertRaisesRegex(ProbeError, "not verification-lan"):
+            select_cloud_specs(self.configured_cloud_members(),
+                               profile(name="production-lan"))
+
+    def test_unapproved_host_and_provider_redirect_are_refused(self):
+        members = self.configured_cloud_members()
+        for endpoint in (
+            "http://api.openai.com/v1",
+            "https://api.openai.com.evil.example/v1",
+            "https://api.openai.com/v1?redirect=https://elsewhere",
+            "https://api.openai.com/v2",
+        ):
+            changed = [dict(item) for item in members]
+            changed[1]["endpoint"] = endpoint
+            with self.assertRaises(ProbeError):
+                select_cloud_specs(changed, profile())
+        validate_endpoint(members[1])
+        validate_endpoint(members[2])
+
+    def test_no_live_request_without_explicit_flag(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "scripts/db/probe_magi_cloud_synthetic.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('if not args.live_synthetic:', source)
+        self.assertIn('options="-c default_transaction_read_only=on"', source)
+        self.assertIn('register_connection_credential_loader(None)', source)
 
 
 class RuntimePolicyReadonlyProbeTests(unittest.TestCase):
