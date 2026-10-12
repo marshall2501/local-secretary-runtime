@@ -120,19 +120,20 @@ def restrict_members(session: dict, snapshot: dict) -> tuple[list[dict] | None, 
             if grant["decision"] == "redact"
             for token in grant["mask_rules"]["tokens"]
         })
+    union_tokens = sorted({token for tokens in redactions.values() for token in tokens})
     info = {"mode": "configured_policy",
             "profile_id": policy["profile_id"],
             "profile_name": policy["profile_name"],
             "revision": policy["revision"],
             "private_sources": sources,
             "withheld_members": withheld,
-            "member_redactions": redactions}
+            "redaction_member_counts": {key: len(values) for key, values in redactions.items()}}
     session["cloud_context_gate"] = {**deepcopy(info),
                                      "status": "applied" if allowed else "blocked_no_allowed_member"}
     if not allowed:
         session.update(status="stopped", next_step="cloud_context_gate_no_allowed_member")
         return [], None
-    return allowed, info
+    return allowed, {**info, "redaction_tokens": union_tokens}
 
 
 def redact_observation_text(text: str, tokens: list[str]) -> str:
