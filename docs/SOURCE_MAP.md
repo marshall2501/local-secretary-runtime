@@ -1,6 +1,6 @@
 # SOURCE_MAP — ソース構成と機能対応
 
-更新: 2026-10-07  
+更新: 2026-10-12  
 参照runtime: behavior `05beac90...` / verification harness `969fb5f6...`
 
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
@@ -8,6 +8,8 @@
 source directoryの役割・dependency direction・重要な配置原則の設計マスタは [`local-secretary-ai/docs/01_Architecture/RuntimeSourceArchitecture_実装ソース構造.md`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/RuntimeSourceArchitecture_%E5%AE%9F%E8%A3%85%E3%82%BD%E3%83%BC%E3%82%B9%E6%A7%8B%E9%80%A0.md) です。本資料は、その設計を**現在どのfileが実装しているか**を追跡します。
 
 本資料は「どこに何が実装されているか」を示すものであり、機能が実機受入済みであることを意味しません。
+
+2026-10-12: state-driven Taskの開始・本人回答・Proposal ReviewがGUI非依存のApplication入口を経由するようになった。固定Action fixtureでは共通Operation定義、Task scopeによる低影響事前許可／高影響個別承認、PostgreSQL予約とreadbackを隔離CIで確認。**日常GUIのAction操作、実サービス連携、Production適用は未実施**。
 
 - 大目標・製品要件: `local-secretary-ai/docs/PROJECT.md`
 - 採用アーキテクチャ: `local-secretary-ai/docs/ARCHITECTURE.md`
@@ -27,7 +29,7 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 | 4 | PKB Entity詳細 | [../interfaces/web/pages/entity.py](../interfaces/web/pages/entity.py) | PKB query / entity model | PostgreSQL |
 | 5 | Pending確認 | [../interfaces/web/pages/pkb.py](../interfaces/web/pages/pkb.py) | [../pkb/pending_service.py](../pkb/pending_service.py) | PostgreSQL |
 | 6 | Memory Intake | Web / RITSUKO | [../pkb/application/memory_intake.py](../pkb/application/memory_intake.py), [../pkb/memory_intake.py](../pkb/memory_intake.py) | PostgreSQL |
-| 7 | RITSUKOへ自然言語依頼 | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | [../ritsuko/application/entry.py](../ritsuko/application/entry.py) | Task / MAGI / PKB / Capability |
+| 7 | RITSUKOへ自然言語依頼（旧Core＋state-driven） | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | [../ritsuko/application/entry.py](../ritsuko/application/entry.py)（旧Core）／[../ritsuko/application/task_runtime.py](../ritsuko/application/task_runtime.py)→[../ritsuko/core/observation_loop.py](../ritsuko/core/observation_loop.py)（state-driven） | Task / MAGI / PKB / Web / Finance |
 | 8 | RITSUKO Task再開 | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | `RitsukoApplicationEntry.resume()` | PostgreSQL |
 | 9 | RITSUKO Task履歴・trace | [../interfaces/web/pages/core_history.py](../interfaces/web/pages/core_history.py) | [../ritsuko/application/task_queries.py](../ritsuko/application/task_queries.py) | PostgreSQL |
 | 10 | MAGI分析 | RITSUKO経由 | [../ritsuko/magi/](../ritsuko/magi/) | Ollama / OpenAI / Gemini等 |
@@ -49,6 +51,7 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 | 26 | Fresh Production初期化 | [../scripts/db/initialize-fresh-production.ps1](../scripts/db/initialize-fresh-production.ps1) | migration 001-008 / existing cluster role reuse | PostgreSQL |
 | 27 | Production DB再構築 | [../scripts/db/rebuild-production.ps1](../scripts/db/rebuild-production.ps1) | fresh schema + settings only → replacement DB | PostgreSQL |
 | 28 | 旧昇格entry互換 | [../scripts/db/promote-production.ps1](../scripts/db/promote-production.ps1) | clean rebuildへ委譲 | PowerShell |
+| 29 | 外部Action（隔離fixture、日常UI/write API非公開） | Application入口 [../ritsuko/application/task_runtime.py](../ritsuko/application/task_runtime.py)（オプションのAction Service） | [../ritsuko/application/external_actions.py](../ritsuko/application/external_actions.py)／[../ritsuko/application/external_action_policy.py](../ritsuko/application/external_action_policy.py) | [../infrastructure/postgres/external_action_repository.py](../infrastructure/postgres/external_action_repository.py) ＋ 固定loopback HTTP。使い捨てDB上の検証でありProduction利用の受入ではない |
 
 ---
 
