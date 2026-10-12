@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 from ritsuko.application.context_policy import (
-    endpoint_scope, restrict_members, validate_policy_snapshot,
+    endpoint_scope, restrict_members, resolve_grant, validate_policy_snapshot,
     redact_observation_text,
 )
 from ritsuko.magi.async_execution import (
@@ -59,6 +59,51 @@ class RuntimePolicyPureTests(unittest.TestCase):
         self.assertEqual(context["mode"], "configured_policy")
         self.assertEqual(s["cloud_context_gate"]["status"], "applied")
         self.assertNotIn("redaction_tokens", s["cloud_context_gate"])
+
+    def test_verification_remote_grant_inherits_any_allow(self):
+        # Initial Migration 009 inserts 'any/allow' only; the settings UI
+        # must not invent an explicit remote deny where no rule exists.
+        rules = profile()["grants"]
+        for scope in ("local", "remote"):
+            selected, origin = resolve_grant(
+                rules, "llm.send_context.private", scope
+            )
+            self.assertEqual(selected["decision"], "allow")
+            self.assertEqual(selected["destination_scope"], "any")
+            self.assertEqual(origin, "inherited")
+
+    def test_exact_remote_grant_overrides_inherited_allow(self):
+        rules = profile()["grants"]
+        rules.append({
+            "label": "llm.send_context.private",
+            "destination_scope": "remote",
+            "decision": "deny",
+            "mask_rules": {},
+        })
+        remote, remote_origin = resolve_grant(
+            rules, "llm.send_context.private", "remote"
+        )
+        local, local_origin = resolve_grant(
+            rules, "llm.send_context.private", "local"
+        )
+        self.assertEqual((remote["decision"], remote_origin), ("deny", "exact"))
+        self.assertEqual((local["decision"], local_origin), ("allow", "inherited"))
+
+    def test_missing_grant_is_not_a_stored_deny(self):
+        found, origin = resolve_grant(
+            profile()["grants"], "llm.send_context.other", "remote"
+        )
+        self.assertIsNone(found)
+        self.assertEqual(origin, "missing")
+
+    def test_settings_ui_uses_same_grant_precedence_as_runtime(self):
+        root = Path(__file__).resolve().parents[1]
+        settings = (root / "interfaces/web/pages/settings.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("resolve_grant(grants, label, scope)", settings)
+        self.assertIn("すべての送信先から継承", settings)
+        self.assertIn("該当Grantなし／未設定", settings)
 
     def test_production_blocks_remote_even_for_ollama(self):
         p = profile(name="production-lan")
