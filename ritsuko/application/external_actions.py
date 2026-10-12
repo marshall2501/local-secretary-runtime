@@ -6,7 +6,7 @@ The first registered operation is a disposable loopback HTTP fixture.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from ritsuko.application.external_action_policy import RegisteredOperation as Operation
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Protocol
@@ -17,39 +17,6 @@ import anyio
 
 class ActionDenied(ValueError):
     """Safe denial; never include credentials or external response bodies."""
-
-
-@dataclass(frozen=True)
-class Operation:
-    operation_id: str
-    service_id: str
-    connection_id: str
-    resource_id: str
-    required_permission: str
-    effect: str
-    verification_kind: str
-    kind: str = "write"
-
-    def __post_init__(self):
-        if self.kind != "write" or self.verification_kind != "readback_equals":
-            raise ValueError("unsupported_external_action_operation")
-        if any(not v or len(v) > 100 for v in (
-            self.operation_id, self.service_id, self.connection_id,
-            self.resource_id, self.required_permission, self.effect,
-        )):
-            raise ValueError("invalid_external_action_operation")
-
-    def snapshot(self) -> dict:
-        return {
-            "operation_id": self.operation_id,
-            "service_id": self.service_id,
-            "connection_id": self.connection_id,
-            "resource_id": self.resource_id,
-            "required_permission": self.required_permission,
-            "effect": self.effect,
-            "verification_kind": self.verification_kind,
-            "kind": self.kind,
-        }
 
 
 class ActionStore(Protocol):
@@ -80,6 +47,8 @@ FIXTURE_OPERATION = Operation(
     required_permission="external_actions",
     effect="change disposable fixture setting",
     verification_kind="readback_equals",
+    risk="high",
+    input_fields=frozenset({"resource_id", "value"}),
 )
 
 
