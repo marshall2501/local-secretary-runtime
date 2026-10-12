@@ -20,7 +20,7 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 ## 1. 利用者機能と主な実装
 
 | No. | 利用者から見える処理 | Interface / Entry | 主なApplication / Domain | Infrastructure / 外部I/O |
-| --- ---|---|---|---|
+| --- | --- | --- |---|---|
 | 1 | 日常Web GUI起動 | [../interfaces/web/app.py](../interfaces/web/app.py) | [../bootstrap/web_runtime.py](../bootstrap/web_runtime.py) | NiceGUI / PostgreSQL |
 | 2 | TOP / 機能一覧 | [../interfaces/web/pages/top.py](../interfaces/web/pages/top.py), [../interfaces/web/pages/features.py](../interfaces/web/pages/features.py) | Web Runtime | read-only status |
 | 3 | PKB登録・訂正・検索 | [../interfaces/web/pages/pkb.py](../interfaces/web/pages/pkb.py) | [../pkb/application/daily.py](../pkb/application/daily.py), PKB services | PostgreSQL |
@@ -252,7 +252,7 @@ PostgreSQL
 主な対応:
 
 | No. | Owner | Port / 上位contract | PostgreSQL adapter |
-| --- ---|---|---|
+| --- | --- | --- |---|
 | 1 | PKB | `pkb/persistence.py` と各PKB service | `infrastructure/postgres/pkb_repository.py` + `pkb_*_repository.py` |
 | 2 | RITSUKO Task / MAGI | `ritsuko/tasks/magi_task_store.py`, `ritsuko/magi/settings.py` | `magi_task_repository.py`, `magi_settings_repository.py` |
 | 3 | Finance | `capabilities/finance/` | `finance_repository.py` |
@@ -370,7 +370,7 @@ PostgreSQL / PKB / Capability
 RITSUKO内部の主な責務:
 
 | No. | 責務 | 実装 |
-| --- ---|---|
+| --- | --- | --- |
 | 1 | Core coordination | `ritsuko/core/core_coordinator.py` |
 | 2 | OODA / 制御 | `ritsuko/core/core_ooda.py` |
 | 3 | Observation | `ritsuko/core/core_observation.py` |
@@ -406,6 +406,21 @@ MAGI evaluate_observation
 ```
 
 PKB / Finance等のprivate・sensitive Observationを含む再分析はlocal-onlyです。Webへは、scope済みPKB結果から公開してよいと決定できる技術識別子だけを `public_query_terms` として渡せます。対象を一意に解決できないPKB要求はglobal Claim検索へ広げません。Files / task_history / external_service / pc_observationは現時点ではこの自動read経路へ未接続です。
+
+### 外部Actionの現存コード（未受入の範囲を含む）
+
+| No. | 担当 | 現存ソース | 現在の実証・未達 |
+| --- | --- | --- | --- |
+| 1 | 個別承認前提のfixture Action Application | [`ritsuko/application/external_actions.py`](../ritsuko/application/external_actions.py) | 登録済み模擬操作に限る。通常GUI/APIから未接続 |
+| 2 | 先行Policy helper | [`ritsuko/application/external_action_policy.py`](../ritsuko/application/external_action_policy.py) | 別実装経路。共通Policyへの統合が必要 |
+| 3 | Approval / Action / Result / Source / Audit SQL | [`infrastructure/postgres/external_action_repository.py`](../infrastructure/postgres/external_action_repository.py) | 既存schemaを使用。実PostgreSQL統合試験は未確認 |
+| 4 | 固定loopback HTTP設定変更Adapter | [`integrations/connections/loopback_setting_adapter.py`](../integrations/connections/loopback_setting_adapter.py) | 使い捨てHTTP fixtureで試験済み。一般HTTP proxyではない |
+| 5 | 隔離HTTPテスト | [`tests/test_external_actions.py`](../tests/test_external_actions.py) | MemoryStore + loopback HTTP、2026-10-12 mainのCI PASS |
+| 6 | 先行Policyの単体テスト | [`tests/test_external_action_policy.py`](../tests/test_external_action_policy.py) | コード存在。CIの上記独立テストの実行は未確認 |
+
+2026-10-12採用設計は[DesignDecisions D-29](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/00_Project/DesignDecisions_%E8%A8%AD%E8%A8%88%E5%88%A4%E6%96%AD.md)を参照。通常の低影響Actionは事前許可範囲で個別承認なし、高影響Actionは必要な本人承認後に実行する。現行コードは個別承認が必要なfixture操作だけを対象とし、**この採用設計全体を実装・受入済みとは扱わない**。
+
+新規DB試験はproduction `db/migrations/`の現行schemaを使う一時PostgreSQL DBを基本とする。歴史的`db/isolated/pkb_proto/`の別migration系列へ新機能を追加せず、テストデータを運用DBへ昇格・移植する前提を作らない。
 
 ---
 
@@ -468,7 +483,7 @@ PostgreSQL repository / connection
 主な責務:
 
 | No. | 機能 | 実装 |
-| --- ---|---|
+| --- | --- | --- |
 | 1 | 日常PKB操作 | `pkb/application/daily.py` |
 | 2 | 厳密検索 | `pkb/query_service.py` |
 | 3 | 登録 | `pkb/write_service.py` |
@@ -646,7 +661,7 @@ DB境界と昇格手順の正本:
 主要entry:
 
 | No. | 処理 | 実装 |
-| --- ---|---|
+| --- | --- | --- |
 | 1 | PostgreSQL Setup / Start / Doctor | `scripts/db/postgres.ps1` |
 | 2 | production migration | `scripts/db/migrate.sh` |
 | 3 | 2DB read-only比較 | `scripts/db/compare-runtime-databases.ps1` |
@@ -697,7 +712,7 @@ Application / DomainからConcrete Infrastructureへの逆依存を増やしま�
 ## 13. テスト対応
 
 | No. | テスト | 主な対象 |
-| --- ---|---|
+| --- | --- | --- |
 | 1 | `test_architecture_boundaries.py` | package依存境界、旧runtime path |
 | 2 | `test_ritsuko_application_entry.py` | RITSUKO共通Application Entry |
 | 3 | `test_ritsuko_magi_protocol.py` | RITSUKO-MAGI契約 |
