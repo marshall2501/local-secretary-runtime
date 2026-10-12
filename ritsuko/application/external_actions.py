@@ -52,6 +52,18 @@ FIXTURE_OPERATION = Operation(
 )
 
 
+FIXTURE_LOW_IMPACT_OPERATION = Operation(
+    operation_id="fixture.setting.update.low",
+    service_id="loopback_fixture",
+    connection_id="isolated-fixture-no-secret",
+    resource_id="fixture.setting",
+    required_permission="external_actions",
+    effect="change disposable fixture setting (preauthorized low impact)",
+    verification_kind="readback_equals",
+    risk="low",
+    input_fields=frozenset({"resource_id", "value"}),
+)
+
 class ExternalActionService:
     """Keep validation, approval, dispatch, and observed result separate.
 
@@ -78,11 +90,19 @@ class ExternalActionService:
             raise ActionDenied("invalid_fixture_setting")
         if type(lifetime_seconds) is not int or not 1 <= lifetime_seconds <= 3600:
             raise ActionDenied("invalid_approval_lifetime")
+        # The store must independently verify the persisted Task permission
+        # scope. A registered low-impact descriptor alone is not authorization.
+        offer_options = {
+            "task_id": task_id,
+            "operation": operation.snapshot(),
+            "arguments": {"value": value},
+            "requested_by": requested_by,
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds),
+        }
+        if operation.risk == "low":
+            offer_options["preapproved"] = True
         return await anyio.to_thread.run_sync(partial(
-            self._store.offer, task_id=task_id,
-            operation=operation.snapshot(), arguments={"value": value},
-            requested_by=requested_by,
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds),
+            self._store.offer, **offer_options,
         ))
 
     async def decide(self, *, task_id: UUID, approval_id: UUID,
