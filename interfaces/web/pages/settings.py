@@ -1,5 +1,7 @@
 """settings page for the daily portal."""
 
+from ritsuko.application.context_policy import resolve_grant
+
 
 def sync(portal_context: dict) -> None:
     globals().update(portal_context)
@@ -743,10 +745,19 @@ def register(portal_context: dict):
                         "マスク対象（カンマ区切り、redact時のみ）",
                         placeholder="例：特定の数字,固有名詞",
                     ).classes("w-full")
+                    effective_grant_label = ui.label(
+                        "実効権限を読み込んでいます"
+                    ).classes("text-sm font-medium text-indigo-900")
+                    ui.label(
+                        "「すべての送信先」のGrantは、個別Grantがない送信先にも"
+                        "継承されます。下の権限欄は個別Grantを編集する入力欄です。"
+                        "変更を保存すると、選択した送信先の個別Grantを作成・更新します。"
+                    ).classes("text-xs text-grey-7")
                     ui.label(
                         "変更は選択中の設定セットに保存されます。"
                         "進行中Taskの権限は勝手に切り替わりません。"
                     ).classes("text-xs text-grey-7")
+                    displayed_grant = {"origin": "missing", "decision": None, "tokens": []}
 
                     def refresh_policy_choices(_event=None):
                         exposure = str(policy_exposure.value or "lan")
@@ -783,20 +794,44 @@ def register(portal_context: dict):
                             return
                         label = str(policy_label_select.value or "")
                         scope = str(grant_scope.value or "remote")
-                        selected = next(
-                            (g for g in grants if g["label"] == label
-                             and g["destination_scope"] == scope), None
+                        selected, origin = resolve_grant(grants, label, scope)
+                        decision_labels = {
+                            "allow": "許可",
+                            "deny": "禁止",
+                            "require_confirmation": "実行前確認",
+                            "redact": "指定値をマスクして許可",
+                        }
+                        displayed_grant["origin"] = origin
+                        displayed_grant["decision"] = (
+                            selected["decision"] if selected else None
                         )
-                        if selected:
+                        displayed_grant["tokens"] = (
+                            list((selected.get("mask_rules") or {}).get("tokens") or [])
+                            if selected else []
+                        )
+                        if selected is not None:
                             grant_decision.value = selected["decision"]
-                            mask_values.value = ",".join(
-                                (selected.get("mask_rules") or {}).get("tokens") or []
+                            mask_values.value = ",".join(displayed_grant["tokens"])
+                            provenance = (
+                                "この送信先の個別Grant" if origin == "exact"
+                                else "すべての送信先から継承"
+                            )
+                            effective_grant_label.text = (
+                                "現在の実効権限: "
+                                + decision_labels[selected["decision"]]
+                                + "（" + provenance + "）"
                             )
                         else:
+                            # Missing is fail-closed, but it must not look like
+                            # an actual explicit 'deny' Grant stored in DB.
                             grant_decision.value = "deny"
                             mask_values.value = ""
+                            effective_grant_label.text = (
+                                "現在の実効権限: 禁止（該当Grantなし／未設定）"
+                            )
                         grant_decision.update()
                         mask_values.update()
+                        effective_grant_label.update()
 
                     policy_exposure.on_value_change(refresh_policy_choices)
                     policy_profile_select.on_value_change(refresh_selected_grant)
@@ -825,17 +860,39 @@ def register(portal_context: dict):
                             raw = str(mask_values.value or "")
                             tokens = [token.strip() for token in raw.split(",")
                                       if token.strip()]
+                            new_decision = str(grant_decision.value or "")
+                            if (
+                                displayed_grant["origin"] == "inherited"
+                                and new_decision == displayed_grant["decision"]
+                                and tokens == displayed_grant["tokens"]
+                            ):
+                                ui.notify(
+                                    "既存の「すべての送信先」Grantを継承しています。"
+                                    "同じ設定の個別Grantを追加する必要はありません。",
+                                    type="info",
+                                )
+                                return
                             _save_runtime_policy_grant(
                                 str(policy_profile_select.value or ""),
                                 str(policy_label_select.value or ""),
                                 str(grant_scope.value or ""),
-                                str(grant_decision.value or ""),
+                                new_decision,
                                 tokens,
                             )
                             ui.notify("権限Grantを保存しました", type="positive")
-                            # Do not reset selection to the active profile when
-                            # editing a different (inactive) environment set.
+                            # Preserve the selected (possibly inactive) Profile.
                             refresh_selected_grant()
+                            current = _load_magi_policy_snapshot(
+                                str(policy_exposure.value or "lan")
+                            )
+                            if current and current["profile_id"] == str(
+                                policy_profile_select.value or ""
+                            ):
+                                active_profile_text.text = (
+                                    "現在有効: " + current["profile_name"]
+                                    + " / rev=" + str(current["revision"])
+                                )
+                                active_profile_text.update()
                         except Exception as exc:
                             ui.notify("Grant保存失敗: " + str(exc)[:180],
                                       type="negative")
