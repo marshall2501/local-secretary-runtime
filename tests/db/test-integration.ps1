@@ -65,6 +65,9 @@ try {
     # external Action repository, not the in-memory test double.
     & python (Join-Path $PSScriptRoot 'verify-external-action.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated external Action PostgreSQL verification failed.' }
+    # Policy migration 009 is verified against the same disposable DB.
+    & python (Join-Path $PSScriptRoot 'verify-runtime-policy.py') $project $script:container
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated runtime policy PostgreSQL verification failed.' }
     & python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -BackupPath $backup
