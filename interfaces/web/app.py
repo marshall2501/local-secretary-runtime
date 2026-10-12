@@ -670,11 +670,7 @@ def _load_magi_policy_snapshot(exposure: str = "lan") -> dict | None:
     Deploys before migration 009 retain the legacy Cloud Gate; other DB
     failures are surfaced rather than silently assuming a broader policy.
     """
-    from psycopg.errors import UndefinedTable
-    try:
-        return _runtime_policy_repository.load_snapshot(exposure)
-    except UndefinedTable:
-        return None
+    return _runtime_policy_repository.load_snapshot_or_none(exposure)
 
 
 def _list_runtime_policy_profiles() -> list[dict]:
