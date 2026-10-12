@@ -24,6 +24,34 @@ class RegisteredOperation:
     risk: str
     input_fields: frozenset[str]
     resource_field: str = "resource_id"
+    # Execution metadata is optional for pure policy tests, but required
+    # when an operation is dispatched by ExternalActionService.
+    service_id: str = ""
+    resource_id: str = ""
+    effect: str = ""
+    verification_kind: str = "readback_equals"
+    kind: str = "write"
+
+    def snapshot(self) -> dict:
+        """One canonical, immutable operation descriptor for persistence."""
+        if any(not field or len(field) > 100 for field in (
+            self.operation_id, self.service_id, self.connection_id,
+            self.resource_id, self.required_permission, self.effect,
+        )):
+            raise ActionPolicyError("invalid_action_operation")
+        if self.kind != "write" or self.verification_kind != "readback_equals":
+            raise ActionPolicyError("unsupported_action_operation")
+        return {
+            "operation_id": self.operation_id,
+            "service_id": self.service_id,
+            "connection_id": self.connection_id,
+            "resource_id": self.resource_id,
+            "required_permission": self.required_permission,
+            "effect": self.effect,
+            "verification_kind": self.verification_kind,
+            "kind": self.kind,
+            "risk": self.risk,
+        }
 
     def __post_init__(self) -> None:
         if (
