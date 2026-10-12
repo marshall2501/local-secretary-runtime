@@ -50,6 +50,7 @@ from bootstrap.web_runtime import (
     build_pkb_repository,
     build_service_billing_settings_repository,
     build_service_connection_repository,
+    build_runtime_policy_repository,
     build_schema_diagram_service,
     claim_core_cooperative_probe,
     connection,
@@ -219,6 +220,7 @@ _pkb_repository = build_pkb_repository()
 _magi_task_repository = build_magi_task_repository()
 _magi_settings_repository = build_magi_settings_repository()
 _service_connection_repository = build_service_connection_repository()
+_runtime_policy_repository = build_runtime_policy_repository()
 _service_billing_settings_repository = build_service_billing_settings_repository()
 _finance_repository = build_finance_repository()
 _schema_diagram_service = build_schema_diagram_service()
@@ -660,6 +662,49 @@ def _entity_source_rows(detail: dict) -> list[dict]:
         )
 
     return result
+
+
+def _load_magi_policy_snapshot(exposure: str = "lan") -> dict | None:
+    """Read current owner-selected policy before starting a Task.
+
+    Deploys before migration 009 retain the legacy Cloud Gate; other DB
+    failures are surfaced rather than silently assuming a broader policy.
+    """
+    from psycopg.errors import UndefinedTable
+    try:
+        return _runtime_policy_repository.load_snapshot(exposure)
+    except UndefinedTable:
+        return None
+
+
+def _list_runtime_policy_profiles() -> list[dict]:
+    return _runtime_policy_repository.list_profiles()
+
+
+def _list_runtime_policy_labels() -> list[dict]:
+    return _runtime_policy_repository.list_labels()
+
+
+def _list_runtime_policy_grants(profile_id: str) -> list[dict]:
+    return _runtime_policy_repository.list_grants(profile_id)
+
+
+def _activate_runtime_policy(exposure: str, profile_id: str) -> dict:
+    return _runtime_policy_repository.activate(exposure, profile_id)
+
+
+def _save_runtime_policy_grant(
+    profile_id: str, label: str, scope: str, decision: str, tokens: list[str]
+) -> dict:
+    return _runtime_policy_repository.save_grant(
+        profile_id, label, scope, decision, mask_tokens=tokens
+    )
+
+
+def _create_runtime_policy_label(
+    label: str, category: str, description: str = ""
+) -> dict:
+    return _runtime_policy_repository.create_label(label, category, description)
 
 
 def _connection_credential_loader(connection_id: str) -> str | None:
