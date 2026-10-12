@@ -176,8 +176,8 @@ def register(portal_context: dict):
                         "MELCHIOR / CASPER / BALTHASARをProvider非依存slotとして利用します。"
                     ).classes("text-sm")
                     ui.label(
-                        "private / sensitive Observationを含む再分析はCloud Context Gateでlocal-only。"
-                        "外部変更操作や未接続Sourceを利用可能とは扱いません。"
+                        "個人ObservationのMAGI送信先は、設定画面の環境別権限Profileに従います。"
+                        "Migration未適用・以前のTaskは既存のCloud Context Gateを維持します。"
                     ).classes("text-xs text-orange-800")
                     ui.label(
                         "利用可能read Source: "
@@ -404,7 +404,7 @@ def register(portal_context: dict):
                                 "provider": str(spec.get("provider") or ""),
                                 "model": str(spec.get("model") or ""),
                                 "state": "withheld",
-                                "validated_summary": "Cloud Context Gate / local-only",
+                                "validated_summary": "MAGI context policy / withheld",
                             })
                     return await call_guided_panel_async(
                         envelope,
@@ -415,9 +415,16 @@ def register(portal_context: dict):
                     )
 
                 async def guided_dialogue_starter(user_raw: str, **kwargs) -> dict:
+                    # Profile is bound once at Task creation and persisted in
+                    # the MAGI session. A later UI change does not silently
+                    # alter the permissions of an in-flight/resumed Task.
+                    policy_snapshot = await run.io_bound(
+                        _load_magi_policy_snapshot, "lan"
+                    )
                     return await start_dialogue_async(
                         user_raw,
                         caller=guided_panel_caller,
+                        policy_snapshot=policy_snapshot,
                         **kwargs,
                     )
 
