@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 import unittest
+
+from scripts.db.probe_runtime_policy_readonly import (
+    configured_port,
+    evaluate_synthetic_observations,
+)
 
 from ritsuko.application.context_policy import (
     endpoint_scope, restrict_members, resolve_grant, validate_policy_snapshot,
@@ -174,6 +180,39 @@ class RuntimePolicyPureTests(unittest.TestCase):
         _, context = restrict_members(s, s["policy_snapshot"])
         self.assertEqual(context["redaction_tokens"], ["SENSITIVE-123"])
         self.assertNotIn("SENSITIVE-123", str(s["cloud_context_gate"]))
+
+
+class RuntimePolicyReadonlyProbeTests(unittest.TestCase):
+    def test_real_policy_synthetic_evaluation_accepts_fixture(self):
+        self.assertEqual(
+            evaluate_synthetic_observations(profile()), 
+            ["MELCHIOR", "CASPER", "BALTHASAR"],
+        )
+
+    def test_probe_fails_when_production_profile_selected(self):
+        p = profile(name="production-lan")
+        with self.assertRaisesRegex(RuntimeError, "not verification-lan"):
+            evaluate_synthetic_observations(p)
+
+    def test_probe_refuses_port_outside_configured_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / ".env.postgres"
+            filename.write_text("LSA_DB_PORT=55432\\n", encoding="utf-8")
+            # This must use an actual line separator, not two literal characters.
+            filename.write_text("LSA_DB_PORT=55432" + chr(10), encoding="utf-8")
+            self.assertEqual(configured_port(filename), 55432)
+            filename.write_text("LSA_DB_PORT=2" + chr(10), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "out of range"):
+                configured_port(filename)
+
+    def test_probe_enforces_read_only_connection_without_cloud_api(self):
+        file = (Path(__file__).resolve().parents[1]
+                / "scripts/db/probe_runtime_policy_readonly.py").read_text(
+                    encoding="utf-8"
+                )
+        self.assertIn("default_transaction_read_only=on", file)
+        self.assertIn("SHOW transaction_read_only", file)
+        self.assertNotIn("request_json_with_retry", file)
 
 
 class RuntimePolicyAsyncTests(unittest.IsolatedAsyncioTestCase):
