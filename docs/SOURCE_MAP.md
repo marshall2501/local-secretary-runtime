@@ -1,7 +1,7 @@
 # SOURCE_MAP — ソース構成と機能対応
 
 更新: 2026-10-12  
-参照runtime: behavior `05beac90...` / verification harness `969fb5f6...`
+参照runtime: current policy implementation `3de93850013c2e410815160e56c009344d889dbc` / GitHub isolated CI PASS。サブPC実機は未確認。過去のTask/Actionの受入は各Plan/STATUSを参照。
 
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
 
