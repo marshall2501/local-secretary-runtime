@@ -197,8 +197,6 @@ class RuntimePolicyReadonlyProbeTests(unittest.TestCase):
     def test_probe_refuses_port_outside_configured_range(self):
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / ".env.postgres"
-            filename.write_text("LSA_DB_PORT=55432\\n", encoding="utf-8")
-            # This must use an actual line separator, not two literal characters.
             filename.write_text("LSA_DB_PORT=55432" + chr(10), encoding="utf-8")
             self.assertEqual(configured_port(filename), 55432)
             filename.write_text("LSA_DB_PORT=2" + chr(10), encoding="utf-8")
