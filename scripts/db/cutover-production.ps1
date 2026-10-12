@@ -45,7 +45,7 @@ foreach ($database in @('secretary', $ReplacementDatabase)) {
 }
 
 $replacementState = Invoke-AdminScalar $ReplacementDatabase "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-if ($replacementState -ne '8|008_runtime_privileges.sql') {
+if ($replacementState -ne '9|009_runtime_policy_profiles.sql') {
     throw "Replacement database migration state is unexpected: $replacementState"
 }
 
@@ -106,7 +106,7 @@ try {
     $newPromoted = $true
 
     $newState = Invoke-AdminScalar 'secretary' "SELECT count(*)::text || '|' || max(version) FROM secretary.schema_migrations;"
-    if ($newState -ne '8|008_runtime_privileges.sql') {
+    if ($newState -ne '9|009_runtime_policy_profiles.sql') {
         throw "Promoted secretary migration state is unexpected: $newState"
     }
 
