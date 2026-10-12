@@ -1980,6 +1980,9 @@ _FEATURES = [
 ]
 
 
+WEB_COPYRIGHT = "© 2026 marshall2501"
+
+
 def _nav():
     with ui.row().classes("w-full items-center gap-2 mb-2"):
         ui.button("TOP", icon="home").props("flat href=/ tag=a")
@@ -1990,6 +1993,7 @@ def _nav():
         ui.button("利用料金・契約", icon="query_stats").props("flat href=/service-billing tag=a")
         ui.button("デバッグ", icon="monitor_heart").props("flat href=/debug tag=a")
         ui.button("設定", icon="settings").props("flat href=/settings tag=a")
+    ui.label(WEB_COPYRIGHT).classes("text-xs text-grey-6")
 
 
 def _portal_header(title: str, subtitle: str):
