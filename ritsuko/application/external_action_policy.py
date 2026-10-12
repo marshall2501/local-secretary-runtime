@@ -78,6 +78,29 @@ def _canonical(value: Mapping[str, Any]) -> str:
         raise ActionPolicyError("invalid_action_arguments") from exc
 
 
+def validate_operation_arguments(
+    operation: RegisteredOperation, arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bounded operation arguments, shared by planning and dispatch.
+
+    This validates shape and fixed target, not the caller's authority.
+    Authorization must use the persisted Task permission scope.
+    """
+    if not isinstance(arguments, Mapping) or set(arguments) != operation.input_fields:
+        raise ActionPolicyError("invalid_action_fields")
+    if any(
+        isinstance(v, (dict, list, tuple, set)) or v is None
+        for v in arguments.values()
+    ):
+        raise ActionPolicyError("unsupported_argument_value")
+    target = arguments.get(operation.resource_field)
+    if not isinstance(target, str) or not target.strip():
+        raise ActionPolicyError("invalid_target")
+    if operation.resource_id and target != operation.resource_id:
+        raise ActionPolicyError("registered_resource_mismatch")
+    return dict(arguments)
+
+
 def prepare_action(
     *,
     task_id: str,
@@ -95,19 +118,10 @@ def prepare_action(
         raise ActionPolicyError("connection_mismatch")
     if operation.required_permission not in actor_permissions:
         raise ActionPolicyError("permission_denied")
-    if not task_id or not isinstance(arguments, Mapping):
+    if not task_id:
         raise ActionPolicyError("invalid_action_request")
-    if set(arguments) != operation.input_fields:
-        raise ActionPolicyError("invalid_action_fields")
-    if any(
-        isinstance(v, (dict, list, tuple, set)) or v is None
-        for v in arguments.values()
-    ):
-        raise ActionPolicyError("unsupported_argument_value")
-    target = arguments.get(operation.resource_field)
-    if not isinstance(target, str) or not target.strip():
-        raise ActionPolicyError("invalid_target")
-    args = dict(arguments)
+    args = validate_operation_arguments(operation, arguments)
+    target = args[operation.resource_field]
     canonical = _canonical(
         {
             "task_id": task_id,
