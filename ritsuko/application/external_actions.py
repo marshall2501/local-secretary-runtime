@@ -6,7 +6,7 @@ The first registered operation is a disposable loopback HTTP fixture.
 """
 from __future__ import annotations
 
-from ritsuko.application.external_action_policy import RegisteredOperation as Operation
+from ritsuko.application.external_action_policy import (RegisteredOperation as Operation, validate_operation_arguments)
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Protocol
@@ -90,6 +90,9 @@ class ExternalActionService:
             raise ActionDenied("invalid_fixture_setting")
         if type(lifetime_seconds) is not int or not 1 <= lifetime_seconds <= 3600:
             raise ActionDenied("invalid_approval_lifetime")
+        validate_operation_arguments(
+            operation, {"resource_id": operation.resource_id, "value": value},
+        )
         # The store must independently verify the persisted Task permission
         # scope. A registered low-impact descriptor alone is not authorization.
         offer_options = {
