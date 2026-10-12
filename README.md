@@ -70,3 +70,8 @@ cd D:\AI\projects\local-secretary-runtime
 ## 文書の扱い
 
 runtime側の文書は現在使う運用方法・API境界・安全条件だけを扱います。過去の「次の作業」「当時は未実装」「特定モデルで成功」といった時点依存の記録は現行仕様として使わず、必要な実験知見は設計repoの `DevelopmentKnowledge`、現在地は `STATUS`、優先作業は `PLAN` をマスタとします。
+
+
+## Copyright
+
+© 2026 marshall2501. ライセンスは第三者権利の確認後に本リポジトリの `LICENSE` で明示します。現時点でMITの適用が完了したことを意味しません。
