@@ -75,12 +75,32 @@ def validate_policy_snapshot(snapshot: object) -> dict:
             "grants": safe}
 
 
+def resolve_grant(
+    grants: list[dict], label: str, scope: str,
+) -> tuple[dict | None, str]:
+    """Resolve exactly as RITSUKO does: target override, then any, else deny.
+
+    Return the rule's provenance so the settings UI can distinguish a
+    concrete grant from an inherited one. Missing is fail-closed, not an
+    explicit deny stored in the database.
+    """
+    exact = next(
+        (g for g in grants if g["label"] == label
+         and g["destination_scope"] == scope), None,
+    )
+    if exact is not None:
+        return exact, "exact"
+    inherited = next(
+        (g for g in grants if g["label"] == label
+         and g["destination_scope"] == "any"), None,
+    )
+    if inherited is not None:
+        return inherited, "inherited"
+    return None, "missing"
+
+
 def _grant_for(snapshot: dict, label: str, scope: str) -> dict | None:
-    rules = snapshot.get("grants") or []
-    exact = next((g for g in rules if g["label"] == label and
-                  g["destination_scope"] == scope), None)
-    return exact or next((g for g in rules if g["label"] == label and
-                          g["destination_scope"] == "any"), None)
+    return resolve_grant(snapshot.get("grants") or [], label, scope)[0]
 
 
 def _context_labels(session: dict) -> tuple[list[str], list[str]]:
