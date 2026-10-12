@@ -1,6 +1,6 @@
 # PostgreSQL runtime operations
 
-この文書は `local-secretary-runtime` のPostgreSQL構築・migration・バックアップ・復元・安全境界を扱います。製品設計や実装済み範囲の正本ではありません。設計は `local-secretary-ai` の [`ARCHITECTURE`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/ARCHITECTURE.md)、実証済み現在地は [`STATUS`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を確認してください。
+この文書は `local-secretary-runtime` のPostgreSQL構築・migration・バックアップ・復元・安全境界を扱います。製品設計や実装済み範囲のマスタではありません。設計は `local-secretary-ai` の [`ARCHITECTURE`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/ARCHITECTURE.md)、実証済み現在地は [`STATUS`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を確認してください。
 
 ## 通常構成
 
@@ -14,7 +14,7 @@
 | 6 | DB / 管理用user | `secretary` / `secretary_admin` |
 | 7 | image | `postgres:17-bookworm` |
 
-通常運用先はサブPC、メインPCは手動復旧先です。ポート等の実値は `.env.postgres` と起動中containerを正本として確認してください。
+通常運用先はサブPC、メインPCは手動復旧先です。ポート等の実値は `.env.postgres` と起動中containerをマスタとして確認してください。
 
 ## Setup / Start / Migrate / Doctor
 
