@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts.db.probe_runtime_policy_readonly import (
     configured_port,
@@ -16,6 +17,7 @@ from ritsuko.application.context_policy import (
 )
 from ritsuko.magi.async_execution import (
     _private_observation_local_scope, _send_async, start_dialogue_async,
+    continue_with_verified_observations_async,
 )
 
 
@@ -254,6 +256,134 @@ class RuntimePolicyAsyncTests(unittest.IsolatedAsyncioTestCase):
         p["revision"] = 99
         self.assertEqual(task["policy_snapshot"]["revision"], 1)
         self.assertTrue(captured)
+
+
+class RuntimePolicyRealAsyncPathTests(unittest.IsolatedAsyncioTestCase):
+    """Run the real continuation, panel fan-out and provider routing with fake I/O."""
+
+    @staticmethod
+    def waiting_session(policy):
+        s = session(policy)
+        s["member_specs"] = specs()
+        s["member_specs"][2].update(
+            provider="gemini",
+            endpoint="https://generativelanguage.googleapis.com/v1beta",
+            model="fixture-gemini",
+        )
+        s.update(
+            status="waiting_information",
+            task_id="synthetic-permission-task",
+            prompt_version="test",
+            model="",
+            user_raw="synthetic request SENSITIVE-123",
+            turns=[],
+            classification={"category": "INFORMATION"},
+            detail={"state": "NEED_INFORMATION"},
+            pending_requests=[{"request_id": "REQ-1", "source": "pkb"}],
+        )
+        return s
+
+    @staticmethod
+    def observation():
+        return {
+            "source": "pkb", "verified": True, "confidentiality": "sensitive",
+            "text": "FICTIONAL SENSITIVE-123",
+            "responds_to": ["REQ-1"],
+        }
+
+    async def execute_with_fake_providers(self, prepared):
+        calls = []
+
+        async def fake_provider(envelope, **kwargs):
+            calls.append((envelope["magi_member"], envelope))
+            return {
+                "status": "unavailable", "response": None,
+                "errors": ["synthetic_provider_result"], "diagnostic": {},
+            }
+
+        # No HTTP clients, real providers, DB, PKB or runtime credentials.
+        with (
+            patch("ritsuko.magi.async_execution._call_ollama_guided_async",
+                  side_effect=fake_provider),
+            patch("ritsuko.magi.async_execution._call_openai_guided_async",
+                  side_effect=fake_provider),
+            patch("ritsuko.magi.async_execution._call_gemini_guided_async",
+                  side_effect=fake_provider),
+        ):
+            result = await continue_with_verified_observations_async(
+                prepared, [self.observation()], timeout=1
+            )
+        return result, calls
+
+    async def test_verification_allows_real_async_panel_provider_fanout(self):
+        result, calls = await self.execute_with_fake_providers(
+            self.waiting_session(profile())
+        )
+        self.assertEqual({name for name, _ in calls},
+                         {"MELCHIOR", "CASPER", "BALTHASAR"})
+        self.assertEqual(
+            set(result["turns"][0]["diagnostic"]["enabled_members"]),
+            {"MELCHIOR", "CASPER", "BALTHASAR"},
+        )
+        self.assertEqual(result["cloud_context_gate"]["status"], "applied")
+        self.assertEqual(result["turns"][0]["question_purpose"],
+                         "evaluate_observation")
+        self.assertEqual(result["turns"][0]["context_policy"]["profile_name"],
+                         "verification-lan")
+
+    async def test_production_filters_remote_before_real_async_panel(self):
+        p = profile(name="production-lan", decision="deny")
+        p["grants"] += [
+            {"label": label, "destination_scope": "local",
+             "decision": "allow", "mask_rules": {"tokens": []}}
+            for label in ("llm.send_context.private", "llm.send_context.sensitive")
+        ]
+        result, calls = await self.execute_with_fake_providers(
+            self.waiting_session(p)
+        )
+        self.assertEqual([name for name, _ in calls], ["MELCHIOR"])
+        self.assertEqual(result["turns"][0]["diagnostic"]["enabled_members"],
+                         ["MELCHIOR"])
+        self.assertEqual(
+            {item["name"] for item in result["cloud_context_gate"]["withheld_members"]},
+            {"CASPER", "BALTHASAR"},
+        )
+
+    async def test_mask_applies_to_all_fake_provider_envelopes(self):
+        result, calls = await self.execute_with_fake_providers(
+            self.waiting_session(profile(decision="redact"))
+        )
+        self.assertEqual({name for name, _ in calls},
+                         {"MELCHIOR", "CASPER", "BALTHASAR"})
+        for _, envelope in calls:
+            self.assertNotIn("SENSITIVE-123", str(envelope))
+            self.assertIn("[MASKED]", str(envelope["observations"]))
+        self.assertNotIn("SENSITIVE-123",
+                         str(result["turns"][0]["request_envelope"]))
+        self.assertNotIn("SENSITIVE-123",
+                         str(result["turns"][0]["context_policy"]))
+
+    async def test_all_denied_stops_before_provider_calls(self):
+        result, calls = await self.execute_with_fake_providers(
+            self.waiting_session(profile(decision="deny"))
+        )
+        self.assertEqual(calls, [])
+        self.assertEqual(result["status"], "stopped")
+        self.assertEqual(result["next_step"],
+                         "cloud_context_gate_no_allowed_member")
+        self.assertEqual(result["turns"], [])
+
+    async def test_task_snapshot_not_overwritten_by_new_profile(self):
+        original = profile()
+        prepared = self.waiting_session(original)
+        # Simulate a different currently-active Profile. Existing Tasks retain
+        # their policy_snapshot; there is no DB lookup during continuation.
+        original["grants"] = profile(decision="deny")["grants"]
+        result, calls = await self.execute_with_fake_providers(prepared)
+        self.assertEqual(result["policy_snapshot"]["grants"][0]["decision"],
+                         "allow")
+        self.assertEqual({name for name, _ in calls},
+                         {"MELCHIOR", "CASPER", "BALTHASAR"})
 
 
 class RuntimePolicySchemaContractTests(unittest.TestCase):
