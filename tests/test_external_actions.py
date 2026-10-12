@@ -18,6 +18,7 @@ from ritsuko.application.external_actions import (
     ActionDenied,
     ExternalActionService,
     FIXTURE_OPERATION,
+    FIXTURE_LOW_IMPACT_OPERATION,
 )
 
 
@@ -68,11 +69,12 @@ class _MemoryStore:
         self.audit = []
         self.results = []
 
-    def new_task(self, *, external_actions=True, state="ACTION_PROPOSAL"):
+    def new_task(self, *, external_actions=True, low_impact=False, state="ACTION_PROPOSAL"):
         task_id = uuid4()
         self.tasks[task_id] = {
             "status": "running",
             "external_actions": external_actions,
+            "low_impact": low_impact,
             "session": {"status": "proposal_ready",
                         "detail": {"state": state,
                                    "action_candidate": "Change the fixture setting"}},
@@ -80,7 +82,8 @@ class _MemoryStore:
         }
         return task_id
 
-    def offer(self, *, task_id, operation, arguments, requested_by, expires_at):
+    def offer(self, *, task_id, operation, arguments, requested_by, expires_at,
+              preapproved=False):
         with self.lock:
             task = self.tasks[task_id]
             if not task["external_actions"]:
@@ -89,15 +92,20 @@ class _MemoryStore:
                 raise ValueError("magi_action_proposal_missing")
             if task["approval_id"] is not None:
                 raise ValueError("external_action_already_offered")
+            if preapproved and (operation.get("risk") != "low" or not task["low_impact"]):
+                raise ValueError("low_impact_not_previously_permitted")
             approval_id = uuid4()
             self.approvals[approval_id] = {
                 "task_id": task_id, "operation": dict(operation),
                 "arguments": dict(arguments), "expires_at": expires_at,
-                "status": "pending",
+                "status": "approved" if preapproved else "pending",
             }
-            task.update(status="waiting_approval", approval_id=approval_id)
-            self.audit.append("approval_requested")
-            return {"approval_id": str(approval_id), "status": "pending",
+            task.update(status="waiting_external" if preapproved else "waiting_approval",
+                        approval_id=approval_id)
+            if preapproved:
+                self.actions[approval_id] = "planned"
+            self.audit.append("policy_preauthorized" if preapproved else "approval_requested")
+            return {"approval_id": str(approval_id), "status": "approved" if preapproved else "pending",
                     "operation": dict(operation), "arguments": dict(arguments)}
 
     def decide(self, *, task_id, approval_id, approved, actor):
@@ -163,7 +171,12 @@ class ExternalActionsTests(unittest.IsolatedAsyncioTestCase):
         self.store = _MemoryStore()
         self.adapter = LoopbackSettingAdapter(self.http.server_port)
         self.service = ExternalActionService(
-            self.store, {FIXTURE_OPERATION.operation_id: (FIXTURE_OPERATION, self.adapter)},
+            self.store, {
+                FIXTURE_OPERATION.operation_id: (FIXTURE_OPERATION, self.adapter),
+                FIXTURE_LOW_IMPACT_OPERATION.operation_id: (
+                    FIXTURE_LOW_IMPACT_OPERATION, self.adapter,
+                ),
+            },
         )
         with self.fixture["lock"]:
             self.fixture["value"] = "initial"
@@ -196,6 +209,37 @@ class ExternalActionsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "action_not_claimable"):
             await self.service.execute(task_id=task_id, approval_id=approval_id)
         self.assertEqual(self.fixture["writes"], 1)
+
+    async def test_preapproved_low_impact_uses_task_permission_without_prompt(self):
+        task_id = self.store.new_task(low_impact=True)
+        offered = await self.service.offer(
+            task_id=task_id,
+            operation_id=FIXTURE_LOW_IMPACT_OPERATION.operation_id,
+            value="low-impact-value",
+        )
+        approval_id = UUID(offered["approval_id"])
+        self.assertEqual(offered["status"], "approved")
+        self.assertIn("policy_preauthorized", self.store.audit)
+        self.assertNotIn("approval_requested", self.store.audit)
+        self.assertEqual(self.fixture["writes"], 0)
+        result = await self.service.execute(task_id=task_id, approval_id=approval_id)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["task_status"], "completed")
+        self.assertEqual(self.fixture["writes"], 1)
+        with self.assertRaises(ValueError):
+            await self.service.execute(task_id=task_id, approval_id=approval_id)
+        self.assertEqual(self.fixture["writes"], 1)
+
+    async def test_low_impact_requires_persisted_task_prepermission(self):
+        task_id = self.store.new_task(low_impact=False)
+        with self.assertRaisesRegex(ValueError, "low_impact_not_previously_permitted"):
+            await self.service.offer(
+                task_id=task_id,
+                operation_id=FIXTURE_LOW_IMPACT_OPERATION.operation_id,
+                value="must-not-send",
+            )
+        self.assertEqual(self.fixture["writes"], 0)
+        self.assertEqual(len(self.store.actions), 0)
 
     async def test_no_write_without_authorization(self):
         task_id = self.store.new_task(external_actions=False)
