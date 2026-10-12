@@ -1,6 +1,6 @@
 # SQL-first Memory Search
 
-`GET /memory/search` は `api/secretary_api.py` が提供する、PostgreSQL正本を直接読む読み取り専用検索です。LLMやRAGによる意味推測を挟まず、保存されているEntity / Claim / Issue / Hypothesis / Sourceメタデータを条件検索・列挙します。
+`GET /memory/search` は `api/secretary_api.py` が提供する、PostgreSQLマスタを直接読む読み取り専用検索です。LLMやRAGによる意味推測を挟まず、保存されているEntity / Claim / Issue / Hypothesis / Sourceメタデータを条件検索・列挙します。
 
 ## 境界
 
@@ -43,4 +43,4 @@ Invoke-RestMethod "$base/memory/search?domain=pc&kind=claim&limit=50" -Headers $
 Invoke-RestMethod "$base/memory/search?kind=claim&include_history=true&limit=50" -Headers $headers
 ```
 
-このendpointの仕様変更は `api/secretary_api.py` と対応テストを正本とし、実装済み・実機検証済みの範囲は設計repoの `STATUS` で管理します。
+このendpointの仕様変更は `api/secretary_api.py` と対応テストをマスタとし、実装済み・実機検証済みの範囲は設計repoの `STATUS` で管理します。
