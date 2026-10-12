@@ -59,6 +59,32 @@ try {
         }
     }
 
+    # Migration 009 intentionally seeds only synthetic policy catalog defaults.
+    # Unlike 005-008, narrowly scoped INSERTs are part of its owner-configurable
+    # bootstrap; it must not mutate existing production records.
+    $policyMigrationPath = Join-Path $root 'db/migrations/009_runtime_policy_profiles.sql'
+    if (-not (Test-Path -LiteralPath $policyMigrationPath -PathType Leaf)) {
+        throw 'Missing policy profile migration 009.'
+    }
+    $policyMigrationText = Get-Content -LiteralPath $policyMigrationPath -Raw
+    foreach ($required in @(
+        'CREATE TABLE permission_labels',
+        'CREATE TABLE policy_profiles',
+        'CREATE TABLE policy_grants',
+        'CREATE TABLE policy_activations',
+        'INSERT INTO permission_labels',
+        'INSERT INTO policy_profiles',
+        'INSERT INTO policy_grants',
+        'INSERT INTO policy_activations'
+    )) {
+        if (-not $policyMigrationText.Contains($required)) {
+            throw "Policy migration 009 marker missing: $required"
+        }
+    }
+    if ($policyMigrationText -match '(?im)^\s*(DELETE|UPDATE|TRUNCATE|DROP)\b') {
+        throw 'Policy migration 009 must not rewrite existing production data.'
+    }
+
     $preflightPath = Join-Path $root 'scripts/db/promotion-preflight.ps1'
     if (-not (Test-Path -LiteralPath $preflightPath -PathType Leaf)) {
         throw 'Missing production promotion preflight.'
@@ -121,6 +147,7 @@ try {
         'secretary_rebuild_',
         'Existing cluster roles missing',
         "db/migrations/008_runtime_privileges.sql",
+        "db/migrations/009_runtime_policy_profiles.sql",
         'CREATE ROLE secretary_[a-z_]+ NOLOGIN'
     )) {
         if (-not $initializerText.Contains($requiredMarker)) {
@@ -177,8 +204,8 @@ try {
     if ($launcherText -notmatch "\[ValidateSet\('isolated','production'\)\]") {
         throw 'Daily launcher must expose an explicit isolated/production cutover mode.'
     }
-    if ($launcherText -notmatch '008_runtime_privileges.sql') {
-        throw 'Production daily launcher must require migration 008.'
+    if ($launcherText -notmatch '009_runtime_policy_profiles.sql') {
+        throw 'Production daily launcher must require migration 009.'
     }
     if ($launcherText -notmatch 'LSA_DAILY_DB_NAME') {
         throw 'Production daily launcher must pass the selected rebuilt database name to runtime.'
@@ -218,7 +245,7 @@ try {
         'ALTER DATABASE secretary RENAME TO',
         'OldSecretaryPreserved = $true',
         'Restore-DatabaseNames',
-        '008_runtime_privileges.sql'
+        '009_runtime_policy_profiles.sql'
     )) {
         if (-not $cutoverText.Contains($requiredMarker)) {
             throw "Production cutover safety marker missing: $requiredMarker"
