@@ -17,7 +17,7 @@ if ($DatabaseMode -eq 'production') {
     $secret = Join-Path $root 'secrets\secretary-daily-runtime-password.txt'
     $db = $ProductionDatabase
     $role = 'secretary_daily_runtime'
-    $requiredMigration = '008_runtime_privileges.sql'
+    $requiredMigration = '009_runtime_policy_profiles.sql'
 } else {
     $secret = Join-Path $root 'secrets\pkb-proto-writer-password.txt'
     $db = 'secretary_pkb_proto_20260927'
