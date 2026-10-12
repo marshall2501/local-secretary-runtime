@@ -32,7 +32,7 @@ class PostgresExternalActionStore:
             raise ValueError("external_action_not_permitted")
         if not isinstance(checkpoint, dict) or checkpoint.get("core_slice") != CORE_SLICE:
             raise ValueError("not_magi_observation_task")
-        return status, deepcopy(checkpoint)
+        return status, deepcopy(checkpoint), deepcopy(scope)
 
     @staticmethod
     def _approval(cur, approval_id, task_id):
@@ -68,18 +68,43 @@ class PostgresExternalActionStore:
             (event_type, task_id, approval_id, action_id, task_id, Jsonb(details)),
         )
 
+    @staticmethod
+    def _insert_action(cur, *, task_id, approval_id, operation, arguments,
+                       actor: str, risk: str, authorization_basis: str):
+        cur.execute(
+            """INSERT INTO secretary.actions
+               (task_id, approval_id, actor, tool, operation, parameters,
+                risk, authorization_basis, status, idempotency_key, reversible)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'planned', %s, false)
+               RETURNING id""",
+            (task_id, approval_id, actor, operation["service_id"],
+             operation["operation_id"],
+             Jsonb({"resource_id": operation["resource_id"], **arguments}),
+             risk, authorization_basis,
+             f"external-action:{task_id}:{approval_id}"),
+        )
+        return cur.fetchone()[0]
+
     def offer(self, *, task_id: UUID, operation: dict, arguments: dict,
-              requested_by: str, expires_at: datetime) -> dict:
-        if arguments.keys() != {"value"} or not isinstance(arguments["value"], str):
+              requested_by: str, expires_at: datetime,
+              preapproved: bool = False) -> dict:
+        if arguments.keys() != {"value"} or type(arguments["value"]) is not str:
             raise ValueError("invalid_external_action_arguments")
         if operation.get("required_permission") != "external_actions":
             raise ValueError("invalid_operation_permission")
+        risk = operation.get("risk")
+        if risk not in {"low", "high"} or (preapproved and risk != "low"):
+            raise ValueError("invalid_external_action_risk")
+        if risk == "low" and not preapproved:
+            raise ValueError("low_impact_policy_required")
         if expires_at <= datetime.now(timezone.utc):
             raise ValueError("approval_already_expired")
         with self._connect() as db, db.transaction(), db.cursor() as cur:
-            status, checkpoint = self._task(cur, task_id)
+            status, checkpoint, scope = self._task(cur, task_id)
             if status not in {"running", "waiting_external"}:
                 raise ValueError("task_not_ready_for_action")
+            if preapproved and scope.get("external_actions_low_impact") is not True:
+                raise ValueError("low_impact_not_previously_permitted")
             if checkpoint.get("external_action") is not None:
                 raise ValueError("external_action_already_offered")
             session = checkpoint.get("magi_session")
@@ -91,47 +116,65 @@ class PostgresExternalActionStore:
                     or not isinstance(detail.get("action_candidate"), str)
                     or not detail["action_candidate"].strip()):
                 raise ValueError("magi_action_proposal_missing")
-            # The model's free-form explanation is evidence, NOT executable
-            # operation data. Only the registered descriptor and user-reviewed
-            # structured arguments enter the approval snapshot.
+            # LLM prose is evidence, not executable operation data.
+            basis = ("task_scoped_low_impact_policy" if preapproved
+                     else "trusted_local_explicit_approval")
             snapshot = {
-                "operation": deepcopy(operation),
-                "arguments": deepcopy(arguments),
+                "operation": deepcopy(operation), "arguments": deepcopy(arguments),
                 "proposal_text": detail["action_candidate"][:500],
-                "confirmation_basis": "trusted_local_explicit_approval",
+                "confirmation_basis": basis,
             }
+            decision = "approved" if preapproved else "pending"
+            actor = "ritsuko_policy" if preapproved else None
             cur.execute(
                 """INSERT INTO secretary.approvals
-                   (approval_kind, task_id, status, scope, requested_by, expires_at)
-                   VALUES ('external_action', %s, 'pending', %s, %s, %s)
+                   (approval_kind, task_id, status, scope, requested_by,
+                    expires_at, decided_by, decided_at)
+                   VALUES ('external_action', %s, %s, %s, %s, %s, %s,
+                           CASE WHEN %s='approved' THEN now() ELSE NULL END)
                    RETURNING id""",
-                (task_id, Jsonb(snapshot), requested_by, expires_at),
+                (task_id, decision, Jsonb(snapshot), requested_by,
+                 expires_at, actor, decision),
             )
             approval_id = cur.fetchone()[0]
+            action_id = None
+            if preapproved:
+                # A Task-scoped policy decision is not individual user approval.
+                action_id = self._insert_action(
+                    cur, task_id=task_id, approval_id=approval_id,
+                    operation=operation, arguments=arguments, actor="ritsuko_policy",
+                    risk="low", authorization_basis=basis,
+                )
             checkpoint["external_action"] = {
-                "approval_id": str(approval_id), "status": "pending",
+                "approval_id": str(approval_id),
+                "action_id": str(action_id) if action_id else None,
+                "status": decision, "risk": risk,
                 "operation_id": operation["operation_id"],
                 "resource_id": operation["resource_id"],
             }
             cur.execute(
                 """UPDATE secretary.tasks
-                   SET status='waiting_approval', checkpoint=%s, completed_at=NULL
-                   WHERE id=%s""",
-                (Jsonb(checkpoint), task_id),
+                   SET status=%s, checkpoint=%s, completed_at=NULL WHERE id=%s""",
+                ("waiting_external" if preapproved else "waiting_approval",
+                 Jsonb(checkpoint), task_id),
             )
             self._record_audit(
-                cur, task_id=task_id, approval_id=approval_id, action_id=None,
-                event_type="external_action.approval_requested",
+                cur, task_id=task_id, approval_id=approval_id,
+                action_id=action_id,
+                event_type=("external_action.policy_preauthorized" if preapproved
+                            else "external_action.approval_requested"),
                 details={"operation_id": operation["operation_id"],
-                         "resource_id": operation["resource_id"]},
+                         "resource_id": operation["resource_id"], "risk": risk,
+                         "authorization_basis": basis},
             )
-            return {"approval_id": str(approval_id), "status": "pending",
-                    "operation": deepcopy(operation), "arguments": deepcopy(arguments)}
+            return {"approval_id": str(approval_id), "status": decision,
+                    "operation": deepcopy(operation), "arguments": deepcopy(arguments),
+                    "action_id": str(action_id) if action_id else None}
 
     def decide(self, *, task_id: UUID, approval_id: UUID, approved: bool,
                actor: str) -> dict:
         with self._connect() as db, db.transaction(), db.cursor() as cur:
-            status, checkpoint = self._task(cur, task_id)
+            status, checkpoint, scope = self._task(cur, task_id)
             if status != "waiting_approval":
                 raise ValueError("task_not_waiting_approval")
             state = checkpoint.get("external_action")
@@ -155,20 +198,11 @@ class PostgresExternalActionStore:
             if approved:
                 operation = snapshot["operation"]
                 arguments = snapshot["arguments"]
-                cur.execute(
-                    """INSERT INTO secretary.actions
-                       (task_id, approval_id, actor, tool, operation, parameters,
-                        risk, authorization_basis, status, idempotency_key, reversible)
-                       VALUES (%s, %s, %s, %s, %s, %s, 'high',
-                               'explicit_external_action_approval', 'planned',
-                               %s, false)
-                       RETURNING id""",
-                    (task_id, approval_id, actor, operation["service_id"],
-                     operation["operation_id"],
-                     Jsonb({"resource_id": operation["resource_id"], **arguments}),
-                     f"external-action:{task_id}:{approval_id}"),
+                action_id = self._insert_action(
+                    cur, task_id=task_id, approval_id=approval_id,
+                    operation=operation, arguments=arguments, actor=actor,
+                    risk="high", authorization_basis="explicit_external_action_approval",
                 )
-                action_id = cur.fetchone()[0]
             state.update(status=decision, action_id=str(action_id) if action_id else None)
             checkpoint["external_action"] = state
             cur.execute(
@@ -187,15 +221,24 @@ class PostgresExternalActionStore:
 
     def claim(self, *, task_id: UUID, approval_id: UUID) -> dict:
         with self._connect() as db, db.transaction(), db.cursor() as cur:
-            status, checkpoint = self._task(cur, task_id)
+            status, checkpoint, scope = self._task(cur, task_id)
             state = checkpoint.get("external_action") or {}
-            if (status != "waiting_approval" or
-                    state.get("approval_id") != str(approval_id) or
-                    state.get("status") != "approved"):
+            if (state.get("approval_id") != str(approval_id)
+                    or state.get("status") != "approved"):
                 raise ValueError("action_not_claimable")
             approval_status, snapshot, expires_at = self._approval(
                 cur, approval_id, task_id,
             )
+            risk = (snapshot.get("operation") or {}).get("risk")
+            expected_status = ("waiting_external" if risk == "low"
+                               else "waiting_approval")
+            if status != expected_status or risk not in {"low", "high"}:
+                raise ValueError("action_not_claimable")
+            if risk == "low" and (
+                scope.get("external_actions_low_impact") is not True
+                or snapshot.get("confirmation_basis") != "task_scoped_low_impact_policy"
+            ):
+                raise ValueError("low_impact_not_previously_permitted")
             if approval_status != "approved" or expires_at <= datetime.now(timezone.utc):
                 raise ValueError("action_approval_invalid_or_expired")
             action_id, action_status = self._action(cur, approval_id, task_id)
@@ -221,7 +264,7 @@ class PostgresExternalActionStore:
     def _end(self, *, task_id: UUID, approval_id: UUID, verified: bool,
              evidence: dict) -> dict:
         with self._connect() as db, db.transaction(), db.cursor() as cur:
-            task_status_before, checkpoint = self._task(cur, task_id)
+            task_status_before, checkpoint, _scope = self._task(cur, task_id)
             state = checkpoint.get("external_action") or {}
             if task_status_before != "running":
                 raise ValueError("task_not_running")
