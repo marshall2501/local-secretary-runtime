@@ -30,6 +30,7 @@ from infrastructure.postgres.core_advisor_repository import (
 from infrastructure.postgres.core_execution_repository import PostgresCoreExecutionRepository
 from infrastructure.postgres.magi_task_repository import PostgresMagiTaskRepository
 from infrastructure.postgres.magi_settings_repository import PostgresMagiSettingsRepository
+from infrastructure.postgres.runtime_policy_repository import PostgresRuntimePolicyRepository
 from infrastructure.postgres.service_connection_repository import PostgresServiceConnectionRepository
 from infrastructure.postgres.service_billing_settings_repository import PostgresServiceBillingSettingsRepository
 from infrastructure.postgres.finance_repository import PostgresFinanceRepository
@@ -74,6 +75,10 @@ def build_magi_task_repository() -> PostgresMagiTaskRepository:
 
 def build_magi_settings_repository() -> PostgresMagiSettingsRepository:
     return PostgresMagiSettingsRepository(connection)
+
+
+def build_runtime_policy_repository() -> PostgresRuntimePolicyRepository:
+    return PostgresRuntimePolicyRepository(connection)
 
 
 def build_service_connection_repository() -> PostgresServiceConnectionRepository:
