@@ -67,6 +67,10 @@ from .dialogue import (
     select_weighted_consensus,
     validate_turn,
 )
+from ritsuko.application.context_policy import (
+    restrict_members as restrict_members_by_profile,
+    redact_observation_text,
+)
 from .settings import (
     DEFAULT_RETRY_HTTP_CODES,
     DEFAULT_RETRY_WITHIN_TURN,
@@ -651,8 +655,27 @@ async def _send_async(
             },
             "observations": deepcopy(session["observations"]),
         })
+    safe_context_policy = None
     if context_policy:
-        envelope["context_policy"] = deepcopy(context_policy)
+        # Redaction rules contain literal owner-selected values. Never put
+        # those values in the transmitted envelope or persisted Turn diagnostics.
+        tokens = list(context_policy.get("redaction_tokens") or [])
+        safe_context_policy = {
+            key: deepcopy(value)
+            for key, value in context_policy.items()
+            if key != "redaction_tokens"
+        }
+        if tokens:
+            def redact_tree(value):
+                if isinstance(value, str):
+                    return redact_observation_text(value, tokens)
+                if isinstance(value, list):
+                    return [redact_tree(item) for item in value]
+                if isinstance(value, dict):
+                    return {key: redact_tree(item) for key, item in value.items()}
+                return value
+            envelope = redact_tree(envelope)
+        envelope["context_policy"] = deepcopy(safe_context_policy)
     if on_turn_start is not None:
         on_turn_start(turn_number)
 
@@ -689,7 +712,7 @@ async def _send_async(
         "diagnostic": deepcopy(result.get("diagnostic") or {}),
         "member_results": deepcopy(result.get("member_results") or []),
         "consensus": deepcopy(result.get("consensus")),
-        "context_policy": deepcopy(context_policy) if context_policy else None,
+        "context_policy": deepcopy(safe_context_policy),
     })
     session["last_question_purpose"] = question_purpose
 
@@ -1030,6 +1053,7 @@ async def start_dialogue_async(
     task_id: str | None = None,
     task_timezone: str = "Asia/Tokyo",
     task_locale: str = "ja-JP",
+    policy_snapshot: dict | None = None,
 ) -> dict:
     specs = _normalized_member_specs(member_specs, model)
     from uuid import uuid4
@@ -1058,6 +1082,7 @@ async def start_dialogue_async(
         "turn_limit": MAX_TURNS,
         "legacy_router_used": False,
         "tool_read_executed": False,
+        "policy_snapshot": deepcopy(policy_snapshot) if policy_snapshot else None,
     }
     if not session["user_raw"]:
         session.update(status="stopped", next_step="invalid_input")
@@ -1130,7 +1155,9 @@ async def continue_with_observation_async(
 def _private_observation_local_scope(
     session: dict,
 ) -> tuple[list[dict] | None, dict | None]:
-    """Keep later turns local while verified private/sensitive Observations exist."""
+    """Respect one Task's owner-selected Profile, or the legacy pre-migration gate."""
+    if session.get("policy_snapshot") is not None:
+        return restrict_members_by_profile(session, session["policy_snapshot"])
     private_sources = sorted({
         str(item.get("source") or "")
         for item in (session.get("observations") or [])
