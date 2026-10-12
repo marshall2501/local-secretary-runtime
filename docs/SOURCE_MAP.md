@@ -9,6 +9,8 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 
 本資料は「どこに何が実装されているか」を示すものであり、機能が実機受入済みであることを意味しません。
 
+2026-10-12: 環境別DB権限設定（Migration 009、Permission Label / Grant / Profile / Activation）、MAGIのContext送信Profile評価、Task単位の設定snapshot、設定GUI、合成データでのCI・使い捨てPostgreSQL検証をGitHubに追加。**実機の運用DB Migration・本人PKBを用いたCloud MAGI分析・外部Callerの環境識別は未受入**。従来Task／Migration未適用環境のGate挙動は保持する。
+
 2026-10-12: state-driven Taskの開始・本人回答・Proposal ReviewがGUI非依存のApplication入口を経由するようになった。固定Action fixtureでは共通Operation定義、Task scopeによる低影響事前許可／高影響個別承認、PostgreSQL予約とreadbackを隔離CIで確認。**日常GUIのAction操作、実サービス連携、Production適用は未実施**。
 
 - 大目標・製品要件: `local-secretary-ai/docs/PROJECT.md`
@@ -52,6 +54,7 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 | 27 | Production DB再構築 | [../scripts/db/rebuild-production.ps1](../scripts/db/rebuild-production.ps1) | fresh schema + settings only → replacement DB | PostgreSQL |
 | 28 | 旧昇格entry互換 | [../scripts/db/promote-production.ps1](../scripts/db/promote-production.ps1) | clean rebuildへ委譲 | PowerShell |
 | 29 | 外部Action（隔離fixture、日常UI/write API非公開） | Application入口 [../ritsuko/application/task_runtime.py](../ritsuko/application/task_runtime.py)（オプションのAction Service） | [../ritsuko/application/external_actions.py](../ritsuko/application/external_actions.py)／[../ritsuko/application/external_action_policy.py](../ritsuko/application/external_action_policy.py) | [../infrastructure/postgres/external_action_repository.py](../infrastructure/postgres/external_action_repository.py) ＋ 固定loopback HTTP。使い捨てDB上の検証でありProduction利用の受入ではない |
+| 30 | 環境別権限Profile・MAGI送信先の設定（GitHub＋隔離CIのみ） | [../interfaces/web/pages/settings.py](../interfaces/web/pages/settings.py)、[../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | [../ritsuko/application/context_policy.py](../ritsuko/application/context_policy.py)、[../ritsuko/magi/async_execution.py](../ritsuko/magi/async_execution.py) | [../infrastructure/postgres/runtime_policy_repository.py](../infrastructure/postgres/runtime_policy_repository.py)、[../db/migrations/009_runtime_policy_profiles.sql](../db/migrations/009_runtime_policy_profiles.sql)。運用DBには未適用 |
 
 ---
 
