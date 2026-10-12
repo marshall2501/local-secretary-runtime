@@ -204,8 +204,8 @@ try {
     if ($launcherText -notmatch "\[ValidateSet\('isolated','production'\)\]") {
         throw 'Daily launcher must expose an explicit isolated/production cutover mode.'
     }
-    if ($launcherText -notmatch '009_runtime_policy_profiles.sql') {
-        throw 'Production daily launcher must require migration 009.'
+    if ($launcherText -notmatch '008_runtime_privileges.sql') {
+        throw 'Production daily launcher must remain compatible with migration 008 until 009 is explicitly applied.'
     }
     if ($launcherText -notmatch 'LSA_DAILY_DB_NAME') {
         throw 'Production daily launcher must pass the selected rebuilt database name to runtime.'
