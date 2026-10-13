@@ -23,6 +23,7 @@ from infrastructure.postgres.runtime_policy_repository import PostgresRuntimePol
 from ritsuko.application.context_policy import restrict_members, redact_observation_text
 from infrastructure.postgres.magi_task_repository import PostgresMagiTaskRepository
 from ritsuko.magi.async_execution import continue_with_user_clarification_async
+from scripts.db.probe_magi_task_resume_rollback import exercise_transaction
 
 
 def verify_fixture_identity(project: str, container: str) -> int:
@@ -95,6 +96,31 @@ def verify(connect):
     assert reverted["profile_name"] == "production-lan"
     assert len(repo.list_grants(production_id)) >= 2
     verify_saved_task_resume_snapshot(connect, repo)
+    # Reuse the exact production-role probe logic against this disposable DB.
+    # Explicit ROLLBACK must leave no synthetic Task or audit events.
+    with connect() as check:
+        with check.cursor() as cur:
+            cur.execute("SELECT count(*) FROM secretary.tasks")
+            tasks_before = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM secretary.audit_events")
+            audit_before = cur.fetchone()[0]
+    disposable = connect()
+    try:
+        disposable.autocommit = True
+        disposable.execute("BEGIN")
+        current_name, allowed = exercise_transaction(disposable)
+        assert current_name == "production-lan"
+        assert allowed == ["MELCHIOR"]
+    finally:
+        disposable.rollback()
+        disposable.close()
+    with connect() as check:
+        with check.cursor() as cur:
+            cur.execute("SELECT count(*) FROM secretary.tasks")
+            assert cur.fetchone()[0] == tasks_before, "rollback_left_task"
+            cur.execute("SELECT count(*) FROM secretary.audit_events")
+            assert cur.fetchone()[0] == audit_before, "rollback_left_audit"
+    print("PASS: rollback-only operational-style synthetic Task probe.")
     print("PASS: isolated migration 009, policy repository, grants and profile activation.")
 
 
