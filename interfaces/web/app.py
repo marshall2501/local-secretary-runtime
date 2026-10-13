@@ -78,6 +78,8 @@ from ritsuko.magi.client import (
     list_chat_models as list_magi_models,
 )
 from ritsuko.magi.dialogue import MAX_TURNS, export_dialogue
+from ritsuko.magi.native_web import search_magi_web
+from ritsuko.application.context_policy import public_web_search_permission
 from ritsuko.core.magi_bridge import reviewable_user_knowledge_proposal
 from ritsuko.magi.async_execution import (
     call_guided_panel_async,
@@ -1125,8 +1127,33 @@ def _execute_magi_source_request(
         return _execute_magi_pkb_request(user_raw, pending_request)
     if source == "web":
         query = web_query_from_request(pending_request, session)
+        permission = public_web_search_permission(session.get("policy_snapshot"))
+        if not permission["allowed"]:
+            return {
+                "status": "error", "source": "web",
+                "capability": "web_research", "confidentiality": "public",
+                "operation": "research", "total": 0, "answer": "",
+                "result": {"result_kind": "web_search_permission_denied",
+                           "reason": permission["reason"]},
+                "error_type": permission["reason"], "verified_by": None,
+            }
+        # This is already an AnyIO worker thread in observation_loop. A fresh
+        # runner here does not block the NiceGUI event loop. Only the public
+        # gated query, not the user's full Task or private PKB, reaches tools.
+        import anyio
+        native = anyio.run(search_magi_web, query,
+                           session.get("member_specs") or [])
+        if native.get("status") == "ok":
+            return native
+        # Existing bounded DDGS is a fallback, not a separate permission path.
         result = _execute_core_read("web_research", query)
-        return {"source": "web", **result}
+        source_metadata = dict(result.get("source_metadata") or {})
+        source_metadata["native_web_fallback"] = {
+            "status": native.get("status"),
+            "member_runs": (native.get("result") or {}).get("member_runs") or [],
+        }
+        return {"source": "web", **result,
+                "source_metadata": source_metadata}
     if source == "finance":
         query = finance_query_from_request(pending_request, session=session)
         result = _execute_core_read("finance_read", query)
