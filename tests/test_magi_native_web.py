@@ -212,5 +212,107 @@ class WebToolPanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["result"]["member_runs"][0]["status"], "no_tool_call")
 
 
+class WebTaskRoundtripTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cited_web_results_return_to_same_task_as_bounded_observation(self):
+        import anyio
+        from ritsuko.application.observation_sources import (
+            verified_source_observation, web_query_from_request,
+        )
+        from ritsuko.core.magi_bridge import task_projection
+        from ritsuko.core.observation_loop import run_observation_loop
+
+        query = "Public official Python dict.get definition"
+        events = []
+        specs = [{"name": "CASPER", "enabled": True, "provider": "openai",
+                  "model": "fixture", "endpoint": "https://api.openai.com/v1"}]
+        policy = _policy(_grant("web.search", "remote", "allow"))
+
+        async def transport(method, url, *, headers, json_body, timeout,
+                            retry_enabled, retry_http_codes):
+            events.append(("external", json_body["input"]))
+            return {
+                "output": [
+                    {"type": "web_search_call", "status": "completed"},
+                    {"type": "message", "content": [
+                        {"type": "output_text",
+                         "text": "dict.get returns default if the key is missing.",
+                         "annotations": [{
+                             "type": "url_citation",
+                             "url": "https://docs.python.org/3/library/stdtypes.html",
+                             "title": "Mapping Types",
+                         }]}
+                    ]},
+                ]
+            }, {}
+
+        async def starter(request, *, task_id, **kwargs):
+            return {
+                "task_id": task_id, "user_raw": request,
+                "status": "waiting_information",
+                "member_specs": specs, "policy_snapshot": policy,
+                "pending_requests": [{
+                    "request_id": "REQ-1", "source": "web", "what": query,
+                    "reason": "official evidence requested",
+                }],
+                "observations": [], "turns": [{"stage": "classify"}, {"stage": "analyze"}],
+            }
+
+        def execute(raw, pending, session):
+            events.append(("read", pending["source"]))
+            self.assertTrue(public_web_search_permission(
+                session["policy_snapshot"])["allowed"])
+            safe = web_query_from_request(pending, session)
+            return anyio.run(
+                lambda: search_magi_web(
+                    safe, session["member_specs"], transport=transport,
+                    credential_loader=lambda *_: "synthetic-credential",
+                )
+            )
+
+        def record(task_id, execution, pending):
+            events.append(("record", execution["verified_by"], str(task_id)))
+            self.assertEqual(execution["source"], "web")
+            self.assertEqual(execution["status"], "ok")
+            self.assertEqual(execution["result"]["hits"][0]["provider"], "openai")
+            self.assertEqual(
+                verified_source_observation(execution, pending)["source_metadata"]
+                ["member_runs"][0]["provider"], "openai")
+            return ("action-id", "result-id")
+
+        async def continue_observation(session, observations, **kwargs):
+            self.assertEqual(len(observations), 1)
+            self.assertEqual(observations[0]["source"], "web")
+            self.assertTrue(observations[0]["verified"])
+            self.assertIn("https://docs.python.org", observations[0]["text"])
+            return {
+                **session, "status": "candidate_ready", "pending_requests": [],
+                "observations": observations, "tool_read_executed": True,
+                "detail": {"answer_candidate":
+                           "dict.get returns default; source https://docs.python.org/3/library/stdtypes.html"},
+            }
+
+        def persist(task_id, session, selected):
+            events.append(("persist", str(task_id), session["status"]))
+            self.assertEqual(task_projection(session)["task_status"], "completed")
+
+        result = await run_observation_loop(
+            "Use official docs to explain dict.get",
+            member_specs=specs, timeout=20,
+            create_task_record=lambda *args: events.append(("create",)),
+            execute_source_request=execute,
+            record_source_read_record=record,
+            persist_session_record=persist,
+            fail_task_record=lambda *args: self.fail("must not fail Task"),
+            dialogue_starter=starter,
+            observation_continuation=continue_observation,
+            resource_catalog={"web": {"available": True}},
+        )
+        self.assertEqual(result["status"], "candidate_ready")
+        self.assertEqual(
+            [event[0] for event in events],
+            ["create", "read", "external", "record", "persist"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
