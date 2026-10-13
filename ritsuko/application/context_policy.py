@@ -103,6 +103,42 @@ def _grant_for(snapshot: dict, label: str, scope: str) -> dict | None:
     return resolve_grant(snapshot.get("grants") or [], label, scope)[0]
 
 
+
+def public_web_search_permission(snapshot: dict | None) -> dict:
+    """Decide external Web search using the existing Task policy Profile.
+
+    Model Context grants cannot authorize a search-engine query. Search is an
+    external destination even when the model requesting it runs locally.
+    Missing or pending permissions never turn into an implicit allow.
+    """
+    if snapshot is None:
+        return {"allowed": False, "reason": "web_search_policy_snapshot_missing"}
+    policy = validate_policy_snapshot(snapshot)
+    matches = []
+    scopes = set()
+    for raw in snapshot.get("grants") or []:
+        if not isinstance(raw, dict) or raw.get("label") != "web.search":
+            continue
+        scope = raw.get("destination_scope")
+        decision = raw.get("decision")
+        if scope not in {"any", "local", "remote"} or decision not in DECISIONS:
+            raise ValueError("invalid_web_search_grant")
+        if scope in scopes:
+            raise ValueError("duplicate_web_search_grant")
+        scopes.add(scope)
+        matches.append({"label": "web.search", "destination_scope": scope,
+                        "decision": decision})
+    grant, provenance = resolve_grant(matches, "web.search", "remote")
+    decision = grant["decision"] if grant else "missing"
+    return {
+        "allowed": decision == "allow",
+        "reason": "web_search_allowed" if decision == "allow" else "web_search_" + decision,
+        "policy_profile_id": policy["profile_id"],
+        "policy_revision": policy["revision"],
+        "grant_scope": provenance,
+    }
+
+
 def _context_labels(session: dict) -> tuple[list[str], list[str]]:
     sources, labels = set(), set()
     for item in (session.get("observations") or []):
