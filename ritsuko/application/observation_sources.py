@@ -173,6 +173,9 @@ def verified_source_observation(
                 "web_sources": deepcopy(
                     (metadata.get("web_sources") or [])[:8]
                 ),
+                "member_runs": deepcopy(
+                    (metadata.get("member_runs") or [])[:4]
+                ),
             }
     return observation
 
