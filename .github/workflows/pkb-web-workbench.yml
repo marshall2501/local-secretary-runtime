@@ -76,6 +76,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_runtime_policy_profiles.py -v
       - run: python -m unittest discover -s tests -p test_magi_core_bridge.py -v
       - run: python -m unittest discover -s tests -p test_magi_observation_loop.py -v
+      - run: python -m unittest discover -s tests -p test_magi_native_web.py -v
       - run: python -m unittest discover -s tests -p test_magi_task_store.py -v
       - run: python -m unittest discover -s tests -p test_external_actions.py -v
       - run: python -m unittest discover -s tests -p test_external_action_policy.py -v
