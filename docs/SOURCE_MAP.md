@@ -1,6 +1,6 @@
 # SOURCE_MAP — ソース構成と機能対応
 
-更新: 2026-10-12  
+更新: 2026-10-13  
 参照runtime: current policy implementation `3de93850013c2e410815160e56c009344d889dbc` / GitHub isolated CI PASS。サブPC実機は未確認。過去のTask/Actionの受入は各Plan/STATUSを参照。
 
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
@@ -536,6 +536,13 @@ OpenAI / Google等の利用量・料金・契約・Credit・Limitを共通形式
 `capabilities/web_research/`
 
 Web検索、取得、Source品質判定等を担当します。
+
+**2026-10-13 GitHub隔離実装（サブPC実機未受入）:** 日常RITSUKOの`NEED_INFORMATION(source=web)`は、`interfaces/web/app.py::_execute_magi_source_request`から既存`ritsuko/application/observation_sources.py::web_query_from_request`の公開Query検査を通し、`ritsuko/application/context_policy.py::public_web_search_permission`でTaskのDB Profile snapshotの`web.search / remote` Grantを確認してから`ritsuko/magi/native_web.py::search_magi_web`へ渡す。OpenAI Responses `web_search`、Gemini `google_search`、Ollamaの1回のTool Calling（許可済みQueryのみ、実行はRITSUKOが管理）を並列に利用でき、出典／Provider別実行状況を1つの`web` Observationに集約して既存Task履歴へ戻す。出典がない、全員エラー等の時は同じ権限の内側で従来のbounded DDGSへfallbackする。
+
+`web.search` Permission Labelは既存Policy Repositoryの`create_label`／`save_grant`を使ってDBに登録・割当可能だが、**今回のGitHub code反映だけでは運用DBのLabel/Grantは追加されない**。欠落、deny、未確認の場合は新Web経路がfail-closedとなる。既存`llm.send_context.private/sensitive`はWeb検索の許可へ代用しない。従来の直接Web Research UI／旧Coreを含む全入出力面のPolicy統一、本人のサブPC運用Profile設定、実クラウド検索、検索料金・根拠品質、GUIの最終完走は未受入である。
+
+コード: [native_web.py](../ritsuko/magi/native_web.py) / [context_policy.py](../ritsuko/application/context_policy.py) / [observation_sources.py](../ritsuko/application/observation_sources.py) / [test_magi_native_web.py](../tests/test_magi_native_web.py)。
+
 
 ---
 
