@@ -16,6 +16,37 @@ from ritsuko.core.core_advisor import AdvisorResult
 
 
 class CoreGuiTests(TestCase):
+    def test_presentation_prefers_persisted_task_terminal_status(self):
+        session = {
+            "task_id": "same-task", "status": "candidate_ready",
+            "detail": {"answer_candidate": "未確定の候補"},
+        }
+        saved = {
+            "id": "same-task", "status": "completed",
+            "request": "Pythonの辞書とは？", "message": "確定済みの回答",
+        }
+        outcome = daily.build_task_presentation(
+            session, saved_task=saved, busy=False,
+        )
+        self.assertEqual(outcome["status"], "completed")
+        self.assertEqual(outcome["status_label"], "完了（Task確定）")
+        self.assertEqual(outcome["latest_result_summary"], "確定済みの回答")
+        self.assertEqual(outcome["system_next_action"], "このTaskは完了しています。")
+        self.assertFalse(outcome["user_action_required"])
+        # During execution we must not let a stale terminal snapshot overrule
+        # an actively running member, and waiting_user retains its prompt.
+        outcome = daily.build_task_presentation(
+            {**session, "status": "running"}, saved_task=saved, busy=True,
+        )
+        self.assertEqual(outcome["status"], "running")
+        waiting = daily.build_task_presentation(
+            {**session, "status": "waiting_user", "user_question": "どの版？"},
+            saved_task={**saved, "status": "waiting_external"}, busy=False,
+        )
+        self.assertEqual(waiting["status"], "waiting_user")
+        self.assertTrue(waiting["user_action_required"])
+
+
     def test_preferences_roundtrip_validation_and_live_apply(self):
         old = deepcopy(daily._UI_PREFERENCES)
         try:
@@ -350,6 +381,48 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.elements('対話結果を一括コピー'))
             self.assertTrue(self.elements('手動Observationで継続（開発用）'))
             self.assertTrue(self.elements('未解決の情報要求（利用不可Sourceまたは追加情報が必要）'))
+
+    async def test_live_task_shows_persisted_completion_not_magi_candidate(self):
+        """The owner sees DB-confirmed completion without refreshing the browser."""
+        from uuid import uuid4
+        saved_id = str(uuid4())
+        response = "DBへ確定保存された辞書の説明です。"
+        async def fake_loop(*args, **kwargs):
+            return {
+                "task_id": saved_id, "user_raw": args[0],
+                "status": "candidate_ready", "next_step": "review_goal_answer",
+                "detail": {"answer_candidate": "まだ確定していない候補"},
+                "turns": [], "observations": [],
+                "member_specs": [], "pending_requests": [],
+            }
+        def fake_trace(task_id):
+            self.assertEqual(str(task_id), saved_id)
+            return {"task": {
+                "id": saved_id, "status": "completed", "phase": "completed",
+                "revision": 1, "request": "Pythonの辞書とは？",
+                "message": response,
+            }, "actions": []}
+        with self.client, patch.object(
+            daily, "list_magi_models", return_value=[]
+        ), patch.object(
+            daily, "_save_magi_assignments",
+            side_effect=lambda assignments: deepcopy(assignments),
+        ), patch.object(
+            daily, "run_observation_loop", side_effect=fake_loop,
+        ), patch.object(
+            daily, "load_core_task_trace", side_effect=fake_trace,
+        ):
+            daily.core_page()
+            request_input = next(
+                e for e in self.client.elements.values()
+                if e._props.get("label") == "新しいTaskとして依頼"
+            )
+            request_input.value = "Pythonの辞書とは？"
+            await self.click("新しい依頼を開始")
+            self.assertTrue(self.elements("完了（Task確定）"))
+            self.assertTrue(self.elements("このTaskは完了しています。"))
+            self.assertTrue(self.elements(response))
+            self.assertFalse(self.elements("RITSUKOの状態を確認しています。"))
 
     async def test_waiting_magi_task_open_restores_interactive_user_resume(self):
         saved_session = {
