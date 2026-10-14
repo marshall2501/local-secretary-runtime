@@ -245,6 +245,13 @@ def _latest_observation_summary(session: dict) -> str:
 
 
 def _latest_result_summary(session: dict, saved_task: dict) -> str:
+    # A committed terminal Task outcome outranks a MAGI proposal. The
+    # member's answer_candidate is not itself a verified Task result.
+    if saved_task.get("status") in {"completed", "failed", "paused"}:
+        message = short_text(saved_task.get("message"))
+        if message:
+            return message
+
     detail = session.get("detail") or {}
     if isinstance(detail, dict):
         for key in ("answer_candidate", "knowledge_candidate"):
@@ -360,13 +367,17 @@ def build_task_presentation(
     session = session if isinstance(session, dict) else {}
     saved_task = saved_task if isinstance(saved_task, dict) else {}
 
+    # Both the live result panel and Task history have a DB-backed snapshot.
+    # Once execution settles, the recorded terminal Task state is authoritative;
+    # MAGI candidate_ready is a *proposal*, not a Task completion state.
+    saved_status = str(saved_task.get("status") or "")
+    saved_terminal = (
+        not busy and saved_status in {"completed", "failed", "paused"}
+    )
     status = str(
-        (
-            saved_task.get("status")
-            if read_only and saved_task.get("status")
-            else session.get("status")
-        )
-        or saved_task.get("status")
+        (saved_status if saved_terminal or (read_only and saved_status) else None)
+        or session.get("status")
+        or saved_status
         or ("running" if busy else "")
     )
     request_text = short_text(
@@ -380,7 +391,10 @@ def build_task_presentation(
     return {
         "request_text": request_text,
         "status": status,
-        "status_label": _STATUS_LABELS.get(status, status or "未開始"),
+        "status_label": (
+            (_STATUS_LABELS.get(status, status) + "（Task確定）")
+            if saved_terminal else _STATUS_LABELS.get(status, status or "未開始")
+        ),
         "latest_result_summary": _latest_result_summary(session, saved_task),
         "user_action_required": action_kind is not None,
         "user_action_kind": action_kind,
