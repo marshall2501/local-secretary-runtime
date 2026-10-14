@@ -1073,9 +1073,14 @@ def register(portal_context: dict):
                         "通常運用では最新情報を上に表示し、ここで有効にする検証情報では実行経緯を古い順に追えます。"
                     ).classes("text-sm text-grey-7")
                     ui.label(
-                        "実行方式の選択は通常のRITSUKO画面で行います。"
-                        "この設定は選択欄の表示だけを変更し、保存済みの方式は変えません。"
+                        "新しいTaskで使う判断方式と、RITSUKO画面の選択欄表示を"
+                        "それぞれ設定します。検証終了後は既定方式をOFFに戻せます。"
+                        "進行中・保存済みTaskの方式は変更しません。"
                     ).classes("text-xs text-grey-7")
+                    judgment_default_mode = ui.switch(
+                        "新規Taskの既定判断方式：LLM（ON）／従来（OFF）",
+                        value=bool(_UI_PREFERENCES.get("core_goal_mode", False)),
+                    )
                     judgment_selector_visibility = ui.switch(
                         "フロー判断方式の選択欄を表示",
                         value=_UI_PREFERENCES.get("core_show_judgment_mode", True),
@@ -1158,7 +1163,7 @@ def register(portal_context: dict):
                             },
                         },
                         "core_show_judgment_mode": bool(judgment_selector_visibility.value),
-                        "core_goal_mode": bool(_UI_PREFERENCES.get("core_goal_mode", False)),
+                        "core_goal_mode": bool(judgment_default_mode.value),
                         "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
                         "core_advisor_timeout": _UI_PREFERENCES.get("core_advisor_timeout", 60),
                         "visibility": {
@@ -1182,6 +1187,7 @@ def register(portal_context: dict):
                     }
     
                 def sync_controls(preferences: dict) -> None:
+                    judgment_default_mode.value = preferences["core_goal_mode"]
                     judgment_selector_visibility.value = preferences["core_show_judgment_mode"]
                     for key, control in pkb_open_controls.items():
                         control.value = preferences["pkb"][key]
