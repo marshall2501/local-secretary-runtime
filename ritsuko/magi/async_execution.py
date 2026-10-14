@@ -1159,78 +1159,22 @@ async def continue_with_observation_async(
 def _private_observation_local_scope(
     session: dict,
 ) -> tuple[list[dict] | None, dict | None]:
-    """Respect one Task's owner-selected Profile, or the legacy pre-migration gate."""
-    if session.get("policy_snapshot") is not None:
-        return restrict_members_by_profile(session, session["policy_snapshot"])
-    private_sources = sorted({
-        str(item.get("source") or "")
-        for item in (session.get("observations") or [])
-        if isinstance(item, dict)
+    """Apply the Task's recorded profile; do not revive obsolete local-only rules."""
+    snapshot = session.get("policy_snapshot")
+    if snapshot is not None:
+        return restrict_members_by_profile(session, snapshot)
+    if any(
+        isinstance(item, dict)
         and item.get("verified") is True
         and item.get("confidentiality") in {"private", "sensitive"}
-    })
-    if not private_sources:
-        return None, None
-
-    local_specs = [
-        deepcopy(spec)
-        for spec in (session.get("member_specs") or [])
-        if spec.get("enabled") and spec.get("provider") == "ollama"
-    ]
-    withheld = [
-        {
-            "name": spec.get("name"),
-            "provider": spec.get("provider"),
-            "model": spec.get("model"),
-        }
-        for spec in (session.get("member_specs") or [])
-        if spec.get("enabled") and spec.get("provider") != "ollama"
-    ]
-    read_private_sources = {
-        source
-        for source in private_sources
-        if source in {"pkb", "finance", "files"}
-    }
-    # Preserve the already-accepted PKB mode when later private Observations are
-    # workflow evidence (Proposal Review / Memory Intake) rather than a newly
-    # acquired private read Source.
-    pkb_only_read_context = read_private_sources == {"pkb"}
-    mode = (
-        "local_only_private_pkb"
-        if pkb_only_read_context
-        else "local_only_private_observation"
-    )
-    reason = (
-        "verified_private_pkb_observation"
-        if pkb_only_read_context
-        else "verified_private_or_sensitive_observation"
-    )
-    base = {
-        "mode": mode,
-        "reason": reason,
-        "private_sources": private_sources,
-        "withheld_members": withheld,
-    }
-    if not local_specs:
-        session["cloud_context_gate"] = {
-            **deepcopy(base),
-            "status": "blocked_no_local_member",
-        }
-        session.update(
-            status="stopped",
-            next_step="cloud_context_gate_no_local_member",
-        )
-        return [], None
-
-    session["cloud_context_gate"] = {
-        **deepcopy(base),
-        "status": "applied",
-    }
-    return local_specs, base
+        for item in session.get("observations") or []
+    ):
+        raise ValueError("task_policy_snapshot_required")
+    return None, None
 
 
 def _private_pkb_local_scope(session: dict):
-    """Compatibility alias for older tests/callers."""
+    """Compatibility entry point for current callers; same recorded-policy contract."""
     return _private_observation_local_scope(session)
 
 
