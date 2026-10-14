@@ -711,7 +711,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "model": "",
             "prompt_version": "test",
             "member_specs": [
-                {"name": "MELCHIOR", "provider": "ollama", "model": "qwen",
+                {"name": "MELCHIOR", "provider": "ollama", "endpoint": "http://secretary-ollama:11434", "model": "qwen",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
                 {"name": "CASPER", "provider": "openai", "model": "cloud",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
@@ -839,7 +839,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "member_specs": [
                 {
                     "name": "MELCHIOR",
-                    "provider": "ollama",
+                    "provider": "ollama", "endpoint": "http://secretary-ollama:11434",
                     "model": "local",
                     "enabled": True,
                     "weight": 1.0,
@@ -947,7 +947,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "model": "",
             "prompt_version": "test",
             "member_specs": [
-                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                {"name": "MELCHIOR", "provider": "ollama", "endpoint": "http://secretary-ollama:11434", "model": "local",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
                 {"name": "CASPER", "provider": "openai", "model": "cloud",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
@@ -1033,7 +1033,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "model": "",
             "prompt_version": "test",
             "member_specs": [
-                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                {"name": "MELCHIOR", "provider": "ollama", "endpoint": "http://secretary-ollama:11434", "model": "local",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
                 {"name": "CASPER", "provider": "openai", "model": "cloud",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
@@ -1252,7 +1252,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "model": "",
             "prompt_version": "test",
             "member_specs": [
-                {"name": "MELCHIOR", "provider": "ollama", "model": "local",
+                {"name": "MELCHIOR", "provider": "ollama", "endpoint": "http://secretary-ollama:11434", "model": "local",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
                 {"name": "CASPER", "provider": "openai", "model": "cloud",
                  "enabled": True, "weight": 1.0, "timeout_seconds": 10},
@@ -1370,7 +1370,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             "member_specs": [
                 {
                     "name": "MELCHIOR",
-                    "provider": "ollama",
+                    "provider": "ollama", "endpoint": "http://secretary-ollama:11434",
                     "model": "local",
                     "enabled": True,
                     "weight": 1.0,
