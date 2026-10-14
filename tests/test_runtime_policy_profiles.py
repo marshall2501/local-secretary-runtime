@@ -152,12 +152,17 @@ class RuntimePolicyPureTests(unittest.TestCase):
         self.assertEqual(s["status"], "stopped")
         self.assertEqual(s["next_step"], "cloud_context_gate_no_allowed_member")
 
-    def test_missing_snapshot_retains_existing_legacy_gate(self):
+    def test_old_task_without_snapshot_requires_explicit_profile(self):
         s = session(None)
+        with self.assertRaisesRegex(ValueError, "task_policy_snapshot_required"):
+            _private_observation_local_scope(s)
+
+    def test_public_observation_without_snapshot_does_not_need_context_grant(self):
+        s = session(None)
+        s["observations"][0]["confidentiality"] = "public"
         members, context = _private_observation_local_scope(s)
-        self.assertEqual([m["name"] for m in members],
-                         ["MELCHIOR", "BALTHASAR"])
-        self.assertEqual(context["mode"], "local_only_private_pkb")
+        self.assertIsNone(members)
+        self.assertIsNone(context)
 
     def test_unknown_or_missing_endpoint_is_not_local(self):
         self.assertEqual(endpoint_scope({"provider": "ollama",
