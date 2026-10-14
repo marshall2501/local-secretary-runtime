@@ -290,6 +290,21 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(4):
             await asyncio.sleep(0)
 
+    async def test_hidden_judgment_mode_selector_keeps_saved_strategy(self):
+        preferences = daily._default_ui_preferences()
+        preferences["core_show_judgment_mode"] = False
+        preferences["core_goal_mode"] = True
+        daily._apply_ui_preferences(preferences)
+        with self.client:
+            daily.core_page()
+            checkboxes = [
+                e for e in self.client.elements.values()
+                if isinstance(e, ui.checkbox)
+                and "フロー判断：LLM" in str(getattr(e, "text", ""))
+            ]
+            self.assertEqual(checkboxes, [])
+            self.assertIs(daily._UI_PREFERENCES["core_goal_mode"], True)
+
     async def test_opt_in_goal_mode_never_persists_temporary_single_member_selection(self):
         """The owner's normal three-member settings must survive one Goal test."""
         names = ("MELCHIOR", "CASPER", "BALTHASAR")
@@ -339,7 +354,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                 toggle.value = enabled
             checkbox = next(e for e in self.client.elements.values()
                             if isinstance(e, ui.checkbox)
-                            and "Goal判断方式" in str(getattr(e, "text", "")))
+                            and "フロー判断：LLM" in str(getattr(e, "text", "")))
             checkbox.value = True
             await self.click("新しい依頼を開始")
             save.assert_not_called()
