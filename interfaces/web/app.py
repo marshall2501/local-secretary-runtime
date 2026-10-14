@@ -329,6 +329,7 @@ def _default_ui_preferences() -> dict:
         },
         "core_advisor_model": None,
         "core_advisor_timeout": 60,
+        "core_goal_mode": False,
         "visibility": {
             section: dict(values)
             for section, values in UI_VISIBILITY_DEFAULT.items()
@@ -411,6 +412,9 @@ def _validate_ui_preferences(raw: object) -> dict:
                 value = providers.get(key)
                 if isinstance(value, bool):
                     result["debug"]["er_diagram_providers"][key] = value
+
+    if isinstance(raw.get("core_goal_mode"), bool):
+        result["core_goal_mode"] = raw["core_goal_mode"]
 
     advisor_model = raw.get("core_advisor_model")
     if isinstance(advisor_model, str):
@@ -562,6 +566,12 @@ def _set_core_ui_open(key: str, value: bool) -> None:
     if key not in CORE_UI_DEFAULT_OPEN:
         raise KeyError("unknown Core accordion key")
     _CORE_UI_OPEN[key] = bool(value)
+
+
+def _save_core_goal_mode(enabled: bool) -> None:
+    """Persist the owner's Goal/standard MAGI mode selection across restarts."""
+    saved = save_ui_preferences({**_UI_PREFERENCES, "core_goal_mode": bool(enabled)})
+    _apply_ui_preferences(saved)
 
 
 def _save_core_advisor_settings(model: str | None, timeout_seconds: int) -> tuple[str | None, int]:
