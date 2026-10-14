@@ -1266,13 +1266,35 @@ def register(portal_context: dict):
                     if not request_text:
                         ui.notify("入力文を指定してください", type="warning")
                         return
-                    specs = save_guided_assignments(notify=False)
-                    if not specs:
-                        return
                     goal_mode = bool(goal_mode_checkbox.value)
-                    if goal_mode and len([item for item in specs if item.get("enabled")]) != 1:
-                        ui.notify("Goal判断方式ではMAGIの有効モデルを1席だけにしてください", type="warning")
-                        return
+                    if goal_mode:
+                        # A temporary single-member test must not persist changes
+                        # to the owner's normal MAGI member assignments.
+                        chosen = [
+                            item for item in collect_guided_assignments()
+                            if item["enabled"]
+                        ]
+                        if len(chosen) != 1:
+                            ui.notify("Goal判断方式ではMAGIの有効モデルを1席だけにしてください", type="warning")
+                            return
+                        selected = chosen[0]
+                        saved = next((
+                            item for item in (state.get("magi_member_specs") or [])
+                            if item.get("name") == selected["name"]
+                        ), None)
+                        if (not saved or not saved.get("enabled") or
+                                saved.get("profile_id") != selected["profile_id"]):
+                            ui.notify(
+                                "Goal試験では保存済みのLLMプロファイルを選択してください。"
+                                "変更が必要な場合は通常のMAGI設定から保存してください。",
+                                type="warning",
+                            )
+                            return
+                        specs = [{**saved, **selected}]
+                    else:
+                        specs = save_guided_assignments(notify=False)
+                        if not specs:
+                            return
                     policy_snapshot = (
                         await run.io_bound(_load_magi_policy_snapshot, "lan")
                         if goal_mode else None
@@ -1295,7 +1317,7 @@ def register(portal_context: dict):
                     try:
                         start_options = {
                             "member_specs": specs,
-                            "timeout": guided_timeout_seconds(),
+                            "timeout": guided_timeout_seconds({"member_specs": specs}),
                             "stop_requested": stop_event.is_set,
                             "on_turn_start": note_guided_turn,
                             "task_id": task_uuid,
