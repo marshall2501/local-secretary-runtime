@@ -1294,6 +1294,34 @@ def register(portal_context: dict):
                         render_guided_verification(session)
     
     
+                def selected_guided_goal_mode() -> bool:
+                    # Hidden test control must keep the saved default.
+                    return (
+                        bool(goal_mode_checkbox.value)
+                        if goal_mode_checkbox is not None
+                        else bool(_UI_PREFERENCES.get("core_goal_mode", False))
+                    )
+
+                def save_guided_goal_mode(*, notify: bool = True) -> bool:
+                    """Persist the selected mode independently of Task execution."""
+                    try:
+                        selected = selected_guided_goal_mode()
+                        _save_core_goal_mode(selected)
+                        # Do not report success unless the disk-backed preference
+                        # actually round-trips through the persisted settings.
+                        if load_ui_preferences()["core_goal_mode"] != selected:
+                            raise RuntimeError("flow_judgment_preference_not_persisted")
+                    except Exception as exc:
+                        ui.notify(
+                            "フロー判断方式を保存できません: "
+                            + type(exc).__name__ + ": " + str(exc)[:120],
+                            type="negative",
+                        )
+                        return False
+                    if notify:
+                        ui.notify("フロー判断方式を保存しました", type="positive")
+                    return True
+
                 async def start_guided():
                     if state["guided_busy"]:
                         return
@@ -1301,13 +1329,11 @@ def register(portal_context: dict):
                     if not request_text:
                         ui.notify("入力文を指定してください", type="warning")
                         return
-                    # Hiding the verification selector does not silently
-                    # change the saved choice for subsequent new Tasks.
-                    goal_mode = (
-                        bool(goal_mode_checkbox.value)
-                        if goal_mode_checkbox is not None
-                        else bool(_UI_PREFERENCES.get("core_goal_mode", False))
-                    )
+                    goal_mode = selected_guided_goal_mode()
+                    # Starting a new Task is also an explicit save action,
+                    # even when the checkbox's change event was not delivered.
+                    if not save_guided_goal_mode(notify=False):
+                        return
                     if goal_mode:
                         # A temporary single-member test must not persist changes
                         # to the owner's normal MAGI member assignments.
@@ -1414,12 +1440,16 @@ def register(portal_context: dict):
                         goal_mode_checkbox = ui.checkbox(
                             "フロー判断：LLM（検証用・MAGI 1席）",
                             value=bool(_UI_PREFERENCES.get("core_goal_mode", False)),
-                            on_change=lambda event: _save_core_goal_mode(bool(event.value)),
                         ).props("dense")
                         ui.label(
-                            "ON: LLMで次の処理を判断（現行検証は1席）。"
-                            "OFF: 従来の判断処理。設定画面からこの選択欄だけ非表示にできます。"
+                            "選択は「新しい依頼を開始」時に保存します。"
+                            "実行しない場合は「フロー判断を保存」を押してください。"
+                            "選択欄は設定画面から非表示にできます。"
                         ).classes("text-xs text-grey-7")
+                        ui.button(
+                            "フロー判断を保存",
+                            icon="save", on_click=save_guided_goal_mode,
+                        ).props("outline dense")
                     guided_button = ui.button(
                         "新しい依頼を開始",
                         icon="play_arrow",
