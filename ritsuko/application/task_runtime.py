@@ -45,7 +45,8 @@ class StateDrivenTaskApplication:
     async def start(self, request: str, *, member_specs: list[dict],
                     timeout: float, task_id: UUID | None = None,
                     stop_requested=None, on_turn_start=None,
-                    dialogue_starter=None, observation_continuation=None) -> dict:
+                    dialogue_starter=None, observation_continuation=None,
+                    control_mode: str = "legacy") -> dict:
         options = {
             "member_specs": member_specs,
             "timeout": timeout,
@@ -58,6 +59,15 @@ class StateDrivenTaskApplication:
             "stop_requested": stop_requested,
             "on_turn_start": on_turn_start,
         }
+        if control_mode not in {"legacy", "goal_loop_v1"}:
+            raise ValueError("unsupported_task_control_mode")
+        if control_mode == "goal_loop_v1":
+            if dialogue_starter is not None or observation_continuation is not None:
+                raise ValueError("goal_mode_must_use_own_dialogue_contract")
+            from ritsuko.magi.goal_loop import start_goal_dialogue, continue_goal_observations
+            options["dialogue_starter"] = start_goal_dialogue
+            options["observation_continuation"] = continue_goal_observations
+            options["resource_catalog"] = {"web": {"available": True}}
         if dialogue_starter is not None:
             options["dialogue_starter"] = dialogue_starter
         if observation_continuation is not None:
