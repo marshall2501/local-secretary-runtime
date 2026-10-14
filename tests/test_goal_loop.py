@@ -352,42 +352,41 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
             await start_goal_dialogue("Pythonの辞書は？",
                 member_specs=SPEC + [{**SPEC[0], "name": "MELCHIOR"}], timeout=5)
 
-    async def test_legacy_mode_unchanged_and_new_mode_is_opt_in(self):
+    async def test_task_application_selects_judgment_callbacks_without_mode_branch(self):
         from unittest.mock import Mock
         names = list(TaskRuntimePorts.__dataclass_fields__)
         ports = TaskRuntimePorts(**{k: Mock() for k in names})
         forwarded = []
+
         async def runner(*args, **kwargs):
             forwarded.append(kwargs)
             return {"status": "ok"}
+
         app = StateDrivenTaskApplication(
             ports, start_runner=runner,
             resume_runner=runner, review_runner=runner,
         )
-        await app.start("legacy", member_specs=SPEC, timeout=5)
+        await app.start("standard", member_specs=SPEC, timeout=5)
         self.assertNotIn("dialogue_starter", forwarded[-1])
-        with self.assertRaisesRegex(ValueError, "goal_mode_policy_snapshot_required"):
-            await app.start("new", member_specs=SPEC, timeout=5,
-                            control_mode="goal_loop_v1")
-        await app.start("new", member_specs=SPEC, timeout=5,
-                        control_mode="goal_loop_v1",
-                        policy_snapshot={"profile_id": "test", "revision": 1, "grants": []})
-        self.assertIs(forwarded[-1]["dialogue_starter"].func, start_goal_dialogue)
-        self.assertEqual(forwarded[-1]["dialogue_starter"].keywords["policy_snapshot"]["profile_id"], "test")
-        self.assertIs(forwarded[-1]["observation_continuation"],
-                      continue_goal_observations)
+        snapshot = {"profile_id": "test", "revision": 1, "grants": []}
         progress = []
-        await app.start("new", member_specs=SPEC, timeout=5,
-                        control_mode="goal_loop_v1",
-                        policy_snapshot={"profile_id": "test", "revision": 1, "grants": []},
-                        on_member_progress=progress.append)
-        self.assertIs(forwarded[-1]["dialogue_starter"].func, start_goal_dialogue)
-        self.assertIsNotNone(
-            forwarded[-1]["dialogue_starter"].keywords["on_member_progress"])
-        self.assertIs(forwarded[-1]["observation_continuation"].func,
-                      continue_goal_observations)
-        self.assertIsNotNone(
-            forwarded[-1]["observation_continuation"].keywords["on_member_progress"])
+        goal_starter = partial(
+            start_goal_dialogue, policy_snapshot=snapshot,
+            on_member_progress=progress.append,
+        )
+        goal_observe = partial(
+            continue_goal_observations, on_member_progress=progress.append,
+        )
+        await app.start(
+            "goal", member_specs=SPEC, timeout=5,
+            dialogue_starter=goal_starter,
+            observation_continuation=goal_observe,
+        )
+        self.assertIs(forwarded[-1]["dialogue_starter"], goal_starter)
+        self.assertIs(forwarded[-1]["observation_continuation"], goal_observe)
+        self.assertEqual(forwarded[-1]["dialogue_starter"].keywords["policy_snapshot"], snapshot)
+        self.assertNotIn("control_mode", forwarded[-1])
+        self.assertNotIn("policy_snapshot", forwarded[-1])
 
 
 if __name__ == "__main__":
