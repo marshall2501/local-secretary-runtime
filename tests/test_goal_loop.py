@@ -50,6 +50,25 @@ class GoalContractTests(unittest.TestCase):
                              "query": "do something", "reason": "X"}
         self.assertIn("read_request:invalid", validate_goal_turn(x))
 
+    def test_insufficient_but_recorded_result_may_explain_missing_coverage(self):
+        """A cited search Result can be insufficient for direct-page verification."""
+        existing = str(uuid4())
+        x = judgment("request_read", fulfillment="partial", basis="insufficient",
+                     refs=[existing], request={
+                         "source": "web", "query": "official page source",
+                         "reason": "provider citation is not direct content verification",
+                     })
+        self.assertEqual(validate_goal_turn(x), [])
+        # Refs are never allowed when the model claims NO evidence is needed.
+        x["evidence"]["basis"] = "not_required"
+        self.assertIn("evidence:unexpected_refs", validate_goal_turn(x))
+        x["evidence"]["basis"] = "insufficient"
+        x["next"] = "respond"
+        x["read_request"] = None
+        x["answer"] = "Unverified source is sufficient"
+        x["fulfillment"] = "met"
+        self.assertIn("respond:insufficient_evidence", validate_goal_turn(x))
+
     def test_malformed_and_dangerous_state_pairs(self):
         x = judgment("respond", answer="result", fulfillment="unknown",
                      basis="not_required")
@@ -160,6 +179,71 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
             s, [{"source": "web", "result_id": str(uuid4()),
                  "action_id": str(uuid4()), "verified": True,
                  "verification_level": "provider_cited", "text": "provider citation"}],
+            timeout=5, caller=caller,
+        )
+        self.assertEqual(s["next_step"], "unrecorded_task_result_reference")
+        self.assertEqual(goal_task_projection(s)["task_status"], "failed")
+
+    async def test_partial_search_result_references_do_not_abort_new_read(self):
+        """Regression for the actual 2026-10-14 second MAGI turn."""
+        result_id = str(uuid4())
+        async def caller(_spec, envelope, **_kw):
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "request_read", request={
+                        "source": "web", "query": "Python dict.get official docs",
+                        "reason": "Need official result",
+                    })}
+            self.assertEqual(
+                envelope["resource_catalog"]["web"]["direct_page_content_fetch"], False
+            )
+            self.assertEqual(envelope["observations"][0]["result_id"], result_id)
+            return {"status": "ok", "response": judgment(
+                "request_read", fulfillment="partial",
+                basis="insufficient", refs=[result_id], request={
+                    "source": "web", "query": "More context for dict.get",
+                    "reason": "Only provider citation, not direct page content",
+                })}
+        session = await start_goal_dialogue(
+            "Python公式資料をWeb検索して調べて", member_specs=SPEC,
+            timeout=5, caller=caller,
+        )
+        updated = await continue_goal_observations(
+            session,
+            [{"source": "web", "result_id": result_id,
+              "action_id": str(uuid4()), "verified": True,
+              "verification_level": "provider_cited",
+              "text": "Provider reported Python official citation"}],
+            timeout=5, caller=caller,
+        )
+        self.assertEqual(updated["turns"][1]["status"], "ok")
+        self.assertEqual(updated["turns"][1]["errors"], [])
+        self.assertEqual(updated["status"], "waiting_information")
+        self.assertEqual(updated["pending_requests"][0]["source"], "web")
+        self.assertEqual(goal_task_projection(updated)["task_status"], "waiting_external")
+
+    async def test_forged_partial_result_reference_is_rejected(self):
+        async def caller(_spec, envelope, **_kw):
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "request_read", request={
+                        "source": "web", "query": "Python official doc",
+                        "reason": "Need a citation",
+                    })}
+            return {"status": "ok", "response": judgment(
+                "request_read", fulfillment="partial", basis="insufficient",
+                refs=["another-task-result"], request={
+                    "source": "web", "query": "Python further details",
+                    "reason": "The citation is not enough",
+                })}
+        s = await start_goal_dialogue(
+            "Python公式資料で確認して", member_specs=SPEC, timeout=5,
+            caller=caller,
+        )
+        s = await continue_goal_observations(
+            s, [{"source": "web", "result_id": str(uuid4()),
+                 "action_id": str(uuid4()), "verified": True,
+                 "verification_level": "provider_cited", "text": "citation"}],
             timeout=5, caller=caller,
         )
         self.assertEqual(s["next_step"], "unrecorded_task_result_reference")
