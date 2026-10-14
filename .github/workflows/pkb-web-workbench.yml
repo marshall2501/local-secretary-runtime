@@ -65,6 +65,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
       - run: python -m unittest discover -s tests -p test_core_gui.py -v
       - run: python -m unittest discover -s tests -p test_task_runtime.py -v
+      - run: python -m unittest discover -s tests -p test_goal_loop.py -v
       - run: python -m unittest discover -s tests -p test_schema_diagram.py -v
       - run: python -m unittest discover -s tests -p test_core_ooda.py -v
       - run: python -m unittest discover -s tests -p test_core_advisor.py -v
