@@ -282,13 +282,13 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(inputs), 1)
             inputs[0].value = "Pythonの辞書とは何？"
             switches = [e for e in self.client.elements.values()
-                        if isinstance(e, ui.switch) and e._props.get("label") == "有効"]
+                        if isinstance(e, ui.switch)]
             self.assertEqual(len(switches), 3)
             for toggle, enabled in zip(switches, (False, True, False)):
                 toggle.value = enabled
             checkbox = next(e for e in self.client.elements.values()
                             if isinstance(e, ui.checkbox)
-                            and "Goal判断方式" in str(e._props.get("label") or ""))
+                            and "Goal判断方式" in str(getattr(e, "text", "")))
             checkbox.value = True
             await self.click("新しい依頼を開始")
             save.assert_not_called()
