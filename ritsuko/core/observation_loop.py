@@ -140,7 +140,7 @@ async def run_observation_loop(
                 )
                 batch_executions.append(execution)
                 all_executions.append(execution)
-                await anyio.to_thread.run_sync(
+                record_ids = await anyio.to_thread.run_sync(
                     record_source_read_record,
                     task_uuid,
                     execution,
@@ -150,6 +150,28 @@ async def run_observation_loop(
                     execution,
                     pending,
                 )
+                if session.get("control_mode") == "goal_loop_v1":
+                    # Returned IDs belong to the current Task's committed read
+                    # record; LLM-provided IDs must never become evidence.
+                    if (not isinstance(record_ids, tuple) or len(record_ids) != 2
+                            or not all(record_ids)):
+                        raise ValueError("goal_result_ids_required")
+                    if observation is None:
+                        # A failed Tool is evidence of failure, not a verified
+                        # factual Source. Allow MAGI to suggest wait/next step.
+                        observation = {
+                            "source": pending["source"],
+                            "verified": False,
+                            "text": str(execution.get("error_type") or "source_read_failed"),
+                            "responds_to": pending.get("request_ids") or [],
+                        }
+                    observation["action_id"] = str(record_ids[0])
+                    observation["result_id"] = str(record_ids[1])
+                    observation["verification_level"] = (
+                        "provider_cited"
+                        if execution.get("verified_by") == "provider_reported_web_citations"
+                        else "bounded_read" if observation["verified"] else "read_failed"
+                    )
                 if observation is not None:
                     observations.append(observation)
 
@@ -164,6 +186,12 @@ async def run_observation_loop(
                 on_turn_start=on_turn_start,
             )
             cycles += 1
+
+        if (session.get("control_mode") == "goal_loop_v1"
+                and session.get("status") == "waiting_information"
+                and cycles >= max_observation_cycles):
+            session["next_step"] = "goal_observation_cycle_limit"
+            session["status_message"] = "許可された情報取得回数の上限に達したため、追加取得せず待機しています。"
 
         await anyio.to_thread.run_sync(
             persist_session_record,
