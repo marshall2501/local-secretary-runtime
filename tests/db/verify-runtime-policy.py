@@ -86,9 +86,11 @@ def verify(connect):
     )
     masked = repo.load_snapshot("lan")
     assert masked["revision"] > verification["revision"]
-    _, policy = restrict_members(candidate(masked), masked)
-    assert policy["redaction_tokens"] == ["CODE-123"]
-    assert redact_observation_text("CODE-123", policy["redaction_tokens"]) == "[MASKED]"
+    members, policy = restrict_members(candidate(masked), masked)
+    assert [x["name"] for x in members] == ["MELCHIOR", "CASPER"]
+    assert policy["redaction_tokens"] == []
+    assert redact_observation_text("CODE-123", policy["redaction_tokens"]) == "CODE-123"
+    assert masked["profile_name"] == "verification-lan"
 
     production_id = next(row["id"] for row in profiles
                          if row["name"] == "production-lan")
