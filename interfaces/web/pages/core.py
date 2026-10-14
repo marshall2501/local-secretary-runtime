@@ -443,7 +443,10 @@ def register(portal_context: dict):
                 ) -> dict:
                     if session.get("control_mode") == "goal_loop_v1":
                         from ritsuko.magi.goal_loop import continue_goal_user
-                        return await continue_goal_user(session, user_text, **kwargs)
+                        return await continue_goal_user(
+                            session, user_text,
+                            on_member_progress=note_member_progress, **kwargs,
+                        )
                     return await continue_with_user_clarification_async(
                         session,
                         user_text,
@@ -1326,6 +1329,7 @@ def register(portal_context: dict):
                             start_options.update(
                                 control_mode="goal_loop_v1",
                                 policy_snapshot=policy_snapshot,
+                                on_member_progress=note_member_progress,
                             )
                         else:
                             start_options.update(
