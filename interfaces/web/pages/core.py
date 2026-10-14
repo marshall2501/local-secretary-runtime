@@ -1361,10 +1361,22 @@ def register(portal_context: dict):
                             "task_id": task_uuid,
                         }
                         if goal_mode:
+                            # Only the MAGI judgment provider changes. The
+                            # RITSUKO Application/Task/Observation path is shared.
+                            from functools import partial
+                            from ritsuko.magi.goal_loop import (
+                                start_goal_dialogue, continue_goal_observations,
+                            )
                             start_options.update(
-                                control_mode="goal_loop_v1",
-                                policy_snapshot=policy_snapshot,
-                                on_member_progress=note_member_progress,
+                                dialogue_starter=partial(
+                                    start_goal_dialogue,
+                                    policy_snapshot=policy_snapshot,
+                                    on_member_progress=note_member_progress,
+                                ),
+                                observation_continuation=partial(
+                                    continue_goal_observations,
+                                    on_member_progress=note_member_progress,
+                                ),
                             )
                         else:
                             start_options.update(
