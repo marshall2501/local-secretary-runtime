@@ -46,7 +46,8 @@ class StateDrivenTaskApplication:
                     timeout: float, task_id: UUID | None = None,
                     stop_requested=None, on_turn_start=None,
                     dialogue_starter=None, observation_continuation=None,
-                    control_mode: str = "legacy") -> dict:
+                    control_mode: str = "legacy",
+                    policy_snapshot: dict | None = None) -> dict:
         options = {
             "member_specs": member_specs,
             "timeout": timeout,
@@ -64,8 +65,11 @@ class StateDrivenTaskApplication:
         if control_mode == "goal_loop_v1":
             if dialogue_starter is not None or observation_continuation is not None:
                 raise ValueError("goal_mode_must_use_own_dialogue_contract")
+            if policy_snapshot is None:
+                raise ValueError("goal_mode_policy_snapshot_required")
+            from functools import partial
             from ritsuko.magi.goal_loop import start_goal_dialogue, continue_goal_observations
-            options["dialogue_starter"] = start_goal_dialogue
+            options["dialogue_starter"] = partial(start_goal_dialogue, policy_snapshot=policy_snapshot)
             options["observation_continuation"] = continue_goal_observations
             options["resource_catalog"] = {"web": {"available": True}}
         if dialogue_starter is not None:
