@@ -9,7 +9,7 @@ from copy import deepcopy
 import re
 from uuid import uuid4
 
-from .async_execution import _call_panel_member_async, _emit_member_progress
+from .async_execution import _apply_detail_async, _call_panel_member_async, _emit_member_progress
 from .dialogue import _normalized_member_specs
 from .goal_contract import VERSION, validate_goal_turn
 from .runtime_context import create_runtime_context
@@ -95,10 +95,13 @@ def goal_task_projection(session: dict) -> dict:
     }
 
 
-def _apply_judgment(session: dict, decision: dict) -> None:
-    """RITSUKO checks proposal against its locally recorded observations."""
+async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> None:
+    """Adapt an LLM decision to the existing MAGI flow/state handler.
+
+    The model evaluates Goal fulfillment; RITSUKO still checks recorded Result
+    IDs and applies the same downstream state decisions used by standard MAGI.
+    """
     session["goal_judgment"] = deepcopy(decision)
-    session["detail"] = {"answer_candidate": decision.get("answer")}
     session["user_question"] = None
     session["pending_requests"] = []
     next_step = decision["next"]
@@ -110,49 +113,56 @@ def _apply_judgment(session: dict, decision: dict) -> None:
         if isinstance(o, dict) and o.get("source") == "web"
         and o.get("result_id")
     }
-    # References in an "insufficient" proposal are provenance only: they
-    # must exist in this Task, but need not be a successful/verified read.
-    # A "result_refs" answer, by contrast, requires verified observations.
     if (any(ref not in recorded for ref in ids)
             or (evidence["basis"] == "result_refs"
                 and (not ids or any(not recorded[ref].get("verified")
                                     for ref in ids)))):
-
         session.update(status="stopped", next_step="unrecorded_task_result_reference")
         return
     if next_step == "respond":
-        if (evidence["basis"] == "not_required" and
-                (session["requires_web"] or session.get("tool_read_executed"))):
+        if (evidence["basis"] == "not_required"
+                and (session["requires_web"] or session.get("tool_read_executed"))):
             session.update(status="stopped", next_step="required_source_not_observed")
             return
-        if evidence["basis"] == "not_required" or ids:
-            session.update(status="candidate_ready", next_step="review_goal_answer")
+        if evidence["basis"] != "not_required" and not ids:
+            session.update(status="stopped", next_step="goal_evidence_missing")
             return
-        session.update(status="stopped", next_step="goal_evidence_missing")
-        return
-    if next_step == "request_read":
+        state = "READY"
+        information_requests = []
+    elif next_step == "request_read":
         request = decision["read_request"]
         query = request["query"].strip()
-        if query in session["previous_queries"]:
-            session.update(status="stopped", next_step="repeated_goal_query")
-            return
-        session["previous_queries"].append(query)
-        session["pending_requests"] = [{
-            "request_id": "REQ-" + session["task_id"][:8] + "-" + str(len(session["turns"])),
+        state = "NEED_INFORMATION"
+        information_requests = [{
             "source": "web", "what": query, "reason": request["reason"],
         }]
-        session.update(status="waiting_information", next_step="review_information_requests")
-        return
-    if next_step == "ask_user":
-        session["user_question"] = decision["question"]
-        session.update(status="waiting_user", next_step="ask_user_for_information")
-        return
-    if next_step == "wait":
+    elif next_step == "ask_user":
+        state = "NEED_CLARIFICATION"
+        information_requests = []
+    elif next_step == "wait":
+        state = "NEED_INFORMATION"
+        information_requests = []
         session["status_message"] = decision["reason"][:1000]
-        session.update(status="waiting_information", next_step="goal_wait")
-        return
-    session["status_message"] = decision["reason"][:1000]
-    session.update(status="stopped", next_step="goal_unable")
+    else:
+        state = "UNABLE"
+        information_requests = []
+        session["status_message"] = decision["reason"][:1000]
+
+    # This is the same state application function used by the original mode.
+    # No second mapping of request/user/candidate states is maintained here.
+    detail = {
+        "state": state,
+        "understood_request": decision["goal"],
+        "reason": decision["reason"],
+        "information_requests": information_requests,
+        "question_for_user": decision.get("question"),
+        "answer_candidate": decision.get("answer"),
+        "knowledge_candidate": None,
+        "action_candidate": None,
+    }
+    await _apply_detail_async(
+        session, detail, timeout=timeout, purpose="review_or_repair",
+    )
 
 
 async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
@@ -230,7 +240,7 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         session.update(status="stopped", next_step="goal_member_invalid")
         return session
     session["goal"] = response["goal"]
-    _apply_judgment(session, response)
+    await _apply_judgment(session, response, timeout=timeout)
     return session
 
 
@@ -255,7 +265,8 @@ async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
         "requires_web": goal_requires_web(request),
         "goal": None, "goal_judgment": None, "observations": [],
         "detail": None, "turns": [], "pending_requests": [],
-        "previous_queries": [], "user_replies": [], "tool_read_executed": False,
+        "previous_queries": [], "previous_request_signatures": [],
+        "turn_limit": MAX_GOAL_TURNS, "user_replies": [], "tool_read_executed": False,
         "user_question": None, "status_message": None,
     }
     return await _run_goal_turn(session, timeout=timeout, caller=caller,
