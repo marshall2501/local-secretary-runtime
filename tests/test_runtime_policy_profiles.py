@@ -305,7 +305,7 @@ class RuntimePolicyAsyncTests(unittest.IsolatedAsyncioTestCase):
             return {"status": "unavailable", "response": None, "errors": ["fixture"],
                     "diagnostic": {}}
 
-        raw = session(profile(decision="redact"))
+        raw = session(profile(name="production-lan", decision="redact"))
         _, policy = restrict_members(raw, raw["policy_snapshot"])
         raw.update({
             "turns": [], "task_id": "fixture-1", "prompt_version": "test",
@@ -406,10 +406,10 @@ class RuntimePolicyRealAsyncPathTests(unittest.IsolatedAsyncioTestCase):
             set(result["turns"][0]["diagnostic"]["enabled_members"]),
             {"MELCHIOR", "CASPER", "BALTHASAR"},
         )
-        self.assertEqual(result["cloud_context_gate"]["status"], "applied")
+        self.assertEqual(result["cloud_context_gate"]["status"], "bypassed")
         self.assertEqual(result["turns"][0]["question_purpose"],
                          "evaluate_observation")
-        self.assertEqual(result["turns"][0]["context_policy"]["profile_name"],
+        self.assertEqual(result["cloud_context_gate"]["profile_name"],
                          "verification-lan")
 
     async def test_production_filters_remote_before_real_async_panel(self):
@@ -432,7 +432,7 @@ class RuntimePolicyRealAsyncPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mask_applies_to_all_fake_provider_envelopes(self):
         result, calls = await self.execute_with_fake_providers(
-            self.waiting_session(profile(decision="redact"))
+            self.waiting_session(profile(name="production-lan", decision="redact"))
         )
         self.assertEqual({name for name, _ in calls},
                          {"MELCHIOR", "CASPER", "BALTHASAR"})
@@ -446,7 +446,7 @@ class RuntimePolicyRealAsyncPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_denied_stops_before_provider_calls(self):
         result, calls = await self.execute_with_fake_providers(
-            self.waiting_session(profile(decision="deny"))
+            self.waiting_session(profile(name="production-lan", decision="deny"))
         )
         self.assertEqual(calls, [])
         self.assertEqual(result["status"], "stopped")
