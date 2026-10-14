@@ -722,7 +722,7 @@ async def _send_async(
         "diagnostic": deepcopy(result.get("diagnostic") or {}),
         "member_results": deepcopy(result.get("member_results") or []),
         "consensus": deepcopy(result.get("consensus")),
-        "context_policy": deepcopy(safe_context_policy),
+        "context_policy": deepcopy(envelope.get("context_policy")),
     })
     session["last_question_purpose"] = question_purpose
 
