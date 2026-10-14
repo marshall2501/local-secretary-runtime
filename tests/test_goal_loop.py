@@ -185,6 +185,28 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s["status"], "waiting_information")
         self.assertEqual(goal_task_projection(s)["task_status"], "waiting_external")
 
+    async def test_user_answer_rejoins_same_goal_task(self):
+        from ritsuko.magi.goal_loop import continue_goal_user
+        replies = []
+        async def responder(_spec, envelope, **_kw):
+            replies.extend(envelope.get("user_replies") or [])
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "ask_user", question="Pythonのどの版を説明しますか？")}
+            return {"status": "ok", "response": judgment(
+                "respond", answer="3.12として説明します。",
+                fulfillment="met", basis="not_required")}
+        s = await start_goal_dialogue(
+            "Pythonについて説明して", member_specs=SPEC, timeout=5,
+            caller=responder,
+        )
+        self.assertEqual(goal_task_projection(s)["phase"], "awaiting_clarification")
+        t = await continue_goal_user(s, "3.12", timeout=5, caller=responder)
+        self.assertEqual(t["task_id"], s["task_id"])
+        self.assertEqual(t["status"], "candidate_ready")
+        self.assertEqual(goal_task_projection(t)["task_status"], "completed")
+        self.assertEqual(replies, ["3.12"])
+
     async def test_requires_explicit_single_llm(self):
         with self.assertRaisesRegex(ValueError, "one_enabled_member"):
             await start_goal_dialogue("Pythonの辞書は？",
@@ -204,9 +226,14 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         )
         await app.start("legacy", member_specs=SPEC, timeout=5)
         self.assertNotIn("dialogue_starter", forwarded[-1])
+        with self.assertRaisesRegex(ValueError, "goal_mode_policy_snapshot_required"):
+            await app.start("new", member_specs=SPEC, timeout=5,
+                            control_mode="goal_loop_v1")
         await app.start("new", member_specs=SPEC, timeout=5,
-                        control_mode="goal_loop_v1")
-        self.assertIs(forwarded[-1]["dialogue_starter"], start_goal_dialogue)
+                        control_mode="goal_loop_v1",
+                        policy_snapshot={"profile_id": "test", "revision": 1, "grants": []})
+        self.assertIs(forwarded[-1]["dialogue_starter"].func, start_goal_dialogue)
+        self.assertEqual(forwarded[-1]["dialogue_starter"].keywords["policy_snapshot"]["profile_id"], "test")
         self.assertIs(forwarded[-1]["observation_continuation"],
                       continue_goal_observations)
 
