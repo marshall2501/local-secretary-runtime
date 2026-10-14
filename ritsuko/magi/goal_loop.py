@@ -17,7 +17,7 @@ from .runtime_context import create_runtime_context
 # Fail closed for explicit requests to consult external sources; do not treat
 # model-generated "not_required" as a substitute for a user-required Web read.
 SOURCE_REQUEST = re.compile(
-    r"(?i)(公式|出典|引用|資料|検索|調べて|調査|最新|ウェブ|web|website|URL|ネット|サイト|source|reference)"
+    r"(?i)(公式|出典|引用|資料|検索|調べて|調査|最新|今日|昨日|現在|最近|価格|私の|自分の|ウェブ|web|website|URL|ネット|サイト|source|reference)"
 )
 MAX_GOAL_TURNS = 6
 
@@ -53,9 +53,16 @@ def goal_task_projection(session: dict) -> dict:
         if judgment.get("fulfillment") == "met" and (valid_ref or source_free):
             answer = judgment.get("answer")
             if isinstance(answer, str) and answer.strip():
+                # A provider citation is not independent page-content verification.
+                disclaimer = ""
+                if valid_ref and any(
+                    available[ref].get("verification_level") == "provider_cited"
+                    for ref in ids
+                ):
+                    disclaimer = "\\n\\n注: 出典は検索Providerが報告した引用であり、本文の独立確認は未実施です。"
                 return {
                     "task_status": "completed", "phase": "completed",
-                    "next_step": "respond", "message": answer.strip(),
+                    "next_step": "respond", "message": answer.strip() + disclaimer,
                     "question": None, "reason": "goal_evaluated_with_recorded_evidence"
                     if valid_ref else "goal_evaluated_source_free",
                 }
@@ -162,6 +169,7 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         "goal": session.get("goal"),
         "observations": deepcopy((session.get("observations") or [])[-8:]),
         "previous_judgment": deepcopy(session.get("goal_judgment")),
+        "user_replies": deepcopy(session.get("user_replies") or []),
         "resource_catalog": {"web": {"available": True, "access": "bounded_read_only"}},
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
     }
@@ -179,6 +187,9 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         "response": deepcopy(response), "errors": errors,
         "member_results": [deepcopy(result)], "diagnostic": deepcopy(result.get("diagnostic") or {}),
     })
+    if stop_requested is not None and stop_requested():
+        session.update(status="stopped", next_step="user_requested_stop")
+        return session
     if status != "ok":
         session.update(status="stopped", next_step="goal_member_invalid")
         return session
@@ -190,7 +201,7 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
 async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
                               timeout: float, task_id: str | None = None,
                               stop_requested=None, on_turn_start=None,
-                              caller=None) -> dict:
+                              caller=None, policy_snapshot: dict | None = None) -> dict:
     """Explicit goal_loop_v1 only. One enabled member avoids implicit consensus."""
     specs = [s for s in _normalized_member_specs(member_specs, "") if s["enabled"]]
     if len(specs) != 1:
@@ -200,13 +211,14 @@ async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
         raise ValueError("empty_request")
     session = {
         "task_id": str(task_id or uuid4()), "user_raw": request,
+        "policy_snapshot": deepcopy(policy_snapshot),
         "control_mode": VERSION, "member_specs": specs,
         "runtime_context": create_runtime_context(timezone_name="Asia/Tokyo", locale="ja-JP"),
         "status": "running", "next_step": "evaluate_goal",
         "requires_web": goal_requires_web(request),
         "goal": None, "goal_judgment": None, "observations": [],
         "detail": None, "turns": [], "pending_requests": [],
-        "previous_queries": [], "tool_read_executed": False,
+        "previous_queries": [], "user_replies": [], "tool_read_executed": False,
         "user_question": None, "status_message": None,
     }
     return await _run_goal_turn(session, timeout=timeout, caller=caller,
@@ -229,5 +241,23 @@ async def continue_goal_observations(session: dict, observations: list[dict], *,
     updated["tool_read_executed"] = True
     updated["pending_requests"] = []
     updated.update(status="running", next_step="evaluate_observation")
+    return await _run_goal_turn(updated, timeout=timeout, caller=caller,
+                                stop_requested=stop_requested, on_turn_start=on_turn_start)
+
+
+async def continue_goal_user(session: dict, user_text: str, *, timeout: float,
+                             stop_requested=None, on_turn_start=None,
+                             caller=None) -> dict:
+    """Resume a previously saved public Goal Task with one clarifying answer."""
+    if session.get("control_mode") != VERSION or session.get("status") != "waiting_user":
+        raise ValueError("goal_not_waiting_for_user")
+    reply = str(user_text or "").strip()
+    if not reply:
+        raise ValueError("empty_goal_clarification")
+    updated = deepcopy(session)
+    updated.setdefault("user_replies", []).append(reply[:4000])
+    updated["user_replies"] = updated["user_replies"][-3:]
+    updated["user_question"] = None
+    updated.update(status="running", next_step="evaluate_user_clarification")
     return await _run_goal_turn(updated, timeout=timeout, caller=caller,
                                 stop_requested=stop_requested, on_turn_start=on_turn_start)
