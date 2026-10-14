@@ -173,7 +173,14 @@ def restrict_members(session: dict, snapshot: dict) -> tuple[list[dict] | None, 
             "revision": policy["revision"],
             "status": "bypassed",
         }
-        return None, None
+        return [deepcopy(member) for member in session.get("member_specs") or []
+                if member.get("enabled")], {
+                    "mode": "verification_unrestricted",
+                    "profile_name": policy["profile_name"],
+                    "profile_id": policy["profile_id"],
+                    "revision": policy["revision"],
+                    "redaction_tokens": [],
+                }
     labels, sources = _context_labels(session)
     if not labels:
         return None, None
