@@ -1158,6 +1158,7 @@ def register(portal_context: dict):
                             },
                         },
                         "core_show_judgment_mode": bool(judgment_selector_visibility.value),
+                        "core_goal_mode": bool(_UI_PREFERENCES.get("core_goal_mode", False)),
                         "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
                         "core_advisor_timeout": _UI_PREFERENCES.get("core_advisor_timeout", 60),
                         "visibility": {
