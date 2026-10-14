@@ -239,6 +239,69 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(4):
             await asyncio.sleep(0)
 
+    async def test_opt_in_goal_mode_never_persists_temporary_single_member_selection(self):
+        """The owner's normal three-member settings must survive one Goal test."""
+        names = ("MELCHIOR", "CASPER", "BALTHASAR")
+        providers = ("ollama", "openai", "gemini")
+        profiles = [
+            {"id": f"profile-{name}", "display_name": name, "provider": provider,
+             "model": "synthetic", "enabled": True}
+            for name, provider in zip(names, providers)
+        ]
+        configured = [
+            {"name": name, "profile_id": f"profile-{name}", "enabled": True,
+             "weight": 1.0, "timeout_seconds": 120, "retry_within_turn": True,
+             "provider": provider, "model": "synthetic"}
+            for name, provider in zip(names, providers)
+        ]
+        passed = []
+        async def fake_loop(*args, **kwargs):
+            passed.append((args, kwargs))
+            return {"task_id": str(kwargs["task_id"]),
+                    "user_raw": args[0], "status": "waiting_user",
+                    "next_step": "ask_user_for_information",
+                    "member_specs": kwargs["member_specs"],
+                    "turns": [], "observations": []}
+        with self.client, patch.object(
+            daily, "list_magi_models", return_value=[]
+        ), patch.object(
+            daily, "_load_magi_configuration",
+            return_value=(profiles, configured),
+        ), patch.object(
+            daily, "_save_magi_assignments",
+            side_effect=AssertionError("temporary Goal test must not save DB assignments"),
+        ) as save, patch.object(
+            daily, "_load_magi_policy_snapshot",
+            return_value={"profile_id": "test-lan", "revision": 1, "grants": []},
+        ), patch.object(
+            daily, "run_observation_loop", side_effect=fake_loop,
+        ):
+            daily.core_page()
+            inputs = [e for e in self.client.elements.values()
+                      if e._props.get("label") == "新しいTaskとして依頼"]
+            self.assertEqual(len(inputs), 1)
+            inputs[0].value = "Pythonの辞書とは何？"
+            switches = [e for e in self.client.elements.values()
+                        if isinstance(e, ui.switch) and e._props.get("label") == "有効"]
+            self.assertEqual(len(switches), 3)
+            for toggle, enabled in zip(switches, (False, True, False)):
+                toggle.value = enabled
+            checkbox = next(e for e in self.client.elements.values()
+                            if isinstance(e, ui.checkbox)
+                            and "Goal判断方式" in str(e._props.get("label") or ""))
+            checkbox.value = True
+            await self.click("新しい依頼を開始")
+            save.assert_not_called()
+            self.assertEqual(len(passed), 1)
+            _, options = passed[0]
+            self.assertEqual([s["name"] for s in options["member_specs"]], ["CASPER"])
+            self.assertEqual(options["member_specs"][0]["provider"], "openai")
+            self.assertEqual(options["dialogue_starter"].keywords["policy_snapshot"]["profile_id"],
+                             "test-lan")
+            self.assertEqual(
+                [s["enabled"] for s in configured], [True, True, True],
+            )
+
     async def test_guided_dialogue_ui_and_comparison_are_separated(self):
         fixture = {
             'task_id': 'fixture-guided-task', 'user_raw': '車の車種は？',
