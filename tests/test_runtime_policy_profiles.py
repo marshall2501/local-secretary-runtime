@@ -66,8 +66,8 @@ class RuntimePolicyPureTests(unittest.TestCase):
     def test_verification_profile_allows_all_enabled_members(self):
         s = session(profile())
         members, context = _private_observation_local_scope(s)
-        self.assertIsNone(members)
-        self.assertIsNone(context)
+        self.assertEqual(len(members), 3)
+        self.assertEqual(context["mode"], "verification_unrestricted")
         self.assertEqual(s["cloud_context_gate"]["status"], "bypassed")
         self.assertNotIn("redaction_tokens", s["cloud_context_gate"])
 
@@ -75,8 +75,8 @@ class RuntimePolicyPureTests(unittest.TestCase):
         p = profile(name="verification-lan", decision="deny")
         s = session(p)
         members, context = restrict_members(s, p)
-        self.assertIsNone(members)
-        self.assertIsNone(context)
+        self.assertEqual(len(members), 3)
+        self.assertEqual(context["redaction_tokens"], [])
         self.assertEqual(s["status"], "running")
         self.assertEqual(s["cloud_context_gate"]["mode"], "verification_unrestricted")
 
