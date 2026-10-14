@@ -25,6 +25,19 @@ from ritsuko.magi.async_execution import (
 )
 
 
+def production_local_context_policy():
+    """Synthetic production profile explicitly allows local but not remote context."""
+    return {
+        "profile_id": "test-production", "profile_name": "production-lan",
+        "revision": 1, "grants": [
+            {"label": label, "destination_scope": scope,
+             "decision": decision, "mask_rules": {"tokens": []}}
+            for label in ("llm.send_context.private", "llm.send_context.sensitive")
+            for scope, decision in (("local", "allow"), ("remote", "deny"))
+        ],
+    }
+
+
 class _SlowTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         await anyio.sleep(0.2)
@@ -692,6 +705,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             }
 
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-1",
             "user_raw": "メインPCのGPUの種類は？",
             "model": "",
@@ -758,7 +772,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([x["provider"] for x in seen["specs"]], ["ollama"])
         self.assertEqual(
             seen["envelope"]["context_policy"]["mode"],
-            "local_only_private_pkb",
+            "configured_policy",
         )
         self.assertEqual(seen["envelope"]["observations"][0]["source"], "pkb")
         self.assertTrue(updated["tool_read_executed"])
@@ -817,6 +831,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             }
 
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-1",
             "user_raw": "メインPCのGPUの種類は？",
             "model": "",
@@ -926,6 +941,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             }
 
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-finance",
             "user_raw": "先月の家計の収支は？",
             "model": "",
@@ -977,7 +993,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen["members"], ["ollama"])
         self.assertEqual(
             seen["policy"]["mode"],
-            "local_only_private_observation",
+            "configured_policy",
         )
         self.assertEqual(seen["policy"]["private_sources"], ["finance"])
         self.assertEqual(updated["status"], "candidate_ready")
@@ -1011,6 +1027,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             }
 
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-finance-empty",
             "user_raw": "先月の家計で何に使いすぎた？",
             "model": "",
@@ -1077,7 +1094,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             updated["cloud_context_gate"]["mode"],
-            "local_only_private_observation",
+            "configured_policy",
         )
 
     async def test_public_web_observation_does_not_withhold_cloud_members(self):
@@ -1159,6 +1176,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verified_private_pkb_observation_fails_closed_without_local_member(self):
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-1",
             "user_raw": "私の情報は？",
             "model": "",
@@ -1196,7 +1214,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(updated["status"], "stopped")
         self.assertEqual(
-            updated["next_step"], "cloud_context_gate_no_local_member"
+            updated["next_step"], "cloud_context_gate_no_allowed_member"
         )
 
     async def test_user_resume_after_turn_four_opens_new_window_and_keeps_private_context_local(self):
@@ -1228,6 +1246,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             }
 
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-1",
             "user_raw": "メインPCのGPUの種類は？",
             "model": "",
@@ -1302,7 +1321,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen[0]["members"], ["MELCHIOR"])
         self.assertEqual(
             seen[0]["policy"]["mode"],
-            "local_only_private_pkb",
+            "configured_policy",
         )
         self.assertTrue(any(
             item.get("source") == "user_clarification"
@@ -1343,6 +1362,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
             }
 
         session = {
+            "policy_snapshot": production_local_context_policy(),
             "task_id": "task-1",
             "user_raw": "メインPCのGPUの種類は？",
             "model": "",
@@ -1445,7 +1465,7 @@ class AsyncMagiDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen[0]["members"], ["MELCHIOR"])
         self.assertEqual(
             seen[0]["policy"]["mode"],
-            "local_only_private_pkb",
+            "configured_policy",
         )
         self.assertEqual(
             seen[0]["observations"][-1]["source"],
