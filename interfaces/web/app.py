@@ -330,6 +330,7 @@ def _default_ui_preferences() -> dict:
         "core_advisor_model": None,
         "core_advisor_timeout": 60,
         "core_goal_mode": False,
+        "core_show_judgment_mode": True,
         "visibility": {
             section: dict(values)
             for section, values in UI_VISIBILITY_DEFAULT.items()
@@ -415,6 +416,8 @@ def _validate_ui_preferences(raw: object) -> dict:
 
     if isinstance(raw.get("core_goal_mode"), bool):
         result["core_goal_mode"] = raw["core_goal_mode"]
+    if isinstance(raw.get("core_show_judgment_mode"), bool):
+        result["core_show_judgment_mode"] = raw["core_show_judgment_mode"]
 
     advisor_model = raw.get("core_advisor_model")
     if isinstance(advisor_model, str):
