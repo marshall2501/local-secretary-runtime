@@ -12,6 +12,7 @@ from ritsuko.magi.async_execution import (
 from ritsuko.magi.goal_contract import validate_goal_turn
 from ritsuko.magi.goal_loop import (
     start_goal_dialogue, continue_goal_observations, goal_task_projection,
+    _run_goal_turn,
 )
 from ritsuko.core.observation_loop import run_observation_loop
 from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
@@ -82,6 +83,52 @@ class GoalContractTests(unittest.TestCase):
 
 
 class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_llm_flow_uses_same_member_scope_and_masking_as_standard(self):
+        async def first(_spec, _envelope, **_kwargs):
+            return {"status": "ok", "response": judgment(
+                "ask_user", question="確認が必要です",
+            )}
+
+        session = await start_goal_dialogue(
+            "一般情報", member_specs=SPEC, timeout=5, caller=first,
+        )
+        session["observations"].append({
+            "source": "web", "verified": True,
+            "text": "PRIVATE-TOKEN is in this source",
+        })
+        original = session["observations"][-1]["text"]
+        captured = []
+
+        async def later(_spec, envelope, **_kwargs):
+            captured.append(envelope)
+            return {"status": "ok", "response": judgment(
+                "wait", reason="次の処理を待ちます",
+            )}
+
+        await _run_goal_turn(
+            session, timeout=5, caller=later,
+            member_specs_override=SPEC,
+            context_policy={"mode": "masked",
+                            "redaction_tokens": ["PRIVATE-TOKEN"]},
+        )
+        self.assertEqual(len(captured), 1)
+        self.assertNotIn("PRIVATE-TOKEN", str(captured[0]))
+        self.assertNotIn("redaction_tokens", captured[0].get("context_policy", {}))
+        self.assertEqual(session["observations"][-1]["text"], original)
+
+        calls = []
+        async def blocked(*_args, **_kwargs):
+            calls.append(True)
+            self.fail("a denied MAGI member must not receive context")
+
+        session["status"] = "running"
+        await _run_goal_turn(
+            session, timeout=5, caller=blocked,
+            member_specs_override=[{**SPEC[0], "enabled": False}],
+        )
+        self.assertEqual(calls, [])
+        self.assertEqual(session["next_step"], "goal_model_not_permitted")
+
     async def test_shared_dialogue_selects_llm_judgment_without_new_task_loop(self):
         result_id = str(uuid4())
         observed_stages = []
