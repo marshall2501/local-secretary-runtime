@@ -146,6 +146,30 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["status"], "candidate_ready")
         self.assertEqual(goal_task_projection(updated)["task_status"], "completed")
 
+    async def test_old_goal_session_resumes_through_new_common_user_path(self):
+        async def responder(_spec, envelope, **_kwargs):
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "ask_user", question="どのPython版？",
+                )}
+            self.assertEqual(envelope["user_replies"], ["3.12"])
+            return {"status": "ok", "response": judgment(
+                "respond", answer="Python 3.12 です",
+                fulfillment="met", basis="not_required",
+            )}
+
+        old_session = await start_goal_dialogue(
+            "Python版を説明して", member_specs=SPEC, timeout=5,
+            caller=responder,
+        )
+        self.assertNotIn("decision_strategy", old_session)
+        result = await continue_with_user_clarification_async(
+            old_session, "3.12", timeout=5, goal_caller=responder,
+        )
+        self.assertEqual(result["task_id"], old_session["task_id"])
+        self.assertEqual(result["status"], "candidate_ready")
+        self.assertEqual(goal_task_projection(result)["task_status"], "completed")
+
     async def test_shared_dialogue_preserves_failed_web_read_as_unverified(self):
         async def responder(_spec, envelope, **_kwargs):
             if envelope["turn"] == 1:
