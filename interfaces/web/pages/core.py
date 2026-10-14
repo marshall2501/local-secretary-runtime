@@ -629,6 +629,40 @@ def register(portal_context: dict):
                             "w-full border-2 border-teal-300 bg-white shadow-none"
                         ):
                             ui.label("現在のTask").classes("font-bold text-teal-900")
+                            # Owner's local export is intentionally complete: never
+                            # silently mask or truncate the final answer or Task data.
+                            full_answer = str(
+                                (session or {}).get("goal_judgment", {}).get("answer")
+                                or (session or {}).get("detail", {}).get("answer_candidate")
+                                or presentation["latest_result_summary"]
+                                or ""
+                            )
+                            ui.button(
+                                "最終結果をコピー",
+                                icon="content_copy",
+                                on_click=lambda value=full_answer: copy_protocol_json(
+                                    value, "最終結果"
+                                ),
+                            ).props("outline dense")
+                            full_task_export = json.dumps(
+                                {
+                                    "request": presentation["request_text"],
+                                    "display_status": presentation["status_label"],
+                                    "saved_task": saved_task,
+                                    "dialogue": session,
+                                },
+                                ensure_ascii=False,
+                                indent=2,
+                                default=str,
+                            )
+                            ui.button(
+                                "Task全情報をコピー",
+                                icon="content_copy",
+                                on_click=lambda value=full_task_export: copy_protocol_json(
+                                    value, "Task全情報"
+                                ),
+                            ).props("outline dense")
+
                             with ui.grid(columns=2).classes("w-full gap-2"):
                                 ui.label("依頼").classes("text-xs text-grey-7")
                                 ui.label(
