@@ -66,11 +66,25 @@ class RuntimePolicyPureTests(unittest.TestCase):
     def test_verification_profile_allows_all_enabled_members(self):
         s = session(profile())
         members, context = _private_observation_local_scope(s)
-        self.assertEqual([m["name"] for m in members],
-                         ["MELCHIOR", "CASPER", "BALTHASAR"])
-        self.assertEqual(context["mode"], "configured_policy")
-        self.assertEqual(s["cloud_context_gate"]["status"], "applied")
+        self.assertIsNone(members)
+        self.assertIsNone(context)
+        self.assertEqual(s["cloud_context_gate"]["status"], "bypassed")
         self.assertNotIn("redaction_tokens", s["cloud_context_gate"])
+
+    def test_verification_bypasses_denial_and_redaction(self):
+        p = profile(name="verification-lan", decision="deny")
+        s = session(p)
+        members, context = restrict_members(s, p)
+        self.assertIsNone(members)
+        self.assertIsNone(context)
+        self.assertEqual(s["status"], "running")
+        self.assertEqual(s["cloud_context_gate"]["mode"], "verification_unrestricted")
+
+    def test_production_profile_remains_configurable(self):
+        s = session(profile(name="production-lan", decision="redact"))
+        members, context = restrict_members(s, s["policy_snapshot"])
+        self.assertEqual(len(members), 3)
+        self.assertEqual(context["redaction_tokens"], ["SENSITIVE-123"])
 
     def test_verification_remote_grant_inherits_any_allow(self):
         # Initial Migration 009 inserts 'any/allow' only; the settings UI
@@ -131,7 +145,7 @@ class RuntimePolicyPureTests(unittest.TestCase):
         self.assertEqual(len(context["withheld_members"]), 2)
 
     def test_all_denied_stops_task(self):
-        s = session(profile(decision="deny"))
+        s = session(profile(name="production-lan", decision="deny"))
         members, context = _private_observation_local_scope(s)
         self.assertEqual(members, [])
         self.assertIsNone(context)
@@ -155,7 +169,7 @@ class RuntimePolicyPureTests(unittest.TestCase):
     def test_snapshot_validation_and_rule_precedence(self):
         with self.assertRaises(ValueError):
             validate_policy_snapshot({"revision": 0, "profile_id": "x", "grants": []})
-        p = profile()
+        p = profile(name="production-lan")
         p["grants"].append({"label": "llm.send_context.private",
                             "destination_scope": "remote",
                             "decision": "deny", "mask_rules": {}})
@@ -163,7 +177,7 @@ class RuntimePolicyPureTests(unittest.TestCase):
         self.assertEqual([m["name"] for m in members], ["MELCHIOR"])
 
     def test_sensitive_requires_its_own_allow(self):
-        p = profile()
+        p = profile(name="production-lan")
         p["grants"] = [p["grants"][0]]
         s = session(p)
         s["observations"].append({"source": "finance", "verified": True,
@@ -182,7 +196,7 @@ class RuntimePolicyPureTests(unittest.TestCase):
         self.assertEqual(redact_observation_text("A.B A+B", ["A.B"]), "[MASKED] A+B")
 
     def test_mask_values_not_stored_in_diagnostic(self):
-        s = session(profile(decision="redact"))
+        s = session(profile(name="production-lan", decision="redact"))
         _, context = restrict_members(s, s["policy_snapshot"])
         self.assertEqual(context["redaction_tokens"], ["SENSITIVE-123"])
         self.assertNotIn("SENSITIVE-123", str(s["cloud_context_gate"]))
