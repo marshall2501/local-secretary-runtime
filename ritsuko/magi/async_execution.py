@@ -44,6 +44,7 @@ async def _transport_not_configured(*_args, **_kwargs):
 # Keeping this module-level name preserves the existing test patch surface.
 request_json_with_retry = _transport_not_configured
 from .client import OLLAMA
+from .goal_contract import GOAL_SCHEMA, GOAL_SYSTEM, validate_goal_turn
 from .dialogue import (
     CLASSIFY_QUESTION,
     MAX_TURNS,
@@ -127,14 +128,15 @@ async def _call_ollama_guided_async(
     retry_http_codes: tuple[int, ...] | list[int] = DEFAULT_RETRY_HTTP_CODES,
 ) -> dict:
     stage = envelope["stage"]
-    schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
+    schema = (GOAL_SCHEMA if stage == "goal" else
+              _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA)
     payload = {
         "model": model,
         "stream": False,
         "think": False,
         "format": schema,
         "messages": [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": GOAL_SYSTEM if stage == "goal" else SYSTEM},
             {"role": "user", "content": json.dumps(envelope, ensure_ascii=False)},
         ],
         "options": {
@@ -186,7 +188,7 @@ async def _call_ollama_guided_async(
                 "errors": ["invalid_json"],
                 "diagnostic": diagnostic,
             }
-        errors = validate_turn(stage, data)
+        errors = validate_goal_turn(data) if stage == "goal" else validate_turn(stage, data)
         return {
             "status": "ok" if not errors else "invalid",
             "response": data,
@@ -230,16 +232,17 @@ async def _call_openai_guided_async(
             },
         }
     stage = envelope["stage"]
-    schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
+    schema = (GOAL_SCHEMA if stage == "goal" else
+              _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA)
     endpoint = str(
         base_url or os.environ.get("OPENAI_BASE_URL") or OPENAI_DEFAULT_BASE_URL
     ).strip().rstrip("/")
     payload = {
         "model": model,
         "store": False,
-        "instructions": SYSTEM,
+        "instructions": GOAL_SYSTEM if stage == "goal" else SYSTEM,
         "input": json.dumps(envelope, ensure_ascii=False),
-        "max_output_tokens": 1600,
+        "max_output_tokens": 2100 if stage == "goal" else 1600,
         "text": {
             "format": {
                 "type": "json_schema",
@@ -288,7 +291,7 @@ async def _call_openai_guided_async(
                 "errors": ["invalid_json"],
                 "diagnostic": diagnostic,
             }
-        errors = validate_turn(stage, data)
+        errors = validate_goal_turn(data) if stage == "goal" else validate_turn(stage, data)
         return {
             "status": "ok" if not errors else "invalid",
             "response": data,
@@ -332,18 +335,19 @@ async def _call_gemini_guided_async(
             },
         }
     stage = envelope["stage"]
-    schema = _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA
+    schema = (GOAL_SCHEMA if stage == "goal" else
+              _CLASSIFICATION_SCHEMA if stage == "classify" else _DETAIL_SCHEMA)
     endpoint = str(
         base_url or os.environ.get("GEMINI_BASE_URL") or GEMINI_DEFAULT_BASE_URL
     ).strip().rstrip("/")
     payload = {
-        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "systemInstruction": {"parts": [{"text": GOAL_SYSTEM if stage == "goal" else SYSTEM}]},
         "contents": [{
             "role": "user",
             "parts": [{"text": json.dumps(envelope, ensure_ascii=False)}],
         }],
         "generationConfig": {
-            "maxOutputTokens": 1600,
+            "maxOutputTokens": 2100 if stage == "goal" else 1600,
             "responseFormat": {
                 "text": {
                     "mimeType": "APPLICATION_JSON",
@@ -390,7 +394,7 @@ async def _call_gemini_guided_async(
                 "errors": ["invalid_json"],
                 "diagnostic": diagnostic,
             }
-        errors = validate_turn(stage, data)
+        errors = validate_goal_turn(data) if stage == "goal" else validate_turn(stage, data)
         return {
             "status": "ok" if not errors else "invalid",
             "response": data,
