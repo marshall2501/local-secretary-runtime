@@ -648,7 +648,7 @@ def register(portal_context: dict):
                                 indent=2,
                                 default=str,
                             )
-                            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+                            with ui.row().classes("w-full items-center gap-2 flex-nowrap"):
                                 ui.button(
                                     "最終結果をコピー",
                                     icon="content_copy",
