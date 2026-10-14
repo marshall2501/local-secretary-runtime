@@ -94,6 +94,62 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p["reason"], "goal_evaluated_source_free")
         self.assertFalse(s["tool_read_executed"])
 
+    async def test_member_progress_reports_actual_running_on_each_goal_turn(self):
+        """UI must never show a Goal member queued while its LLM call runs."""
+        events = []
+        result_id = str(uuid4())
+
+        async def responder(_spec, envelope, **_kw):
+            self.assertEqual(events[-1]["state"], "running")
+            self.assertEqual(events[-1]["turn"], envelope["turn"])
+            if envelope["turn"] == 1:
+                return {"status": "ok", "elapsed_seconds": 1.5,
+                        "response": judgment("request_read", request={
+                            "source": "web", "query": "Python dict.get docs",
+                            "reason": "Web result needed"})}
+            return {"status": "ok", "elapsed_seconds": 2.3,
+                    "response": judgment(
+                        "respond", answer="Cited provider information, unverified body",
+                        fulfillment="met", basis="result_refs", refs=[result_id])}
+
+        session = await start_goal_dialogue(
+            "Python公式資料のdict.getを検索して", member_specs=SPEC,
+            timeout=5, caller=responder, on_member_progress=events.append,
+        )
+        self.assertEqual([e["state"] for e in events],
+                         ["queued", "running", "completed"])
+        self.assertEqual([e["turn"] for e in events], [1, 1, 1])
+
+        session = await continue_goal_observations(
+            session, [{
+                "source": "web", "result_id": result_id,
+                "action_id": str(uuid4()), "verified": True,
+                "verification_level": "provider_cited", "text": "Provider citation",
+            }],
+            timeout=5, caller=responder, on_member_progress=events.append,
+        )
+        self.assertEqual([e["state"] for e in events[3:]],
+                         ["queued", "running", "completed"])
+        self.assertEqual([e["turn"] for e in events[3:]], [2, 2, 2])
+        self.assertEqual({e["task_id"] for e in events}, {session["task_id"]})
+        self.assertEqual(events[-1]["elapsed_seconds"], 2.3)
+        self.assertEqual(session["status"], "candidate_ready")
+
+    async def test_goal_invalid_member_reports_invalid_not_queued(self):
+        events = []
+        async def invalid_reply(_spec, _envelope, **_kw):
+            return {"status": "ok", "response": judgment(
+                "respond", answer="Missing evidence", fulfillment="unknown",
+                basis="insufficient")}
+        session = await start_goal_dialogue(
+            "Pythonの辞書とは？", member_specs=SPEC, timeout=5,
+            caller=invalid_reply, on_member_progress=events.append,
+        )
+        self.assertEqual(session["next_step"], "goal_member_invalid")
+        self.assertEqual([e["state"] for e in events],
+                         ["queued", "running", "invalid"])
+        self.assertEqual(events[-1]["error_kind"], "respond:answer_or_goal_missing")
+
     async def test_explicit_official_source_cannot_be_dismissed_as_unneeded(self):
         async def responder(*_args, **_kwargs):
             return {"status": "ok", "response": judgment(
@@ -320,6 +376,18 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forwarded[-1]["dialogue_starter"].keywords["policy_snapshot"]["profile_id"], "test")
         self.assertIs(forwarded[-1]["observation_continuation"],
                       continue_goal_observations)
+        progress = []
+        await app.start("new", member_specs=SPEC, timeout=5,
+                        control_mode="goal_loop_v1",
+                        policy_snapshot={"profile_id": "test", "revision": 1, "grants": []},
+                        on_member_progress=progress.append)
+        self.assertIs(forwarded[-1]["dialogue_starter"].func, start_goal_dialogue)
+        self.assertIsNotNone(
+            forwarded[-1]["dialogue_starter"].keywords["on_member_progress"])
+        self.assertIs(forwarded[-1]["observation_continuation"].func,
+                      continue_goal_observations)
+        self.assertIsNotNone(
+            forwarded[-1]["observation_continuation"].keywords["on_member_progress"])
 
 
 if __name__ == "__main__":
