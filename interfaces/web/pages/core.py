@@ -632,8 +632,8 @@ def register(portal_context: dict):
                             # Owner's local export is intentionally complete: never
                             # silently mask or truncate the final answer or Task data.
                             full_answer = str(
-                                (session or {}).get("goal_judgment", {}).get("answer")
-                                or (session or {}).get("detail", {}).get("answer_candidate")
+                                ((session or {}).get("goal_judgment") or {}).get("answer")
+                                or ((session or {}).get("detail") or {}).get("answer_candidate")
                                 or presentation["latest_result_summary"]
                                 or ""
                             )
