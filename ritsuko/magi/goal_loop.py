@@ -104,15 +104,20 @@ def _apply_judgment(session: dict, decision: dict) -> None:
     next_step = decision["next"]
     evidence = decision["evidence"]
     ids = evidence["result_ids"]
-    trusted = {
-        str(o["result_id"])
+    recorded = {
+        str(o["result_id"]): o
         for o in session.get("observations") or []
         if isinstance(o, dict) and o.get("source") == "web"
-        and o.get("verified") is True and o.get("result_id")
+        and o.get("result_id")
     }
-    if evidence["basis"] == "result_refs" and (
-        not ids or any(ref not in trusted for ref in ids)
-    ):
+    # References in an "insufficient" proposal are provenance only: they
+    # must exist in this Task, but need not be a successful/verified read.
+    # A "result_refs" answer, by contrast, requires verified observations.
+    if (any(ref not in recorded for ref in ids)
+            or (evidence["basis"] == "result_refs"
+                and (not ids or any(not recorded[ref].get("verified")
+                                    for ref in ids)))):
+
         session.update(status="stopped", next_step="unrecorded_task_result_reference")
         return
     if next_step == "respond":
@@ -170,7 +175,13 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         "observations": deepcopy((session.get("observations") or [])[-8:]),
         "previous_judgment": deepcopy(session.get("goal_judgment")),
         "user_replies": deepcopy(session.get("user_replies") or []),
-        "resource_catalog": {"web": {"available": True, "access": "bounded_read_only"}},
+        "resource_catalog": {
+            "web": {
+                "available": True, "access": "bounded_read_only",
+                "capability": "provider_search_with_citations",
+                "direct_page_content_fetch": False,
+            },
+        },
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
     }
     spec = session["member_specs"][0]
