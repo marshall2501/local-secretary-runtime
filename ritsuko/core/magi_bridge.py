@@ -175,6 +175,9 @@ def proposal_review_observation(
 
 def task_projection(session: dict) -> dict:
     """Map one dialogue state to the deterministic Task state RITSUKO owns."""
+    if session.get("control_mode") == "goal_loop_v1":
+        from ritsuko.magi.goal_loop import goal_task_projection
+        return goal_task_projection(session)
     detail = session.get("detail") or {}
     status = session.get("status")
     answer = detail.get("answer_candidate")
