@@ -1045,6 +1045,37 @@ async def _advance_async(
     )
 
 
+def _uses_llm_flow(session: dict) -> bool:
+    """Honor the persisted strategy, including older Goal Task sessions."""
+    return (session.get("decision_strategy") == "llm"
+            or session.get("control_mode") == "goal_loop_v1")
+
+
+async def _advance_by_strategy(
+    session: dict, *, timeout: float, caller=call_guided_panel_async,
+    stop_requested=None, on_turn_start=None, on_member_progress=None,
+    goal_caller=None, member_specs_override=None, context_policy=None,
+) -> dict:
+    """One strategy selection point for MAGI's next-flow judgment."""
+    if _uses_llm_flow(session):
+        from .goal_loop import MAX_GOAL_TURNS, _run_goal_turn
+        # Sessions persisted by the older dedicated Goal code may lack fields
+        # of the shared state handler; preserve their Task and Turn history.
+        session.setdefault("previous_request_signatures", [])
+        session.setdefault("turn_limit", MAX_GOAL_TURNS)
+        return await _run_goal_turn(
+            session, timeout=timeout, caller=goal_caller,
+            stop_requested=stop_requested, on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress,
+        )
+    return await _advance_async(
+        session, timeout=timeout, caller=caller,
+        stop_requested=stop_requested, on_turn_start=on_turn_start,
+        member_specs_override=member_specs_override,
+        context_policy=context_policy,
+    )
+
+
 async def start_dialogue_async(
     user_raw: str,
     *,
@@ -1058,8 +1089,17 @@ async def start_dialogue_async(
     task_timezone: str = "Asia/Tokyo",
     task_locale: str = "ja-JP",
     policy_snapshot: dict | None = None,
+    decision_strategy: str = "standard",
+    on_member_progress=None,
+    goal_caller=None,
 ) -> dict:
+    if decision_strategy not in {"standard", "llm"}:
+        raise ValueError("unknown_flow_decision_strategy")
     specs = _normalized_member_specs(member_specs, model)
+    if decision_strategy == "llm":
+        specs = [spec for spec in specs if spec["enabled"]]
+        if len(specs) != 1:
+            raise ValueError("goal_mode_requires_one_enabled_member")
     from uuid import uuid4
 
     session = {
@@ -1069,6 +1109,7 @@ async def start_dialogue_async(
         "prompt_version": PROMPT_VERSION,
         "runtime_context": create_runtime_context(timezone_name=task_timezone, locale=task_locale),
         "magi_mode": "weighted_panel_async",
+        "decision_strategy": decision_strategy,
         "member_specs": specs,
         "status": "running",
         "next_step": "classify",
@@ -1094,6 +1135,22 @@ async def start_dialogue_async(
     if not [spec for spec in specs if spec["enabled"]]:
         session.update(status="stopped", next_step="no_magi_member")
         return session
+
+    if decision_strategy == "llm":
+        from .goal_loop import MAX_GOAL_TURNS, goal_requires_web
+        session.update(
+            control_mode="goal_loop_v1",
+            status="running", next_step="evaluate_goal",
+            requires_web=goal_requires_web(session["user_raw"]),
+            goal=None, goal_judgment=None, user_replies=[],
+            previous_queries=[], status_message=None,
+            turn_limit=MAX_GOAL_TURNS,
+        )
+        return await _advance_by_strategy(
+            session, timeout=timeout,
+            stop_requested=stop_requested, on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress, goal_caller=goal_caller,
+        )
 
     classification = await _send_async(
         session,
@@ -1186,6 +1243,8 @@ async def continue_with_verified_observations_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
+    goal_caller=None,
 ) -> dict:
     """Continue from one bounded batch of RITSUKO-verified read Observations."""
     updated = deepcopy(session)
@@ -1193,6 +1252,10 @@ async def continue_with_verified_observations_async(
         raise ValueError("not_waiting_for_information")
     if not isinstance(observations, list) or not observations:
         raise ValueError("verified_observations_required")
+    if _uses_llm_flow(updated):
+        from .goal_loop import MAX_GOAL_TURNS
+        updated.setdefault("turn_limit", MAX_GOAL_TURNS)
+        updated.setdefault("previous_request_signatures", [])
     if len(updated["turns"]) >= _turn_limit(updated):
         updated.update(status="stopped", next_step="max_turns_reached")
         return updated
@@ -1202,9 +1265,18 @@ async def continue_with_verified_observations_async(
     for observation in observations[:12]:
         if not isinstance(observation, dict):
             raise ValueError("invalid_observation")
+        # A failed read is a recorded failure, not a verified Source.
+        # Only the LLM flow may re-evaluate such a bounded Web failure.
+        failed_goal_read = (
+            _uses_llm_flow(updated)
+            and observation.get("source") == "web"
+            and observation.get("verified") is False
+            and bool(observation.get("result_id"))
+            and bool(observation.get("action_id"))
+        )
         if (
             observation.get("source") not in {"pkb", "web", "finance"}
-            or observation.get("verified") is not True
+            or (observation.get("verified") is not True and not failed_goal_read)
         ):
             raise ValueError("verified_read_observation_required")
         text_value = str(observation.get("text") or "").strip()
@@ -1238,14 +1310,11 @@ async def continue_with_verified_observations_async(
     local_specs, context_policy = _private_observation_local_scope(updated)
     if local_specs == []:
         return updated
-    return await _advance_async(
-        updated,
-        timeout=timeout,
-        caller=caller,
-        stop_requested=stop_requested,
-        on_turn_start=on_turn_start,
-        member_specs_override=local_specs,
-        context_policy=context_policy,
+    return await _advance_by_strategy(
+        updated, timeout=timeout, caller=caller,
+        stop_requested=stop_requested, on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress, goal_caller=goal_caller,
+        member_specs_override=local_specs, context_policy=context_policy,
     )
 
 
@@ -1339,6 +1408,8 @@ async def continue_with_user_clarification_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
+    goal_caller=None,
 ) -> dict:
     updated = deepcopy(session)
     if updated.get("status") != "waiting_user":
@@ -1360,6 +1431,18 @@ async def continue_with_user_clarification_async(
     local_specs, context_policy = _private_observation_local_scope(updated)
     if local_specs == []:
         return updated
+
+    if _uses_llm_flow(updated):
+        updated.setdefault("user_replies", []).append(text)
+        updated["user_replies"] = updated["user_replies"][-3:]
+        updated["pending_requests"] = []
+        updated["next_step"] = "evaluate_user_clarification"
+        return await _advance_by_strategy(
+            updated, timeout=timeout, caller=caller,
+            stop_requested=stop_requested, on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress, goal_caller=goal_caller,
+            member_specs_override=local_specs, context_policy=context_policy,
+        )
 
     if updated.get("classification") is None:
         updated["next_step"] = "classify_with_context"
