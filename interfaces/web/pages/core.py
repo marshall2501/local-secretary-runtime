@@ -1282,7 +1282,7 @@ def register(portal_context: dict):
                             item for item in (state.get("magi_member_specs") or [])
                             if item.get("name") == selected["name"]
                         ), None)
-                        if (not saved or not saved.get("enabled") or
+                        if (not saved or
                                 saved.get("profile_id") != selected["profile_id"]):
                             ui.notify(
                                 "Goal試験では保存済みのLLMプロファイルを選択してください。"
