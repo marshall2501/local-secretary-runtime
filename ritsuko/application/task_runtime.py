@@ -29,8 +29,10 @@ class TaskRuntimePorts:
 class StateDrivenTaskApplication:
     """Expose start/answer/review as one stable, UI-neutral Task entry.
 
-    Caller-specific LLM progress callbacks and cancellation stay optional.
-    Task and MAGI state, approval, and completion decisions stay in the Core.
+    The calling interface supplies its chosen MAGI judgment implementation
+    through the existing starter/continuation callbacks. This application
+    never chooses between prompt strategies or owns LLM result interpretation.
+    Task, approval and completion decisions remain in RITSUKO.
     """
 
     def __init__(self, ports: TaskRuntimePorts, *,
@@ -45,10 +47,7 @@ class StateDrivenTaskApplication:
     async def start(self, request: str, *, member_specs: list[dict],
                     timeout: float, task_id: UUID | None = None,
                     stop_requested=None, on_turn_start=None,
-                    dialogue_starter=None, observation_continuation=None,
-                    control_mode: str = "legacy",
-                    policy_snapshot: dict | None = None,
-                    on_member_progress=None) -> dict:
+                    dialogue_starter=None, observation_continuation=None) -> dict:
         options = {
             "member_specs": member_specs,
             "timeout": timeout,
@@ -61,25 +60,6 @@ class StateDrivenTaskApplication:
             "stop_requested": stop_requested,
             "on_turn_start": on_turn_start,
         }
-        if control_mode not in {"legacy", "goal_loop_v1"}:
-            raise ValueError("unsupported_task_control_mode")
-        if control_mode == "goal_loop_v1":
-            if dialogue_starter is not None or observation_continuation is not None:
-                raise ValueError("goal_mode_must_use_own_dialogue_contract")
-            if policy_snapshot is None:
-                raise ValueError("goal_mode_policy_snapshot_required")
-            from functools import partial
-            from ritsuko.magi.goal_loop import start_goal_dialogue, continue_goal_observations
-            options["dialogue_starter"] = partial(
-                start_goal_dialogue, policy_snapshot=policy_snapshot,
-                **({"on_member_progress": on_member_progress}
-                   if on_member_progress is not None else {}),
-            )
-            options["observation_continuation"] = (
-                partial(continue_goal_observations, on_member_progress=on_member_progress)
-                if on_member_progress is not None else continue_goal_observations
-            )
-            options["resource_catalog"] = {"web": {"available": True}}
         if dialogue_starter is not None:
             options["dialogue_starter"] = dialogue_starter
         if observation_continuation is not None:
