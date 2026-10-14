@@ -1304,7 +1304,13 @@ def register(portal_context: dict):
                     if not request_text:
                         ui.notify("入力文を指定してください", type="warning")
                         return
-                    goal_mode = bool(goal_mode_checkbox.value)
+                    # Hiding the verification selector does not silently
+                    # change the saved choice for subsequent new Tasks.
+                    goal_mode = (
+                        bool(goal_mode_checkbox.value)
+                        if goal_mode_checkbox is not None
+                        else bool(_UI_PREFERENCES.get("core_goal_mode", False))
+                    )
                     if goal_mode:
                         # A temporary single-member test must not persist changes
                         # to the owner's normal MAGI member assignments.
@@ -1422,16 +1428,17 @@ def register(portal_context: dict):
                         completed_tasks_panel.refresh()
     
                 with new_request_slot:
-                    goal_mode_checkbox = ui.checkbox(
-                        "Goal判断方式（MAGI 1席）",
-                        value=bool(_UI_PREFERENCES.get("core_goal_mode", False)),
-                        on_change=lambda event: _save_core_goal_mode(bool(event.value)),
-                    ).props("dense")
-                    ui.label(
-                        "ON: MAGI 1席で目標・次の行動を判断します。"
-                        "OFF: 通常のMAGI対話方式です。"
-                        "選択は次回も保持します。ONでは有効MAGIを1席だけにしてください。"
-                    ).classes("text-xs text-grey-7")
+                    goal_mode_checkbox = None
+                    if _UI_PREFERENCES.get("core_show_judgment_mode", True):
+                        goal_mode_checkbox = ui.checkbox(
+                            "フロー判断：LLM（検証用・MAGI 1席）",
+                            value=bool(_UI_PREFERENCES.get("core_goal_mode", False)),
+                            on_change=lambda event: _save_core_goal_mode(bool(event.value)),
+                        ).props("dense")
+                        ui.label(
+                            "ON: LLMで次の処理を判断（現行検証は1席）。"
+                            "OFF: 従来の判断処理。設定画面からこの選択欄だけ非表示にできます。"
+                        ).classes("text-xs text-grey-7")
                     guided_button = ui.button(
                         "新しい依頼を開始",
                         icon="play_arrow",
