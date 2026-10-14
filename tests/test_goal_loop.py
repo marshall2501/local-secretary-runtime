@@ -5,6 +5,10 @@ import unittest
 from functools import partial
 from uuid import uuid4
 
+from ritsuko.magi.async_execution import (
+    start_dialogue_async, continue_with_verified_observations_async,
+    continue_with_user_clarification_async,
+)
 from ritsuko.magi.goal_contract import validate_goal_turn
 from ritsuko.magi.goal_loop import (
     start_goal_dialogue, continue_goal_observations, goal_task_projection,
@@ -78,6 +82,96 @@ class GoalContractTests(unittest.TestCase):
 
 
 class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shared_dialogue_selects_llm_judgment_without_new_task_loop(self):
+        result_id = str(uuid4())
+        observed_stages = []
+
+        async def responder(_spec, envelope, **_kwargs):
+            observed_stages.append(envelope["stage"])
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "request_read", request={
+                        "source": "web", "query": "Python dict official",
+                        "reason": "Official source requested",
+                    },
+                )}
+            self.assertEqual(envelope["observations"][-1]["result_id"], result_id)
+            return {"status": "ok", "response": judgment(
+                "respond", answer="Python公式資料により確認できた範囲",
+                fulfillment="met", basis="result_refs", refs=[result_id],
+            )}
+
+        session = await start_dialogue_async(
+            "公式のPython資料を調べて", member_specs=SPEC, timeout=5,
+            decision_strategy="llm", goal_caller=responder,
+        )
+        self.assertEqual(session["decision_strategy"], "llm")
+        self.assertEqual(session["status"], "waiting_information")
+        self.assertEqual(observed_stages, ["goal"])
+        updated = await continue_with_verified_observations_async(
+            session, [{
+                "source": "web", "verified": True,
+                "result_id": result_id, "action_id": str(uuid4()),
+                "verification_level": "provider_cited",
+                "text": "Python provider citation",
+                "responds_to": [session["pending_requests"][0]["request_id"]],
+            }], timeout=5, goal_caller=responder,
+        )
+        self.assertEqual(updated["task_id"], session["task_id"])
+        self.assertEqual(updated["status"], "candidate_ready")
+        self.assertEqual(goal_task_projection(updated)["task_status"], "completed")
+        self.assertEqual(observed_stages, ["goal", "goal"])
+
+    async def test_shared_dialogue_resumes_llm_user_answer(self):
+        async def responder(_spec, envelope, **_kwargs):
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "ask_user", question="説明するPythonの版を教えてください",
+                )}
+            self.assertEqual(envelope["user_replies"], ["3.12"])
+            return {"status": "ok", "response": judgment(
+                "respond", answer="Python 3.12について説明します",
+                fulfillment="met", basis="not_required",
+            )}
+
+        session = await start_dialogue_async(
+            "Pythonの説明をして", member_specs=SPEC, timeout=5,
+            decision_strategy="llm", goal_caller=responder,
+        )
+        self.assertEqual(session["status"], "waiting_user")
+        updated = await continue_with_user_clarification_async(
+            session, "3.12", timeout=5, goal_caller=responder,
+        )
+        self.assertEqual(updated["task_id"], session["task_id"])
+        self.assertEqual(updated["status"], "candidate_ready")
+        self.assertEqual(goal_task_projection(updated)["task_status"], "completed")
+
+    async def test_shared_dialogue_preserves_failed_web_read_as_unverified(self):
+        async def responder(_spec, envelope, **_kwargs):
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "request_read", request={"source": "web", "query": "Official docs",
+                                              "reason": "Read requested"},
+                )}
+            self.assertFalse(envelope["observations"][-1]["verified"])
+            return {"status": "ok", "response": judgment(
+                "wait", reason="Web read failed; awaiting next attempt",
+            )}
+
+        session = await start_dialogue_async(
+            "公式資料を調査して", member_specs=SPEC, timeout=5,
+            decision_strategy="llm", goal_caller=responder,
+        )
+        failed = await continue_with_verified_observations_async(
+            session, [{
+                "source": "web", "verified": False,
+                "result_id": str(uuid4()), "action_id": str(uuid4()),
+                "text": "HTTPError",
+            }], timeout=5, goal_caller=responder,
+        )
+        self.assertEqual(failed["status"], "waiting_information")
+        self.assertNotEqual(goal_task_projection(failed)["task_status"], "completed")
+
     async def test_source_free_can_complete_without_fake_read(self):
         async def responder(_spec, envelope, **_kw):
             self.assertEqual(envelope["stage"], "goal")
