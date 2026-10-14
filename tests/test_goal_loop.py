@@ -169,6 +169,59 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(goal_task_projection(updated)["task_status"], "completed")
         self.assertEqual(observed_stages, ["goal", "goal"])
 
+    async def test_shared_task_loop_persists_llm_decision_and_recorded_result(self):
+        recorded_result_id = str(uuid4())
+        writes = []
+
+        def record(_task, _execution, _request):
+            writes.append("record")
+            return str(uuid4()), recorded_result_id
+
+        async def responder(_spec, envelope, **_kwargs):
+            if envelope["turn"] == 1:
+                return {"status": "ok", "response": judgment(
+                    "request_read", request={
+                        "source": "web", "query": "Official Python dict",
+                        "reason": "Required source",
+                    },
+                )}
+            self.assertEqual(envelope["observations"][0]["result_id"], recorded_result_id)
+            return {"status": "ok", "response": judgment(
+                "respond", fulfillment="met",
+                answer="Python official reference, provider cited",
+                basis="result_refs", refs=[recorded_result_id],
+            )}
+
+        def persist(_id, session, _cap):
+            writes.append("persist")
+            self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+
+        result = await run_observation_loop(
+            "Python公式サイトを調べて",
+            member_specs=SPEC, timeout=5,
+            create_task_record=lambda *_: writes.append("create"),
+            execute_source_request=lambda *_: {
+                "status": "ok", "source": "web", "answer": "Provider citation",
+                "verified_by": "provider_reported_web_citations",
+                "capability": "web_research", "total": 1,
+                "result": {"result_kind": "web_research"},
+            },
+            record_source_read_record=record,
+            persist_session_record=persist,
+            fail_task_record=lambda *_: self.fail("unexpected Task failure"),
+            dialogue_starter=partial(
+                start_dialogue_async, decision_strategy="llm",
+                goal_caller=responder,
+            ),
+            observation_continuation=partial(
+                continue_with_verified_observations_async,
+                goal_caller=responder,
+            ),
+            resource_catalog={"web": {"available": True}},
+        )
+        self.assertEqual(result["status"], "candidate_ready")
+        self.assertEqual(writes, ["create", "record", "persist"])
+
     async def test_shared_dialogue_resumes_llm_user_answer(self):
         async def responder(_spec, envelope, **_kwargs):
             if envelope["turn"] == 1:
