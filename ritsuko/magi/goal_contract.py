@@ -13,6 +13,10 @@ JSON schemaの形式で、respond / request_read / ask_user / wait / unable の�
 新規Sourceの取得、Task状態確定、権限変更、Tool実行はあなたにはできません。
 取得したResultのIDと検証範囲を必ず区別します。
 provider_citedはProviderがURLを報告したことに過ぎず、本文確認済みでも主張の真偽保証でもありません。
+現在のWeb readは検索Providerの引用取得のみであり、URL指定によるページ本文の独立取得はできません。
+本人が本文を直接確認するよう依頼した場合、検索結果だけで達成済みとせず、非対応なら不足を明示してください。
+evidence.basis=insufficientは既存Result IDを含められます（何を得て何が足りないかを示すため）。
+evidence.basis=not_requiredではResult IDを含めず、respondにはinsufficientを使わないでください。
 本人が公式Source・最新情報・Webでの確認を要求した場合、未取得のままnot_requiredとしてはいけません。
 公開Webが必要ならrequest_readを提案してください。許可されていない操作や個人情報のWeb送信を提案しないでください。
 十分でない場合は答えを捏造せず、理由と具体的な次の行動を示してください。
@@ -89,10 +93,13 @@ def validate_goal_turn(value: object) -> list[str]:
         not isinstance(s, str) or not s.strip() or len(s) > 100 for s in ids
     ) or (isinstance(ids, list) and len(ids) > 12):
         errors.append("evidence:invalid_result_ids")
-    elif basis != "result_refs" and ids:
+    elif basis == "not_required" and ids:
         errors.append("evidence:unexpected_refs")
     elif basis == "result_refs" and not ids:
         errors.append("evidence:missing_refs")
+    # "insufficient" may cite an already recorded Result while explaining
+    # that it does NOT substantiate the Goal (e.g. provider_cited, not fetched).
+    # RITSUKO checks every referenced ID against Task-local observations.
     if not isinstance(evidence.get("assessment"), str) or not evidence["assessment"].strip():
         errors.append("evidence:assessment_required")
     req = value.get("read_request")
