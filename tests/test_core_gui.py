@@ -1309,6 +1309,34 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(daily._UI_PREFERENCES['core']['completed_limit'], 4)
             self.assertEqual(daily.load_ui_preferences()['core']['completed_limit'], 4)
 
+    async def test_settings_temporary_llm_default_and_visibility_are_independent(self):
+        with self.client, TemporaryDirectory() as directory, patch.object(
+            daily, '_preferences_path', return_value=Path(directory) / 'prefs.json'
+        ):
+            daily.settings_page()
+            default_mode = next(
+                e for e in self.client.elements.values()
+                if isinstance(e, ui.switch)
+                and str(getattr(e, 'text', '')).startswith('新規Taskの既定判断方式')
+            )
+            selector_display = self.elements('フロー判断方式の選択欄を表示')[0]
+            self.assertFalse(default_mode.value)
+            self.assertTrue(selector_display.value)
+            default_mode.value = True
+            selector_display.value = False
+            await self.click('保存して反映')
+            saved = daily.load_ui_preferences()
+            self.assertTrue(saved['core_goal_mode'])
+            self.assertFalse(saved['core_show_judgment_mode'])
+            self.assertFalse(daily._default_ui_preferences()['core_goal_mode'])
+            # Built-in reset must restore the product's OFF default.
+            await self.click('初期値に戻す')
+            restored = daily.load_ui_preferences()
+            self.assertFalse(restored['core_goal_mode'])
+            self.assertTrue(restored['core_show_judgment_mode'])
+            self.assertFalse(default_mode.value)
+            self.assertTrue(selector_display.value)
+
     async def test_top_has_system_debug_status_card(self):
         summary = {
             'status': 'ok',
