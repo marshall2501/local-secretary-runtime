@@ -9,7 +9,7 @@ from copy import deepcopy
 import re
 from uuid import uuid4
 
-from .async_execution import _call_panel_member_async
+from .async_execution import _call_panel_member_async, _emit_member_progress
 from .dialogue import _normalized_member_specs
 from .goal_contract import VERSION, validate_goal_turn
 from .runtime_context import create_runtime_context
@@ -156,7 +156,8 @@ def _apply_judgment(session: dict, decision: dict) -> None:
 
 
 async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
-                         stop_requested=None, on_turn_start=None) -> dict:
+                         stop_requested=None, on_turn_start=None,
+                         on_member_progress=None) -> dict:
     if stop_requested is not None and stop_requested():
         session.update(status="stopped", next_step="user_requested_stop")
         return session
@@ -185,13 +186,37 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
     }
     spec = session["member_specs"][0]
+    progress = {
+        "task_id": session["task_id"], "turn": number,
+        "member": spec["name"], "provider": spec["provider"],
+        "model": spec["model"],
+    }
+    _emit_member_progress(on_member_progress, {**progress, "state": "queued"})
+    _emit_member_progress(on_member_progress, {**progress, "state": "running"})
     run = caller or _call_panel_member_async
-    result = await run(spec, envelope, timeout=timeout)
+    try:
+        result = await run(spec, envelope, timeout=timeout)
+    except Exception as exc:
+        _emit_member_progress(on_member_progress, {
+            **progress, "state": "unavailable",
+            "error_kind": type(exc).__name__,
+        })
+        raise
     response = result.get("response")
     errors = list(result.get("errors") or [])
     if result.get("status") == "ok":
         errors += validate_goal_turn(response)
     status = "ok" if result.get("status") == "ok" and not errors else "invalid"
+    _emit_member_progress(on_member_progress, {
+        **progress, "state": "completed" if status == "ok" else (
+            str(result.get("status") or "invalid")
+            if result.get("status") not in (None, "ok") else "invalid"
+        ),
+        "elapsed_seconds": result.get("elapsed_seconds"),
+        "validated_summary": str(response.get("reason") or "")
+        if status == "ok" and isinstance(response, dict) else "",
+        "error_kind": str(errors[0]) if errors else "",
+    })
     session["turns"].append({
         "stage": "goal", "question_purpose": "evaluate_goal",
         "request_envelope": envelope, "status": status,
@@ -212,7 +237,8 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
 async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
                               timeout: float, task_id: str | None = None,
                               stop_requested=None, on_turn_start=None,
-                              caller=None, policy_snapshot: dict | None = None) -> dict:
+                              caller=None, policy_snapshot: dict | None = None,
+                              on_member_progress=None) -> dict:
     """Explicit goal_loop_v1 only. One enabled member avoids implicit consensus."""
     specs = [s for s in _normalized_member_specs(member_specs, "") if s["enabled"]]
     if len(specs) != 1:
@@ -233,12 +259,14 @@ async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
         "user_question": None, "status_message": None,
     }
     return await _run_goal_turn(session, timeout=timeout, caller=caller,
-                                stop_requested=stop_requested, on_turn_start=on_turn_start)
+                                stop_requested=stop_requested, on_turn_start=on_turn_start,
+                                on_member_progress=on_member_progress)
 
 
 async def continue_goal_observations(session: dict, observations: list[dict], *,
                                      timeout: float, stop_requested=None,
-                                     on_turn_start=None, caller=None) -> dict:
+                                     on_turn_start=None, caller=None,
+                                     on_member_progress=None) -> dict:
     if session.get("control_mode") != VERSION or session.get("status") != "waiting_information":
         raise ValueError("goal_not_waiting_for_information")
     updated = deepcopy(session)
@@ -253,12 +281,13 @@ async def continue_goal_observations(session: dict, observations: list[dict], *,
     updated["pending_requests"] = []
     updated.update(status="running", next_step="evaluate_observation")
     return await _run_goal_turn(updated, timeout=timeout, caller=caller,
-                                stop_requested=stop_requested, on_turn_start=on_turn_start)
+                                stop_requested=stop_requested, on_turn_start=on_turn_start,
+                                on_member_progress=on_member_progress)
 
 
 async def continue_goal_user(session: dict, user_text: str, *, timeout: float,
                              stop_requested=None, on_turn_start=None,
-                             caller=None) -> dict:
+                             caller=None, on_member_progress=None) -> dict:
     """Resume a previously saved public Goal Task with one clarifying answer."""
     if session.get("control_mode") != VERSION or session.get("status") != "waiting_user":
         raise ValueError("goal_not_waiting_for_user")
@@ -271,4 +300,5 @@ async def continue_goal_user(session: dict, user_text: str, *, timeout: float,
     updated["user_question"] = None
     updated.update(status="running", next_step="evaluate_user_clarification")
     return await _run_goal_turn(updated, timeout=timeout, caller=caller,
-                                stop_requested=stop_requested, on_turn_start=on_turn_start)
+                                stop_requested=stop_requested, on_turn_start=on_turn_start,
+                                on_member_progress=on_member_progress)
