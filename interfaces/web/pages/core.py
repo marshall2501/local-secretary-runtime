@@ -1411,9 +1411,15 @@ def register(portal_context: dict):
     
                 with new_request_slot:
                     goal_mode_checkbox = ui.checkbox(
-                        "Goal判断方式（試験・公開情報のみ／MAGI 1席）",
-                        value=False,
+                        "Goal判断方式（MAGI 1席）",
+                        value=bool(_UI_PREFERENCES.get("core_goal_mode", False)),
+                        on_change=lambda event: _save_core_goal_mode(bool(event.value)),
                     ).props("dense")
+                    ui.label(
+                        "ON: MAGI 1席で目標・次の行動を判断します。"
+                        "OFF: 通常のMAGI対話方式です。"
+                        "選択は次回も保持します。ONでは有効MAGIを1席だけにしてください。"
+                    ).classes("text-xs text-grey-7")
                     guided_button = ui.button(
                         "新しい依頼を開始",
                         icon="play_arrow",
