@@ -282,7 +282,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(inputs), 1)
             inputs[0].value = "Pythonの辞書とは何？"
             switches = [e for e in self.client.elements.values()
-                        if isinstance(e, ui.switch)]
+                        if isinstance(e, ui.switch) and getattr(e, "text", "") == "有効"]
             self.assertEqual(len(switches), 3)
             for toggle, enabled in zip(switches, (False, True, False)):
                 toggle.value = enabled
