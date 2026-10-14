@@ -70,6 +70,26 @@ class CoreGuiTests(TestCase):
         finally:
             daily._apply_ui_preferences(old)
 
+    def test_judgment_selector_visibility_does_not_change_selected_strategy(self):
+        for choice in (False, True):
+            for visible in (False, True):
+                with TemporaryDirectory() as directory:
+                    path = Path(directory) / "preferences.json"
+                    preferences = daily._default_ui_preferences()
+                    preferences["core_goal_mode"] = choice
+                    preferences["core_show_judgment_mode"] = visible
+                    stored = daily.save_ui_preferences(preferences, path)
+                    reloaded = daily.load_ui_preferences(path)
+                    self.assertEqual(stored["core_goal_mode"], choice)
+                    self.assertEqual(reloaded["core_goal_mode"], choice)
+                    self.assertEqual(reloaded["core_show_judgment_mode"], visible)
+        invalid = daily._validate_ui_preferences({
+            "core_goal_mode": "yes",
+            "core_show_judgment_mode": 0,
+        })
+        self.assertIs(invalid["core_goal_mode"], False)
+        self.assertIs(invalid["core_show_judgment_mode"], True)
+
     def test_er_diagram_has_dedicated_debug_page(self):
         self.assertTrue(hasattr(daily, "debug_page"))
         self.assertTrue(hasattr(daily, "debug_er_page"))
