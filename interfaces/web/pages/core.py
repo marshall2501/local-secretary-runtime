@@ -441,6 +441,9 @@ def register(portal_context: dict):
                 async def guided_user_continuation(
                     session: dict, user_text: str, **kwargs
                 ) -> dict:
+                    if session.get("control_mode") == "goal_loop_v1":
+                        from ritsuko.magi.goal_loop import continue_goal_user
+                        return await continue_goal_user(session, user_text, **kwargs)
                     return await continue_with_user_clarification_async(
                         session,
                         user_text,
@@ -1266,6 +1269,14 @@ def register(portal_context: dict):
                     specs = save_guided_assignments(notify=False)
                     if not specs:
                         return
+                    goal_mode = bool(goal_mode_checkbox.value)
+                    if goal_mode and len([item for item in specs if item.get("enabled")]) != 1:
+                        ui.notify("Goal判断方式ではMAGIの有効モデルを1席だけにしてください", type="warning")
+                        return
+                    policy_snapshot = (
+                        await run.io_bound(_load_magi_policy_snapshot, "lan")
+                        if goal_mode else None
+                    )
                     task_uuid = uuid4()
                     stop_event = begin_guided_run(
                         1,
@@ -1282,16 +1293,25 @@ def register(portal_context: dict):
                     core_result.refresh()
                     trace_panel.refresh()
                     try:
+                        start_options = {
+                            "member_specs": specs,
+                            "timeout": guided_timeout_seconds(),
+                            "stop_requested": stop_event.is_set,
+                            "on_turn_start": note_guided_turn,
+                            "task_id": task_uuid,
+                        }
+                        if goal_mode:
+                            start_options.update(
+                                control_mode="goal_loop_v1",
+                                policy_snapshot=policy_snapshot,
+                            )
+                        else:
+                            start_options.update(
+                                dialogue_starter=guided_dialogue_starter,
+                                observation_continuation=guided_observation_continuation,
+                            )
                         state["guided_session"] = await task_app.start(
-                            request_text,
-                            member_specs=specs,
-                            timeout=guided_timeout_seconds(),
-
-                            stop_requested=stop_event.is_set,
-                            on_turn_start=note_guided_turn,
-                            task_id=task_uuid,
-                            dialogue_starter=guided_dialogue_starter,
-                            observation_continuation=guided_observation_continuation,
+                            request_text, **start_options,
                         )
                         guided_task_id = str(
                             (state.get("guided_session") or {}).get("task_id") or ""
@@ -1329,6 +1349,10 @@ def register(portal_context: dict):
                         completed_tasks_panel.refresh()
     
                 with new_request_slot:
+                    goal_mode_checkbox = ui.checkbox(
+                        "Goal判断方式（試験・公開情報のみ／MAGI 1席）",
+                        value=False,
+                    ).props("dense")
                     guided_button = ui.button(
                         "新しい依頼を開始",
                         icon="play_arrow",
