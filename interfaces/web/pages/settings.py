@@ -1072,6 +1072,14 @@ def register(portal_context: dict):
                     ui.label(
                         "通常運用では最新情報を上に表示し、ここで有効にする検証情報では実行経緯を古い順に追えます。"
                     ).classes("text-sm text-grey-7")
+                    ui.label(
+                        "実行方式の選択は通常のRITSUKO画面で行います。"
+                        "この設定は選択欄の表示だけを変更し、保存済みの方式は変えません。"
+                    ).classes("text-xs text-grey-7")
+                    judgment_selector_visibility = ui.switch(
+                        "フロー判断方式の選択欄を表示",
+                        value=_UI_PREFERENCES.get("core_show_judgment_mode", True),
+                    )
                     for key in CORE_UI_SETTING_GROUPS["verification"]:
                         label = core_labels[key]
                         with ui.row().classes("w-full items-center gap-4 border-b border-grey-300 py-2"):
@@ -1149,6 +1157,7 @@ def register(portal_context: dict):
                                 for key, control in er_provider_controls.items()
                             },
                         },
+                        "core_show_judgment_mode": bool(judgment_selector_visibility.value),
                         "core_advisor_model": _UI_PREFERENCES.get("core_advisor_model"),
                         "core_advisor_timeout": _UI_PREFERENCES.get("core_advisor_timeout", 60),
                         "visibility": {
@@ -1172,6 +1181,7 @@ def register(portal_context: dict):
                     }
     
                 def sync_controls(preferences: dict) -> None:
+                    judgment_selector_visibility.value = preferences["core_show_judgment_mode"]
                     for key, control in pkb_open_controls.items():
                         control.value = preferences["pkb"][key]
                     for key, control in pkb_visible_controls.items():
