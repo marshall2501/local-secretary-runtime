@@ -186,7 +186,7 @@ class RuntimePolicyPureTests(unittest.TestCase):
         self.assertEqual(members, [])
 
     def test_unverified_observation_does_not_trigger_restriction(self):
-        s = session(profile(decision="deny"))
+        s = session(profile(name="production-lan", decision="deny"))
         s["observations"][0]["verified"] = False
         members, context = restrict_members(s, s["policy_snapshot"])
         self.assertIsNone(members)
