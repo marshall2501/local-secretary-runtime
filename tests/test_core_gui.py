@@ -251,11 +251,15 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.old = deepcopy(daily._UI_PREFERENCES)
         daily._apply_ui_preferences(daily._default_ui_preferences())
+        # GUI acceptance tests must not modify the sub-PC's real UI preferences.
+        self._prefs_temp = TemporaryDirectory()
         self.waiting = [self.item(i, 'waiting_external') for i in range(14)]
         self.done = [self.item(i + 100, 'completed') for i in range(12)]
         def read(items):
             return lambda limit=20, offset=0: items[offset:offset+limit]
         self.patches = [patch.object(core, 'loop', asyncio.get_running_loop()),
+                        patch.object(daily, '_preferences_path',
+                                     return_value=Path(self._prefs_temp.name) / 'ui_prefs.json'),
                         patch.object(daily, 'list_advisor_models', return_value=[]),
                         patch.object(daily, 'load_open_core_tasks', side_effect=read(self.waiting)),
                         patch.object(daily, 'load_completed_core_tasks', side_effect=read(self.done)),
@@ -270,6 +274,7 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
         self.client.delete()
         for p in reversed(self.patches):
             p.stop()
+        self._prefs_temp.cleanup()
         daily._apply_ui_preferences(self.old)
 
     def item(self, i, status):
@@ -304,6 +309,32 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertEqual(checkboxes, [])
             self.assertIs(daily._UI_PREFERENCES["core_goal_mode"], True)
+
+    async def test_flow_judgment_explicit_save_and_page_reopen(self):
+        with self.client:
+            daily.core_page()
+            checkboxes = [
+                e for e in self.client.elements.values()
+                if isinstance(e, ui.checkbox)
+                and "フロー判断：LLM" in str(getattr(e, "text", ""))
+            ]
+            self.assertEqual(len(checkboxes), 1)
+            self.assertFalse(checkboxes[0].value)
+            checkboxes[0].value = True
+            # Setting a checkbox's value does not require an on_change event.
+            await self.click("フロー判断を保存")
+            self.assertTrue(daily.load_ui_preferences()["core_goal_mode"])
+            daily._apply_ui_preferences(daily.load_ui_preferences())
+            daily.core_page()
+            checkboxes = [
+                e for e in self.client.elements.values()
+                if isinstance(e, ui.checkbox)
+                and "フロー判断：LLM" in str(getattr(e, "text", ""))
+            ]
+            self.assertTrue(checkboxes[-1].value)
+            checkboxes[-1].value = False
+            await self.click("フロー判断を保存", index=1)
+            self.assertFalse(daily.load_ui_preferences()["core_goal_mode"])
 
     async def test_opt_in_goal_mode_never_persists_temporary_single_member_selection(self):
         """The owner's normal three-member settings must survive one Goal test."""
@@ -357,6 +388,9 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
                             and "フロー判断：LLM" in str(getattr(e, "text", "")))
             checkbox.value = True
             await self.click("新しい依頼を開始")
+            # Task start explicitly persists the selected strategy, even when
+            # changing the checkbox never emitted its change event.
+            self.assertTrue(daily.load_ui_preferences()["core_goal_mode"])
             save.assert_not_called()
             self.assertEqual(len(passed), 1)
             _, options = passed[0]
