@@ -393,7 +393,7 @@ def build_task_presentation(
         "status": status,
         "status_label": (
             (_STATUS_LABELS.get(status, status) + "（Task確定）")
-            if saved_terminal else _STATUS_LABELS.get(status, status or "未開始")
+            if saved_terminal and not read_only else _STATUS_LABELS.get(status, status or "未開始")
         ),
         "latest_result_summary": _latest_result_summary(session, saved_task),
         "user_action_required": action_kind is not None,
