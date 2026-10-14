@@ -362,8 +362,10 @@ class CoreGuiPageTests(unittest.IsolatedAsyncioTestCase):
             _, options = passed[0]
             self.assertEqual([s["name"] for s in options["member_specs"]], ["CASPER"])
             self.assertEqual(options["member_specs"][0]["provider"], "openai")
-            self.assertEqual(options["dialogue_starter"].keywords["policy_snapshot"]["profile_id"],
-                             "test-lan")
+            self.assertEqual(options["dialogue_starter"].keywords["decision_strategy"],
+                             "llm")
+            self.assertIsNotNone(options["observation_continuation"])
+            self.assertNotIn("control_mode", options)
             self.assertEqual(
                 [s["enabled"] for s in configured], [True, True, True],
             )
