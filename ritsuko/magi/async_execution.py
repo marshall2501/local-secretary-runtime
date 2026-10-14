@@ -612,6 +612,32 @@ async def call_guided_panel_async(
     }
 
 
+def apply_context_policy_to_envelope(envelope: dict, context_policy: dict | None) -> dict:
+    """Apply one Task's allowed masking without exposing masking tokens.
+
+    The same transformation is used for both ordinary and LLM flow judgments.
+    """
+    if not context_policy:
+        return envelope
+    tokens = list(context_policy.get("redaction_tokens") or [])
+    safe_policy = {
+        key: deepcopy(value) for key, value in context_policy.items()
+        if key != "redaction_tokens"
+    }
+    if tokens:
+        def redact_tree(value):
+            if isinstance(value, str):
+                return redact_observation_text(value, tokens)
+            if isinstance(value, list):
+                return [redact_tree(item) for item in value]
+            if isinstance(value, dict):
+                return {key: redact_tree(item) for key, item in value.items()}
+            return value
+        envelope = redact_tree(envelope)
+    envelope["context_policy"] = deepcopy(safe_policy)
+    return envelope
+
+
 async def _send_async(
     session: dict,
     stage: str,
@@ -659,27 +685,7 @@ async def _send_async(
             },
             "observations": deepcopy(session["observations"]),
         })
-    safe_context_policy = None
-    if context_policy:
-        # Redaction rules contain literal owner-selected values. Never put
-        # those values in the transmitted envelope or persisted Turn diagnostics.
-        tokens = list(context_policy.get("redaction_tokens") or [])
-        safe_context_policy = {
-            key: deepcopy(value)
-            for key, value in context_policy.items()
-            if key != "redaction_tokens"
-        }
-        if tokens:
-            def redact_tree(value):
-                if isinstance(value, str):
-                    return redact_observation_text(value, tokens)
-                if isinstance(value, list):
-                    return [redact_tree(item) for item in value]
-                if isinstance(value, dict):
-                    return {key: redact_tree(item) for key, item in value.items()}
-                return value
-            envelope = redact_tree(envelope)
-        envelope["context_policy"] = deepcopy(safe_context_policy)
+    envelope = apply_context_policy_to_envelope(envelope, context_policy)
     if on_turn_start is not None:
         on_turn_start(turn_number)
 
@@ -1067,6 +1073,8 @@ async def _advance_by_strategy(
             session, timeout=timeout, caller=goal_caller,
             stop_requested=stop_requested, on_turn_start=on_turn_start,
             on_member_progress=on_member_progress,
+            member_specs_override=member_specs_override,
+            context_policy=context_policy,
         )
     return await _advance_async(
         session, timeout=timeout, caller=caller,
