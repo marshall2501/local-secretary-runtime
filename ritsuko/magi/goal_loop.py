@@ -9,7 +9,10 @@ from copy import deepcopy
 import re
 from uuid import uuid4
 
-from .async_execution import _apply_detail_async, _call_panel_member_async, _emit_member_progress
+from .async_execution import (
+    _apply_detail_async, _call_panel_member_async, _emit_member_progress,
+    apply_context_policy_to_envelope,
+)
 from .dialogue import _normalized_member_specs
 from .goal_contract import VERSION, validate_goal_turn
 from .runtime_context import create_runtime_context
@@ -167,7 +170,8 @@ async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> N
 
 async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
                          stop_requested=None, on_turn_start=None,
-                         on_member_progress=None) -> dict:
+                         on_member_progress=None,
+                         member_specs_override=None, context_policy=None) -> dict:
     if stop_requested is not None and stop_requested():
         session.update(status="stopped", next_step="user_requested_stop")
         return session
@@ -195,7 +199,14 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         },
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
     }
-    spec = session["member_specs"][0]
+    envelope = apply_context_policy_to_envelope(envelope, context_policy)
+    specs = (member_specs_override if member_specs_override is not None
+             else session["member_specs"])
+    enabled = [spec for spec in specs if spec.get("enabled")]
+    if len(enabled) != 1:
+        session.update(status="stopped", next_step="goal_model_not_permitted")
+        return session
+    spec = enabled[0]
     progress = {
         "task_id": session["task_id"], "turn": number,
         "member": spec["name"], "provider": spec["provider"],
