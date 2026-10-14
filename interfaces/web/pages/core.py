@@ -425,6 +425,7 @@ def register(portal_context: dict):
                         user_raw,
                         caller=guided_panel_caller,
                         policy_snapshot=policy_snapshot,
+                        on_member_progress=note_member_progress,
                         **kwargs,
                     )
 
@@ -435,22 +436,18 @@ def register(portal_context: dict):
                         session,
                         observations,
                         caller=guided_panel_caller,
+                        on_member_progress=note_member_progress,
                         **kwargs,
                     )
 
                 async def guided_user_continuation(
                     session: dict, user_text: str, **kwargs
                 ) -> dict:
-                    if session.get("control_mode") == "goal_loop_v1":
-                        from ritsuko.magi.goal_loop import continue_goal_user
-                        return await continue_goal_user(
-                            session, user_text,
-                            on_member_progress=note_member_progress, **kwargs,
-                        )
                     return await continue_with_user_clarification_async(
                         session,
                         user_text,
                         caller=guided_panel_caller,
+                        on_member_progress=note_member_progress,
                         **kwargs,
                     )
 
@@ -1339,10 +1336,6 @@ def register(portal_context: dict):
                         specs = save_guided_assignments(notify=False)
                         if not specs:
                             return
-                    policy_snapshot = (
-                        await run.io_bound(_load_magi_policy_snapshot, "lan")
-                        if goal_mode else None
-                    )
                     task_uuid = uuid4()
                     stop_event = begin_guided_run(
                         1,
@@ -1366,29 +1359,17 @@ def register(portal_context: dict):
                             "on_turn_start": note_guided_turn,
                             "task_id": task_uuid,
                         }
-                        if goal_mode:
-                            # Only the MAGI judgment provider changes. The
-                            # RITSUKO Application/Task/Observation path is shared.
-                            from functools import partial
-                            from ritsuko.magi.goal_loop import (
-                                start_goal_dialogue, continue_goal_observations,
-                            )
-                            start_options.update(
-                                dialogue_starter=partial(
-                                    start_goal_dialogue,
-                                    policy_snapshot=policy_snapshot,
-                                    on_member_progress=note_member_progress,
-                                ),
-                                observation_continuation=partial(
-                                    continue_goal_observations,
-                                    on_member_progress=note_member_progress,
-                                ),
-                            )
-                        else:
-                            start_options.update(
-                                dialogue_starter=guided_dialogue_starter,
-                                observation_continuation=guided_observation_continuation,
-                            )
+                        # Start, Source observations and user resume all use
+                        # one shared RITSUKO/MAGI route. Only the next-flow
+                        # judgment strategy changes for a new Task.
+                        from functools import partial
+                        start_options.update(
+                            dialogue_starter=partial(
+                                guided_dialogue_starter,
+                                decision_strategy="llm" if goal_mode else "standard",
+                            ),
+                            observation_continuation=guided_observation_continuation,
+                        )
                         state["guided_session"] = await task_app.start(
                             request_text, **start_options,
                         )
