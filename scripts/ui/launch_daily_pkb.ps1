@@ -4,7 +4,8 @@ param(
     [ValidateSet('isolated','production')]
     [string]$DatabaseMode = 'isolated',
     [ValidatePattern('^(secretary|secretary_rebuild_[a-z0-9_]{1,40})$')]
-    [string]$ProductionDatabase = 'secretary'
+    [string]$ProductionDatabase = 'secretary',
+    [switch]$AutoReload
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -145,6 +146,9 @@ try {
         }
     }
 
+    # 開発用ランチャーが選ばれたときだけNiceGUIのPython監視を有効にする。
+    # Pythonプロセスを再起動するため、処理中Taskがないときだけソースを更新する。
+    $env:LSA_WEB_AUTO_RELOAD = if ($AutoReload) { '1' } else { '0' }
     $env:LSA_DAILY_DB_MODE = $DatabaseMode
     if ($DatabaseMode -eq 'production') {
         $env:LSA_DAILY_DB_NAME = $db
@@ -159,6 +163,7 @@ try {
     & $python -m interfaces.web.app
     if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
 } finally {
+    Remove-Item Env:LSA_WEB_AUTO_RELOAD -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_DAILY_DB_MODE -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_DAILY_DB_NAME -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
