@@ -21,9 +21,9 @@ if (-not (Test-Path -LiteralPath $secret -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
     throw 'Missing .env.postgres.'
 }
-$matches = @(Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^LSA_DB_PORT=[0-9]+$' })
-if ($matches.Count -ne 1) { throw 'Expected exactly one LSA_DB_PORT setting.' }
-$port = [int]($matches[0] -replace '^LSA_DB_PORT=', '')
+$portLines = @(Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^LSA_DB_PORT=[0-9]+$' })
+if ($portLines.Count -ne 1) { throw 'Expected exactly one LSA_DB_PORT setting.' }
+$port = [int]($portLines[0] -replace '^LSA_DB_PORT=', '')
 if ($port -lt 1024 -or $port -gt 65535) { throw 'Invalid database port.' }
 
 # 実在する運用DB接続境界を再利用する。資格情報の値は表示しない。
