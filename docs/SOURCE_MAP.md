@@ -1,8 +1,9 @@
 # SOURCE_MAP — ソース構成と機能対応
 
-更新: 2026-10-13  
+更新: 2026-10-15
 参照runtime: current policy implementation `3de93850013c2e410815160e56c009344d889dbc` / GitHub isolated CI PASS。サブPC実機は未確認。過去のTask/Actionの受入は各Plan/STATUSを参照。
 
+2026-10-15: Vue正式開発に向け、共通RITSUKO Task Compositionと、実DB-backed Task読取専用API/画面（別ポート8097、未実機）を追加。旧Vue隔離Labは8098で独立継続。GitHub型検査/隔離CI PASS。本番Taskの開始・回答・停止やGUI切替は未実装。
 この資料は、Personal Local Secretary AI の **利用者から見える機能・Application責務・実装ソース** を対応付けるための現行実装索引です。
 
 source directoryの役割・dependency direction・重要な配置原則の設計マスタは [`local-secretary-ai/docs/01_Architecture/RuntimeSourceArchitecture_実装ソース構造.md`](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/01_Architecture/RuntimeSourceArchitecture_%E5%AE%9F%E8%A3%85%E3%82%BD%E3%83%BC%E3%82%B9%E6%A7%8B%E9%80%A0.md) です。本資料は、その設計を**現在どのfileが実装しているか**を追跡します。
@@ -55,6 +56,8 @@ source directoryの役割・dependency direction・重要な配置原則の設�
 | 28 | 旧昇格entry互換 | [../scripts/db/promote-production.ps1](../scripts/db/promote-production.ps1) | clean rebuildへ委譲 | PowerShell |
 | 29 | 外部Action（隔離fixture、日常UI/write API非公開） | Application入口 [../ritsuko/application/task_runtime.py](../ritsuko/application/task_runtime.py)（オプションのAction Service） | [../ritsuko/application/external_actions.py](../ritsuko/application/external_actions.py)／[../ritsuko/application/external_action_policy.py](../ritsuko/application/external_action_policy.py) | [../infrastructure/postgres/external_action_repository.py](../infrastructure/postgres/external_action_repository.py) ＋ 固定loopback HTTP。使い捨てDB上の検証でありProduction利用の受入ではない |
 | 30 | 環境別権限Profile・MAGI送信先の設定（GitHub＋隔離CIのみ） | [../interfaces/web/pages/settings.py](../interfaces/web/pages/settings.py)、[../interfaces/web/pages/core.py](../interfaces/web/pages/core.py) | [../ritsuko/application/context_policy.py](../ritsuko/application/context_policy.py)、[../ritsuko/magi/async_execution.py](../ritsuko/magi/async_execution.py) | [../infrastructure/postgres/runtime_policy_repository.py](../infrastructure/postgres/runtime_policy_repository.py)、[../db/migrations/009_runtime_policy_profiles.sql](../db/migrations/009_runtime_policy_profiles.sql)。運用DBには未適用 |
+| 31 | RITSUKO Task Application共通組立（NiceGUI / Vue架空Port） | [../interfaces/web/pages/core.py](../interfaces/web/pages/core.py)、[../interfaces/vue_lab/task_service.py](../interfaces/vue_lab/task_service.py) | [../bootstrap/ritsuko_task_composition.py](../bootstrap/ritsuko_task_composition.py) → [../ritsuko/application/task_runtime.py](../ritsuko/application/task_runtime.py) | 既存MAGI/Task Port、隔離fixture（接続先を混在させない） |
+| 32 | Vue日常UIの実Task読取専用スライス（CI PASS／サブPC実機未受入） | [../interfaces/vue_daily/app.py](../interfaces/vue_daily/app.py)、[../interfaces/vue_daily/frontend/src/App.vue](../interfaces/vue_daily/frontend/src/App.vue) | [../ritsuko/application/task_queries.py](../ritsuko/application/task_queries.py) | [../infrastructure/postgres/core_task_query_repository.py](../infrastructure/postgres/core_task_query_repository.py)。8097 localhost明示起動、状態更新やLLM送信は未実装 |
 
 ---
 
