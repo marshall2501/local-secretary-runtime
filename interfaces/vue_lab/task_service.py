@@ -14,8 +14,7 @@ from dataclasses import dataclass, field
 from threading import Event, RLock
 from uuid import UUID, uuid4
 
-from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
-from ritsuko.core.observation_loop import resume_user_answer, run_observation_loop
+from bootstrap.ritsuko_task_composition import build_task_application
 
 
 class TaskConflict(ValueError):
@@ -47,21 +46,17 @@ class IsolatedTaskService:
         self._lock = RLock()
         self._tasks: dict[str, _Task] = {}
         self._jobs: dict[str, asyncio.Task] = {}
-        self._application = StateDrivenTaskApplication(
-            TaskRuntimePorts(
-                create_task_record=self._create_record,
-                execute_source_request=self._reject_source,
-                record_source_read_record=self._reject_source,
-                persist_session_record=self._persist,
-                fail_task_record=self._fail,
-                claim_user_resume_record=self._claim_answer,
-                abort_user_resume_record=self._abort_answer,
-                claim_proposal_review_record=self._unsupported_review,
-                finalize_proposal_review_record=self._unsupported_review,
-                abort_proposal_review_record=self._unsupported_review,
-            ),
-            start_runner=run_observation_loop,
-            resume_runner=resume_user_answer,
+        self._application = build_task_application(
+            create_task_record=self._create_record,
+            execute_source_request=self._reject_source,
+            record_source_read_record=self._reject_source,
+            persist_session_record=self._persist,
+            fail_task_record=self._fail,
+            claim_user_resume_record=self._claim_answer,
+            abort_user_resume_record=self._abort_answer,
+            claim_proposal_review_record=self._unsupported_review,
+            finalize_proposal_review_record=self._unsupported_review,
+            abort_proposal_review_record=self._unsupported_review,
             review_runner=self._unsupported_review,
         )
 
