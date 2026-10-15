@@ -36,6 +36,12 @@ LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定
 - `scripts/db/postgres.ps1` — PostgreSQLのSetup / Start / Migrate / Doctor / Backup / Restore。
 - `Launch-PKB-Web.cmd` — 開発Workbench。
 
+### RITSUKO画面の起動（サブPC）
+
+- **日常運用**: `Launch-Local-Secretary-AI.cmd`。Pythonコードが変わっても自動再起動しません。
+- **開発中の自動リロード**: `Launch-Local-Secretary-AI-Dev.cmd`。従来と同じProduction DB/既存の起動前チェックを使い、ソース内の`*.py`変更でWebプロセスを自動再起動します。ブラウザは自動で増やさず、普段のRITSUKOのURLへアクセスしてください。初回のみ既存Workbenchを閉じて開発用を起動します。
+- **注意**: これは無停止更新ではありません。MAGI/Actionが実行中の状態でGit pullやPython変更を行うとTaskが中断される可能性があります。Taskの終了を確認してからコードを更新してください。F5や実行途中のTask復元は別のR&D課題です。不安定なら開発用を終了し、日常運用用ランチャーで起動し直してください。
+
 旧 `pkb_proto` Python実装は責務別packageへ移行済みです。隔離PKB DBの履歴migrationは `db/isolated/pkb_proto/`、隔離検証スクリプトは `scripts/pkb/isolated/` に保全します。これらは運用 `secretary` DBへ直接適用するproduction migrationではありません。
 
 ## PostgreSQL
