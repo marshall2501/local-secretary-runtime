@@ -1,3 +1,5 @@
+// Provenance-Origin: original
+// Provenance-AI: AI-generated
 /** 秘書AIのVue試作を隔離APIへ接続する開発設定。 */
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
