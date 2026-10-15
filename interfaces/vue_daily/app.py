@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 
 TaskView = Literal["recent", "open", "completed"]
@@ -78,6 +80,10 @@ def create_app(*, queries) -> FastAPI:
         except (RuntimeError, OSError):
             raise HTTPException(503, "task_query_unavailable") from None
 
+    # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
+    dist = Path(__file__).parent / "frontend" / "dist"
+    if dist.is_dir():
+        app.mount("/ui", StaticFiles(directory=str(dist), html=True), name="vue_daily_ui")
     return app
 
 
