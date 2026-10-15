@@ -1,3 +1,5 @@
+# Provenance-Origin: original
+# Provenance-AI: AI-generated
 """Vue試作専用の架空Task実行境界。
 
 実運用DB・Provider・外部Actionへ接続しない。共通StateDrivenTaskApplicationと
