@@ -30,6 +30,11 @@ def register(portal_context: dict):
             claim_proposal_review_record=_claim_magi_proposal_review_record,
             finalize_proposal_review_record=_finalize_magi_proposal_review_record,
             abort_proposal_review_record=_abort_magi_proposal_review_record,
+            # 旧画面/隔離テストが差し替える実行Runnerを注入する。
+            # 画面からMAGI呼出しを複製せず、既存互換性を維持する。
+            start_runner=run_observation_loop,
+            resume_runner=resume_user_answer,
+            review_runner=review_magi_proposal,
         )
         state = {"result": None, "busy": False, "resume_busy": False,
                  "trace": None, "trace_error": None,
