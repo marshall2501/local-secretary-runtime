@@ -14,16 +14,11 @@ export interface TaskView {
   synthetic: true
 }
 
-export interface Session {
-  csrf: string
-}
-
 /** Cookieを送信し、HTTP失敗を利用者に通知できるエラーへ変換する。 */
 export async function callApi<T>(
   path: string,
   method: 'GET' | 'POST' = 'GET',
   data?: unknown,
-  csrf = '',
 ): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -32,7 +27,6 @@ export async function callApi<T>(
       Accept: 'application/json',
       ...(method === 'POST' ? {
         'Content-Type': 'application/json',
-        'X-CSRF-Token': csrf,
       } : {}),
     },
     ...(method === 'POST' ? { body: JSON.stringify(data ?? {}) } : {}),
