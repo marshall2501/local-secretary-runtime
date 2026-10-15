@@ -2216,14 +2216,31 @@ pkb_page = _register_page(register_pkb_page)
 app.on_shutdown(_shutdown_core_advisor_background_jobs)
 
 
+def web_auto_reload_enabled() -> bool:
+    """開発用起動のときだけPythonソース変更を自動反映する。
+
+    日常用の安定起動は変更しない。再起動で進行中のMAGI Taskが中断される
+    可能性があるため、ソース更新はTaskの処理が終わったときに行う。
+    """
+    return os.environ.get("LSA_WEB_AUTO_RELOAD", "0") == "1"
+
+
 def main() -> None:
     _recover_interrupted_core_advisors()
+    auto_reload = web_auto_reload_enabled()
     ui.run(
         host="127.0.0.1",
         port=resolve_daily_web_port(),
-        reload=False,
-        show=True,
+        reload=auto_reload,
+        # Reload後にタブを増やさない。通常起動は従来どおりブラウザを開く。
+        show=not auto_reload,
         title="Local Secretary",
+        # 大きいDB・仮想環境・Git履歴は監視せず、Pythonソースだけを見る。
+        uvicorn_reload_dirs=(
+            "interfaces,ritsuko,pkb,capabilities,integrations,"
+            "infrastructure,bootstrap"
+        ) if auto_reload else ".",
+        uvicorn_reload_includes="*.py",
     )
 
 
