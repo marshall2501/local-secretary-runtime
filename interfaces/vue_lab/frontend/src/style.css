@@ -1,0 +1,69 @@
+/* Provenance-Origin: original; Provenance-AI: AI-generated */
+/* Vue試作: 日常UIとRITSUKOの実行コードを分離するための独立スタイル。 */
+:root {
+  color: #192d42;
+  background: #f3f6fa;
+  font-family: "Noto Sans JP", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  line-height: 1.55;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .56; }
+.shell { max-width: 1520px; margin: 0 auto; padding: 24px; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+h1 { font-size: 25px; margin: 4px 0 16px; }
+h2 { font-size: 19px; margin: 0 0 16px; }
+h3 { font-size: 15px; margin: 0; }
+.eyebrow { color: #08766c; font-size: 12px; font-weight: 700; letter-spacing: .07em; }
+.muted { color: #617387; }
+.small { font-size: 12px; }
+.connection { display: flex; gap: 9px; align-items: center; white-space: nowrap; font-size: 13px; }
+.dot { height: 9px; width: 9px; border-radius: 50%; background: #15916d; }
+.disconnected .dot { background: #ba6b1c; }
+.warning { background: #fff8e7; border: 1px solid #f3d9a6; border-radius: 10px; padding: 14px 20px; margin: 5px 0 20px; color: #764f16; }
+.workspace { display: grid; grid-template-columns: minmax(220px, 285px) 1fr; gap: 20px; }
+.card { background: white; border: 1px solid #d9e2eb; border-radius: 12px; padding: 23px; box-shadow: 0 2px 9px rgba(21, 48, 79, .035); }
+.sidebar { min-height: 550px; }
+.nav-current { background: #e2f5f1; border-radius: 7px; padding: 12px; font-weight: 700; color: #09665d; margin-bottom: 14px; }
+.divider { height: 1px; background: #e4e9ee; margin: 26px 0; }
+.side-heading, .section-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.section-head { margin-bottom: 12px; }
+.section-head h2 { margin: 0; }
+.task-item { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; border: 1px solid transparent; background: none; padding: 12px; border-radius: 7px; margin: 4px 0; color: inherit; }
+.task-item:hover, .task-item.active { border-color: #a8d9d0; background: #eefaf7; }
+.item-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.main { display: flex; flex-direction: column; gap: 17px; min-width: 0; }
+label { display: block; color: #486175; font-size: 13px; margin-bottom: 6px; }
+textarea, input { width: 100%; padding: 11px 13px; border: 1px solid #b6c5d4; border-radius: 7px; color: #183046; background: white; }
+textarea:focus-visible, input:focus-visible { outline: 2px solid #06837a; outline-offset: 2px; }
+textarea { resize: vertical; }
+button.primary { background: #057c70; border: 1px solid #057c70; color: white; }
+button.secondary { background: white; border: 1px solid #adbcc9; color: #2e4c67; }
+button.primary, button.secondary { padding: 10px 15px; border-radius: 7px; font-weight: 650; }
+.form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 12px; }
+.details { min-height: 330px; }
+.field { margin: 18px 0; }
+.field-name { font-size: 12px; color: #64748b; font-weight: 600; }
+.field p, .result p, .question p { margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+code { font-size: 12px; overflow-wrap: anywhere; }
+.status { padding: 5px 9px; border-radius: 7px; background: #e2e8f0; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.status-running, .status-queued { background: #e7f2fe; color: #235b92; }
+.status-completed { background: #e1f7e7; color: #17764d; }
+.status-failed { background: #fff0f0; color: #a32e2e; }
+.status-waiting_user { background: #fff3db; color: #95600b; }
+.question, .result { padding: 17px; border: 1px solid #abdcd4; background: #f0faf7; border-radius: 8px; margin-top: 20px; }
+.result { border-color: #bdd7ef; background: #f1f8ff; }
+.message { background: #f1f7fe; padding: 12px; border-radius: 6px; margin: 0; }
+.error { color: #a83232; background: #ffefef; padding: 11px; border-radius: 6px; overflow-wrap: anywhere; }
+.login { max-width: 550px; margin: 60px auto; }
+.login input { margin-bottom: 14px; }
+.login button { width: 100%; }
+@media (max-width: 830px) {
+  .shell { padding: 12px; }
+  .workspace { display: flex; flex-direction: column-reverse; }
+  .sidebar { min-height: 0; }
+  .section-head, .header { align-items: flex-start; flex-direction: column; gap: 7px; }
+}

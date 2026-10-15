@@ -76,3 +76,7 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
+
+# Isolated Vue experiment build artifacts
+interfaces/vue_lab/frontend/dist/
+interfaces/vue_lab/frontend/*.tsbuildinfo
