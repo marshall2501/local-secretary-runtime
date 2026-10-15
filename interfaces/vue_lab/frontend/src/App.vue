@@ -6,7 +6,7 @@
  * Task開始・回答・停止はAPIに依頼し、確定状態のみ再照会する。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { callApi, type Session, type TaskView } from './api'
+import { callApi, type TaskView } from './api'
 
 const requestText = ref('')
 const replyText = ref('')
