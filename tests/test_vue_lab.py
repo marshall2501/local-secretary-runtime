@@ -1,3 +1,5 @@
+# Provenance-Origin: original
+# Provenance-AI: AI-generated
 """Vue版秘書AIの入口契約を架空Taskのみで検証する。
 
 本番DB・Cloud LLM・外部Action・Web UI稼働ポートにアクセスしない。
