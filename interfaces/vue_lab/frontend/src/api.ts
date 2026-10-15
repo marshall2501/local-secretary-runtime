@@ -1,3 +1,5 @@
+// Provenance-Origin: original
+// Provenance-AI: AI-generated
 /** RITSUKO試作APIの表示用契約。Taskの真の実行判断は保持しない。 */
 export type TaskStatus =
   | 'queued' | 'running' | 'waiting_user' | 'completed' | 'paused' | 'failed'
