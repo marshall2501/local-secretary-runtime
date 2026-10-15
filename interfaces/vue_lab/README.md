@@ -1,6 +1,6 @@
 # Vue / FastAPIの秘書AI UI比較（隔離試作）
 
-このディレクトリは **`experiment/vue-secretary-ui-20261015` 専用の技術比較**です。
+このディレクトリは Runtime `main` 上の**VueとNiceGUIの並走比較用**です。実動作を行うには試作用サーバーを明示的に起動します。
 RITSUKOの既存 `StateDrivenTaskApplication` と `run_observation_loop` / `resume_user_answer` を呼び出しますが、
 **Task Store・LLM応答・ユーザー質問は全て合成fixture**です。実PostgreSQL・MAGI・PKB・Actionには接続しません。
 
@@ -16,28 +16,25 @@ Taskの受付（202）→実行中→本人質問待ち→同一Task IDで回答
 
 ## 安全な起動（サブPCで確認するときのみ）
 
-専用ブランチの別checkout / worktreeなど、**通常運用中のソースを上書きしない隔離環境**で扱う。
+現行 `main` のまま使用できます。既存NiceGUIは別プロセスであり、起動中のTaskやサーバーには触れません。
 既存8093（NiceGUI）・8010（実Secretary API）・8015（PVA）は使用しない。
 
 1. Python依存は既存runtimeの `requirements-web.txt` に従う。
 2. `interfaces/vue_lab/frontend`で`npm install`、`npm run build`。
-3. ソースルートのPowerShellで以下を設定して起動する。トークンは架空試作専用で、Gitやチャットに貼り付けない。
+3. ソースルートのPowerShellから直接起動する。ログイン・設定用トークンは不要。
 
    ```powershell
-   $env:LSA_VUE_LAB_TOKEN = [guid]::NewGuid().ToString("N")
    $env:LSA_VUE_LAB_PORT = '8098'
    & ".\.venv\Scripts\python.exe" -m interfaces.vue_lab.app
    ```
 
-4. 同じPCの `http://127.0.0.1:8098/ui/` を開いて試作専用トークンでログイン。
-   F5でCookie認証とURL内Task IDを利用し、同じ架空Taskを再表示できる。
+4. 同じPCで `http://127.0.0.1:8098/ui/` を開く。ログイン画面はなく、Task操作画面が表示される。
+   F5後もAPIに保持されたTask IDを再照会する（サーバー再起動後の復元とは異なる）。
 5. Vite開発サーバーを使うときは別PowerShellで `npm run dev`、
    API側へ `LSA_VUE_LAB_DEV_ORIGIN=http://127.0.0.1:5173` を設定してからAPIを起動する。
    アクセス先は `http://127.0.0.1:5173/ui/`。
 
-**重要**：試作用Tokenはサービス終了時に使い捨てる。CookieはHttpOnly・SameSite=Strictで、
-JavaScriptにはTokenを永続保存しない。Web APIはlocalhost限定、Origin/CSRF制限あり。
-一般のLAN/Internetへの公開と外部利用は認可していない。
+**重要**：架空Taskだけを扱うため、試作にはログイン・トークン・ユーザー管理・Cookieセッションを設けない。APIはlocalhostでのみ起動し、Host/Originを簡易確認する。本人認証ではないため、実PKBや実Actionに無条件で接続する設計ではない。LAN/Internetへ公開しない。
 本番DB/Secretを渡さない。実PKB/Financeデータを入力しない。
 
 ## 自動検証
@@ -47,7 +44,7 @@ JavaScriptにはTokenを永続保存しない。Web APIはlocalhost限定、Orig
 ```
 
 フロントエンドは `npm run build` でTypeScriptの型検査とViteビルドを実行。
-GitHubの隔離ワークフローはPRで起動する。テストPASSは実Windowsブラウザ受入の代わりではない。
+GitHubの隔離ワークフローはmain更新およびPR時に実行される。テストPASSは実Windowsブラウザ受入の代わりではない。
 
 ## 後続設計の判断
 
