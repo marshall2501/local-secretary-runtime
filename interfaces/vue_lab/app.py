@@ -1,3 +1,5 @@
+# Provenance-Origin: original
+# Provenance-AI: AI-generated
 """Vue試作用の独立FastAPIサーバー。
 
 既存Secretary API（8010）のDB権限・連携契約は変更しない。
