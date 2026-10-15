@@ -16,6 +16,41 @@ from ritsuko.core.core_advisor import AdvisorResult
 
 
 class CoreGuiTests(TestCase):
+    def test_web_autoreload_is_explicit_and_does_not_change_stable_launcher(self):
+        """通常起動は安定運用、開発用起動だけソース変更を監視する。"""
+        import os
+        for setting, enabled in (("0", False), ("1", True), ("yes", False)):
+            with self.subTest(setting=setting), patch.dict(
+                os.environ, {"LSA_WEB_AUTO_RELOAD": setting}
+            ), patch.object(
+                daily, "_recover_interrupted_core_advisors"
+            ), patch.object(daily.ui, "run") as run_ui:
+                daily.main()
+                kwargs = run_ui.call_args.kwargs
+                self.assertEqual(kwargs["reload"], enabled)
+                self.assertEqual(kwargs["show"], not enabled)
+                self.assertEqual(kwargs["host"], "127.0.0.1")
+                self.assertEqual(kwargs["uvicorn_reload_includes"], "*.py")
+                if enabled:
+                    self.assertIn("interfaces", kwargs["uvicorn_reload_dirs"])
+                    self.assertIn("ritsuko", kwargs["uvicorn_reload_dirs"])
+                    self.assertNotIn(".venv", kwargs["uvicorn_reload_dirs"])
+                    self.assertNotIn("secrets", kwargs["uvicorn_reload_dirs"])
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(daily.web_auto_reload_enabled())
+
+    def test_development_launcher_requires_explicit_autoreload_switch(self):
+        root = Path(__file__).resolve().parents[1]
+        stable = (root / "Launch-Local-Secretary-AI.cmd").read_text(encoding="utf-8")
+        dev = (root / "Launch-Local-Secretary-AI-Dev.cmd").read_text(encoding="utf-8")
+        script = (root / "scripts/ui/launch_daily_pkb.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("-AutoReload", stable)
+        self.assertIn("-AutoReload", dev)
+        self.assertIn("-DatabaseMode production", stable)
+        self.assertIn("-DatabaseMode production", dev)
+        self.assertIn("$env:LSA_WEB_AUTO_RELOAD = if ($AutoReload) { '1' } else { '0' }", script)
+        self.assertIn("Remove-Item Env:LSA_WEB_AUTO_RELOAD", script)
+
     def test_presentation_prefers_persisted_task_terminal_status(self):
         session = {
             "task_id": "same-task", "status": "candidate_ready",
