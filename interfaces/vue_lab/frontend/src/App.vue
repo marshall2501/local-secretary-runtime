@@ -1,3 +1,4 @@
+<!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
 /**
  * RITSUKOへ直接依存しない秘書AI UIの比較用画面。
