@@ -1,6 +1,6 @@
 """core page for the daily portal."""
 
-from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
+from bootstrap.ritsuko_task_composition import build_task_application
 
 
 def sync(portal_context: dict) -> None:
@@ -17,22 +17,19 @@ def register(portal_context: dict):
     @ui.page("/core")
     def core_page(task_id: str = ""):
         globals().update(portal_context)
-        task_app = StateDrivenTaskApplication(
-            TaskRuntimePorts(
-                create_task_record=_create_magi_core_task_record,
-                execute_source_request=_execute_magi_source_request,
-                record_source_read_record=_record_magi_source_read_record,
-                persist_session_record=_persist_magi_core_session_record,
-                fail_task_record=_fail_magi_core_task_record,
-                claim_user_resume_record=_claim_magi_user_resume_record,
-                abort_user_resume_record=_abort_magi_user_resume_record,
-                claim_proposal_review_record=_claim_magi_proposal_review_record,
-                finalize_proposal_review_record=_finalize_magi_proposal_review_record,
-                abort_proposal_review_record=_abort_magi_proposal_review_record,
-            ),
-            start_runner=run_observation_loop,
-            resume_runner=resume_user_answer,
-            review_runner=review_magi_proposal,
+        # Task実行の組立は画面から共通Composition Rootへ移した。
+        # MAGI/DBへの具体的なPortは既存Runtimeと同じものを渡す。
+        task_app = build_task_application(
+            create_task_record=_create_magi_core_task_record,
+            execute_source_request=_execute_magi_source_request,
+            record_source_read_record=_record_magi_source_read_record,
+            persist_session_record=_persist_magi_core_session_record,
+            fail_task_record=_fail_magi_core_task_record,
+            claim_user_resume_record=_claim_magi_user_resume_record,
+            abort_user_resume_record=_abort_magi_user_resume_record,
+            claim_proposal_review_record=_claim_magi_proposal_review_record,
+            finalize_proposal_review_record=_finalize_magi_proposal_review_record,
+            abort_proposal_review_record=_abort_magi_proposal_review_record,
         )
         state = {"result": None, "busy": False, "resume_busy": False,
                  "trace": None, "trace_error": None,
