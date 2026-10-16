@@ -14,6 +14,7 @@ from infrastructure.postgres.magi_task_repository import (
     list_pending_starts,
     request_stop,
     finalize_proposal_review,
+    fail_task,
     persist_session,
     prepare_memory_intake,
     record_pkb_read,
