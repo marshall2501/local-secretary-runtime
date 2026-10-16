@@ -335,7 +335,7 @@ class MagiTaskStoreTests(unittest.TestCase):
         )
 
     def test_persist_verified_candidate_completes_task(self):
-        db = _DB(fetches=[({"core_slice": "ritsuko_magi_observation_v1"},)])
+        db = _DB(fetches=[("running", {"core_slice": "ritsuko_magi_observation_v1"})])
         projection = persist_session(
             db,
             task_id=TASK_ID,
@@ -354,6 +354,42 @@ class MagiTaskStoreTests(unittest.TestCase):
             },
         )
         self.assertEqual(projection["task_status"], "completed")
+
+    def test_stop_wins_over_late_candidate_and_failure(self):
+        """Stop後のMAGI完了候補・例外がpausedを上書きしない。"""
+        checkpoint = {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "stop_requested": True,
+        }
+        session = {
+            "status": "candidate_ready",
+            "next_step": "review_answer_candidate",
+            "tool_read_executed": True,
+            "observations": [{"source": "pkb", "verified": True}],
+            "detail": {"answer_candidate": "旧Workerの遅れた回答"},
+        }
+        db = _DB(fetches=[("running", checkpoint)])
+        projection = persist_session(db, task_id=TASK_ID, session=session)
+        self.assertEqual(projection["task_status"], "paused")
+        self.assertFalse(any(
+            "core.magi.completed" in sql for sql, _ in db.cur.calls
+        ))
+        self.assertTrue(any(
+            "core.magi.stop_acknowledged" in sql for sql, _ in db.cur.calls
+        ))
+        fail = _DB(fetches=[("running", checkpoint)])
+        fail_task(fail, task_id=TASK_ID, error="TimeoutError")
+        self.assertTrue(any(
+            "SET status='paused'" in sql for sql, _ in fail.cur.calls
+        ))
+        terminal = _DB(fetches=[("completed", checkpoint)])
+        fail_task(terminal, task_id=TASK_ID, error="TimeoutError")
+        self.assertFalse(any(
+            "UPDATE secretary.tasks" in sql for sql, _ in terminal.cur.calls
+        ))
+        stale = _DB(fetches=[("paused", checkpoint)])
+        with self.assertRaisesRegex(ValueError, "task_not_running"):
+            persist_session(stale, task_id=TASK_ID, session=session)
 
     def test_prepare_memory_intake_is_task_linked_and_retry_safe(self):
         initial = self.review_checkpoint()
