@@ -110,6 +110,8 @@ from ritsuko.application.task_records import (
     record_source_read_record,
 )
 from ritsuko.application.read_dispatch import execute_core_read
+from ritsuko.application.pkb_observation import execute_magi_pkb_request
+from ritsuko.application.source_execution import execute_magi_source_request
 from ritsuko.application.observation_sources import (
     finance_query_from_request,
     web_query_from_request,
@@ -926,253 +928,26 @@ def _execute_cooperative_local_probe(
     return _execute_core_read("pkb_search", text)
 
 
-def _pkb_unresolved_target_execution(
-    *,
-    parent_name: str | None,
-    role_token: str | None,
-    reason: str,
-) -> dict:
-    """Return a bounded verified PKB miss without broadening to unrelated claims."""
-    if parent_name and role_token:
-        answer = (
-            f"PKBでは{parent_name}の{role_token}を一意に確認できませんでした。"
-        )
-    elif role_token:
-        answer = (
-            f"PKBでは{role_token}の対象PCを一意に確認できませんでした。"
-        )
-    else:
-        answer = "PKBでは要求対象を一意に確認できませんでした。"
-    return {
-        "capability": "pkb_search",
-        "result": {
-            "status": "ok",
-            "result_kind": "pkb_target_unresolved",
-            "total": 0,
-            "items": [],
-            "reason": reason,
-            "parent_name": parent_name,
-            "role_token": role_token,
-        },
-        "answer": answer,
-        "total": 0,
-        "tool": "pkb",
-        "operation": "target_resolution",
-        "source_slug": "pkb-target-unresolved",
-        "citation": "RITSUKO bounded PKB target resolution",
-        "verified_by": "deterministic_pkb_query",
-        "status": "ok",
-        "confidentiality": "private",
-        "source_metadata": {
-            "target_resolution": reason,
-            "parent_entity_name": parent_name,
-            "role_token": role_token,
-        },
-    }
-
-
-def _public_query_terms_from_pkb_result(result: dict, combined_request: str) -> list[str]:
-    """Expose only allowlisted public technical identifiers from one scoped PKB result."""
-    rows = [
-        item for item in (result.get("items") or [])
-        if isinstance(item, dict)
-    ]
-    entity_names = {
-        str(item.get("entity_name") or "").strip()
-        for item in rows
-        if str(item.get("entity_name") or "").strip()
-    }
-    # Never derive outbound terms from a broad/global PKB result.
-    if len(entity_names) != 1:
-        return []
-    entity_name = next(iter(entity_names))
-    if entity_name not in combined_request:
-        return []
-
-    terms: list[str] = []
-    for item in rows[:12]:
-        predicate = str(item.get("predicate") or "").strip()
-        value = item.get("value")
-        if predicate in {"manufacturer", "model", "current_os_release"}:
-            text = str(value or "").strip()
-            if text:
-                terms.append(text)
-        elif predicate == "os_release_changed" and isinstance(value, dict):
-            for key in ("product", "to_release"):
-                text = str(value.get(key) or "").strip()
-                if text:
-                    terms.append(text)
-    return list(dict.fromkeys(terms))[:20]
-
-
-def _execute_magi_pkb_request(
-    user_raw: str,
-    pending_request: dict,
-) -> dict:
-    """Execute one deterministic bounded PKB read requested by MAGI.
-
-    MAGI chooses the information source and describes the needed fact.
-    RITSUKO resolves only already-modelled Entity/component identifiers and
-    performs the actual local read. It does not invent a new semantic route.
-    """
-    requested = str(pending_request.get("what") or "").strip()
-    combined = (user_raw.strip() + "\n" + requested).strip()
-
-    entities = _entity_map()
-    parents = [
-        row for name, row in sorted(
-            entities.items(), key=lambda item: len(item[0]), reverse=True
-        )
-        if name and name in combined and row.get("entity_type") == "computer"
-    ]
-    roles = [token for token in COMPONENT_ROLE_TOKENS if token in combined]
-
-    if roles:
-        if len(roles) != 1:
-            return _pkb_unresolved_target_execution(
-                parent_name=(parents[0].get("name") if len(parents) == 1 else None),
-                role_token=None,
-                reason="component_role_not_unique",
-            )
-        role = roles[0]
-        if len(parents) != 1:
-            return _pkb_unresolved_target_execution(
-                parent_name=None,
-                role_token=role,
-                reason="parent_computer_not_unique_or_missing",
-            )
-
-        parent = parents[0]
-        component = _pkb_repository.resolve_component_reference(
-            parent["name"], role
-        )
-        if component is None:
-            return _pkb_unresolved_target_execution(
-                parent_name=parent["name"],
-                role_token=role,
-                reason="component_relation_not_unique_or_missing",
-            )
-
-        detail = _json_safe(
-            _pkb_repository.load_entity_detail(component["id"]) or {}
-        )
-        current = [
-            item for item in (detail.get("current") or [])
-            if item.get("valid_to") is None
-        ][:20]
-        values = {
-            str(item.get("predicate")): item.get("value")
-            for item in current
-            if item.get("predicate")
-        }
-        manufacturer = str(values.get("manufacturer") or "").strip()
-        model = str(values.get("model") or "").strip()
-        driver = str(values.get("current_driver") or "").strip()
-        identity = model or component.get("name") or role
-        if manufacturer and manufacturer.lower() not in identity.lower():
-            identity = manufacturer + " " + identity
-        answer = (
-            f"PKBの記録では、{parent['name']}の{role}は {identity} です。"
-            if model
-            else (
-                f"PKBには{parent['name']}の{role} Entity "
-                f"{component.get('name')}がありますが、モデル属性は確認できませんでした。"
-            )
-        )
-        if driver:
-            answer += f" 現在ドライバーは {driver} です。"
-        result = {
-            "status": "ok",
-            "result_kind": "entity_detail",
-            "total": len(current),
-            "entity": detail.get("entity"),
-            "parent": {
-                "id": parent.get("id"),
-                "name": parent.get("name"),
-            },
-            "component_role": component.get("relation_role"),
-            "current": current,
-            "relations": (detail.get("relations") or [])[:12],
-            "events": (detail.get("events") or [])[:12],
-        }
-        return {
-            "capability": "pkb_search",
-            "result": result,
-            "answer": answer,
-            "total": len(current),
-            "tool": "pkb",
-            "operation": "entity_detail",
-            "source_slug": "pkb-entity-detail",
-            "citation": "RITSUKO bounded PKB Entity detail",
-            "verified_by": "deterministic_pkb_query",
-            "source_metadata": {
-                "parent_entity_id": str(parent.get("id") or ""),
-                "parent_entity_name": parent.get("name"),
-                "component_entity_id": component.get("id"),
-                "component_entity_name": component.get("name"),
-                "relation_role": component.get("relation_role"),
-                "public_query_terms": [
-                    value
-                    for value in (manufacturer, model)
-                    if str(value or "").strip()
-                ],
-            },
-        }
-
-    execution = _execute_core_read("pkb_search", requested or user_raw)
-    result = execution.get("result") or {}
-    public_terms = _public_query_terms_from_pkb_result(result, combined)
-    if public_terms:
-        metadata = dict(execution.get("source_metadata") or {})
-        metadata["public_query_terms"] = public_terms
-        execution["source_metadata"] = metadata
-    return execution
+def _execute_magi_pkb_request(user_raw: str, pending_request: dict) -> dict:
+    """MAGIのPKB観測を共通処理へ委譲し、NiceGUIの既存呼出し契約を維持する。"""
+    return execute_magi_pkb_request(
+        user_raw, pending_request,
+        pkb_repository=_pkb_repository,
+        entity_map=_entity_map,
+        execute_read=_execute_core_read,
+    )
 
 
 def _execute_magi_source_request(
-    user_raw: str,
-    pending_request: dict,
-    session: dict,
+    user_raw: str, pending_request: dict, session: dict,
 ) -> dict:
-    """Execute one Source-neutral bounded read selected by RITSUKO."""
-    source = str(pending_request.get("source") or "").strip()
-    if source == "pkb":
-        return _execute_magi_pkb_request(user_raw, pending_request)
-    if source == "web":
-        query = web_query_from_request(pending_request, session)
-        permission = public_web_search_permission(session.get("policy_snapshot"))
-        if not permission["allowed"]:
-            return {
-                "status": "error", "source": "web",
-                "capability": "web_research", "confidentiality": "public",
-                "operation": "research", "total": 0, "answer": "",
-                "result": {"result_kind": "web_search_permission_denied",
-                           "reason": permission["reason"]},
-                "error_type": permission["reason"], "verified_by": None,
-            }
-        # This is already an AnyIO worker thread in observation_loop. A fresh
-        # runner here does not block the NiceGUI event loop. Only the public
-        # gated query, not the user's full Task or private PKB, reaches tools.
-        import anyio
-        native = anyio.run(search_magi_web, query,
-                           session.get("member_specs") or [])
-        if native.get("status") == "ok":
-            return native
-        # Existing bounded DDGS is a fallback, not a separate permission path.
-        result = _execute_core_read("web_research", query)
-        source_metadata = dict(result.get("source_metadata") or {})
-        source_metadata["native_web_fallback"] = {
-            "status": native.get("status"),
-            "member_runs": (native.get("result") or {}).get("member_runs") or [],
-        }
-        return {"source": "web", **result,
-                "source_metadata": source_metadata}
-    if source == "finance":
-        query = finance_query_from_request(pending_request, session=session)
-        result = _execute_core_read("finance_read", query)
-        return {"source": "finance", **result}
-    raise ValueError("unsupported_observation_source")
-
+    """MAGIのPKB/Web/Finance観測を、Vueでも再利用する共通処理へ渡す。"""
+    return execute_magi_source_request(
+        user_raw, pending_request, session,
+        pkb_execute=_execute_magi_pkb_request,
+        execute_read=_execute_core_read,
+        native_web_search=search_magi_web,
+    )
 
 def _create_magi_core_task_record(task_id: UUID, request: str, member_specs: list[dict]) -> None:
     create_task_record(_magi_task_repository, task_id, request, member_specs)
