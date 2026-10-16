@@ -297,7 +297,11 @@ class TaskCommands:
             try:
                 db_status = self._request_stop(task_id=task_id)
             except ValueError as exc:
+                if str(exc) == "task_not_found":
+                    raise TaskCommandNotFound("task_not_found") from exc
                 raise TaskCommandConflict("task_not_stoppable") from exc
+            if db_status not in {"paused", "running"}:
+                raise TaskCommandConflict("invalid_persisted_stop_status")
             return {
                 "task_id": str(task_id), "kind": "stop",
                 "status": "operation_not_in_process",
@@ -310,7 +314,11 @@ class TaskCommands:
                 # Durable intent is recorded before the in-process Event is set.
                 db_status = self._request_stop(task_id=task_id)
             except ValueError as exc:
+                if str(exc) == "task_not_found":
+                    raise TaskCommandNotFound("task_not_found") from exc
                 raise TaskCommandConflict("task_not_stoppable") from exc
+            if db_status not in {"paused", "running"}:
+                raise TaskCommandConflict("invalid_persisted_stop_status")
             self._operations[task_id]["task_status"] = db_status
         self._stops[task_id].set()
         self._operations[task_id]["stop_requested"] = True
