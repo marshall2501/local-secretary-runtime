@@ -31,6 +31,39 @@ class FakeMagiRepository:
             "member_specs": deepcopy(member_specs),
         }
 
+    def reserve_start(self, *, task_id, request, member_specs,
+                      decision_strategy, policy_snapshot):
+        """最初にpending Taskを確定するfake transaction境界。"""
+        if task_id in self.tasks:
+            raise ValueError("duplicate_task")
+        self.calls.append("reserve")
+        self.tasks[task_id] = {
+            "id": str(task_id), "request": request, "status": "pending",
+            "member_specs": deepcopy(member_specs),
+            "decision_strategy": decision_strategy,
+            "policy_snapshot": deepcopy(policy_snapshot),
+        }
+
+    def claim_start(self, *, task_id, request, member_specs):
+        """1件のpending TaskだけがWorkerを開始できる。"""
+        task = self.tasks[task_id]
+        if (task["status"] != "pending" or task["request"] != request
+                or task["member_specs"] != member_specs):
+            raise ValueError("task_start_not_pending")
+        self.calls.append("claim_start")
+        task["status"] = "running"
+
+    def list_pending_starts(self, *, limit=20):
+        """中断時にもfake DBに残る未着手Taskだけを列挙する。"""
+        self.calls.append("list_pending")
+        return [{
+            "task_id": task_id, "request": item["request"],
+            "member_specs": deepcopy(item["member_specs"]),
+            "decision_strategy": item["decision_strategy"],
+            "policy_snapshot": deepcopy(item["policy_snapshot"]),
+        } for task_id, item in self.tasks.items()
+          if item["status"] == "pending"][:limit]
+
     def persist_session(self, *, task_id, session, selected_capability=None):
         """対話セッションを保存し、待機状態だけQuery用に投影する。"""
         self.calls.append("persist")
@@ -146,12 +179,13 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         uid = UUID(started["task_id"])
         await self._wait_for(commands, uid)
         self.assertEqual(repo.tasks[uid]["status"], "waiting_external")
-        self.assertEqual(repo.calls[:2], ["create", "persist"])
+        self.assertEqual(repo.calls[:3], ["reserve", "claim_start", "persist"])
         self.assertEqual(seen[0][1]["profile_id"], "fixture-policy")
         self.assertEqual(seen[0][2], str(uid))
         self.assertEqual(seen[0][3], "llm")
         self.assertEqual(repo.tasks[uid]["magi_session"]["decision_strategy"], "llm")
         self.assertEqual(policies, ["loaded"])
+        self.assertEqual(repo.tasks[uid]["policy_snapshot"]["profile_id"], "fixture-policy")
 
         answered = await commands.answer(uid, "本人の回答")
         self.assertEqual(answered["kind"], "answer")
