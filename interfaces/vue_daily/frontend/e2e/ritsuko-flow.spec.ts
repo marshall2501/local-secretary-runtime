@@ -21,7 +21,7 @@ test('8097から8099へ通常リンク遷移し、フォームを実際に編集
   await expect(page.getByText('実Task操作API接続中')).toBeVisible()
 })
 
-test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page }) => {
+test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
   const previousUrl = page.url()
   await page.getByRole('textbox', { name: '依頼内容' }).fill('Pythonの辞書を簡潔に説明してください')
@@ -46,6 +46,18 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
   await page.getByRole('button', { name: '回答のみで完了を依頼' }).click()
   await expect(page.getByText('完了（Task確定状態）')).toBeVisible()
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://127.0.0.1:8099',
+  })
+  await page.getByRole('button', { name: '最新結果をコピー' }).click()
+  await expect(page.getByText('最新結果をコピーしました。')).toBeVisible()
+  await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('架空Taskの回答を確定しました。')
+  await page.getByRole('button', { name: 'Task全情報をコピー' }).click()
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(JSON.parse(copied) as { task: { request: string } }).toMatchObject({
+    task: { request: 'Pythonの辞書を簡潔に説明してください' },
+  })
 
   await page.reload()
   await expect(page).toHaveURL(taskUrl)
@@ -75,6 +87,7 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   // 同一fixture内の先行テストでTaskが追加されるため、12件固定でなく実増加を検査する。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
   await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
+  await expect(page.getByRole('button', { name: 'さらに読み込む' })).toHaveCount(0)
   // 先行の停止試験Taskが選択済みの場合もある。固定の旧Taskを明示的に選ぶ。
   await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
