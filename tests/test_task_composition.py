@@ -21,7 +21,7 @@ class TaskCompositionTests(unittest.IsolatedAsyncioTestCase):
     """業務判断・DB・LLMを呼ばずに共通入口のPort配線を証明する。"""
 
     async def test_shared_start_answer_review_bind_same_port_objects(self):
-        """受付と本人回答/Reviewは同じPortを異なるTransportから利用できる。"""
+        """受付・本人回答・Reviewに同じPortの実体が正しく渡ることを確認する。"""
         record = []
         ports = {name: (lambda *args, **kwargs: None) for name in PORT_NAMES}
 
