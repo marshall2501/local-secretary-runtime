@@ -14,7 +14,7 @@ from pkb.entity_model_service import COMPONENT_ROLE_TOKENS
 
 
 def _json_safe(value):
-    """Convert bounded Core evidence into JSON-safe values without dropping structure."""
+    """保存済みPKBのUUID・日時を、情報構造を失わずJSONに変換する。"""
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, UUID):
@@ -32,7 +32,7 @@ def _pkb_unresolved_target_execution(
     role_token: str | None,
     reason: str,
 ) -> dict:
-    """Return a bounded verified PKB miss without broadening to unrelated claims."""
+    """対象が不明な場合に広範な記憶検索へ拡張せず、不一致を返す。"""
     if parent_name and role_token:
         answer = (
             f"PKBでは{parent_name}の{role_token}を一意に確認できませんでした。"
@@ -72,7 +72,7 @@ def _pkb_unresolved_target_execution(
 
 
 def _public_query_terms_from_pkb_result(result: dict, combined_request: str) -> list[str]:
-    """Expose only allowlisted public technical identifiers from one scoped PKB result."""
+    """単一Entityに限定された結果から、公開可能な技術識別子のみ抽出する。"""
     rows = [
         item for item in (result.get("items") or [])
         if isinstance(item, dict)
@@ -82,7 +82,7 @@ def _public_query_terms_from_pkb_result(result: dict, combined_request: str) -> 
         for item in rows
         if str(item.get("entity_name") or "").strip()
     }
-    # Never derive outbound terms from a broad/global PKB result.
+    # 複数Entityにまたがる結果から外部送信用の検索語を推測しない。
     if len(entity_names) != 1:
         return []
     entity_name = next(iter(entity_names))
