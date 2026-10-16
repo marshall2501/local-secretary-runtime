@@ -2,7 +2,10 @@
 
 2026-10-17 Task・Goal状態管理の構造整理（Runtime `main@bb906dc`、使い捨てPostgreSQL／Vue/API isolated CI PASS）: 既存 `secretary.tasks.checkpoint.goal_definition` をGoal理解状況のTask側マスタとして新規Taskへ保存する。本人原文は `tasks.request` を唯一のマスタとし、MAGIの解釈を `resolution=proposed`／版管理付きで格納し `core_task_query_repository.py` のread-only APIから参照できる。Task行lockでStopと遅いcompleted/failed／Review結果の状態競合を整理し、`claim_start` が発行した `active_attempt_id` により開始Workerの古いGoal・Source/Result・失敗書込みを拒否。通常8097のwrite公開、Production DB操作は行わない。詳細・受入境界は[設計側の変更計画](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/05_Implementation/WorkPlans/2026-10-17-0612-task-goal-state-redesign.md)。
 
-更新: 2026-10-15
+
+2026-10-17 Vue Stage B-3c: `features/ritsuko/components/TaskCommandPanel.vue` と `useTasks.ts`／typed `api.ts` を共通Task HTTP開始・本人回答・回答のみReview・Stop・Operation照会へ接続。Task状態の正本は引き続き `PostgresCoreTaskQueryRepository`。`interfaces/vue_daily/app.py::create_app` は実Commandsを明示注入でき、別ポート8099の `interfaces/vue_daily/commands_preview.py` のみ明示引数 `--enable-task-commands` で既存日常MAGI/DBを組み立てる。既存pendingの自動再開を行わず、通常8097はread-only／POST 503。実機Task write／MAGI実動作は未受入。
+
+更新: 2026-10-17
 参照runtime: current policy implementation `3de93850013c2e410815160e56c009344d889dbc` / GitHub isolated CI PASS。サブPC実機は未確認。過去のTask/Actionの受入は各Plan/STATUSを参照。
 
 2026-10-15: Vue正式開発に向け、共通RITSUKO Task Compositionと、実DB-backed Task読取専用API/画面（別ポート8097、未実機）を追加。旧Vue隔離Labは8098で独立継続。GitHub型検査/隔離CI PASS。本番Taskの開始・回答・停止やGUI切替は未実装。
