@@ -122,6 +122,7 @@ class MagiTaskStoreTests(unittest.TestCase):
         checkpoint = task_call[1][-1].obj
         scope = task_call[1][-2].obj
         self.assertEqual(checkpoint["core_slice"], "ritsuko_magi_observation_v1")
+        self.assertEqual(checkpoint["goal_definition"]["resolution"], "unresolved")
         self.assertTrue(scope["pkb_read"])
         self.assertTrue(scope["web_research"])
         self.assertTrue(scope["finance_read"])
@@ -391,6 +392,39 @@ class MagiTaskStoreTests(unittest.TestCase):
         stale = _DB(fetches=[("paused", checkpoint)])
         with self.assertRaisesRegex(ValueError, "task_not_running"):
             persist_session(stale, task_id=TASK_ID, session=session)
+
+    def test_goal_interpretation_is_proposed_and_versioned(self):
+        """MAGIのGoal解釈は本人原文を変えず、Task状態と同時に保存する。"""
+        db = _DB(fetches=[("running", {"core_slice": "ritsuko_magi_observation_v1"})])
+        judgment = {
+            "goal": "本人の予算に合う候補を比較する",
+            "next": "respond",
+            "fulfillment": "met",
+            "answer": "比較しました。",
+            "evidence": {"basis": "not_required", "result_ids": [],
+                         "assessment": "synthetic"},
+            "reason": "synthetic",
+        }
+        projection = persist_session(
+            db, task_id=TASK_ID,
+            session={
+                "status": "candidate_ready", "control_mode": "goal_loop_v1",
+                "goal_judgment": judgment, "observations": [], "turns": [],
+            },
+        )
+        self.assertEqual(projection["task_status"], "completed")
+        update = next(
+            call for call in db.cur.calls
+            if "SET status=%s, checkpoint=%s" in call[0]
+        )
+        goal = update[1][1].obj["goal_definition"]
+        self.assertEqual(goal["resolution"], "proposed")
+        self.assertEqual(goal["interpreted_goal"], judgment["goal"])
+        self.assertEqual(goal["version"], 2)
+        self.assertFalse(goal["criteria"])
+        self.assertTrue(any(
+            "core.magi.goal_interpreted" in sql for sql, _ in db.cur.calls
+        ))
 
     def test_prepare_memory_intake_is_task_linked_and_retry_safe(self):
         initial = self.review_checkpoint()
