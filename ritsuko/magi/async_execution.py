@@ -1145,10 +1145,11 @@ async def start_dialogue_async(
         return session
 
     if decision_strategy == "llm":
-        from .goal_loop import MAX_GOAL_TURNS, goal_requires_web
+        from .goal_loop import MAX_GOAL_TURNS, goal_requires_source, goal_requires_web
         session.update(
             control_mode="goal_loop_v1",
             status="running", next_step="evaluate_goal",
+            requires_source=goal_requires_source(session["user_raw"]),
             requires_web=goal_requires_web(session["user_raw"]),
             goal=None, goal_judgment=None, user_replies=[],
             previous_queries=[], status_message=None,
@@ -1274,10 +1275,10 @@ async def continue_with_verified_observations_async(
         if not isinstance(observation, dict):
             raise ValueError("invalid_observation")
         # A failed read is a recorded failure, not a verified Source.
-        # Only the LLM flow may re-evaluate such a bounded Web failure.
+        # Tool失敗は検証済み根拠でなく、Goal判断だけが記録済み失敗を再評価する。
         failed_goal_read = (
             _uses_llm_flow(updated)
-            and observation.get("source") == "web"
+            and observation.get("source") in {"pkb", "web", "finance"}
             and observation.get("verified") is False
             and bool(observation.get("result_id"))
             and bool(observation.get("action_id"))
