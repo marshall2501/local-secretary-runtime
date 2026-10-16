@@ -109,6 +109,8 @@ def main(project: str, container: str) -> None:
             status, checkpoint = cur.fetchone()
             assert status == "pending"
             assert checkpoint["member_specs"] == members
+            assert checkpoint["goal_definition"]["resolution"] == "unresolved"
+            assert checkpoint["goal_definition"]["criteria"] == []
             assert checkpoint["start_intent"]["policy_snapshot"] == policy
             assert sum(row["task_id"] == task_id
                        for row in list_pending_starts(db)) == 1
@@ -278,6 +280,58 @@ def main(project: str, container: str) -> None:
     else:
         raise AssertionError("paused_task_accepted_stale_worker")
 
+    goal_id = uuid4()
+    with connect() as db:
+        assert reserve_start(
+            db, task_id=goal_id, request="synthetic custom Goal",
+            member_specs=members, decision_strategy="llm",
+            policy_snapshot=policy,
+        )
+        claim_start(
+            db, task_id=goal_id, request="synthetic custom Goal",
+            member_specs=members,
+        )
+    proposed_goal = {
+        "task_id": str(goal_id),
+        "status": "candidate_ready",
+        "control_mode": "goal_loop_v1",
+        "requires_source": False,
+        "requires_web": False,
+        "observations": [],
+        "turns": [],
+        "goal_judgment": {
+            "goal": "Compare synthetic monthly budget and give a supported summary",
+            "next": "respond", "fulfillment": "met",
+            "answer": "Synthetic explanation; no source needed",
+            "evidence": {"basis": "not_required", "result_ids": [],
+                         "assessment": "Synthetic source-free example"},
+            "reason": "synthetic_goal_assessed",
+        },
+    }
+    projection = repository.persist_session(task_id=goal_id, session=proposed_goal)
+    assert projection["task_status"] == "completed"
+    goal_trace = new_commands().operation(goal_id)
+    assert goal_trace["task_status"] == "completed"
+    with connect() as db, db.cursor() as cur:
+        cur.execute(
+            """SELECT request, checkpoint FROM secretary.tasks WHERE id=%s""",
+            (goal_id,),
+        )
+        request_text, goal_checkpoint = cur.fetchone()
+        goal = goal_checkpoint["goal_definition"]
+        assert request_text == "synthetic custom Goal"
+        assert goal["resolution"] == "proposed", goal
+        assert goal["interpreted_goal"] == proposed_goal["goal_judgment"]["goal"]
+        assert goal["version"] == 2
+        assert goal["criteria"] == []
+        cur.execute(
+            """SELECT count(*) FROM secretary.audit_events
+               WHERE task_id=%s AND event_type='core.magi.goal_interpreted'""",
+            (goal_id,),
+        )
+        assert cur.fetchone()[0] == 1
+    assert new_commands()._queries.trace(goal_id)["task"]["goal_definition"] == goal
+
     for terminal_status in ("completed", "failed"):
         terminal_id = uuid4()
         with connect() as db:
@@ -302,6 +356,7 @@ def main(project: str, container: str) -> None:
         assert terminal_after["task_status"] == terminal_status
         assert terminal_after["stop_requested"] is None
 
+    print("PASS: disposable PG Task Goal interpretation, revision and read-only query")
     print("PASS: disposable PG late MAGI completion/error cannot overwrite acknowledged Stop")
     print("PASS: disposable PG TaskCommands new-instance stop, query, concurrent idempotence and terminal guards")
 
