@@ -23,8 +23,11 @@ test('8097から8099へ通常リンク遷移し、フォームを実際に編集
 
 test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
+  const previousUrl = page.url()
   await page.getByRole('textbox', { name: '依頼内容' }).fill('Pythonの辞書を簡潔に説明してください')
   await page.getByRole('button', { name: '依頼を送信' }).click()
+  // 初期画面でも旧Task IDのhashが付くため、新しい受付IDへ変わるまで待つ。
+  await expect.poll(() => page.url()).not.toBe(previousUrl)
   await expect(page).toHaveURL(/#task=[a-f\d-]{36}$/i)
   const taskUrl = page.url()
   await expect(page.getByRole('textbox', { name: '依頼内容' })).toHaveValue('')
@@ -68,6 +71,8 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   // 同一fixture内の先行テストでTaskが追加されるため、12件固定でなく実増加を検査する。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
   await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
+  // 先行の停止試験Taskが選択済みの場合もある。固定の旧Taskを明示的に選ぶ。
+  await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Task履歴（既存画面）' }))
     .toHaveAttribute('href', 'http://127.0.0.1:8093/core/history')
