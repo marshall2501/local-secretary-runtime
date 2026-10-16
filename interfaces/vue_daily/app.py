@@ -83,10 +83,11 @@ def create_app(*, queries, commands: TaskCommands | None = None,
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        """ローカルホストでの参照を想定し、外部Originと転送ヘッダを拒否する。
+        """localhost入口を保ち、画面閲覧とTask書込の扱いを分ける。
 
-        Host・Originの照合は本人認証ではない。外部Web入口の認可を代替せず、今後の
-        実Task更新APIを無条件で公開するための許可ではない。
+        URLを外部ページから開くと、Chrome等はGETでもSec-Fetch-Site:
+        cross-site / same-siteを送る。GETまで拒否すると本人がUIを開けない。
+        Task変更を伴うリクエストだけOrigin・Fetch Siteを照合する。
         """
         host = request.headers.get("host", "").split(":", 1)[0].lower()
         if host not in {"127.0.0.1", "localhost"}:
@@ -95,12 +96,13 @@ def create_app(*, queries, commands: TaskCommands | None = None,
             "x-forwarded-host", "x-forwarded-for", "forwarded",
         )):
             return JSONResponse({"detail": "forwarded_request_denied"}, status_code=403)
-        origin = request.headers.get("origin")
-        if origin and origin != str(request.base_url).rstrip("/"):
-            return JSONResponse({"detail": "invalid_origin"}, status_code=403)
-        site = request.headers.get("sec-fetch-site")
-        if site and site not in {"same-origin", "none"}:
-            return JSONResponse({"detail": "cross_site_denied"}, status_code=403)
+        if request.method not in {"GET", "HEAD"}:
+            origin = request.headers.get("origin")
+            if origin and origin != str(request.base_url).rstrip("/"):
+                return JSONResponse({"detail": "invalid_origin"}, status_code=403)
+            site = request.headers.get("sec-fetch-site")
+            if site and site not in {"same-origin", "none"}:
+                return JSONResponse({"detail": "cross_site_denied"}, status_code=403)
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
