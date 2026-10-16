@@ -1,8 +1,8 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** 実Task読取に接続するVue秘書AI画面の起動入口。 */
+/** Vue日常UIの起動。業務機能やTask実行状態は保持しない。 */
 import { createApp } from 'vue'
 import App from './App.vue'
-import './style.css'
+import './shared/styles/base.css'
 
 createApp(App).mount('#app')
