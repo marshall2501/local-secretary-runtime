@@ -67,8 +67,11 @@ class VueLabApiTests(unittest.TestCase):
             "request": "synthetic"
         }).status_code, 404)
 
-    def test_shared_application_task_start_answer_completed_and_f5_readback(self):
-        """認証操作なしで共通RITSUKO Applicationを同一Task IDで再利用する。"""
+    def test_shared_application_task_start_answer_completed_and_repeated_get(self):
+        """架空Taskの開始・回答・完了と同一IDの再GETを確認する。
+
+        ブラウザのF5操作や実DB再起動後の復元を検証する試験ではない。
+        """
         accepted = self.client.post("/api/lab/tasks", json={
             "request": "Pythonの辞書とは何ですか？"
         })
