@@ -249,8 +249,8 @@ def main(project: str, container: str) -> None:
             )
             with db.cursor() as cur:
                 cur.execute(
-                    "UPDATE secretary.tasks SET status=%s WHERE id=%s",
-                    (terminal_status, terminal_id),
+                    "UPDATE secretary.tasks SET status=%s, completed_at=CASE WHEN %s = 'completed' THEN now() ELSE NULL END WHERE id=%s",
+                    (terminal_status, terminal_status, terminal_id),
                 )
         try:
             new_commands().stop(terminal_id)
