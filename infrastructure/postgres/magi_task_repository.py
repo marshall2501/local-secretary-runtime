@@ -15,6 +15,45 @@ from ritsuko.core.magi_bridge import (
 from pkb.memory_contracts import MemoryIntake
 
 
+
+def _initial_goal_definition() -> dict:
+    """本人原文はtasks.requestを唯一マスタとし、未確定のGoal理解だけ分離する。
+
+    理解したGoalはMAGIの提案であり、本人原文の書換えではない。
+    """
+    return {
+        "version": 1,
+        "resolution": "unresolved",
+        "interpreted_goal": None,
+        "criteria": [],
+        "interpretation_source": None,
+    }
+
+
+def _merge_goal_interpretation(checkpoint: dict, session: dict) -> bool:
+    """根拠付きLLM解釈を候補として保管し、変更がある時だけ版を進める。"""
+    goal = deepcopy(checkpoint.get("goal_definition") or _initial_goal_definition())
+    judgment = session.get("goal_judgment")
+    if not isinstance(judgment, dict):
+        checkpoint.setdefault("goal_definition", goal)
+        return False
+    interpreted = judgment.get("goal")
+    if not isinstance(interpreted, str) or not interpreted.strip():
+        checkpoint.setdefault("goal_definition", goal)
+        return False
+    interpreted = interpreted.strip()[:2000]
+    if goal.get("interpreted_goal") == interpreted:
+        return False
+    goal.update({
+        "version": int(goal.get("version") or 1) + 1,
+        "resolution": "proposed",
+        "interpreted_goal": interpreted,
+        "interpretation_source": "magi_goal_judgment",
+    })
+    checkpoint["goal_definition"] = goal
+    return True
+
+
 def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) -> None:
     checkpoint = {
         "core_slice": CORE_SLICE,
@@ -26,6 +65,7 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
         "member_specs": deepcopy(member_specs),
         "magi_session": None,
         "final_core_decision": None,
+        "goal_definition": _initial_goal_definition(),
     }
     with db.transaction(), db.cursor() as cur:
         cur.execute(
@@ -36,7 +76,7 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
             (
                 task_id,
                 request,
-                "Return a grounded answer from bounded verified read Observations or stop safely.",
+                "依頼固有の達成条件は未確定（TaskのGoal理解と根拠評価で判断）",
                 Jsonb({
                     "pkb_read": True,
                     "finance_read": True,
@@ -84,6 +124,7 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
         "selected_capability": None, "question": None, "message": None,
         "member_specs": deepcopy(member_specs), "magi_session": None,
         "final_core_decision": None,
+        "goal_definition": _initial_goal_definition(),
         "start_intent": {
             "state": "pending", "decision_strategy": decision_strategy,
             "policy_snapshot": deepcopy(policy_snapshot),
@@ -98,7 +139,7 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
                ON CONFLICT (id) DO NOTHING RETURNING id""" ,
             (
                 task_id, request,
-                "Return a grounded answer from bounded verified read Observations or stop safely.",
+                "依頼固有の達成条件は未確定（TaskのGoal理解と根拠評価で判断）",
                 Jsonb({
                     "pkb_read": True, "finance_read": True,
                     "web_research": True, "files_read": False,
@@ -506,6 +547,7 @@ def persist_session(
         if checkpoint.get("stop_requested") is True:
             return _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
         checkpoint.update(checkpoint_patch)
+        goal_changed = _merge_goal_interpretation(checkpoint, session)
         user_resume = checkpoint.get("user_resume")
         if isinstance(user_resume, dict) and user_resume.get("status") == "processing":
             user_resume["status"] = "completed"
@@ -523,6 +565,17 @@ def persist_session(
                 task_id,
             ),
         )
+        if goal_changed:
+            cur.execute(
+                """INSERT INTO secretary.audit_events
+                   (actor, event_type, task_id, object_type, object_id, details)
+                   VALUES ('ritsuko_core', 'core.magi.goal_interpreted',
+                           %s, 'task', %s, %s)""",
+                (task_id, task_id, Jsonb({
+                    "goal_version": checkpoint["goal_definition"]["version"],
+                    "origin": "magi_goal_judgment",
+                })),
+            )
         cur.execute(
             """INSERT INTO secretary.audit_events
                (actor, event_type, task_id, object_type, object_id, details)
