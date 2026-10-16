@@ -195,6 +195,7 @@ class PostgresCoreTaskQueryRepository:
                 "proposal_review":checkpoint.get("proposal_review"),
                 "proposal_memory_intake":checkpoint.get("proposal_memory_intake"),
                 "user_resume":checkpoint.get("user_resume"),
+                "stop_requested":checkpoint.get("stop_requested"),
             },
             "actions": [
                 {
