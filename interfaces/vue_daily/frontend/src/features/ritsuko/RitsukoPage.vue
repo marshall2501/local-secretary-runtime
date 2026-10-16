@@ -44,6 +44,7 @@ const {
       <TaskActivity :trace="trace" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
+      :commands-enabled="commandsEnabled"
       @select="selectTask" @filter="selectView"
     />
   </div>
