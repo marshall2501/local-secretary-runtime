@@ -11,7 +11,7 @@ class MagiTaskRepository(Protocol):
     def reserve_start(
         self, *, task_id: UUID, request: str, member_specs: list[dict],
         decision_strategy: str, policy_snapshot: dict | None,
-    ) -> None: ...
+    ) -> bool: ...
 
     def claim_start(
         self, *, task_id: UUID, request: str, member_specs: list[dict],
