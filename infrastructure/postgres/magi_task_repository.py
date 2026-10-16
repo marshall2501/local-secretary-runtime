@@ -333,6 +333,8 @@ def claim_user_resume(
         status, checkpoint = row[0], row[1] or {}
         if checkpoint.get("core_slice") != CORE_SLICE:
             raise ValueError("not_magi_observation_task")
+        if checkpoint.get("stop_requested") is True:
+            raise ValueError("task_stop_requested")
         session = checkpoint.get("magi_session")
         if not isinstance(session, dict) or session.get("status") != "waiting_user":
             raise ValueError("task_not_waiting_for_user")
@@ -435,6 +437,9 @@ def abort_user_resume(
             or not isinstance(resume, dict)
             or resume.get("status") != "processing"
         ):
+            return
+        if checkpoint.get("stop_requested") is True:
+            _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
             return
         resume["status"] = "retry_required"
         resume["last_error_type"] = str(error)[:160]
@@ -890,6 +895,9 @@ def finalize_proposal_review(
             raise ValueError("proposal_review_task_not_running")
         if checkpoint.get("core_slice") != CORE_SLICE:
             raise ValueError("not_magi_observation_task")
+        if checkpoint.get("stop_requested") is True:
+            _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
+            return {"status": "paused", "reason": "user_requested_stop"}
 
         review = checkpoint.get("proposal_review")
         if not isinstance(review, dict) or review.get("status") != "processing":
@@ -1013,6 +1021,9 @@ def abort_proposal_review(
         if status != "running" or not isinstance(review, dict):
             return
         if review.get("status") != "processing":
+            return
+        if checkpoint.get("stop_requested") is True:
+            _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
             return
 
         review["status"] = "retry_required"
