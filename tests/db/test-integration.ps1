@@ -5,8 +5,13 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $dbScript = Join-Path $root 'scripts/db/postgres.ps1'
 $project = 'local-secretary-test-' + [guid]::NewGuid().ToString('N').Substring(0,12)
+$testEnvFile = Join-Path $root ('.env.postgres.' + $project + '.tmp')
+$probe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+try { $probe.Start(); $testPort = ([Net.IPEndPoint]$probe.LocalEndpoint).Port } finally { $probe.Stop() }
+[IO.File]::WriteAllText($testEnvFile, "LSA_DB_PORT=$testPort`n", (New-Object Text.UTF8Encoding($false)))
+$env:LSA_TEST_DB_ENV_FILE = $testEnvFile
 $compose = @('compose','--project-name',$project,'--project-directory',(Join-Path $root 'docker'),'--env-file',
-    (Join-Path $root '.env.postgres'),'-f',(Join-Path $root 'docker/compose.postgres.yml'))
+    $testEnvFile,'-f',(Join-Path $root 'docker/compose.postgres.yml'))
 $backup = Join-Path $root "backups/$project.dump"
 function Invoke-TestDocker([string[]]$a) {
     & docker @a
@@ -31,14 +36,12 @@ function Snapshot-Others {
 $before = Snapshot-Others
 try {
     # Prove a bound port fails before creating a container.
-    $portLine = Get-Content (Join-Path $root '.env.postgres') | Where-Object { $_ -match '^LSA_DB_PORT=' }
-    $testPort = [int](($portLine -split '=')[1])
     $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $testPort)
     $listener.Server.ExclusiveAddressUse = $true
     try {
         $listener.Start()
         $rejected = $false
-        try { & $dbScript -Action Start -Project $project } catch {
+        try { & $dbScript -Action Start -Project $project -EnvFile $testEnvFile } catch {
             if ($_.Exception.Message -notlike '*is unavailable*') { throw }
             $rejected = $true
         }
@@ -47,14 +50,14 @@ try {
             throw 'Port-conflict preflight created containers.'
         }
     } finally { $listener.Stop() }
-    & $dbScript -Action Start -Project $project
-    & $dbScript -Action Migrate -Project $project
-    & $dbScript -Action Migrate -Project $project
+    & $dbScript -Action Start -Project $project -EnvFile $testEnvFile
+    & $dbScript -Action Migrate -Project $project -EnvFile $testEnvFile
+    & $dbScript -Action Migrate -Project $project -EnvFile $testEnvFile
     $script:container = (Invoke-TestDocker ($compose + @('ps','-q','secretary-postgres')) | Out-String).Trim()
     # Corrupt only this synthetic project's ledger; applied-file drift must fail closed.
     Run-Sql (Join-Path $PSScriptRoot 'corrupt-history.sql') 'secretary'
     $rejected = $false
-    try { & $dbScript -Action Migrate -Project $project } catch { $rejected = $true }
+    try { & $dbScript -Action Migrate -Project $project -EnvFile $testEnvFile } catch { $rejected = $true }
     if (-not $rejected) { throw 'Migration checksum drift was not rejected.' }
     Invoke-TestDocker @('cp',(Join-Path $PSScriptRoot 'repair-test-history.sql'),"${script:container}:/tmp/repair.sql")
     $checksum = (Get-FileHash (Join-Path $root 'db/migrations/001_memory.sql') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -72,16 +75,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Isolated durable Task PostgreSQL verification failed.' }
     & python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
-    & $dbScript -Action Backup -Project $project -BackupPath $backup
+    & $dbScript -Action Backup -Project $project -EnvFile $testEnvFile -BackupPath $backup
     Invoke-TestDocker ($compose + @('restart','secretary-postgres'))
     Invoke-TestDocker ($compose + @('up','-d','--wait','--wait-timeout','120','secretary-postgres'))
     Run-Sql (Join-Path $PSScriptRoot 'verify-persistence.sql') 'secretary'
-    & $dbScript -Action Restore -Project $project -BackupPath $backup -RestoreDatabase 'secretary_restore_test'
+    & $dbScript -Action Restore -Project $project -EnvFile $testEnvFile -BackupPath $backup -RestoreDatabase 'secretary_restore_test'
     Run-Sql (Join-Path $PSScriptRoot 'verify-persistence.sql') 'secretary_restore_test'
-    & $dbScript -Action Doctor -Project $project
+    & $dbScript -Action Doctor -Project $project -EnvFile $testEnvFile
     # The restore command must reject a pre-existing destination database.
     $rejected = $false
-    try { & $dbScript -Action Restore -Project $project -BackupPath $backup -RestoreDatabase 'secretary_restore_test' }
+    try { & $dbScript -Action Restore -Project $project -EnvFile $testEnvFile -BackupPath $backup -RestoreDatabase 'secretary_restore_test' }
     catch { $rejected = $true }
     if (-not $rejected) { throw 'Existing restore destination was not rejected.' }
     & python (Join-Path $PSScriptRoot 'verify-observation-sources.py')
@@ -91,5 +94,7 @@ try {
     # Exactly the random test project created by this run; never prune or target another project.
     Invoke-TestDocker ($compose + @('down','--volumes'))
     if ((Snapshot-Others) -ne $before) { throw 'Other container state changed during test; investigate.' }
+    Remove-Item -LiteralPath $testEnvFile -ErrorAction SilentlyContinue
+    Remove-Item Env:LSA_TEST_DB_ENV_FILE -ErrorAction SilentlyContinue
     Write-Host 'PASS: other container IDs, status, start times and restart counts unchanged.'
 }
