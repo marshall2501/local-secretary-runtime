@@ -76,7 +76,7 @@ class PostgresCoreTaskQueryRepository:
                        WHERE t.requested_by='local_user'
                          AND COALESCE(t.checkpoint->>'core_slice', '') IN
                              ('daily_read_only_v1','ritsuko_magi_observation_v1')
-                         AND t.status IN ('waiting_external', 'running', 'paused')
+                         AND t.status IN ('pending', 'waiting_external', 'running', 'paused')
                        GROUP BY t.id
                        ORDER BY t.updated_at DESC, t.id DESC
                        LIMIT %s OFFSET %s""",
