@@ -18,9 +18,9 @@ def create_task_record(repository: MagiTaskRepository, task_id: UUID, request: s
 def reserve_start_record(repository: MagiTaskRepository, *,
                          task_id: UUID, request: str, member_specs: list[dict],
                          decision_strategy: str,
-                         policy_snapshot: dict | None) -> None:
-    """実行前にTask受付と必要なIntentをDBへ確定する。"""
-    repository.reserve_start(
+                         policy_snapshot: dict | None) -> bool:
+    """実行前にTask受付を確定。新規ならTrue、同一Intentの再送ならFalse。"""
+    return repository.reserve_start(
         task_id=task_id, request=request, member_specs=member_specs,
         decision_strategy=decision_strategy, policy_snapshot=policy_snapshot,
     )
