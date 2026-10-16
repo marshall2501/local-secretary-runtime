@@ -1,6 +1,9 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** Action/Resultの実保存記録を必要時に展開する（書き込み機能なし）。 */
+/**
+ * Task履歴APIに含まれるAction・Resultの記録を折りたたんで表示する。
+ * 結果IDがないActionは未記録のまま示し、成功したとは表示しない。
+ */
 import type { TaskTrace } from '../types'
 defineProps<{ trace: TaskTrace | null }>()
 </script>
