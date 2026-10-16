@@ -24,7 +24,7 @@ class FakeQueries:
         }
 
     def recent(self, limit, offset):
-        """指定ページの「最近」の代表Taskを返し、受領した範囲を記録する。"""
+        """受領した表示範囲を記録し、固定の最近Taskを返す。"""
         self.calls.append(("recent", limit, offset))
         return [self.task]
 
