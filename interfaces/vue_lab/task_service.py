@@ -30,7 +30,9 @@ class _Task:
     status: str = "queued"
     message: str = ""
     question: str | None = None
+    # 本人回答再開に必要な合成MAGI session。DBには保存せずプロセス内だけで保持。
     session: dict | None = None
+    # 画面の停止要求と合成Runnerの協調停止を同じTask内で受け渡す。
     stop: Event = field(default_factory=Event)
     error: str | None = None
 
@@ -44,7 +46,9 @@ class IsolatedTaskService:
     def __init__(self) -> None:
         """架空Taskストアと共通RITSUKO Applicationを初期化する。"""
         self._lock = RLock()
+        # 架空Taskの唯一の正本。画面や実DBへ複製しない。
         self._tasks: dict[str, _Task] = {}
+        # HTTP応答後に進む合成Runnerの参照。Stop時にTaskと紐付ける。
         self._jobs: dict[str, asyncio.Task] = {}
         self._application = build_task_application(
             create_task_record=self._create_record,
