@@ -764,6 +764,22 @@ class MagiTaskStoreTests(unittest.TestCase):
             "proposal_review_evaluated_memory",
         )
 
+        # 別プロセスStopがMAGI Review中に届いたら、遅い完了を採用しない。
+        stopped = _DB(fetches=[("running", {**checkpoint, "stop_requested": True})])
+        refused = finalize_proposal_review(
+            stopped, task_id=TASK_ID, session=session,
+            selected_capability="pkb_search",
+        )
+        self.assertEqual(refused["status"], "paused")
+        self.assertFalse(any(
+            "core.magi.proposal_review_completed" in sql
+            for sql, _ in stopped.cur.calls
+        ))
+        self.assertTrue(any(
+            "core.magi.stop_acknowledged" in sql
+            for sql, _ in stopped.cur.calls
+        ))
+
     def test_finalize_review_rejects_nonfinalizable_magi_state(self):
         checkpoint = self.review_checkpoint()
         checkpoint["proposal_review"] = {
@@ -849,6 +865,20 @@ class MagiTaskStoreTests(unittest.TestCase):
             saved["final_core_decision"]["next_step"],
             "retry_proposal_review",
         )
+
+    def test_stop_prevents_review_abort_from_reopening_task(self):
+        """Stop済みTaskはReview失敗経路からwaitingへ戻さない。"""
+        checkpoint = self.review_checkpoint()
+        checkpoint["proposal_review"] = {
+            "decision": "answer_only", "status": "processing",
+            "answer": "比較結果",
+        }
+        checkpoint["stop_requested"] = True
+        db = _DB(fetches=[("running", checkpoint)])
+        abort_proposal_review(db, task_id=TASK_ID, error="TimeoutError")
+        sql = "\n".join(call[0] for call in db.cur.calls)
+        self.assertIn("core.magi.stop_acknowledged", sql)
+        self.assertNotIn("proposal_review_retry_required", sql)
 
     def test_record_pkb_read_writes_source_action_result_and_checkpoint(self):
         db = _DB(fetches=[
