@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
@@ -49,7 +50,7 @@ def checked_disposable_port(project: str, container_id: str) -> int:
     if len(bindings) != 1 or bindings[0]["HostIp"] != "127.0.0.1":
         raise RuntimeError("non_loopback_database_binding")
     port = int(bindings[0]["HostPort"])
-    env_file = ROOT / ".env.postgres"
+    env_file = Path(os.environ["LSA_TEST_DB_ENV_FILE"])
     if env_file.read_text(encoding="utf-8").strip() != f"LSA_DB_PORT={port}":
         raise RuntimeError("isolated_database_port_mismatch")
     return port
