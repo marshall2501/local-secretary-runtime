@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable
@@ -122,19 +123,26 @@ def build_magi_task_commands(
             native_web_search=bindings.native_web_search,
         )
 
-    async def begin_dialogue(user_raw: str, **kwargs) -> dict:
-        """新しいTaskに権限Snapshotを固定し、MAGI対話へ引き渡す。
+    _not_captured = object()
 
-        再開時は保存済みsessionのSnapshotを使うため再取得しない。
-        """
-        policy = await asyncio.to_thread(bindings.policy_snapshot_loader)
+    async def begin_dialogue(
+        user_raw: str, *, captured_policy=_not_captured, **kwargs,
+    ) -> dict:
+        """受付時のTask固定PolicyをMAGIへ渡す。旧直接呼出しも維持する。"""
+        policy = (
+            await asyncio.to_thread(bindings.policy_snapshot_loader)
+            if captured_policy is _not_captured else deepcopy(captured_policy)
+        )
         return await dialogue_starter(
             user_raw, policy_snapshot=policy, **kwargs,
         )
 
     async def start_runner(user_raw: str, **kwargs) -> dict:
-        """共通Task実行ループへ判断方式に対応したMAGI入口を一つだけ接続する。"""
+        """pendingのatomic claimに成功したTaskだけ共通Observationへ入る。"""
         chosen_starter = kwargs.pop("dialogue_starter", begin_dialogue)
+        # Existing loop's create port becomes a claim port. This is the only
+        # entry into MAGI execution; no separate resume/executor is introduced.
+        kwargs["create_task_record"] = partial(task_records.claim_start_record, magi)
         return await run_observation_loop(
             user_raw, dialogue_starter=chosen_starter,
             observation_continuation=observation_continuation,
@@ -171,9 +179,13 @@ def build_magi_task_commands(
     )
     return TaskCommands(
         application, bindings.queries, bindings.member_specs_loader,
-        dialogue_starter_factory=lambda strategy: partial(
+        dialogue_starter_factory=lambda strategy, policy: partial(
             begin_dialogue, decision_strategy=strategy,
+            captured_policy=policy,
         ),
+        reserve_start=partial(task_records.reserve_start_record, magi),
+        pending_starts_loader=magi.list_pending_starts,
+        policy_snapshot_loader=bindings.policy_snapshot_loader,
     )
 
 
