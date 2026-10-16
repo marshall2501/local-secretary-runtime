@@ -1077,6 +1077,7 @@ def record_source_read(
     task_id: UUID,
     execution: dict,
     pending_request: dict,
+    expected_attempt_id: UUID | None = None,
 ) -> tuple[str, str]:
     source = str(
         pending_request.get("source")
@@ -1102,7 +1103,8 @@ def record_source_read(
     if confidentiality not in {"public", "private", "restricted"}:
         confidentiality = "private"
 
-    idempotency_key = f"ritsuko-magi:{task_id}:{source}:{request_key}"
+    attempt_part = f":{expected_attempt_id}" if expected_attempt_id else ""
+    idempotency_key = f"ritsuko-magi:{task_id}{attempt_part}:{source}:{request_key}"
     execution_status = str(execution.get("status") or "ok")
     succeeded = execution_status == "ok"
     result_payload = execution.get("result") or {}
@@ -1114,6 +1116,18 @@ def record_source_read(
     )
 
     with db.transaction(), db.cursor() as cur:
+        if expected_attempt_id is not None:
+            # Stop後・別試行の古いWorkerは新しいSource記録を作らない。
+            cur.execute(
+                "SELECT status, checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
+                (task_id,),
+            )
+            task_row = cur.fetchone()
+            if task_row is None or task_row[0] != "running" or (
+                (task_row[1] or {}).get("active_attempt_id")
+                != str(expected_attempt_id)
+            ):
+                raise ValueError("task_attempt_mismatch")
         cur.execute(
             """SELECT a.id, r.id
                FROM secretary.actions a
@@ -1403,11 +1417,14 @@ class PostgresMagiTaskRepository:
         with self._connection_factory() as db:
             abort_proposal_review(db, task_id=task_id, error=error)
 
-    def record_source_read(self, *, task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
+    def record_source_read(self, *, task_id: UUID, execution: dict,
+                           pending_request: dict,
+                           expected_attempt_id: UUID | None = None) -> tuple[str, str]:
         with self._connection_factory() as db:
             return record_source_read(
                 db, task_id=task_id, execution=execution,
                 pending_request=pending_request,
+                expected_attempt_id=expected_attempt_id,
             )
 
     def record_pkb_read(self, *, task_id: UUID, execution: dict, pending_request: dict) -> tuple[str, str]:
