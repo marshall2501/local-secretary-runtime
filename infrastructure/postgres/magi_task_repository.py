@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
@@ -183,7 +183,7 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
 
 
 def claim_start(db, *, task_id: UUID, request: str,
-                member_specs: list[dict]) -> None:
+                member_specs: list[dict]) -> UUID:
     """同じTaskのpending→runningを単一transactionで一度だけclaimする。
 
     Job/LLMを呼ぶ前に確定し、二つのWorkerが同じTaskを開始しない。
@@ -210,6 +210,8 @@ def claim_start(db, *, task_id: UUID, request: str,
             raise ValueError("pending_task_intent_mismatch")
         intent["state"] = "claimed"
         checkpoint["start_intent"] = intent
+        attempt_id = uuid4()
+        checkpoint["active_attempt_id"] = str(attempt_id)
         checkpoint["phase"] = "orient"
         cur.execute(
             """UPDATE secretary.tasks SET status='running', checkpoint=%s
@@ -223,7 +225,7 @@ def claim_start(db, *, task_id: UUID, request: str,
                        %s, 'task', %s, %s)""",
             (task_id, task_id, Jsonb({"core_slice": CORE_SLICE})),
         )
-
+    return attempt_id
 
 
 def request_stop(db, *, task_id: UUID) -> str:
@@ -482,6 +484,7 @@ def _acknowledge_stop(cur, *, task_id: UUID, checkpoint: dict) -> dict:
     Task行のFOR UPDATE保持中だけ呼び出す。同じTaskのStopと完了の順序は
     この行ロックで決まる。操作そのもののResult/Auditは別途保持する。
     """
+    checkpoint.pop("active_attempt_id", None)
     checkpoint.update({
         "phase": "paused",
         "reason": "user_requested_stop",
@@ -522,6 +525,7 @@ def persist_session(
     task_id: UUID,
     session: dict,
     selected_capability: str | None = None,
+    expected_attempt_id: UUID | None = None,
 ) -> dict:
     projection = task_projection(session)
     checkpoint_patch = {
@@ -551,7 +555,12 @@ def persist_session(
             raise ValueError("task_not_running")
         if checkpoint.get("stop_requested") is True:
             return _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
+        active_attempt = checkpoint.get("active_attempt_id")
+        if active_attempt is not None and str(expected_attempt_id or "") != active_attempt:
+            raise ValueError("task_attempt_mismatch")
         checkpoint.update(checkpoint_patch)
+        if projection["task_status"] != "running":
+            checkpoint.pop("active_attempt_id", None)
         goal_changed = _merge_goal_interpretation(checkpoint, session)
         user_resume = checkpoint.get("user_resume")
         if isinstance(user_resume, dict) and user_resume.get("status") == "processing":
@@ -1263,7 +1272,8 @@ def record_pkb_read(
     )
 
 
-def fail_task(db, *, task_id: UUID, error: str) -> None:
+def fail_task(db, *, task_id: UUID, error: str,
+              expected_attempt_id: UUID | None = None) -> None:
     """Fail one persisted MAGI Task without storing secret-bearing exception detail."""
     with db.transaction(), db.cursor() as cur:
         cur.execute(
@@ -1280,6 +1290,11 @@ def fail_task(db, *, task_id: UUID, error: str) -> None:
         if checkpoint.get("stop_requested") is True:
             _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
             return
+        active_attempt = checkpoint.get("active_attempt_id")
+        if active_attempt is not None and str(expected_attempt_id or "") != active_attempt:
+            # 旧Workerの例外で新しいTask実行試行を上書きしない。
+            return
+        checkpoint.pop("active_attempt_id", None)
         checkpoint.update({
             "phase": "failed",
             "reason": "magi_observation_loop_failed",
@@ -1330,10 +1345,10 @@ class PostgresMagiTaskRepository:
             )
 
     def claim_start(self, *, task_id: UUID, request: str,
-                    member_specs: list[dict]) -> None:
-        """二重MAGI実行を避けるためpending Taskをclaimする。"""
+                    member_specs: list[dict]) -> UUID:
+        """pendingをclaimし、Workerの実行試行を一意に識別するIDを返す。"""
         with self._connection_factory() as db:
-            claim_start(db, task_id=task_id, request=request, member_specs=member_specs)
+            return claim_start(db, task_id=task_id, request=request, member_specs=member_specs)
 
     def list_pending_starts(self, *, limit: int = 20) -> list[dict]:
         """再起動後に永続化済みの未着手Taskだけを列挙する。"""
@@ -1356,11 +1371,14 @@ class PostgresMagiTaskRepository:
         with self._connection_factory() as db:
             abort_user_resume(db, task_id=task_id, error=error)
 
-    def persist_session(self, *, task_id: UUID, session: dict, selected_capability: str | None = None) -> dict:
+    def persist_session(self, *, task_id: UUID, session: dict,
+                        selected_capability: str | None = None,
+                        expected_attempt_id: UUID | None = None) -> dict:
         with self._connection_factory() as db:
             return persist_session(
                 db, task_id=task_id, session=session,
                 selected_capability=selected_capability,
+                expected_attempt_id=expected_attempt_id,
             )
 
     def prepare_memory_intake(self, *, task_id: UUID) -> MemoryIntake:
@@ -1399,6 +1417,8 @@ class PostgresMagiTaskRepository:
                 pending_request=pending_request,
             )
 
-    def fail_task(self, *, task_id: UUID, error: str) -> None:
+    def fail_task(self, *, task_id: UUID, error: str,
+                  expected_attempt_id: UUID | None = None) -> None:
         with self._connection_factory() as db:
-            fail_task(db, task_id=task_id, error=error)
+            fail_task(db, task_id=task_id, error=error,
+                      expected_attempt_id=expected_attempt_id)
