@@ -1,6 +1,9 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** RITSUKO専用の画面構成。状態取得と描画を共通Shell・実行制御から分離する。 */
+/**
+ * RITSUKO画面を中央の選択Taskと右側Task一覧に分けて配置する。
+ * 本段階は読取専用。依頼・回答・停止は既存NiceGUIへの実リンクで案内する。
+ */
 import { legacyPageUrl } from '../../shared/navigation'
 import { useTasks } from './useTasks'
 import CurrentTask from './components/CurrentTask.vue'
