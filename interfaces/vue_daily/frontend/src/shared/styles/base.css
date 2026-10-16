@@ -1,5 +1,5 @@
 /* Provenance-Origin: original; Provenance-AI: AI-generated */
-/* NiceGUIの主要領域を踏襲する製品Vueの共通デザイントークン・レイアウト。 */
+/* 上部ナビ・中央RITSUKO・右Task一覧の配置と共通スタイル。 */
 :root { font-family:"Noto Sans JP","Yu Gothic",Meiryo,system-ui,sans-serif; color:#243547; background:#f4f7fb; font-synthesis:none; line-height:1.55; }
 * { box-sizing:border-box; }
 body { margin:0; min-width:320px; }
