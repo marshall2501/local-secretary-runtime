@@ -198,6 +198,8 @@ def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
         service = require_commands()
         try:
             return service.stop(task_id)
+        except TaskCommandNotFound:
+            raise HTTPException(404, "task_not_found") from None
         except TaskCommandConflict as exc:
             raise HTTPException(409, str(exc)) from None
 
