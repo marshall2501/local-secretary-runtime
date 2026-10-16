@@ -51,8 +51,8 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - `ritsuko/application/task_commands.py` の `TaskCommands` は、Task開始・本人回答・回答のみProposal Reviewを既存 `StateDrivenTaskApplication` へ渡し、協調停止Event、同一Task多重受付の回避、プロセス内Operation進捗を管理する。**Operationで`execution_finished`が返っても、DBのTaskが`completed`とは限らない**。
 - FastAPI `create_app(queries=..., commands=...)` のように正しい実Task依存が注入された場合だけ、`POST /api/v1/ritsuko/tasks`、`/{id}/answer`、`/{id}/stop`、`/{id}/review`、`GET /api/v1/ritsuko/operations/{id}` が動作する。**既定の `create_app(queries=...)` と起動コマンドは変更せず、POSTは503**。HTTP 202は受付のみで、Task保存が直後に完了した保証ではない。
 - `review` の `remember` は未対応。Memory Intakeを別経路で正しく確定する接続が必要。MAGI実行の停止も次の境界で反映する協調停止であり、即時停止の保証ではない。
-- **B-2未実装**: NiceGUI側の設定・権限Snapshot、MAGIモデル、Web/PKB/Financeの既存Source実行、Task DB Portを、GUI非依存のComposition Rootで一式bindする。これができるまで、8097を実Task write入口として有効化しない。
-- **B-3未実装**: 実DBに対するTask受付・回答・停止・ReviewのサブPC実機確認、障害時のDB状態、Vueの実操作画面接続。APIプロセス再起動時の実行継続は確認・保証していない。 
+- **B-1終了時点ではB-2未実装**だった。後続のB-2で、NiceGUI側の設定・Policy Snapshot、MAGIモデル、Web/PKB/Financeの既存SourceとTask DB Portを共通Composition Rootで接続済み。ただし8097は引き続きread-only。
+- **B-1終了時点ではB-3未実装**だった。後続のB-3cでVue操作UIと8099 previewは接続済み。ただし本人サブPCで実MAGIを使う受付→回答→Review→停止、API再起動時の実行継続は引き続き受入未了。
 
 ## 2026-10-16 Stage B-2 — 画面非依存の実MAGI/Source/DB組立（隔離検証まで）
 
@@ -131,3 +131,26 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 **再現／検証**: 新しいVueNavigationBrowserHeaderTestsで他サイトからのリンク、8097→8099遷移、URL直接入力、F5、JS取得、health、同一Origin POST202、他Origin POST403をfake Commandsで通す。修正前 [RED（403再現）](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980440793) → 修正後 [GREEN](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980549429)。型チェックとその他API回帰もPASS。**本人Windows実ブラウザはまだ修正後未受入**。
 
 **既存NiceGUIとの機能差分**: VueのTask受付・追加回答・回答のみReview・Stop・保存済みTask表示は既存Applicationに接続したが、MAGI各席の設定・進捗、記憶反映Review、詳細Sourceカード、セッション表示等は現時点で未同等。全面作り直しより、まず入口から実MAGIまで1件を実証し、不足を埋める。最低限の実機受入は画面GET→Vue入力→Task受付/DB ID→MAGI結果→回答/Review→停止/F5復元。CI PASSと実機完了は混同しない。
+
+## 2026-10-17 設計照合・実ブラウザ隔離受入（Stage C基本操作、正式切替は未受入）
+
+承認済みVue移行計画と、現在のNiceGUI `interfaces/web/pages/core.py`、共有Task Application/Commands、PostgreSQL Query、Vue実装を照合し、以下を修正しました。
+
+- `CurrentTask.vue` はGoal `unresolved` / `proposed` / `confirmed` を分け、達成条件・版を表示。Task確定とMAGI候補を同一視しない。
+- `MagiProgress.vue` は保存済みの最新Turnから、MAGI最大3席の結果・Provider/Model/経過秒数を表示。**ライブ進捗イベントはまだ取得していない**ので、表示上もその旨明記。NiceGUIの現在Turn席別リアルタイム進捗と同等ではない。
+- `TaskActivity.vue` はAction/ResultとSource URL・検証経路/時刻・監査イベントを展開。根拠の存在だけで回答の正しさを断定しない。
+- `TaskSidebar.vue` は10件から追加読み込みと既存 `/core/history` への導線を追加。`useTasks.ts` はTask APIの50件上限を守るoffset query、3秒ごとのモード再照会、切断時の誤った送信可能表示の解除。
+- 8097→8099の普通のGETナビゲーションを妨げた `cross_site_denied` は、GET/HEADに対する不適切なOrigin/Sec-Fetch-Siteチェックを取り除いた。Task変更POSTのみ別Origin拒否を継続。
+- **Chromiumの本物のブラウザ操作**: `interfaces/vue_daily/browser_fixture.py` の架空Task APIを8097/8099で起動し、`frontend/e2e/ritsuko-flow.spec.ts` で『8097 read-only→リンクで8099を開く→実際の入力欄を編集→送信』『Task本人回答→Review→完了→F5同ID復元』『停止→Source/監査を確認』『一覧10件→追加読み込み→Goal確定表示』を自動実行。CIの[Vue/API/Chromiumブラウザ4ケース PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983538338)、[PostgreSQL回帰PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983538363)、[行末PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983538339)。
+
+開発環境で同じテストを再実行するには、サブPC既存8097/8099と**ポート競合しない完全隔離環境**で以下を使います（GitHub CIが正規受入環境）。
+
+```bash
+cd interfaces/vue_daily/frontend
+npm install --no-audit --no-fund
+npx playwright install chromium
+npm run build
+npm run test:browser
+```
+
+**残る機能差分**: NiceGUIのMAGI席別**ライブ進捗**／MAGI設定編集、記憶への反映を含むReview、詳細なObservation・Sourceカードや他日常画面はVue未移行です。**実日常DBと実MAGIを使ったWindowsサブPCでのTask縦断も未受入**。以上が成立する前にVueをNiceGUIの完全代替とみなさず、8093を維持します。
