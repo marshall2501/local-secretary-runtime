@@ -45,6 +45,7 @@ class FakeApplication:
         self.called = []
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
+        self.block_answer = False
 
     async def start(self, request, **kwargs):
         """指定Task ID、MAGI設定、協調停止関数を受け取って完了を待つ。"""
@@ -56,6 +57,9 @@ class FakeApplication:
     async def answer(self, task_id, text, **kwargs):
         """本人回答を同一Task IDで処理し、入力とTimeoutを記録する。"""
         self.called.append(("answer", task_id, text, kwargs))
+        if self.block_answer:
+            self.entered.set()
+            await self.release.wait()
         return {"status": "proposal_ready"}
 
     async def review(self, task_id, decision, **kwargs):
@@ -130,13 +134,20 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_task_inflight_conflict(self):
         """同じTaskを二重に処理する受付を拒否するが、DB claimの代用にはしない。"""
         app = FakeApplication()
+        app.block_answer = True
         queries = FakeQueries()
         commands = TaskCommands(app, queries, lambda: [])
         first = await commands.answer(queries.uid, "追加")
         self.assertEqual(first["status"], "accepted")
+        # 1回目のRunnerが確実に処理中になるまで待ってから競合を試す。
+        await asyncio.wait_for(app.entered.wait(), timeout=1)
         with self.assertRaisesRegex(TaskCommandConflict, "already_running"):
             await commands.answer(queries.uid, "別の追加")
-        await asyncio.sleep(0)
+        app.release.set()
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if commands.operation(queries.uid)["status"] == "execution_finished":
+                break
         self.assertEqual(commands.operation(queries.uid)["status"], "execution_finished")
 
 
