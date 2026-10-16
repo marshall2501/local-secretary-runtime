@@ -14,6 +14,25 @@ def create_task_record(repository: MagiTaskRepository, task_id: UUID, request: s
     )
 
 
+
+def reserve_start_record(repository: MagiTaskRepository, *,
+                         task_id: UUID, request: str, member_specs: list[dict],
+                         decision_strategy: str,
+                         policy_snapshot: dict | None) -> None:
+    """実行前にTask受付と必要なIntentをDBへ確定する。"""
+    repository.reserve_start(
+        task_id=task_id, request=request, member_specs=member_specs,
+        decision_strategy=decision_strategy, policy_snapshot=policy_snapshot,
+    )
+
+
+def claim_start_record(repository: MagiTaskRepository, task_id: UUID,
+                       request: str, member_specs: list[dict]) -> None:
+    """既にpendingで永続化されたTaskを原子的に実行中へ遷移させる。"""
+    repository.claim_start(
+        task_id=task_id, request=request, member_specs=member_specs,
+    )
+
 def claim_user_resume_record(repository: MagiTaskRepository, task_id: UUID,
                              reply_length: int, reply_fingerprint: str):
     return repository.claim_user_resume(
