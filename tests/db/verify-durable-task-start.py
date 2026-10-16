@@ -19,11 +19,15 @@ from uuid import uuid4
 
 import psycopg
 
+from ritsuko.application.task_commands import TaskCommandConflict, TaskCommands
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
 from infrastructure.postgres.magi_task_repository import (
-    claim_start, list_pending_starts, request_stop, reserve_start,
+    PostgresMagiTaskRepository, claim_start, list_pending_starts, request_stop,
+    reserve_start,
 )
 
 
@@ -160,6 +164,105 @@ def main(project: str, container: str) -> None:
             assert str(exc) == "task_start_not_pending"
         else:
             raise AssertionError("stopped_pending_task_was_claimed")
+
+    # APIプロセスのOperation辞書を引き継がず、実RepositoryだけでTaskを再照会する。
+    # 物理プロセス再起動／実MAGIを伴わない隔離縦断検証。
+    def new_commands() -> TaskCommands:
+        """APIインスタンスを再生成し、既存DBへStopとQueryを接続する。"""
+        return TaskCommands(
+            None, PostgresCoreTaskQueryRepository(connect), lambda: [],
+            request_stop=PostgresMagiTaskRepository(connect).request_stop,
+        )
+
+    pending_id = uuid4()
+    with connect() as db:
+        assert reserve_start(
+            db, task_id=pending_id, request="synthetic pending after restart",
+            member_specs=members, decision_strategy="standard",
+            policy_snapshot=policy,
+        )
+    first = new_commands()
+    assert first.operation(pending_id)["task_status"] == "pending"
+    del first
+    stopped = new_commands().stop(pending_id)
+    assert stopped["source"] == "persisted_task"
+    assert stopped["task_status"] == "paused"
+    assert stopped["stop_requested"] is True
+    assert stopped["execution_reconciliation_required"] is False
+    retrieved = new_commands().operation(pending_id)
+    assert retrieved["task_status"] == "paused"
+    assert retrieved["stop_requested"] is True
+    try:
+        new_commands().stop(pending_id)
+    except TaskCommandConflict:
+        pass
+    else:
+        raise AssertionError("paused_task_was_stopped_twice")
+
+    running_id = uuid4()
+    with connect() as db:
+        assert reserve_start(
+            db, task_id=running_id, request="synthetic running after restart",
+            member_specs=members, decision_strategy="standard",
+            policy_snapshot=policy,
+        )
+        claim_start(
+            db, task_id=running_id, request="synthetic running after restart",
+            member_specs=members,
+        )
+    running_before = new_commands().operation(running_id)
+    assert running_before["task_status"] == "running"
+    assert running_before["stop_requested"] is None
+
+    def concurrent_stop() -> dict:
+        """別TaskCommands・別DB接続から同じrunning Taskへ停止を記録する。"""
+        return new_commands().stop(running_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        stop_results = list(executor.map(lambda _: concurrent_stop(), range(2)))
+    for result in stop_results:
+        assert result["task_id"] == str(running_id)
+        assert result["source"] == "persisted_task"
+        assert result["task_status"] == "running"
+        assert result["stop_requested"] is True
+        assert result["execution_reconciliation_required"] is True
+    running_after = new_commands().operation(running_id)
+    assert running_after["task_status"] == "running"
+    assert running_after["stop_requested"] is True
+    assert running_after["execution_reconciliation_required"] is True
+    with connect() as db, db.cursor() as cur:
+        cur.execute(
+            """SELECT count(*) FROM secretary.audit_events
+               WHERE task_id=%s AND event_type='core.magi.stop_requested'""",
+            (running_id,),
+        )
+        assert cur.fetchone()[0] == 1, "duplicate_stop_audit_event"
+
+    for terminal_status in ("completed", "failed"):
+        terminal_id = uuid4()
+        with connect() as db:
+            assert reserve_start(
+                db, task_id=terminal_id,
+                request="synthetic terminal " + terminal_status,
+                member_specs=members, decision_strategy="standard",
+                policy_snapshot=policy,
+            )
+            with db.cursor() as cur:
+                cur.execute(
+                    "UPDATE secretary.tasks SET status=%s WHERE id=%s",
+                    (terminal_status, terminal_id),
+                )
+        try:
+            new_commands().stop(terminal_id)
+        except TaskCommandConflict:
+            pass
+        else:
+            raise AssertionError("terminal_task_mutated_by_stop")
+        terminal_after = new_commands().operation(terminal_id)
+        assert terminal_after["task_status"] == terminal_status
+        assert terminal_after["stop_requested"] is None
+
+    print("PASS: disposable PG TaskCommands new-instance stop, query, concurrent idempotence and terminal guards")
 
     print("PASS: disposable PG durable intake, replay, 2-worker claim, stop-before-start")
     # The owning integration harness destroys this whole randomized Compose
