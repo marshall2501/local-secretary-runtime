@@ -34,10 +34,29 @@ def build_task_application(
     review_runner: Callable = review_proposal,
     action_service=None,
 ) -> StateDrivenTaskApplication:
-    """同じTask契約をNiceGUI・REST・合成Adapterへ渡す。
+    """UIやHTTPに依存せず既存RITSUKOのTask処理を組み立てる。
 
-    個別のDB、MAGI、Tool依存はPort経由で注入する。
-    実行の開始や完了判断をこのComposition Rootに実装しない。
+    入力のPortとRunnerは呼び出し側が選ぶ。ここで新しいTask判断や
+    DB・LLM通信を実装せず、NiceGUI・Vue隔離試験から同じ契約を使う。
+
+    Args:
+        create_task_record: Task受付時に記録を作成するPort。
+        execute_source_request: 許可された観測Sourceを実行するPort。
+        record_source_read_record: Sourceの読取記録を保存するPort。
+        persist_session_record: MAGI sessionとTask状態を永続化するPort。
+        fail_task_record: 処理失敗をTaskへ記録するPort。
+        claim_user_resume_record: 本人回答で再開できるTaskを予約するPort。
+        abort_user_resume_record: 回答再開が失敗した際に予約を戻すPort。
+        claim_proposal_review_record: Proposal Review対象を予約するPort。
+        finalize_proposal_review_record: Review判断を確定するPort。
+        abort_proposal_review_record: Review失敗時に予約を戻すPort。
+        start_runner: 新規TaskのObservation実行関数。
+        resume_runner: 本人回答後の実行再開関数。
+        review_runner: Proposal Reviewの実行関数。
+        action_service: 設定された場合だけ外部Actionを扱うサービス。
+
+    Returns:
+        StateDrivenTaskApplication: 各入口で共通利用するTask制御Application。
     """
     return StateDrivenTaskApplication(
         TaskRuntimePorts(
