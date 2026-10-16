@@ -132,7 +132,7 @@ class MagiTaskStoreTests(unittest.TestCase):
         """Taskをpendingとして保存し、同一Intentのclaimのみを許可する。"""
         members = [{"name": "MELCHIOR", "enabled": True}]
         policy = {"profile_id": "test-profile", "revision": 1, "grants": []}
-        db = _DB()
+        db = _DB(fetches=[(TASK_ID,)])
         reserve_start(
             db, task_id=TASK_ID, request="現在の情報を教えて",
             member_specs=members, decision_strategy="llm",
@@ -147,6 +147,28 @@ class MagiTaskStoreTests(unittest.TestCase):
         self.assertEqual(checkpoint["member_specs"], members)
         self.assertIsNone(checkpoint["magi_session"])
         self.assertTrue(any("task_accepted" in sql for sql, _ in db.cur.calls))
+
+        # Same UUID and goal after a lost HTTP response is a replay, not a second Task.
+        replay = _DB(fetches=[None, (
+            "現在の情報を教えて", "local_user", checkpoint,
+        )])
+        self.assertFalse(reserve_start(
+            replay, task_id=TASK_ID, request="現在の情報を教えて",
+            member_specs=members, decision_strategy="llm",
+            policy_snapshot=policy,
+        ))
+        self.assertFalse(any("task_accepted" in sql for sql, _ in replay.cur.calls))
+
+        conflict = _DB(fetches=[None, (
+            "現在の情報を教えて", "local_user", checkpoint,
+        )])
+        with self.assertRaisesRegex(ValueError, "task_id_intent_mismatch"):
+            reserve_start(
+                conflict, task_id=TASK_ID, request="別の依頼",
+                member_specs=members, decision_strategy="llm",
+                policy_snapshot=policy,
+            )
+
 
         db2 = _DB(fetches=[(
             "現在の情報を教えて", "pending", checkpoint,
