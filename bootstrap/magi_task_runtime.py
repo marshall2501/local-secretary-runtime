@@ -186,6 +186,7 @@ def build_magi_task_commands(
         reserve_start=partial(task_records.reserve_start_record, magi),
         pending_starts_loader=magi.list_pending_starts,
         policy_snapshot_loader=bindings.policy_snapshot_loader,
+        request_stop=magi.request_stop,
     )
 
 
