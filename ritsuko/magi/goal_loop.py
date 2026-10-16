@@ -41,74 +41,10 @@ def goal_requires_web(request: str) -> bool:
 
 
 def goal_task_projection(session: dict) -> dict:
-    """Translate one validated semantic proposal into RITSUKO Task state."""
-    status = session.get("status")
-    judgment = session.get("goal_judgment") or {}
-    reason = str(session.get("next_step") or "goal_not_resolved")
-    if status == "candidate_ready" and judgment.get("next") == "respond":
-        evidence = judgment.get("evidence") or {}
-        ids = evidence.get("result_ids") or []
-        available = {
-            str(o.get("result_id")): o
-            for o in session.get("observations") or []
-            if isinstance(o, dict) and o.get("verified") is True and o.get("result_id")
-            and o.get("source") in AUTO_READ_SOURCES
-        }
-        valid_ref = (
-            evidence.get("basis") == "result_refs" and bool(ids)
-            and all(ref in available for ref in ids)
-        )
-        source_free = (
-            evidence.get("basis") == "not_required"
-            and not ids
-            and not session.get("requires_source", session.get("requires_web", False))
-            and not session.get("requires_web")
-            and not session.get("tool_read_executed")
-        )
-        if judgment.get("fulfillment") == "met" and (valid_ref or source_free):
-            answer = judgment.get("answer")
-            if isinstance(answer, str) and answer.strip():
-                # A provider citation is not independent page-content verification.
-                disclaimer = ""
-                if valid_ref and any(
-                    available[ref].get("verification_level") == "provider_cited"
-                    for ref in ids
-                ):
-                    disclaimer = "\n\n注: 出典は検索Providerが報告した引用であり、本文の独立確認は未実施です。"
-                return {
-                    "task_status": "completed", "phase": "completed",
-                    "next_step": "respond", "message": answer.strip() + disclaimer,
-                    "question": None, "reason": "goal_evaluated_with_recorded_evidence"
-                    if valid_ref else "goal_evaluated_source_free",
-                }
-        reason = "goal_evidence_or_source_requirement_not_met"
-        status = "stopped"
-    if status == "waiting_user":
-        return {
-            "task_status": "waiting_external", "phase": "awaiting_clarification",
-            "next_step": "ask_user", "message": None,
-            "question": session.get("user_question"), "reason": reason,
-        }
-    if status == "waiting_information":
-        return {
-            "task_status": "waiting_external", "phase": "awaiting_information",
-            "next_step": "review_information_requests",
-            "message": str(session.get("status_message") or "") or None,
-            "question": None, "reason": reason,
-        }
-    if status == "stopped" and reason == "user_requested_stop":
-        return {
-            "task_status": "paused", "phase": "paused",
-            "next_step": "user_requested_stop", "message": None,
-            "question": None, "reason": reason,
-        }
-    return {
-        "task_status": "failed" if status == "stopped" else "running",
-        "phase": "failed" if status == "stopped" else "orient",
-        "next_step": reason, "message": session.get("status_message"),
-        "question": None, "reason": reason,
-    }
+    """保存済みGoal Task互換入口。確定判断はRITSUKOの共通Task投影が行う。"""
+    from ritsuko.core.magi_bridge import task_projection
 
+    return task_projection(session)
 
 async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> None:
     """Adapt an LLM decision to the existing MAGI flow/state handler.
