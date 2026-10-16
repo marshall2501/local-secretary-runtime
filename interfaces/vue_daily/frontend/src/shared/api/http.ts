@@ -1,6 +1,9 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** 全feature共通の読み取り専用HTTP処理。Task確定・業務判断は持たない。 */
+/**
+ * Vue側で共通利用するJSON取得関数。HTTP失敗は画面で説明できる例外へ変える。
+ * この関数はTaskの実行・保存状態を判断しない。
+ */
 export async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path, {
     method: 'GET',
@@ -14,7 +17,7 @@ export async function getJson<T>(path: string): Promise<T> {
       const payload = await response.json() as { detail?: unknown }
       if (typeof payload.detail === 'string') detail += ' / ' + payload.detail
     } catch {
-      // HTMLエラーでもHTTP失敗として扱う。
+      // 503等がHTMLを返しても本来のHTTP状態コードを失わない。
     }
     throw new Error(detail)
   }
