@@ -87,6 +87,15 @@ class VueDailyApiTests(unittest.TestCase):
             f"/api/v1/ritsuko/tasks/{uuid4()}"
         ).status_code, 404)
 
+    def test_task_command_preview_needs_explicit_write_flag(self):
+        """コマンドプレビューはimportや通常実行では実DBを開かない。"""
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from interfaces.vue_daily.commands_preview import main
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as result:
+            main([])
+        self.assertEqual(result.exception.code, 2)
+
     def test_unbound_commands_remain_disabled_and_external_access_denied(self):
         """Task依存を注入しなければ操作は503で、外部Origin等も拒否する。"""
         self.assertEqual(self.client.get(
