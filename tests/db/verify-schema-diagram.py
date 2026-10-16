@@ -1,6 +1,8 @@
 """Verify ER schema introspection against the disposable PostgreSQL test database."""
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -14,7 +16,9 @@ from infrastructure.schema_diagram.providers import render_mermaid
 
 
 def _env_value(name: str) -> str:
-    path = ROOT / ".env.postgres"
+    path = Path(os.environ["LSA_TEST_DB_ENV_FILE"]).resolve()
+    if path.parent != ROOT or not re.fullmatch(r"\.env\.postgres\.local-secretary-test-[0-9a-f]{12}\.tmp", path.name):
+        raise RuntimeError("isolated_database_settings_required")
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.startswith(name + "="):
             return line.split("=", 1)[1].strip()
