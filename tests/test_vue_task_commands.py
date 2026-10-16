@@ -187,8 +187,39 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
             request_stop=lambda *, task_id: "running",
         )
         result = commands.stop(queries.uid)
+        self.assertEqual(result["task_id"], str(queries.uid))
+        self.assertEqual(result["source"], "persisted_task")
+        self.assertEqual(result["task_status"], "running")
+        self.assertTrue(result["stop_requested"])
         self.assertTrue(result["execution_reconciliation_required"])
         self.assertEqual(result["status"], "operation_not_in_process")
+
+    async def test_stop_persisted_failure_contracts(self):
+        """DB不在・状態拒否・不正戻り値は停止要求成功と表示しない。"""
+        queries = FakeQueries()
+
+        def missing(*, task_id):
+            """Repositoryの対象Task不在を再現する。"""
+            raise ValueError("task_not_found")
+
+        def rejected(*, task_id):
+            """確定済みTaskの停止拒否を再現する。"""
+            raise ValueError("task_not_stoppable")
+
+        cases = (
+            (missing, TaskCommandNotFound, "task_not_found"),
+            (rejected, TaskCommandConflict, "task_not_stoppable"),
+            (lambda *, task_id: None, TaskCommandConflict, "invalid_persisted_stop_status"),
+            (lambda *, task_id: "completed", TaskCommandConflict, "invalid_persisted_stop_status"),
+        )
+        for stop_impl, expected, message in cases:
+            with self.subTest(expected=message):
+                commands = TaskCommands(
+                    FakeApplication(), queries, lambda: [], request_stop=stop_impl,
+                )
+                with self.assertRaisesRegex(expected, message):
+                    commands.stop(queries.uid)
+                self.assertEqual(commands._operations, {})
 
     async def test_answer_review_guard_and_missing_id(self):
         """回答・Reviewを保存済みTaskの状態で絞り、不明IDと未準備記憶反映を拒否する。"""
