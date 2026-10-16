@@ -122,7 +122,8 @@ class TaskCommands:
             raise TaskCommandNotFound("task_not_found") from exc
         return dict(trace.get("task") or {})
 
-    async def start(self, request: str, *, decision_strategy: str = "standard") -> dict:
+    async def start(self, request: str, *, decision_strategy: str = "standard",
+                    task_id: UUID | None = None) -> dict:
         """Taskの判断方式とメンバー設定を受付時に確定して共通Applicationへ渡す。
 
         旧Task APIとの内部互換ではstandardを既定とする。新Vue HTTPの
@@ -143,18 +144,30 @@ class TaskCommands:
             raise TaskCommandConflict("llm_strategy_currently_requires_one_member")
         if decision_strategy == "llm" and self._dialogue_starter_factory is None:
             raise TaskCommandConflict("llm_strategy_not_connected")
-        task_id = uuid4()
+        task_id = task_id or uuid4()
         policy = None
         if self._reserve_start is not None:
             if self._policy_snapshot_loader is None:
                 raise TaskCommandConflict("durable_start_policy_loader_missing")
             policy = await asyncio.to_thread(self._policy_snapshot_loader)
             # DB transaction must commit before 202 is returned or any Job is scheduled.
-            await asyncio.to_thread(
-                self._reserve_start, task_id=task_id, request=text,
-                member_specs=deepcopy(specs), decision_strategy=decision_strategy,
-                policy_snapshot=deepcopy(policy),
-            )
+            try:
+                created = await asyncio.to_thread(
+                    self._reserve_start, task_id=task_id, request=text,
+                    member_specs=deepcopy(specs), decision_strategy=decision_strategy,
+                    policy_snapshot=deepcopy(policy),
+                )
+            except ValueError as exc:
+                if str(exc) == "task_id_intent_mismatch":
+                    raise TaskCommandConflict("task_id_intent_mismatch") from exc
+                raise
+            if created is False:
+                # Same UUID, request and judgment strategy: no second MAGI run.
+                return {
+                    "task_id": str(task_id), "kind": "start",
+                    "status": "already_accepted", "source": "persisted_task",
+                    "stop_requested": None, "error_type": None,
+                }
         self._launch_start(task_id, text, specs, decision_strategy, policy)
         return self.operation(task_id)
 
