@@ -212,7 +212,31 @@ class TaskCommands:
         return self.operation(task_id)
 
     def operation(self, task_id: UUID) -> dict:
-        """受付状況だけを返す。確定Taskの状態はTask履歴APIで確認する。"""
-        if task_id not in self._operations:
-            raise TaskCommandNotFound("operation_not_found")
-        return dict(self._operations[task_id])
+        """プロセス内Operationを返し、不在なら既存DB Taskの状態を照会する。
+
+        API再起動後でも保存済みTaskを404にしない。DBの「running」は
+        Worker稼働の証拠でないため、Operationが継続していると偽らない。
+        DBへ操作履歴を新設・書込はせず、受付の永続化も保証しない。
+        """
+        current = self._operations.get(task_id)
+        if current is not None:
+            return dict(current)
+        try:
+            trace = self._queries.trace(task_id)
+        except ValueError as exc:
+            raise TaskCommandNotFound("operation_and_task_not_found") from exc
+        task = trace.get("task") or {}
+        if not task:
+            raise TaskCommandNotFound("operation_and_task_not_found")
+        persisted_status = str(task.get("status") or "unknown")
+        return {
+            "task_id": str(task_id),
+            "kind": None,
+            "status": "operation_not_in_process",
+            "stop_requested": None,
+            "error_type": None,
+            "source": "persisted_task",
+            "task_status": persisted_status,
+            # running Taskは「Job実行中」と同義ではない。
+            "execution_reconciliation_required": persisted_status == "running",
+        }
