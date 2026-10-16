@@ -1,6 +1,6 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** 全画面の共通ナビ。未移行機能は既存NiceGUI画面へつなぐ。 */
+/** Vue日常画面の共通ヘッダー。Vue未移行の機能は稼働中のNiceGUIで開く。 */
 import { legacyPageUrl, navigationItems } from '../shared/navigation'
 </script>
 
