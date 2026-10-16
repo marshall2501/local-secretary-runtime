@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import unittest
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -112,13 +114,24 @@ class VueDailyApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks", headers={"Host": "evil.invalid"},
         ).status_code, 403)
+        # 他の画面・チャットからリンクで開くGETは合法。実Task操作POSTだけを拒否する。
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks",
-            headers={"Origin": "https://evil.invalid"},
-        ).status_code, 403)
+            headers={"Origin": "https://example.invalid"},
+        ).status_code, 200)
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks",
             headers={"Sec-Fetch-Site": "cross-site"},
+        ).status_code, 200)
+        self.assertEqual(self.client.post(
+            "/api/v1/ritsuko/tasks",
+            headers={"Origin": "https://evil.invalid"},
+            json={"request": "invalid", "decision_strategy": "standard"},
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            "/api/v1/ritsuko/tasks",
+            headers={"Sec-Fetch-Site": "cross-site"},
+            json={"request": "invalid", "decision_strategy": "standard"},
         ).status_code, 403)
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks",
@@ -127,6 +140,86 @@ class VueDailyApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks?limit=51"
         ).status_code, 422)
+
+
+
+class VueNavigationBrowserHeaderTests(unittest.TestCase):
+    """8097/ChatGPTから8099への実ブラウザnavigationをHTTPレベルで再現する。"""
+
+    def test_navigation_html_assets_and_same_origin_write(self):
+        """初回訪問・画面遷移・再読込・Task開始を1つの通し経路で確認する。"""
+        with TemporaryDirectory() as workspace:
+            fake_root = Path(workspace) / "vue_daily"
+            dist = fake_root / "frontend" / "dist"
+            (dist / "assets").mkdir(parents=True)
+            (dist / "index.html").write_text(
+                "<!doctype html><html><body>RITSUKO Task form</body></html>",
+                encoding="utf-8",
+            )
+            (dist / "assets" / "main.js").write_text(
+                "console.log('vue loaded')", encoding="utf-8",
+            )
+            # dist がまだない CI のPython stageでも静的配信を再現可能にする。
+            with patch("interfaces.vue_daily.app.__file__", str(fake_root / "app.py")):
+                queries = FakeQueries()
+                commands = FakeCommands()
+                app = create_app(
+                    queries=queries, commands=commands,
+                    recover_pending_at_startup=False,
+                )
+            with TestClient(app, base_url="http://127.0.0.1:8099") as client:
+                # 外部ChatGPTのリンクを押したとき、8097から8099へ移動したとき、
+                # URLを手入力したとき、F5のときの各ブラウザheaderを再現する。
+                for site, referer in (
+                    ("cross-site", "https://chatgpt.com/"),
+                    ("same-site", "http://127.0.0.1:8097/ui/"),
+                    ("none", None),
+                    ("same-origin", "http://127.0.0.1:8099/ui/"),
+                ):
+                    headers = {
+                        "Sec-Fetch-Site": site,
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Dest": "document",
+                    }
+                    if referer:
+                        headers["Referer"] = referer
+                    response = client.get("/ui/", headers=headers)
+                    self.assertEqual(response.status_code, 200, (site, response.text))
+                    self.assertIn("RITSUKO Task form", response.text)
+
+                asset = client.get(
+                    "/ui/assets/main.js", headers={"Sec-Fetch-Site": "same-origin"},
+                )
+                self.assertEqual(asset.status_code, 200)
+                self.assertIn("vue loaded", asset.text)
+                health = client.get(
+                    "/api/v1/ritsuko/health",
+                    headers={"Sec-Fetch-Site": "same-origin"},
+                )
+                self.assertEqual(health.json()["mode"], "commands_enabled")
+                start = client.post(
+                    "/api/v1/ritsuko/tasks",
+                    json={"request": "Pythonの辞書を説明", "decision_strategy": "standard"},
+                    headers={
+                        "Origin": "http://127.0.0.1:8099",
+                        "Sec-Fetch-Site": "same-origin",
+                    },
+                )
+                self.assertEqual(start.status_code, 202)
+                self.assertEqual(commands.calls[0][0], "start")
+                # ユーザーのリンク遷移は許しても、外部サイトからのPOSTは受付けない。
+                for headers in (
+                    {"Origin": "https://outside.invalid", "Sec-Fetch-Site": "cross-site"},
+                    {"Sec-Fetch-Site": "cross-site"},
+                ):
+                    response = client.post(
+                        "/api/v1/ritsuko/tasks",
+                        json={"request": "外部書込", "decision_strategy": "standard"},
+                        headers=headers,
+                    )
+                    self.assertEqual(response.status_code, 403)
+                self.assertEqual(len(commands.calls), 1)
+
 
 
 class FakeCommands:
