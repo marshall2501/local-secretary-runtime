@@ -4,8 +4,15 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $dbScript = Join-Path $root 'scripts/db/postgres.ps1'
+# サブPC Windowsはプロジェクトの仮想環境、CI Linuxは依存を導入したpythonを使用。
 $python = Join-Path $root '.venv/Scripts/python.exe'
-if (-not (Test-Path -LiteralPath $python)) { throw 'Project .venv Python not found. Create the runtime virtual environment first.' }
+if (-not (Test-Path -LiteralPath $python)) {
+    $python = Join-Path $root '.venv/bin/python'
+    if (-not (Test-Path -LiteralPath $python)) {
+        if ($IsWindows) { throw 'Project .venv Python not found. Create the runtime virtual environment first.' }
+        $python = (Get-Command python -ErrorAction Stop).Source
+    }
+}
 $project = 'local-secretary-test-' + [guid]::NewGuid().ToString('N').Substring(0,12)
 $testEnvFile = Join-Path $root ('.env.postgres.' + $project + '.tmp')
 $probe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
