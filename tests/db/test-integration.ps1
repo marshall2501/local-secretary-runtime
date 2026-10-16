@@ -68,6 +68,8 @@ try {
     # Policy migration 009 is verified against the same disposable DB.
     & python (Join-Path $PSScriptRoot 'verify-runtime-policy.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated runtime policy PostgreSQL verification failed.' }
+    & python (Join-Path $PSScriptRoot 'verify-durable-task-start.py') $project $script:container
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated durable Task PostgreSQL verification failed.' }
     & python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -BackupPath $backup
