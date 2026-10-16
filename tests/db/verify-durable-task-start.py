@@ -19,12 +19,12 @@ from uuid import uuid4
 
 import psycopg
 
-from ritsuko.application.task_commands import TaskCommandConflict, TaskCommands
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
+from ritsuko.application.task_commands import TaskCommandConflict, TaskCommands
 from infrastructure.postgres.magi_task_repository import (
     PostgresMagiTaskRepository, claim_start, list_pending_starts, request_stop,
     reserve_start,
