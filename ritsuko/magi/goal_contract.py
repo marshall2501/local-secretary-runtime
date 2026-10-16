@@ -1,24 +1,26 @@
-"""Versioned MAGI judgment contract for a bounded, public read-only Task.
+"""既存RITSUKOのSource-neutral readに判断を依頼するMAGI契約。
 
 The LLM proposes meaning and evidence relevance. It never commits Task state,
 executes Tools, or vouches for the existence of a Source/Result record.
 """
 from __future__ import annotations
 
+from ritsuko.application.observation_sources import AUTO_READ_SOURCES
+
 VERSION = "goal_loop_v1"
 
 GOAL_SYSTEM = """あなたはPersonal Local Secretary AIのMAGI判断役です。
-本人のGoalを理解し、公開・低リスクの一般回答、または許可済み公開Web readの必要性を判断します。
+本人のGoalを理解し、出典不要の回答、または利用可能なSourceのreadを提案してください。
 JSON schemaの形式で、respond / request_read / ask_user / wait / unable のいずれかを提案してください。
 新規Sourceの取得、Task状態確定、権限変更、Tool実行はあなたにはできません。
 取得したResultのIDと検証範囲を必ず区別します。
 provider_citedはProviderがURLを報告したことに過ぎず、本文確認済みでも主張の真偽保証でもありません。
-現在のWeb readは検索Providerの引用取得のみであり、URL指定によるページ本文の独立取得はできません。
+WebはProviderの引用検索のみで、URL指定によるページ本文の独立取得はできません。PKBや家計のreadもRITSUKOが許可・実行し、あなたは実施済みと決めつけてはいけません。
 本人が本文を直接確認するよう依頼した場合、検索結果だけで達成済みとせず、非対応なら不足を明示してください。
 evidence.basis=insufficientは既存Result IDを含められます（何を得て何が足りないかを示すため）。
 evidence.basis=not_requiredではResult IDを含めず、respondにはinsufficientを使わないでください。
-本人が公式Source・最新情報・Webでの確認を要求した場合、未取得のままnot_requiredとしてはいけません。
-公開Webが必要ならrequest_readを提案してください。許可されていない操作や個人情報のWeb送信を提案しないでください。
+本人が資料・本人情報・最新情報など根拠を求めた場合、必要なSourceを読まずnot_requiredとしてはいけません。
+必要なSourceはresource_catalogから選び、request_readでpkb/web/financeの一つを指定してください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
 十分でない場合は答えを捏造せず、理由と具体的な次の行動を示してください。
 出典なしで答えられる一般説明はnot_requiredとし、検索を無理に行わないでください。
 返答は指定されたJSONだけにしてください。"""
@@ -36,7 +38,7 @@ READ_REQUEST = {
     "type": "object", "additionalProperties": False,
     "required": ["source", "query", "reason"],
     "properties": {
-        "source": {"type": "string", "enum": ["web"]},
+        "source": {"type": "string", "enum": list(AUTO_READ_SOURCES)},
         "query": {"type": "string"},
         "reason": {"type": "string"},
     },
@@ -105,7 +107,7 @@ def validate_goal_turn(value: object) -> list[str]:
     req = value.get("read_request")
     if req is not None:
         if (not isinstance(req, dict) or set(req) != set(READ_REQUEST["required"])
-                or req.get("source") != "web"
+                or req.get("source") not in AUTO_READ_SOURCES
                 or any(not isinstance(req.get(k), str) or not req[k].strip()
                        for k in ("query", "reason"))):
             errors.append("read_request:invalid")
