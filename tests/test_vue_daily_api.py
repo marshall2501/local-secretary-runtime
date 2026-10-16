@@ -127,6 +127,11 @@ class FakeCommands:
         self.uid = uuid4()
         self.calls = []
 
+    async def recover_pending(self, *, limit=20):
+        """API起動時に未着手Taskだけを復旧させる入口を模倣する。"""
+        self.calls.append(("recover_pending", limit))
+        return []
+
     async def start(self, request, *, decision_strategy, task_id=None):
         """選択方式と再送時のTask UUIDを受け取るfake受付。"""
         self.calls.append(("start", request, decision_strategy, task_id))
@@ -195,6 +200,19 @@ class VueDailyCommandApiTests(unittest.TestCase):
                          ["start", "start", "answer", "review", "stop", "operation"])
         self.assertEqual(self.client.get(base + "/tasks").status_code, 200)
         self.assertEqual(self.query.calls[-1][0], "recent")
+
+    def test_pending_recovery_only_on_explicit_command_app_startup(self):
+        """通常previewは復旧起動せず、bindされたCommandだけstartupで走る。"""
+        base = "http://127.0.0.1:8097"
+        with TestClient(create_app(queries=self.query, commands=self.commands),
+                        base_url=base) as client:
+            self.assertEqual(client.get("/api/v1/ritsuko/health").status_code, 200)
+        self.assertEqual(self.commands.calls, [("recover_pending", 20)])
+
+        with TestClient(create_app(queries=self.query), base_url=base) as client:
+            self.assertEqual(client.get("/api/v1/ritsuko/health").json()["mode"],
+                             "read_only")
+        self.assertEqual(self.commands.calls, [("recover_pending", 20)])
 
     def test_restart_without_in_memory_operation_uses_persisted_task_only(self):
         """Commandサービス再構築後、Taskの実状態だけ取得しWorker生存は推測しない。"""
