@@ -49,7 +49,8 @@ class TaskReviewBody(BaseModel):
 
 
 
-def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
+def create_app(*, queries, commands: TaskCommands | None = None,
+               recover_pending_at_startup: bool = True) -> FastAPI:
     """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
 
     DB接続やSecretはComposition Root側で解決し、この入口には渡さない。
@@ -58,6 +59,8 @@ def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
         queries: 保存済みTask一覧と履歴を読み取る共有Query Service。
         commands: 実DB・権限・Sourceを正しく組み立てた場合だけ渡すコマンド受付サービス。
             省略時は従来どおり読取専用（POSTは503）とする。
+        recover_pending_at_startup: Commands注入時の未着手Task自動再開。
+            実Taskの手動プレビューではFalseにして過去のJobを起動しない。
 
     Returns:
         FastAPI: ローカルTask参照と、ビルド済みVueだけを公開するアプリ。
@@ -67,7 +70,8 @@ def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
         docs_url=None, redoc_url=None, openapi_url=None,
     )
 
-    if commands is not None and hasattr(commands, "recover_pending"):
+    if (recover_pending_at_startup and commands is not None
+            and hasattr(commands, "recover_pending")):
         @app.on_event("startup")
         async def recover_durable_pending_tasks() -> None:
             """明示的にCommandsを注入した場合のみ未着手Taskを復旧する。
