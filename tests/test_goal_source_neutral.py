@@ -137,7 +137,12 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
                     """確定結果と判断方式が同一Taskに残ることを検査する。"""
                     self.assertEqual(task, task_id)
                     self.assertEqual(session["decision_strategy"], "llm")
-                    self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+                    self.assertEqual(
+                        goal_task_projection(session)["task_status"], "completed",
+                        msg=(session.get("status"), session.get("next_step"),
+                             session.get("cloud_context_gate", {}).get("status"),
+                             session.get("goal_judgment", {}).get("next")),
+                    )
                     calls.append(("persist", source))
 
                 session = await run_observation_loop(
