@@ -1,6 +1,6 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** RITSUKO試作APIの表示用契約。Taskの真の実行判断は保持しない。 */
+/** 架空TaskのHTTP応答を画面表示へ渡す契約。本番RITSUKOの確定情報ではない。 */
 export type TaskStatus =
   | 'queued' | 'running' | 'waiting_user' | 'completed' | 'paused' | 'failed'
 
@@ -14,7 +14,7 @@ export interface TaskView {
   synthetic: true
 }
 
-/** Cookieを送信し、HTTP失敗を利用者に通知できるエラーへ変換する。 */
+/** ログイン不要の同一オリジンAPIへ要求し、HTTP失敗理由を画面へ返す。 */
 export async function callApi<T>(
   path: string,
   method: 'GET' | 'POST' = 'GET',
@@ -37,7 +37,7 @@ export async function callApi<T>(
       const payload = await response.json() as { detail?: string }
       detail = payload.detail ?? detail
     } catch {
-      // HTMLエラーなども認証成功・Task成功と見なさない。
+      // エラー本文がJSONでなくても、HTTP失敗をTask成功として扱わない。
     }
     throw new Error(detail)
   }
