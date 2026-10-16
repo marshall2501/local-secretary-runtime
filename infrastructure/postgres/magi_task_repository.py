@@ -162,6 +162,52 @@ def claim_start(db, *, task_id: UUID, request: str,
         )
 
 
+
+def request_stop(db, *, task_id: UUID) -> str:
+    """停止要求をDBへ記録。未着手Taskはpausedへ確定し二重claimを防ぐ。
+
+    running TaskのStopは要求のみ。実行中Jobが停止した保証ではない。
+    """
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, checkpoint FROM secretary.tasks
+               WHERE id=%s FOR UPDATE""", (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("task_not_found")
+        status, checkpoint = row
+        if status not in {"pending", "running"}:
+            raise ValueError("task_not_stoppable")
+        checkpoint = checkpoint or {}
+        checkpoint["stop_requested"] = True
+        if status == "pending":
+            checkpoint["phase"] = "paused"
+            checkpoint["reason"] = "user_requested_stop_before_start"
+            checkpoint["final_core_decision"] = {
+                "next_step": "user_requested_stop",
+                "reason": "user_requested_stop_before_start",
+                "task_status": "paused",
+            }
+        next_status = "paused" if status == "pending" else "running"
+        cur.execute(
+            """UPDATE secretary.tasks SET status=%s, checkpoint=%s
+               WHERE id=%s""",
+            (next_status, Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.stop_requested',
+                       %s, 'task', %s, %s)""",
+            (task_id, task_id, Jsonb({
+                "before_status": status,
+                "after_status": next_status,
+            })),
+        )
+    return next_status
+
+
 def list_pending_starts(db, *, limit: int = 20) -> list[dict]:
     """未着手Taskの復旧用Intentだけをローカル実行管理へ取得する。
 
@@ -1151,6 +1197,11 @@ class PostgresMagiTaskRepository:
         """再起動後に永続化済みの未着手Taskだけを列挙する。"""
         with self._connection_factory() as db:
             return list_pending_starts(db, limit=limit)
+
+    def request_stop(self, *, task_id: UUID) -> str:
+        """保存済みTaskへStop要求を残し、未着手の場合はpausedにする。"""
+        with self._connection_factory() as db:
+            return request_stop(db, task_id=task_id)
 
     def claim_user_resume(self, *, task_id: UUID, reply_length: int, reply_fingerprint: str):
         with self._connection_factory() as db:
