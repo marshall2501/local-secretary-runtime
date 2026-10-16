@@ -12,6 +12,7 @@ const props = defineProps<{
   items: TaskSummary[]
   view: TaskListView
   selectedId: string
+  commandsEnabled: boolean
 }>()
 const emit = defineEmits<{
   select: [id: string]
@@ -55,6 +56,6 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
       </button>
     </section>
     <p v-if="!items.length" class="muted small">該当する保存済みTaskはありません。</p>
-    <p class="muted small task-sidebar-foot">保存済みTaskの参照専用です。</p>
+    <p class="muted small task-sidebar-foot">{{ commandsEnabled ? "Taskの確定状態はDBから再照会します。" : "保存済みTaskの参照専用です。" }}</p>
   </aside>
 </template>
