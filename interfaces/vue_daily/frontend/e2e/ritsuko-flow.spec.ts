@@ -29,6 +29,10 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
   // 初期画面でも旧Task IDのhashが付くため、新しい受付IDへ変わるまで待つ。
   await expect.poll(() => page.url()).not.toBe(previousUrl)
   await expect(page).toHaveURL(/#task=[a-f\d-]{36}$/i)
+  // 初期選択の旧Taskハッシュと、新規受付したIDを取り違えないよう本文で照合。
+  await expect(page.locator('.current-task').getByText(
+    'Pythonの辞書を簡潔に説明してください', { exact: true },
+  )).toBeVisible()
   const taskUrl = page.url()
   await expect(page.getByRole('textbox', { name: '依頼内容' })).toHaveValue('')
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
