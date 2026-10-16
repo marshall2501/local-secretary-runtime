@@ -1,24 +1,37 @@
-"""core page for the daily portal."""
+"""既存NiceGUIのRITSUKO画面。画面イベントから共通Task Applicationを呼び出す。
+
+この画面はVue移行中も日常操作の互換入口として残す。
+"""
 
 from bootstrap.ritsuko_task_composition import build_task_application
 
 
 def sync(portal_context: dict) -> None:
+    """既存ポータルが提供する依存関数とUI設定をページモジュールへ反映する。
+
+    移行期間の互換機構であり、新規Vue APIの依存注入方法には流用しない。
+    """
     globals().update(portal_context)
 
 
 def register(portal_context: dict):
+    """依存関数を注入して既存NiceGUIの /core ページを登録する。"""
     sync(portal_context)
 
     def _portal(name: str):
-        """Resolve parent application dependencies at call time."""
+        """ページを開いた時点のポータル依存関数を名前で取得する。"""
         return portal_context[name]
 
     @ui.page("/core")
     def core_page(task_id: str = ""):
+        """Task閲覧・入力・MAGI進捗を扱う既存RITSUKO画面を構築する。
+
+        Args:
+            task_id: 履歴から開く場合に選択する保存済みTaskの識別子。
+        """
         globals().update(portal_context)
-        # Task実行の組立は画面から共通Composition Rootへ移した。
-        # MAGI/DBへの具体的なPortは既存Runtimeと同じものを渡す。
+        # 既存NiceGUIとVue APIでTask操作を二重実装しないため、
+        # 実行PortとRunnerの組立だけを共通Composition Rootに任せる。
         task_app = build_task_application(
             create_task_record=_create_magi_core_task_record,
             execute_source_request=_execute_magi_source_request,
@@ -30,8 +43,8 @@ def register(portal_context: dict):
             claim_proposal_review_record=_claim_magi_proposal_review_record,
             finalize_proposal_review_record=_finalize_magi_proposal_review_record,
             abort_proposal_review_record=_abort_magi_proposal_review_record,
-            # 旧画面/隔離テストが差し替える実行Runnerを注入する。
-            # 画面からMAGI呼出しを複製せず、既存互換性を維持する。
+            # この3関数は既存NiceGUIテストが差し替える対象なので、
+            # 組立関数のデフォルトに任せず明示して互換性を維持する。
             start_runner=run_observation_loop,
             resume_runner=resume_user_answer,
             review_runner=review_magi_proposal,
