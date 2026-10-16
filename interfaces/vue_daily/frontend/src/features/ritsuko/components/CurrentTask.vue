@@ -5,9 +5,21 @@
  * 「現在のTask」は画面の選択対象であり、必ずしも実行中という意味ではない。
  * Taskの確定状態とMAGIの途中状態は別項目で示す。
  */
+import { ref } from 'vue'
 import { taskStatusLabel } from '../types'
-import type { TaskRecord } from '../types'
-defineProps<{ task: TaskRecord | null; loading: boolean }>()
+import type { TaskRecord, TaskTrace } from '../types'
+
+defineProps<{ task: TaskRecord | null; trace: TaskTrace | null; loading: boolean }>()
+const copyFeedback = ref('')
+/** 本人操作時だけブラウザのClipboardへコピーする。送信・サーバー保存はしない。 */
+async function copyText(text: string, label: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    copyFeedback.value = label + 'をコピーしました。'
+  } catch {
+    copyFeedback.value = 'コピーできませんでした。ブラウザのClipboard許可を確認してください。'
+  }
+}
 </script>
 
 <template>
@@ -71,6 +83,13 @@ defineProps<{ task: TaskRecord | null; loading: boolean }>()
       <div v-if="task.message" class="result">
         <strong>最新結果（保存済み）</strong><p>{{ task.message }}</p>
       </div>
+      <div class="task-copy-actions">
+        <button v-if="task.message" type="button" class="secondary"
+          @click="copyText(task.message, '最新結果')">最新結果をコピー</button>
+        <button v-if="trace" type="button" class="secondary"
+          @click="copyText(JSON.stringify(trace, null, 2), 'Task全情報')">Task全情報をコピー</button>
+      </div>
+      <p v-if="copyFeedback" class="muted small" role="status">{{ copyFeedback }}</p>
       <div class="task-meta">
         <span>Task ID: <code>{{ task.id }}</code></span>
         <span>Revision: {{ task.revision }}</span>
