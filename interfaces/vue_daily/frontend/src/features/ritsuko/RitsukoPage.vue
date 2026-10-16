@@ -37,7 +37,7 @@ const {
         :operation="operation"
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @stop="sendStop"
       />
-      <CurrentTask :task="selected" :loading="refreshing" />
+      <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
       <MagiProgress :task="selected" />
       <TaskActivity :trace="trace" />
     </main>
