@@ -24,6 +24,9 @@ function taskIdFromHash(): string {
 export function useTasks() {
   const items = ref<TaskSummary[]>([])
   const view = ref<TaskListView>('recent')
+  // NiceGUIの追加読み込みと同様に、右一覧で見る件数は本人が増やす。
+  const visibleLimit = ref(10)
+  const hasMore = computed(() => items.value.length >= visibleLimit.value)
   const selectedId = ref(taskIdFromHash())
   const trace = ref<TaskTrace | null>(null)
   const connected = ref(false)
@@ -65,13 +68,28 @@ export function useTasks() {
     }
   }
 
-  /** APIが明示的に実Taskコマンドを注入したときだけ操作を許可する。 */
-  async function detectCommands(): Promise<void> {
+  /**
+   * 起動時だけではなく再照会時にも操作可能モードを更新する。
+   * 8099が再起動／8097読取専用へ入れ替わった場合、古い許可表示を保持しない。
+   */
+  async function detectCommands(): Promise<boolean> {
     try {
-      commandsEnabled.value = await getTaskApiMode() === 'commands_enabled'
+      return await getTaskApiMode() === 'commands_enabled'
     } catch {
-      commandsEnabled.value = false
+      return false
     }
+  }
+
+  /** Task APIの1回50件という上限を守りながら、追加読み込み分を再取得する。 */
+  async function loadTaskWindow(filter: TaskListView, limit: number): Promise<TaskSummary[]> {
+    const records: TaskSummary[] = []
+    for (let offset = 0; offset < limit; offset += 50) {
+      const requested = Math.min(50, limit - offset)
+      const page = await listTasks(filter, requested, offset)
+      records.push(...page)
+      if (page.length < requested) break
+    }
+    return records
   }
 
   /** HTTP 202は受付。Task.status の完了とは区別してメッセージを出す。 */
@@ -171,11 +189,14 @@ export function useTasks() {
     const filter = view.value
     refreshing.value = true
     try {
-      const list = await listTasks(filter)
+      const [enabled, list] = await Promise.all([
+        detectCommands(), loadTaskWindow(filter, visibleLimit.value),
+      ])
       if (seq !== version) return
+      commandsEnabled.value = enabled
       const id = selectedId.value || list[0]?.id || ''
       const nextTrace = id ? await getTaskTrace(id) : null
-      const nextOperation = id && commandsEnabled.value
+      const nextOperation = id && enabled
         ? await getTaskOperation(id).catch(() => null) : null
       if (seq !== version || (selectedId.value && selectedId.value !== id)) return
       items.value = list
@@ -211,10 +232,18 @@ export function useTasks() {
     void refresh()
   }
 
+  /** 右側Task一覧に未表示の過去Taskを取得する。DB上限を超える場合もOffsetで分割する。 */
+  function loadMore(): void {
+    if (refreshing.value || !hasMore.value) return
+    visibleLimit.value += 10
+    void refresh()
+  }
+
   /** 最近・進行中・完了の表示条件を切り替え、前の選択を解除する。 */
   function selectView(next: TaskListView): void {
     if (view.value === next) return
     view.value = next
+    visibleLimit.value = 10
     selectedId.value = ''
     reply.value = ''
     operation.value = null
@@ -243,7 +272,7 @@ export function useTasks() {
   // 画面を閉じる際はTimerとイベント購読だけを解除する。Task停止要求は送らない。
   onMounted(() => {
     window.addEventListener('hashchange', onHashChange)
-    void detectCommands().then(() => refresh())
+    void refresh()
     timer = setInterval(() => { void refresh() }, 3000)
   })
   onUnmounted(() => {
@@ -252,8 +281,8 @@ export function useTasks() {
     if (timer !== undefined) clearInterval(timer)
   })
   return {
-    items, view, selectedId, trace, selected, connected, refreshing,
-    problem, refresh, selectTask, selectView,
+    items, view, visibleLimit, hasMore, selectedId, trace, selected, connected, refreshing,
+    problem, refresh, selectTask, selectView, loadMore,
     commandsEnabled, commandBusy, commandFeedback, commandError, operation,
     draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
   }
