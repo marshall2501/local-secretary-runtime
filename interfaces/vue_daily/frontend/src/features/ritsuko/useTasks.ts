@@ -210,6 +210,8 @@ export function useTasks() {
       problem.value = ''
     } catch (error) {
       if (seq !== version) return
+      // API断で直前のcommands_enabledを残すと、送信可能だと誤認させる。
+      commandsEnabled.value = false
       connected.value = false
       problem.value = 'Task情報を取得できません。取得済みの一覧は保持しています。' +
         '選択中の詳細は未取得の場合があります。（' +
