@@ -55,14 +55,17 @@ async def run_observation_loop(
 
     task_uuid = task_id or uuid4()
     task_created = False
+    active_attempt_id = None
     all_executions: list[dict] = []
     try:
-        await anyio.to_thread.run_sync(
+        claimed = await anyio.to_thread.run_sync(
             create_task_record,
             task_uuid,
             request,
             member_specs,
         )
+        # 既存の直呼出しには試行IDがない。DB claimが返すUUIDだけを採用する。
+        active_attempt_id = claimed if isinstance(claimed, UUID) else None
         task_created = True
 
         session = await dialogue_starter(
@@ -193,21 +196,24 @@ async def run_observation_loop(
             session["next_step"] = "goal_observation_cycle_limit"
             session["status_message"] = "許可された情報取得回数の上限に達したため、追加取得せず待機しています。"
 
-        await anyio.to_thread.run_sync(
-            persist_session_record,
-            task_uuid,
-            session,
-            selected_capability_for_batch(all_executions),
-        )
+        persist_args = [
+            task_uuid, session, selected_capability_for_batch(all_executions),
+        ]
+        if active_attempt_id is not None:
+            persist_args.append(active_attempt_id)
+        saved = await anyio.to_thread.run_sync(persist_session_record, *persist_args)
+        if isinstance(saved, dict) and saved.get("task_status") == "paused":
+            # DBの確定状態が優先。遅いMAGIのcandidate_readyは返却しない。
+            session = {**session, "status": "stopped",
+                       "next_step": "user_requested_stop"}
         return session
     except Exception as exc:
         if task_created:
             try:
-                await anyio.to_thread.run_sync(
-                    fail_task_record,
-                    task_uuid,
-                    type(exc).__name__,
-                )
+                fail_args = [task_uuid, type(exc).__name__]
+                if active_attempt_id is not None:
+                    fail_args.append(active_attempt_id)
+                await anyio.to_thread.run_sync(fail_task_record, *fail_args)
             except Exception:
                 pass
         raise
