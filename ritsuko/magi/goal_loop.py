@@ -125,7 +125,7 @@ async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> N
     recorded = {
         str(o["result_id"]): o
         for o in session.get("observations") or []
-        if isinstance(o, dict) and o.get("source") == "web"
+        if isinstance(o, dict) and o.get("source") in AUTO_READ_SOURCES
         and o.get("result_id")
     }
     if (any(ref not in recorded for ref in ids)
