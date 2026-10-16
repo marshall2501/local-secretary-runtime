@@ -19,7 +19,7 @@ export interface TaskRecord extends TaskSummary {
   phase?: string
   magi_session?: { status?: string; next_step?: string } | null
 }
-/** Actionの記録。実行成功の有無はResultを確認して表示する。 */
+/** Actionの状態とResultの識別子を別々に保持し、未完了を成功扱いしない。 */
 export interface TaskAction {
   action_id?: string
   tool?: string
