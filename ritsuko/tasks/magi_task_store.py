@@ -60,7 +60,8 @@ class MagiTaskRepository(Protocol):
     def abort_proposal_review(self, *, task_id: UUID, error: str) -> None: ...
 
     def record_source_read(
-        self, *, task_id: UUID, execution: dict, pending_request: dict
+        self, *, task_id: UUID, execution: dict, pending_request: dict,
+        expected_attempt_id: UUID | None = None,
     ) -> tuple[str, str]: ...
 
     def record_pkb_read(
