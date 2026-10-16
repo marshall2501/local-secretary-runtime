@@ -1,0 +1,77 @@
+/* Provenance-Origin: original; Provenance-AI: AI-generated */
+/* NiceGUIの主要領域を踏襲する製品Vueの共通デザイントークン・レイアウト。 */
+:root { font-family:"Noto Sans JP","Yu Gothic",Meiryo,system-ui,sans-serif; color:#243547; background:#f4f7fb; font-synthesis:none; line-height:1.55; }
+* { box-sizing:border-box; }
+body { margin:0; min-width:320px; }
+button,textarea,input { font:inherit; }
+button { cursor:pointer; }
+button:focus-visible,a:focus-visible,summary:focus-visible { outline:3px solid #00887e; outline-offset:2px; }
+button:disabled { cursor:not-allowed; opacity:.55; }
+a { color:#276ca2; }
+.shell { max-width:1550px; margin:0 auto; padding:18px 24px 50px; }
+.site-header { padding:13px 9px 18px; border-bottom:1px solid #dbe4eb; margin-bottom:18px; }
+.eyebrow { font-size:12px; font-weight:700; color:#16796f; letter-spacing:.06em; }
+.site-nav { display:flex; gap:8px 18px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+.site-nav a { font-size:14px; font-weight:650; text-decoration:none; padding:5px 2px; white-space:nowrap; }
+.site-nav a:hover { text-decoration:underline; }
+.site-nav a.nav-active { color:#056e64; border-bottom:2px solid #058578; }
+.nav-legacy { font-size:10px; font-weight:400; color:#788897; margin-left:4px; }
+.page-title { display:flex; justify-content:space-between; align-items:center; gap:16px; margin:9px 0 14px; }
+h1 { font-size:23px; margin:0; }
+h2 { font-size:17px; margin:0; }
+h3 { font-size:14px; margin:0 0 7px; }
+.muted { color:#647484; }
+.small { font-size:12px; }
+.connection { display:flex; align-items:center; gap:8px; font-size:13px; white-space:nowrap; }
+.dot { height:9px; width:9px; flex:0 0 9px; border-radius:50%; background:#168c63; }
+.disconnected .dot { background:#cc7027; }
+.read-only-notice { font-size:13px; color:#704b24; background:#fff8eb; border:1px solid #f0d8a5; border-radius:8px; padding:11px 14px; margin:0 0 18px; }
+.read-only-notice strong { margin-right:10px; }
+.workspace { display:grid; grid-template-columns:minmax(0,1fr) minmax(260px,305px); align-items:start; gap:18px; }
+.ritsuko-main { display:flex; flex-direction:column; gap:15px; min-width:0; }
+.card { background:#fff; border:1px solid #d4e0e9; border-radius:10px; padding:19px; box-shadow:0 2px 7px rgba(29,50,69,.025); }
+.current-task { border-color:#9edbd0; background:#f7fdfa; }
+.task-sidebar { background:#fff9f0; }
+.section-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:13px; }
+.task-field { display:grid; grid-template-columns:105px minmax(0,1fr); gap:9px; margin:11px 0; }
+.field-name { font-size:12px; color:#627588; font-weight:700; }
+.task-field p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.task-field .muted { grid-column:2; }
+.task-meta { display:flex; flex-wrap:wrap; gap:8px 20px; margin-top:14px; padding-top:13px; border-top:1px solid #d6e4e8; font-size:12px; color:#66788a; }
+code { overflow-wrap:anywhere; font-size:12px; }
+.question,.result { border:1px solid #b1ddd4; background:#effbf7; border-radius:7px; padding:13px 16px; margin-top:12px; }
+.result { border-color:#b4cee8; background:#edf6ff; }
+.question p,.result p { white-space:pre-wrap; overflow-wrap:anywhere; margin:7px 0 0; }
+.status { border-radius:6px; background:#e6edf2; color:#3e5870; font-size:12px; font-weight:700; padding:5px 9px; }
+.status-completed { color:#19734d; background:#dff6e5; }
+.status-failed { color:#a12b35; background:#ffeeef; }
+.status-running,.status-queued { color:#215d96; background:#e6f1ff; }
+.status-waiting_user,.status-waiting_external { color:#92610e; background:#fff0d1; }
+.task-filters { display:flex; gap:7px; flex-wrap:wrap; margin:5px 0 15px; }
+button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; border-radius:5px; padding:7px 10px; font-weight:600; }
+.filter-button { flex:1; }
+.filter-button[aria-pressed="true"] { background:#e2f3f0; border-color:#94cac2; color:#066a60; }
+.task-group { margin-top:16px; }
+.task-group + .task-group { padding-top:17px; border-top:1px solid #e3dacc; }
+.task-item { display:flex; flex-direction:column; align-items:stretch; gap:4px; width:100%; color:inherit; text-align:left; border-radius:7px; border:1px solid #e1d8c7; background:#fff; margin:8px 0; padding:12px; }
+.task-item:hover,.task-item.active { border-color:#85cbbb; background:#f0fbf6; }
+.item-title { display:block; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.task-sidebar-foot { border-top:1px solid #e3dacc; padding-top:13px; }
+.link-button { display:inline-flex; align-items:center; border:1px solid #16948a; border-radius:6px; background:#eef8f6; padding:8px 14px; font-weight:650; text-decoration:none; margin-top:3px; }
+.link-button:hover { background:#def3ec; }
+.request-entry p { font-size:13px; margin:0 0 12px; }
+.activity-summary { cursor:pointer; font-weight:700; display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; }
+.activity-entry { border-top:1px solid #e2eaf0; margin-top:12px; padding-top:12px; }
+.activity-entry p { margin:5px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.error { color:#9d3039; background:#fff0f0; padding:12px; border-radius:6px; overflow-wrap:anywhere; }
+@media(max-width:900px) {
+  .shell { padding:12px; }
+  .workspace { grid-template-columns:minmax(0,1fr) 250px; gap:12px; }
+  .card { padding:13px; }
+}
+@media(max-width:680px) {
+  .page-title { align-items:flex-start; flex-direction:column; }
+  .workspace { display:flex; flex-direction:column; }
+  .ritsuko-main,.task-sidebar { width:100%; }
+  .task-field { grid-template-columns:85px minmax(0,1fr); }
+}
