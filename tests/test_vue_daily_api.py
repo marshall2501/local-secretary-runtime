@@ -187,6 +187,34 @@ class VueDailyCommandApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(base + "/tasks").status_code, 200)
         self.assertEqual(self.query.calls[-1][0], "recent")
 
+    def test_restart_without_in_memory_operation_uses_persisted_task_only(self):
+        """Commandサービス再構築後、Taskの実状態だけ取得しWorker生存は推測しない。"""
+        from ritsuko.application.task_commands import TaskCommands
+
+        new_service = TaskCommands(object(), self.query, lambda: [])
+        app = create_app(queries=self.query, commands=new_service)
+        client = TestClient(app, base_url="http://127.0.0.1:8097")
+        self.query.task["status"] = "running"
+        response = client.get(
+            "/api/v1/ritsuko/operations/" + str(self.query.uid),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "operation_not_in_process")
+        self.assertEqual(payload["task_status"], "running")
+        self.assertEqual(payload["source"], "persisted_task")
+        self.assertTrue(payload["execution_reconciliation_required"])
+        self.assertIsNone(payload["stop_requested"])
+        self.assertNotIn("request", payload)
+        self.assertEqual(
+            client.post("/api/v1/ritsuko/tasks/" + str(self.query.uid) + "/stop").status_code,
+            409,
+        )
+        self.assertEqual(
+            client.get("/api/v1/ritsuko/operations/" + str(uuid4())).status_code,
+            404,
+        )
+
     def test_invalid_input_and_cross_origin_do_not_call_commands(self):
         """無効な入力・他Originの書込要求を拒否し、コマンドを呼び出さない。"""
         base = "/api/v1/ritsuko"
