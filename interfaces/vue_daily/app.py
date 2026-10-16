@@ -67,6 +67,16 @@ def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
         docs_url=None, redoc_url=None, openapi_url=None,
     )
 
+    if commands is not None and hasattr(commands, "recover_pending"):
+        @app.on_event("startup")
+        async def recover_durable_pending_tasks() -> None:
+            """明示的にCommandsを注入した場合のみ未着手Taskを復旧する。
+
+            DBのpendingのみが対象。runningの実行済み部分は自動再実行しない。
+            通常8097のread-only previewではこの処理も実行されない。
+            """
+            await commands.recover_pending(limit=20)
+
     @app.middleware("http")
     async def local_only(request: Request, call_next):
         """ローカルホストでの参照を想定し、外部Originと転送ヘッダを拒否する。
