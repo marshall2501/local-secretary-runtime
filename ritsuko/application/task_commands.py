@@ -35,6 +35,8 @@ class TaskCommands:
         application: 正しいDB/Source/Policy Portを注入済みのTask Application。
         queries: 同一DBの確定Task履歴を取得するQuery Service。
         member_specs_loader: 新規Task開始時に有効なMAGI設定を読む関数。
+        dialogue_starter_factory: 判断方式に対応した共通MAGI入口を生成する関数。
+            Noneでは従来standardのみを受付け、llmへ暗黙に切り替えない。
         max_retained: 完了した操作の受付状況を保持する最大件数。
     """
 
@@ -45,10 +47,12 @@ class TaskCommands:
         member_specs_loader: Callable[[], list[dict]],
         *,
         max_retained: int = 100,
+        dialogue_starter_factory: Callable[[str], Callable] | None = None,
     ) -> None:
         self._application = application
         self._queries = queries
         self._member_specs_loader = member_specs_loader
+        self._dialogue_starter_factory = dialogue_starter_factory
         self._max_retained = max(1, int(max_retained))
         # 実行中Jobと停止EventはAPIプロセス内だけの一時情報。
         self._jobs: dict[UUID, asyncio.Task] = {}
@@ -110,8 +114,15 @@ class TaskCommands:
             raise TaskCommandNotFound("task_not_found") from exc
         return dict(trace.get("task") or {})
 
-    async def start(self, request: str) -> dict:
-        """新規Task IDを発行して受付する。DB作成・実行完了は後続Jobが行う。"""
+    async def start(self, request: str, *, decision_strategy: str = "standard") -> dict:
+        """Taskの判断方式とメンバー設定を受付時に確定して共通Applicationへ渡す。
+
+        旧Task APIとの内部互換ではstandardを既定とする。新Vue HTTPの
+        呼出元には判断方式の明示指定を要求し、意図せぬ方式変更を避ける。
+        実行を受理してもDBのTask作成や完了が終わったことにはならない。
+        """
+        if decision_strategy not in {"standard", "llm"}:
+            raise ValueError("unknown_flow_decision_strategy")
         text = str(request or "").strip()
         if not text:
             raise ValueError("empty_request")
@@ -119,14 +130,27 @@ class TaskCommands:
         enabled = [item for item in specs if item.get("enabled")]
         if not enabled:
             raise TaskCommandConflict("no_enabled_magi_member")
+        # 先行Goal判断実装の現行制約。席数を勝手に変更・保存しない。
+        if decision_strategy == "llm" and len(enabled) != 1:
+            raise TaskCommandConflict("llm_strategy_currently_requires_one_member")
+        if decision_strategy == "llm" and self._dialogue_starter_factory is None:
+            raise TaskCommandConflict("llm_strategy_not_connected")
         timeout = max(float(item.get("timeout_seconds") or 120) for item in enabled)
         task_id = uuid4()
 
+        # Applicationの既存dialogue_starter Portを使い、Task実行ループを複製しない。
+        start_options = {}
+        if self._dialogue_starter_factory is not None:
+            start_options["dialogue_starter"] = (
+                self._dialogue_starter_factory(decision_strategy)
+            )
+
         async def run(stop: Event) -> None:
-            """同じTask IDで既存RITSUKOに開始を依頼し、停止要求を引き渡す。"""
+            """同じTask IDと固定した判断方式で共通RITSUKOのTaskを開始する。"""
             await self._application.start(
                 text, task_id=task_id, member_specs=deepcopy(specs),
                 timeout=timeout, stop_requested=stop.is_set,
+                **start_options,
             )
         return self._schedule(task_id, "start", run)
 
