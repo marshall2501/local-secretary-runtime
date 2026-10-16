@@ -111,10 +111,11 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         async def start_dialogue(user_raw, *, policy_snapshot, **kwargs):
             """開始時の権限とTask IDがMAGIへ渡ることを観測する。"""
-            seen.append(("start", policy_snapshot, kwargs["task_id"]))
+            seen.append(("start", policy_snapshot, kwargs["task_id"], kwargs["decision_strategy"]))
             return {
                 "task_id": kwargs["task_id"], "status": "waiting_user",
                 "member_specs": kwargs["member_specs"], "user_raw": user_raw,
+                "decision_strategy": kwargs["decision_strategy"],
             }
 
         async def resume_dialogue(session, reply, **kwargs):
@@ -141,13 +142,15 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             user_continuation=resume_dialogue,
             review_continuation=evaluate_review,
         )
-        started = await commands.start("対象の観測")
+        started = await commands.start("対象の観測", decision_strategy="llm")
         uid = UUID(started["task_id"])
         await self._wait_for(commands, uid)
         self.assertEqual(repo.tasks[uid]["status"], "waiting_external")
         self.assertEqual(repo.calls[:2], ["create", "persist"])
         self.assertEqual(seen[0][1]["profile_id"], "fixture-policy")
         self.assertEqual(seen[0][2], str(uid))
+        self.assertEqual(seen[0][3], "llm")
+        self.assertEqual(repo.tasks[uid]["magi_session"]["decision_strategy"], "llm")
         self.assertEqual(policies, ["loaded"])
 
         answered = await commands.answer(uid, "本人の回答")
@@ -156,6 +159,7 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repo.tasks[uid]["magi_session"]["status"], "proposal_ready")
         self.assertEqual(seen[1], ("answer", "本人の回答", str(uid)))
         self.assertEqual(policies, ["loaded"])
+        self.assertEqual(repo.tasks[uid]["magi_session"]["decision_strategy"], "llm")
         self.assertIn("claim_user", repo.calls)
 
         accepted = await commands.review(uid, "answer_only")
