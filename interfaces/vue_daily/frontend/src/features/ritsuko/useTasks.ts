@@ -10,6 +10,7 @@ function taskIdFromHash(): string {
   return window.location.hash.match(/^#task=([a-f\d-]{36})$/i)?.[1] ?? ''
 }
 
+/** 画面表示用Task選択・取得・接続状態を管理し、バックエンドの確定値だけを表示する。 */
 export function useTasks() {
   const items = ref<TaskSummary[]>([])
   const view = ref<TaskListView>('recent')
@@ -19,9 +20,11 @@ export function useTasks() {
   const refreshing = ref(false)
   const problem = ref('')
   const selected = computed(() => trace.value?.task ?? null)
+  // フィルタ変更・Task選択後に古い非同期結果が返っても画面を巻き戻さない。
   let version = 0
   let timer: ReturnType<typeof setInterval> | undefined
 
+  /** 一覧と選択Taskの履歴を再取得し、同じ世代の結果だけ画面に反映する。 */
   async function refresh(): Promise<void> {
     const seq = ++version
     const filter = view.value
@@ -50,6 +53,7 @@ export function useTasks() {
     }
   }
 
+  /** 右側一覧から選んだTask IDをURLに残し、再読込・戻る操作に備える。 */
   function selectTask(id: string): void {
     if (selectedId.value === id) return
     selectedId.value = id
@@ -58,6 +62,7 @@ export function useTasks() {
     void refresh()
   }
 
+  /** 表示対象を切り替え、前のTaskを新しい一覧の選択状態に残さない。 */
   function selectView(next: TaskListView): void {
     if (view.value === next) return
     view.value = next
@@ -67,6 +72,7 @@ export function useTasks() {
     void refresh()
   }
 
+  /** ブラウザの戻る・進むでURLに戻ったTaskを再照会する。 */
   function onHashChange(): void {
     const id = taskIdFromHash()
     if (id !== selectedId.value) {
@@ -76,6 +82,8 @@ export function useTasks() {
     }
   }
 
+  // API接続中も現在Taskの状態が変わるため定期照会する。
+  // Vue画面の終了時には照会を止め、アプリのTask実行は停止させない。
   onMounted(() => {
     window.addEventListener('hashchange', onHashChange)
     void refresh()
