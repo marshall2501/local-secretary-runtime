@@ -5,8 +5,8 @@
 ## 状態・安全境界
 
 - 実際のTaskを**既存の`CoreTaskQueryService`とPostgreSQLの正本**から取得します。架空Task専用 `interfaces/vue_lab`（8098）とは別です。
-- 現時点のVue日常画面は**読取専用**。Task開始・回答・停止・Reviewの**API契約はStage B-1で追加**したものの、実運用のMAGI/Source/DBに接続するComposition Rootは未接続で、通常8097のPOSTは**503**を返します。記憶登録・外部Actionは公開しません。NiceGUI日常画面は引き続き利用可能です。
-- 明示起動時だけ `127.0.0.1:8097` で動作。Host / Origin / Sec-Fetch-Site / Forwarded制限、レスポンスno-store。インターネット・LAN公開、第三者向けの認証設計は未実装のため、そのような構成で公開しません。
+- **通常8097は読取専用**（POSTは503）。**実Task用8099は本人が明示起動した場合のみ**日常MAGI/Source/DBへ接続し、Task受付・本人回答・Stop・回答のみReviewが可能です。NiceGUIの全機能は未移行なので既存画面も利用できます。
+- 8097／8099ともに `127.0.0.1` bind。通常の画面GETは別サイトからリンクしても表示できます。Task変更POSTだけ別サイトOrigin/Sec-Fetch-Siteを拒否します。Host・Forwarded制限/no-storeは継続。インターネット・LANへ公開しません。
 - Production DBに接続するときは既存の `bootstrap.web_runtime` → `PostgresCoreTaskQueryRepository` → daily runtime Secretを**Python側だけ**で使います。Browser/TypeScript/生成JSにDB資格情報は入りません。Secretの値をログへ表示しません。
 - ブラウザF5ではTask IDをURLハッシュから復元し再照会します。**実行中Taskの無停止継続・API再起動後のTask実行再開**は本画面の実績ではありません。
 
@@ -112,10 +112,22 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 ## 2026-10-17 Stage B-3c — Vue実Task操作パネルと明示起動
 
 - Vue TaskCommandPanel.vue は、既存Task API経由の依頼開始（判断方式を明示選択）、本人回答、回答のみReview、Stop要求を提供する。Task状態の確定・権限・MAGI判断・Action記録は共有RITSUKO Applicationが担当し、VueはDB確定状態を再取得する。HTTP 202は受付であってTask completedの証明ではない。
-- 画面がhealthの mode=commands_enabled を確認した場合だけ操作パネルを表示する。**通常8097は従来どおり read_only** で、既存NiceGUIへのリンクを案内する。
+- 依頼入力欄は現在Taskより上に常時配置。healthのmode=commands_enabledとなる8099でのみ編集・送信可能。8097はread_onlyとして入力を無効にし、8099へのリンクを案内する。
 - クライアントはUUIDを先に生成し、レスポンス消失時の同一UUID再送に備える。未確認送信のID・依頼本文・判断方式をタブ単位sessionStorageに保持し、受付成功後に消す。ブラウザSession領域には本人原文が一時保持される。別送信先を追加していない。
 - Operationは一時情報、Task TraceはDB確定情報。再起動後のrunningはWorker稼働の証明ではない。Stop要求も停止完了と区別して表示する。
 - **明示的な実Task操作プレビュー**: interfaces/vue_daily/commands_preview.py は --enable-task-commands を指定した時のみ localhostの127.0.0.1:8099 で起動し、build_daily_magi_task_commands() によって既存日常DBとMAGI/Sourceを使用する。このモードは**本番Task DB書込と実LLM呼出しが可能**なので、本人による実際の操作の許可後のみ利用する。通常8097・NiceGUI8093・API8010は変更しない。
 - 8099起動時は recover_pending_at_startup=False にして、過去に受付済みのpendingを勝手に起動しない。実API停止後のrunningや外部Actionを自動再実行しない。
 - 本人が実DB書込を許可した後の実行例（リポジトリ直下のPowerShell）: & ".\.venv\Scripts\python.exe" -m interfaces.vue_daily.commands_preview --enable-task-commands 。画面は http://127.0.0.1:8099/ui/ 。変更したVueソースはサブPCのWSL内で npm run build してdistを再生成する必要がある。
 - CIではVue build、APIのread_only/commands_enabled切替、既存HTTP POST契約、古いpendingの起動なし、明示引数なしの実Task preview起動拒否を検証する。**実ブラウザからの実Task完走、実LLM、本人回答・Review、プロセス再起動後の動作はまだ受入していない**。
+
+## 2026-10-17 403の実機再現／修正と検証上の教訓
+
+**本人実機の事象**: 8097のリンクから8099へ開くと、通常の画面GETが403 / cross_site_denied。画面表示ができずTaskも入力できない。原因は実Task POST用に追加したSec-Fetch-Siteの制限を、画面GETにも一律適用したこと。ブラウザが別ページからリンクを開くとcross-site/same-siteになるのは正常動作。
+
+**なぜ入ったか・なぜ防げなかったか**: 書き込み用の条件を、本人の『開発中は不要なアクセス制限を増やさない』方針より優先して機械的に広げた。事前テストは個々のHTTP応答とJavaScript buildを見ただけで、既存画面のリンク→8099 GET→Vue入力→同一Origin POSTという**実利用経路**を試していなかった。
+
+**変更**: GET/HEADのOriginとSec-Fetch-Siteによる画面遷移拒否を廃止。POSTの別Origin書込拒否は維持。Task Application、永続DB、MAGI、既存サービス設定は変更しない。
+
+**再現／検証**: 新しいVueNavigationBrowserHeaderTestsで他サイトからのリンク、8097→8099遷移、URL直接入力、F5、JS取得、health、同一Origin POST202、他Origin POST403をfake Commandsで通す。修正前 [RED（403再現）](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980440793) → 修正後 [GREEN](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980549429)。型チェックとその他API回帰もPASS。**本人Windows実ブラウザはまだ修正後未受入**。
+
+**既存NiceGUIとの機能差分**: VueのTask受付・追加回答・回答のみReview・Stop・保存済みTask表示は既存Applicationに接続したが、MAGI各席の設定・進捗、記憶反映Review、詳細Sourceカード、セッション表示等は現時点で未同等。全面作り直しより、まず入口から実MAGIまで1件を実証し、不足を埋める。最低限の実機受入は画面GET→Vue入力→Task受付/DB ID→MAGI結果→回答/Review→停止/F5復元。CI PASSと実機完了は混同しない。
