@@ -5,7 +5,11 @@
  * Taskの完了判断と保存はRITSUKOが行う。MAGIの候補状態は別に表示する。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { getTaskTrace, listTasks } from './api'
+import {
+  answerTask, getTaskApiMode, getTaskOperation, getTaskTrace,
+  listTasks, reviewTask, startTask, stopTask,
+} from './api'
+import type { DecisionStrategy, TaskOperation } from './api'
 import type { TaskListView, TaskSummary, TaskTrace } from './types'
 
 /** URLハッシュから選択TaskのIDを読み取る。見つからなければ初回一覧で選ぶ。 */
@@ -26,6 +30,131 @@ export function useTasks() {
   const refreshing = ref(false)
   const problem = ref('')
   const selected = computed(() => trace.value?.task ?? null)
+  const commandsEnabled = ref(false)
+  const commandBusy = ref(false)
+  const commandFeedback = ref('')
+  const commandError = ref('')
+  const operation = ref<TaskOperation | null>(null)
+  const pendingKey = 'ritsuko.pending-start.v1'
+
+  type PendingStart = { id: string; request: string; strategy: DecisionStrategy }
+  /** 通信途絶時の同一UUID再送。タブごとのsessionStorageのみ使用する。 */
+  function loadPending(): PendingStart | null {
+    try {
+      const raw = window.sessionStorage.getItem(pendingKey)
+      if (!raw) return null
+      const item = JSON.parse(raw) as PendingStart
+      return /^[a-f0-9-]{36}$/i.test(item.id) &&
+        item.request.length > 0 && item.request.length <= 4000 &&
+        ['standard', 'llm'].includes(item.strategy) ? item : null
+    } catch {
+      return null
+    }
+  }
+  let pendingStart: PendingStart | null = loadPending()
+  const draftRequest = ref(pendingStart?.request ?? '')
+  const strategy = ref<DecisionStrategy>(pendingStart?.strategy ?? 'standard')
+  const reply = ref('')
+  function storePending(value: PendingStart | null): void {
+    pendingStart = value
+    try {
+      if (value) window.sessionStorage.setItem(pendingKey, JSON.stringify(value))
+      else window.sessionStorage.removeItem(pendingKey)
+    } catch {
+      // Storage禁止時も同一画面内ではUUIDを保持する。
+    }
+  }
+
+  /** APIが明示的に実Taskコマンドを注入したときだけ操作を許可する。 */
+  async function detectCommands(): Promise<void> {
+    try {
+      commandsEnabled.value = await getTaskApiMode() === 'commands_enabled'
+    } catch {
+      commandsEnabled.value = false
+    }
+  }
+
+  /** HTTP 202は受付。Task.status の完了とは区別してメッセージを出す。 */
+  async function sendCommand(
+    command: () => Promise<TaskOperation>, message: string,
+  ): Promise<TaskOperation | null> {
+    if (!commandsEnabled.value || commandBusy.value) return null
+    commandBusy.value = true
+    commandError.value = ''
+    commandFeedback.value = ''
+    try {
+      const result = await command()
+      commandFeedback.value = message
+      return result
+    } catch (error) {
+      commandError.value = '操作を受付できませんでした。（' + String(error) + '）'
+      return null
+    } finally {
+      commandBusy.value = false
+    }
+  }
+
+  /** 自然言語受付。曖昧なHTTP失敗時は同一UUIDを保持して再送する。 */
+  async function sendStart(): Promise<void> {
+    const request = draftRequest.value.trim()
+    if (!request || request.length > 4000) {
+      commandError.value = '依頼は1〜4000文字で入力してください。'
+      return
+    }
+    const intent = pendingStart && pendingStart.request === request &&
+      pendingStart.strategy === strategy.value ? pendingStart : {
+        id: crypto.randomUUID(), request, strategy: strategy.value,
+      }
+    storePending(intent)
+    const result = await sendCommand(
+      () => startTask(intent.request, intent.strategy, intent.id),
+      'Taskを受付けました。結果の確定は保存済みTaskを再照会して確認します。',
+    )
+    if (result === null) return
+    storePending(null)
+    draftRequest.value = ''
+    selectedId.value = result.task_id
+    view.value = 'recent'
+    trace.value = null
+    window.history.replaceState(null, '', '#task=' + result.task_id)
+    await refresh()
+  }
+
+  async function sendAnswer(): Promise<void> {
+    const task = selected.value
+    const text = reply.value.trim()
+    if (!task || task.status !== 'waiting_external' ||
+        task.magi_session?.status !== 'waiting_user' || !text) return
+    const result = await sendCommand(
+      () => answerTask(task.id, text),
+      '本人回答を受付けました。Taskの確定状態を再照会します。',
+    )
+    if (result) {
+      reply.value = ''
+      await refresh()
+    }
+  }
+
+  async function sendReview(): Promise<void> {
+    const task = selected.value
+    if (!task || task.status !== 'waiting_external' ||
+        task.magi_session?.status !== 'proposal_ready') return
+    const result = await sendCommand(
+      () => reviewTask(task.id),
+      '回答のみのReviewを受付けました。完了の確定ではありません。',
+    )
+    if (result) await refresh()
+  }
+
+  async function sendStop(): Promise<void> {
+    const task = selected.value
+    if (!task || !['pending', 'running'].includes(task.status)) return
+    const result = await sendCommand(
+      () => stopTask(task.id),
+      '停止要求を記録しました。Workerの停止完了とは別です。',
+    )
+    if (result) await refresh()
+  }
   // 同時に走った照会のうち最新の呼び出しだけを採用するための世代番号。
   let version = 0
   let timer: ReturnType<typeof setInterval> | undefined
@@ -44,6 +173,8 @@ export function useTasks() {
       if (seq !== version) return
       const id = selectedId.value || list[0]?.id || ''
       const nextTrace = id ? await getTaskTrace(id) : null
+      const nextOperation = id && commandsEnabled.value
+        ? await getTaskOperation(id).catch(() => null) : null
       if (seq !== version || (selectedId.value && selectedId.value !== id)) return
       items.value = list
       if (!selectedId.value && id) {
@@ -51,6 +182,7 @@ export function useTasks() {
         window.history.replaceState(null, '', '#task=' + id)
       }
       trace.value = nextTrace
+      operation.value = nextOperation
       connected.value = true
       problem.value = ''
     } catch (error) {
@@ -97,7 +229,7 @@ export function useTasks() {
   // 画面を閉じる際はTimerとイベント購読だけを解除する。Task停止要求は送らない。
   onMounted(() => {
     window.addEventListener('hashchange', onHashChange)
-    void refresh()
+    void detectCommands().then(() => refresh())
     timer = setInterval(() => { void refresh() }, 3000)
   })
   onUnmounted(() => {
@@ -108,5 +240,7 @@ export function useTasks() {
   return {
     items, view, selectedId, trace, selected, connected, refreshing,
     problem, refresh, selectTask, selectView,
+    commandsEnabled, commandBusy, commandFeedback, commandError, operation,
+    draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
   }
 }
