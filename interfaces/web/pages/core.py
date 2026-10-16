@@ -80,8 +80,8 @@ def register(portal_context: dict):
     
         def current_advisor_shadow():
             """非同期Advisorの最新状態をDBのTask履歴から優先して取得する。"""
-            # Prefer DB trace because background Advisor updates arrive after the
-            # deterministic result object has already been returned to the UI.
+            # Advisorの非同期更新は最初の画面応答より遅れるため、
+            # DBに保存されたTask履歴の状態を優先する。
             trace = state["trace"]
             if trace:
                 shadow = (trace.get("task") or {}).get("advisor_shadow")
@@ -92,7 +92,7 @@ def register(portal_context: dict):
     
         def load_current_trace():
             """選択中Taskの保存済み履歴を取得し、状態・実行ログの表示を揃える。"""
-            # Share one snapshot between the bar, Task detail and execution log.
+            # OODA表示・Task詳細・実行ログで、同じ時点の保存済み履歴を共有する。
             state["trace"] = None
             state["trace_error"] = None
             task_id = (state["result"] or {}).get("task_id")
@@ -136,8 +136,8 @@ def register(portal_context: dict):
             completed_tasks_panel.refresh()
             screen_log_panel.refresh()
     
-        # NiceGUI drawers are top-level layout elements and must be created as
-        # direct children of the page, not inside the central content column.
+        # NiceGUIのDrawerはページ直下のレイアウト要素。
+        # 中央カラム内に作ると右側配置が崩れるため、ページ直下で作成する。
         task_drawer = ui.right_drawer(value=True).classes("bg-orange-50 p-3").props(
             "bordered width=300 breakpoint=700"
         )
@@ -446,9 +446,9 @@ def register(portal_context: dict):
 
                 async def guided_dialogue_starter(user_raw: str, **kwargs) -> dict:
                     """新規Taskの権限snapshotを確定させてからMAGIの初回対話を始める。"""
-                    # Profile is bound once at Task creation and persisted in
-                    # the MAGI session. A later UI change does not silently
-                    # alter the permissions of an in-flight/resumed Task.
+                    # Task開始時の権限ProfileをMAGI sessionへ保存する。
+                    # 途中で画面設定を変更しても、
+                    # 実行中・再開後Taskの権限は暗黙に変更しない。
                     policy_snapshot = await run.io_bound(
                         _load_magi_policy_snapshot, "lan"
                     )
@@ -664,8 +664,8 @@ def register(portal_context: dict):
                             "w-full border-2 border-teal-300 bg-white shadow-none"
                         ):
                             ui.label("現在のTask").classes("font-bold text-teal-900")
-                            # Owner's local export is intentionally complete: never
-                            # silently mask or truncate the final answer or Task data.
+                            # 本人がローカルでコピーするTask情報は省略しない。
+                            # 最終回答やTaskデータを無断でマスク・切詰めしない。
                             full_answer = str(
                                 ((session or {}).get("goal_judgment") or {}).get("answer")
                                 or ((session or {}).get("detail") or {}).get("answer_candidate")
@@ -1340,7 +1340,7 @@ def register(portal_context: dict):
     
                 def selected_guided_goal_mode() -> bool:
                     """表示用の切替が無い場合も保存設定からGoal判断方式を取得する。"""
-                    # Hidden test control must keep the saved default.
+                    # テスト用切替を非表示にしても、保存済みの既定値を使う。
                     return (
                         bool(goal_mode_checkbox.value)
                         if goal_mode_checkbox is not None
@@ -1352,8 +1352,8 @@ def register(portal_context: dict):
                     try:
                         selected = selected_guided_goal_mode()
                         _save_core_goal_mode(selected)
-                        # Do not report success unless the disk-backed preference
-                        # actually round-trips through the persisted settings.
+                        # 保存後の設定を再取得して反映を確認できるまでは、
+                        # 保存成功と通知しない。
                         if load_ui_preferences()["core_goal_mode"] != selected:
                             raise RuntimeError("flow_judgment_preference_not_persisted")
                     except Exception as exc:
@@ -1376,13 +1376,13 @@ def register(portal_context: dict):
                         ui.notify("入力文を指定してください", type="warning")
                         return
                     goal_mode = selected_guided_goal_mode()
-                    # Starting a new Task is also an explicit save action,
-                    # even when the checkbox's change event was not delivered.
+                    # 新規Taskを開始する際には、
+                    # チェックボックスの変更通知が未到達でも判断方式の選択を保存する。
                     if not save_guided_goal_mode(notify=False):
                         return
                     if goal_mode:
-                        # A temporary single-member test must not persist changes
-                        # to the owner's normal MAGI member assignments.
+                        # 単一MAGI席の一時検証で、
+                        # 通常のメンバー割当設定を上書きしない。
                         chosen = [
                             item for item in collect_guided_assignments()
                             if item["enabled"]
@@ -1431,9 +1431,9 @@ def register(portal_context: dict):
                             "on_turn_start": note_guided_turn,
                             "task_id": task_uuid,
                         }
-                        # Start, Source observations and user resume all use
-                        # one shared RITSUKO/MAGI route. Only the next-flow
-                        # judgment strategy changes for a new Task.
+                        # Task開始・Source観測・本人回答の制御は共通経路を使い、
+                        # 次の工程をどう判断するかという設定だけを
+                        # 新規Taskへ適用する。
                         from functools import partial
                         start_options.update(
                             dialogue_starter=partial(
@@ -1601,7 +1601,7 @@ def register(portal_context: dict):
             @ui.refreshable
             def screen_log_panel():
                 """横断履歴を右側一覧へ移したため、旧ログ枠は表示しない。"""
-                # Cross-Task history belongs to the right drawer and /core/history.
+                # Taskを横断する履歴は右側一覧と/core/historyが担当する。
                 return
 
             with ui.expansion(
@@ -2591,7 +2591,7 @@ def register(portal_context: dict):
                     except Exception as exc:
                         ui.notify("Taskを開けません: " + str(exc), type="negative")
     
-                # The legacy MAGI v0 flow is comparison/reference context, not the current path.
+                # 旧MAGI v0経路は比較参照用であり、現在の通常実行経路ではない。
                 with ui.expansion(
                     "旧MAGI v0 処理フロー（比較・確認用）",
                     value=False,
