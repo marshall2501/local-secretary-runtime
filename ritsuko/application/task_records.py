@@ -78,21 +78,25 @@ def persist_session_record(repository: MagiTaskRepository, task_id: UUID,
                            session: dict,
                            selected_capability: str | None = None,
                            expected_attempt_id: UUID | None = None) -> dict:
-    return repository.persist_session(
-        task_id=task_id, session=session,
-        selected_capability=selected_capability,
-        expected_attempt_id=expected_attempt_id,
-    )
+    kwargs = {
+        "task_id": task_id, "session": session,
+        "selected_capability": selected_capability,
+    }
+    if expected_attempt_id is not None:
+        kwargs["expected_attempt_id"] = expected_attempt_id
+    return repository.persist_session(**kwargs)
 
 
 def record_source_read_record(repository: MagiTaskRepository, task_id: UUID,
                               execution: dict, pending_request: dict,
                               expected_attempt_id: UUID | None = None) -> tuple[str, str]:
-    return repository.record_source_read(
-        task_id=task_id, execution=execution,
-        pending_request=pending_request,
-        expected_attempt_id=expected_attempt_id,
-    )
+    kwargs = {
+        "task_id": task_id, "execution": execution,
+        "pending_request": pending_request,
+    }
+    if expected_attempt_id is not None:
+        kwargs["expected_attempt_id"] = expected_attempt_id
+    return repository.record_source_read(**kwargs)
 
 
 def record_pkb_read_record(repository: MagiTaskRepository, task_id: UUID,
@@ -108,5 +112,7 @@ def record_pkb_read_record(repository: MagiTaskRepository, task_id: UUID,
 def fail_task_record(repository: MagiTaskRepository, task_id: UUID,
                      error_type: str,
                      expected_attempt_id: UUID | None = None) -> None:
-    repository.fail_task(task_id=task_id, error=error_type,
-                         expected_attempt_id=expected_attempt_id)
+    kwargs = {"task_id": task_id, "error": error_type}
+    if expected_attempt_id is not None:
+        kwargs["expected_attempt_id"] = expected_attempt_id
+    repository.fail_task(**kwargs)
