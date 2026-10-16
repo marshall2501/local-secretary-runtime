@@ -287,7 +287,7 @@ def main(project: str, container: str) -> None:
             member_specs=members, decision_strategy="llm",
             policy_snapshot=policy,
         )
-        claim_start(
+        goal_attempt = claim_start(
             db, task_id=goal_id, request="synthetic custom Goal",
             member_specs=members,
         )
@@ -308,7 +308,23 @@ def main(project: str, container: str) -> None:
             "reason": "synthetic_goal_assessed",
         },
     }
-    projection = repository.persist_session(task_id=goal_id, session=proposed_goal)
+    try:
+        repository.persist_session(
+            task_id=goal_id, session=proposed_goal,
+            expected_attempt_id=uuid4(),
+        )
+    except ValueError as exc:
+        assert str(exc) == "task_attempt_mismatch"
+    else:
+        raise AssertionError("stale_goal_worker_wrote_completion")
+    repository.fail_task(
+        task_id=goal_id, error="stale error", expected_attempt_id=uuid4(),
+    )
+    assert new_commands().operation(goal_id)["task_status"] == "running"
+    projection = repository.persist_session(
+        task_id=goal_id, session=proposed_goal,
+        expected_attempt_id=goal_attempt,
+    )
     assert projection["task_status"] == "completed"
     goal_trace = new_commands().operation(goal_id)
     assert goal_trace["task_status"] == "completed"
@@ -356,6 +372,7 @@ def main(project: str, container: str) -> None:
         assert terminal_after["task_status"] == terminal_status
         assert terminal_after["stop_requested"] is None
 
+    print("PASS: disposable PG worker attempt fences stale completion and failure")
     print("PASS: disposable PG Task Goal interpretation, revision and read-only query")
     print("PASS: disposable PG late MAGI completion/error cannot overwrite acknowledged Stop")
     print("PASS: disposable PG TaskCommands new-instance stop, query, concurrent idempotence and terminal guards")
