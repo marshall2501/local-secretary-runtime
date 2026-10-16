@@ -89,3 +89,11 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - `goal_loop.py::goal_task_projection` は保存済み旧Task用の互換関数とし、確定状態の正本は `ritsuko/core/magi_bridge.py::task_projection` に統合。根拠IDはRITSUKO Task内の検証済み `pkb/web/finance` 観測のみ認める。未実行・読取失敗・他TaskのID申告だけで完了としない。Web検索Providerの引用報告と本文確認も区別する。
 - `tests/test_goal_source_neutral.py` はfake Task/LLM/Policy/Sourceで、Source選択、同じTask IDのread→記録→評価→完了、未取得・偽Resultでの拒否を検証。既存 `test_goal_loop.py` および `test_magi_core_bridge.py` とともにCIへ追加。
 - **未受入**: 実モデルでのPKB/Finance Goal達成、1〜3席のLLM判断実装、操作/Operationの永続化と再起動復旧、本人用Vue Task操作、複数Sourceや外部Actionによる実際のGoal完走。通常8097はread-only/POST503。
+
+## Stage B-3a: 保存済みTaskのOperation照会フォールバック
+
+- `TaskCommands.operation(task_id)` は実行中／直近完了Jobのメモリ記録があれば従来のOperationを返す。メモリから消えていても、既存Query Serviceの`trace(task_id)`で**保存済みTaskの状態だけ**を確認し、404にはしない。
+- DB fallback応答では `status: operation_not_in_process`、`source: persisted_task`、`task_status` を返す。DB Taskが `running` の場合は `execution_reconciliation_required: true`。これは**TaskがDBに存在すること**であり、Worker稼働・再開可能・処理成功の保証ではない。停止要求も不明なので`stop_requested: null`とする。Task本文・MAGI Session等はレスポンスへ返さない。
+- もとのTaskがDBに存在しない（202後DB作成前にAPI停止など）場合は引き続き404。HTTP 202はなお**プロセス内受付のみ**。永続受付・Worker/PC再起動後の安全な再実行は未実装。
+- `tests/test_vue_task_commands.py` でDBに存在する `running/waiting_external/paused/completed/failed` とWorker不在・stop不可、`tests/test_vue_daily_api.py` で再生成されたAPIと404をfake Queriesで検証。
+- 通常8097は実Task Command未注入の`read_only`でPOST 503。今回の変更はデフォルト8097やNiceGUI/DBの運用を変更しない。
