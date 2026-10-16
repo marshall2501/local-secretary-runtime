@@ -100,9 +100,15 @@ class TaskCommands:
                 self._operations[task_id]["status"] = "interrupted"
                 raise
             except Exception as exc:
-                # 入力文や認証情報を受付状況へ残さず、原因の型だけを保持する。
-                self._operations[task_id]["status"] = "execution_failed"
-                self._operations[task_id]["error_type"] = type(exc).__name__
+                # pending Task was paused by Stop before the claim: this is
+                # a successful refusal to execute, not an execution failure.
+                if (stop_event.is_set() and isinstance(exc, ValueError)
+                        and str(exc) == "task_start_not_pending"):
+                    self._operations[task_id]["status"] = "interrupted"
+                else:
+                    # 例外本文に混じる入力／Credentialは表示しない。
+                    self._operations[task_id]["status"] = "execution_failed"
+                    self._operations[task_id]["error_type"] = type(exc).__name__
             else:
                 # Runnerが返ったことのみ表す。Task completedとは別の事実。
                 self._operations[task_id]["status"] = "execution_finished"
