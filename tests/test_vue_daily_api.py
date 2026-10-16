@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -289,6 +290,36 @@ class VueDailyCommandApiTests(unittest.TestCase):
             json={"decision": "arbitrary"},
         ).status_code, 422)
         self.assertEqual(self.commands.calls, [])
+
+
+
+class VueTaskInputLayoutTests(unittest.TestCase):
+    """入力欄の消失と長い既存回答の下への埋没を防ぐ静的UI回帰。"""
+
+    def test_new_task_form_is_visible_before_saved_answer(self):
+        """実Task入力の位置・条件・8097→8099案内をソースで確認する。"""
+        frontend = (
+            Path(__file__).resolve().parents[1]
+            / "interfaces/vue_daily/frontend/src/features/ritsuko"
+        )
+        page = (frontend / "RitsukoPage.vue").read_text(encoding="utf-8")
+        panel = (
+            frontend / "components/TaskCommandPanel.vue"
+        ).read_text(encoding="utf-8")
+
+        self.assertLess(page.index("<TaskCommandPanel"), page.index("<CurrentTask"))
+        self.assertIn('<textarea id="task-request"', panel)
+        self.assertIn('v-model="request"', panel)
+        self.assertIn(':disabled="busy || !commandsEnabled"', panel)
+        self.assertIn('href="http://127.0.0.1:8099/ui/"', panel)
+        self.assertIn('@submit.prevent="emit(\'start\')"', panel)
+        # ユーザーが確認するまで「実Task API有効」の場合以外は送信不可。
+        self.assertIn(':disabled="busy || !commandsEnabled || !request.trim()"', panel)
+        # かつ入力フォーム自体を commandsEnabled の v-if で隠さない。
+        form_start = panel.index('<form class="command-form"')
+        form_end = panel.index("</form>", form_start)
+        self.assertNotIn('<template v-if="commandsEnabled">', panel[:form_start])
+        self.assertIn('<textarea id="task-request"', panel[form_start:form_end])
 
 
 if __name__ == "__main__":
