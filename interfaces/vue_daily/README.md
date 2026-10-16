@@ -53,3 +53,10 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - `review` の `remember` は未対応。Memory Intakeを別経路で正しく確定する接続が必要。MAGI実行の停止も次の境界で反映する協調停止であり、即時停止の保証ではない。
 - **B-2未実装**: NiceGUI側の設定・権限Snapshot、MAGIモデル、Web/PKB/Financeの既存Source実行、Task DB Portを、GUI非依存のComposition Rootで一式bindする。これができるまで、8097を実Task write入口として有効化しない。
 - **B-3未実装**: 実DBに対するTask受付・回答・停止・ReviewのサブPC実機確認、障害時のDB状態、Vueの実操作画面接続。APIプロセス再起動時の実行継続は確認・保証していない。 
+
+## 2026-10-16 Stage B-2 — 画面非依存の実MAGI/Source/DB組立（隔離検証まで）
+
+- `ritsuko/application/pkb_observation.py` は旧NiceGUIの対象PC/部品解決と公開可能な技術識別子抽出を共通化し、`ritsuko/application/source_execution.py` は権限付きWeb調査／家計読取を共通化する。旧NiceGUIの `_execute_magi_pkb_request`／`_execute_magi_source_request` はこの共通処理へ委譲する。
+- `bootstrap/magi_task_runtime.py` の `MagiTaskBindings`／`build_magi_task_commands` は、既存 `StateDrivenTaskApplication` と Task/Action/Result Repository、MAGI席設定、Task開始時のPolicy Snapshot、PKB/Web/家計のSourceを画面と独立して結合する。`build_daily_magi_task_commands()` は日常Runtimeの既存DB・Service Connection経路を使うが、**通常8097では呼び出していない**。
+- `tests/test_magi_task_runtime_composition.py` はfake DBとfake MAGIを使い、Task開始→本人回答→回答のみReviewとPolicy Snapshotの再利用を検査。`tests/test_magi_shared_source.py` は曖昧なPKB対象で広い検索に拡張しないこと、権限のないWeb検索を実行しないこと、Web fallback時にも同じ公開検索文を使うことを確認。既存NiceGUIのPKB/Web回帰も維持する。
+- **未受入**: 本人のサブPC実DBと実MAGI/Source接続での受付・回答・停止・Review、MAGI設定/権限Snapshotの実機照合、Goal判断方式の画面選択同等性、JobのAPI process再起動後復旧。これらを確認するまで通常8097から実Taskのwriteを有効化しない。Vue画面の操作UIも未接続。
