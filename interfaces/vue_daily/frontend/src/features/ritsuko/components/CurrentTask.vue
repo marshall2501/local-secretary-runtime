@@ -25,17 +25,47 @@ defineProps<{ task: TaskRecord | null; loading: boolean }>()
       </div>
       <div v-if="task.goal_definition" class="task-field">
         <span class="field-name">Goal</span>
-        <p v-if="task.goal_definition.resolution === 'proposed'">
-          {{ task.goal_definition.interpreted_goal }}
-          <span class="muted small">（MAGIの解釈候補 / v{{ task.goal_definition.version }}。本人確定ではありません）</span>
-        </p>
+        <div v-if="task.goal_definition.resolution === 'proposed'">
+          <p>{{ task.goal_definition.interpreted_goal || '解釈候補の本文が保存されていません。' }}</p>
+          <p class="muted small">MAGIの解釈候補 / v{{ task.goal_definition.version }}。本人確定ではありません。</p>
+          <ul v-if="task.goal_definition.criteria?.length" class="goal-criteria">
+            <li v-for="(criterion, index) in task.goal_definition.criteria" :key="index">{{ criterion }}</li>
+          </ul>
+        </div>
+        <div v-else-if="task.goal_definition.resolution === 'confirmed'">
+          <p>{{ task.goal_definition.interpreted_goal || '確定済みGoal（本文は保存されていません）' }}</p>
+          <p class="muted small">Goal確定済み / v{{ task.goal_definition.version }}。Task完了とは別です。</p>
+          <ul v-if="task.goal_definition.criteria?.length" class="goal-criteria">
+            <li v-for="(criterion, index) in task.goal_definition.criteria" :key="index">{{ criterion }}</li>
+          </ul>
+        </div>
         <p v-else class="muted">依頼固有の達成条件はまだ未確定です。</p>
       </div>
       <div class="task-field"><span class="field-name">MAGI</span>
-        <p>{{ task.magi_session?.status ?? '保存済み候補なし' }}</p>
-        <span class="muted small">MAGI候補だけではTask完了になりません。</span>
+        <div>
+          <p>{{ task.magi_session?.status ?? '保存済み候補なし' }}</p>
+          <p v-if="task.magi_session?.next_step" class="muted small">次の処理: {{ task.magi_session.next_step }}</p>
+          <p class="muted small">MAGI候補だけではTask完了になりません。</p>
+        </div>
       </div>
-      <div v-if="task.question" class="question">
+      <div v-if="task.phase" class="task-field">
+        <span class="field-name">処理段階</span><p>{{ task.phase }}</p>
+      </div>
+      <div v-if="task.status === 'running' && task.stop_requested" class="task-field">
+        <span class="field-name">停止</span>
+        <p>停止要求を受付済み。Workerの停止完了は未確認です。</p>
+      </div>
+      <div v-if="task.status === 'waiting_external' && task.magi_session?.status === 'waiting_user'"
+        class="question">
+        <strong>次の操作：本人回答</strong>
+        <p>{{ task.question || task.magi_session.user_question || '回答入力欄から追加情報を送信してください。' }}</p>
+      </div>
+      <div v-else-if="task.status === 'waiting_external' && task.magi_session?.status === 'proposal_ready'"
+        class="question">
+        <strong>次の操作：回答候補の確認</strong>
+        <p>このTaskの回答候補を確認し、上のReview操作から完了判断を依頼してください。</p>
+      </div>
+      <div v-if="task.question && !(task.status === 'waiting_external' && task.magi_session?.status === 'waiting_user')" class="question">
         <strong>本人への質問（保存済み）</strong><p>{{ task.question }}</p>
       </div>
       <div v-if="task.message" class="result">
