@@ -202,6 +202,10 @@ def request_stop(db, *, task_id: UUID) -> str:
         if status not in {"pending", "running"}:
             raise ValueError("task_not_stoppable")
         checkpoint = checkpoint or {}
+        # 同じrunning Taskへの再停止は二重監査を作らない。
+        # FOR UPDATE内で判定するため、別APIインスタンスからの競合にも一貫する。
+        if status == "running" and checkpoint.get("stop_requested") is True:
+            return "running"
         checkpoint["stop_requested"] = True
         if status == "pending":
             checkpoint["phase"] = "paused"
