@@ -11,7 +11,10 @@ $testEnvFile = Join-Path $root ('.env.postgres.' + $project + '.tmp')
 $probe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
 try { $probe.Start(); $testPort = ([Net.IPEndPoint]$probe.LocalEndpoint).Port } finally { $probe.Stop() }
 [IO.File]::WriteAllText($testEnvFile, "LSA_DB_PORT=$testPort`n", (New-Object Text.UTF8Encoding($false)))
+$previousTestEnvFile = [Environment]::GetEnvironmentVariable('LSA_TEST_DB_ENV_FILE', 'Process')
+$previousDbPort = [Environment]::GetEnvironmentVariable('LSA_DB_PORT', 'Process')
 $env:LSA_TEST_DB_ENV_FILE = $testEnvFile
+$env:LSA_DB_PORT = [string]$testPort
 $compose = @('compose','--project-name',$project,'--project-directory',(Join-Path $root 'docker'),'--env-file',
     $testEnvFile,'-f',(Join-Path $root 'docker/compose.postgres.yml'))
 $backup = Join-Path $root "backups/$project.dump"
@@ -97,6 +100,7 @@ try {
     Invoke-TestDocker ($compose + @('down','--volumes'))
     if ((Snapshot-Others) -ne $before) { throw 'Other container state changed during test; investigate.' }
     Remove-Item -LiteralPath $testEnvFile -ErrorAction SilentlyContinue
-    Remove-Item Env:LSA_TEST_DB_ENV_FILE -ErrorAction SilentlyContinue
+    [Environment]::SetEnvironmentVariable('LSA_TEST_DB_ENV_FILE', $previousTestEnvFile, 'Process')
+    [Environment]::SetEnvironmentVariable('LSA_DB_PORT', $previousDbPort, 'Process')
     Write-Host 'PASS: other container IDs, status, start times and restart counts unchanged.'
 }
