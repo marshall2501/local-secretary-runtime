@@ -290,7 +290,21 @@ class TaskCommands:
         """実行中Jobへ停止Eventを送る。Taskが停止した保証は返さない。"""
         job = self._jobs.get(task_id)
         if job is None or job.done():
-            raise TaskCommandConflict("no_running_operation")
+            # A persisted Task can survive API restart without a local worker.
+            # Persist the stop request without reporting execution as stopped.
+            if self._request_stop is None:
+                raise TaskCommandConflict("no_running_operation")
+            try:
+                db_status = self._request_stop(task_id=task_id)
+            except ValueError as exc:
+                raise TaskCommandConflict("task_not_stoppable") from exc
+            return {
+                "task_id": str(task_id), "kind": "stop",
+                "status": "operation_not_in_process",
+                "source": "persisted_task", "task_status": db_status,
+                "stop_requested": True, "error_type": None,
+                "execution_reconciliation_required": db_status == "running",
+            }
         if self._request_stop is not None:
             try:
                 # Durable intent is recorded before the in-process Event is set.
