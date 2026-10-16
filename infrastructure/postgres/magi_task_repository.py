@@ -429,6 +429,47 @@ def abort_user_resume(
         )
 
 
+
+def _acknowledge_stop(cur, *, task_id: UUID, checkpoint: dict) -> dict:
+    """DBに先着したStopを確定し、遅れて届いたMAGI結果を完了扱いしない。
+
+    Task行のFOR UPDATE保持中だけ呼び出す。同じTaskのStopと完了の順序は
+    この行ロックで決まる。操作そのもののResult/Auditは別途保持する。
+    """
+    checkpoint.update({
+        "phase": "paused",
+        "reason": "user_requested_stop",
+        "question": None,
+        "message": None,
+        "final_core_decision": {
+            "next_step": "user_requested_stop",
+            "reason": "user_requested_stop",
+            "task_status": "paused",
+        },
+    })
+    cur.execute(
+        """UPDATE secretary.tasks
+           SET status='paused', checkpoint=%s, completed_at=NULL
+           WHERE id=%s""",
+        (Jsonb(checkpoint), task_id),
+    )
+    cur.execute(
+        """INSERT INTO secretary.audit_events
+           (actor, event_type, task_id, object_type, object_id, details)
+           VALUES ('ritsuko_core', 'core.magi.stop_acknowledged',
+                   %s, 'task', %s, '{}'::jsonb)""",
+        (task_id, task_id),
+    )
+    return {
+        "task_status": "paused",
+        "phase": "paused",
+        "next_step": "user_requested_stop",
+        "message": None,
+        "question": None,
+        "reason": "user_requested_stop",
+    }
+
+
 def persist_session(
     db,
     *,
@@ -452,13 +493,18 @@ def persist_session(
     }
     with db.transaction(), db.cursor() as cur:
         cur.execute(
-            "SELECT checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
+            "SELECT status, checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
             (task_id,),
         )
         row = cur.fetchone()
         if row is None:
             raise ValueError("unknown_task")
-        checkpoint = row[0] or {}
+        status, checkpoint = row[0], row[1] or {}
+        if status != "running":
+            # 既にpaused/completed/failedとなったTaskへ旧Workerが書き戻さない。
+            raise ValueError("task_not_running")
+        if checkpoint.get("stop_requested") is True:
+            return _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
         checkpoint.update(checkpoint_patch)
         user_resume = checkpoint.get("user_resume")
         if isinstance(user_resume, dict) and user_resume.get("status") == "processing":
@@ -1157,13 +1203,19 @@ def fail_task(db, *, task_id: UUID, error: str) -> None:
     """Fail one persisted MAGI Task without storing secret-bearing exception detail."""
     with db.transaction(), db.cursor() as cur:
         cur.execute(
-            "SELECT checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
+            "SELECT status, checkpoint FROM secretary.tasks WHERE id=%s FOR UPDATE",
             (task_id,),
         )
         row = cur.fetchone()
         if row is None:
             return
-        checkpoint = row[0] or {}
+        status, checkpoint = row[0], row[1] or {}
+        if status not in {"running", "pending"}:
+            # 後着の失敗報告は既に確定したTask状態を変更しない。
+            return
+        if checkpoint.get("stop_requested") is True:
+            _acknowledge_stop(cur, task_id=task_id, checkpoint=checkpoint)
+            return
         checkpoint.update({
             "phase": "failed",
             "reason": "magi_observation_loop_failed",
