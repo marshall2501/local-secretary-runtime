@@ -1,9 +1,9 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
 /**
- * RITSUKOへ直接依存しない秘書AI UIの比較用画面。
- * 合成Taskだけを扱うローカル試作のため、ログイン機構は持たない。
- * Task開始・回答・停止はAPIに依頼し、確定状態のみ再照会する。
+ * ログインなしで架空Taskの受付・回答・停止を試すVue画面。
+ * 本番DBや実LLMとは接続しない。成功・完了表示は隔離fixtureの結果に限る。
+ * Task操作はAPIへ送り、応答後の状態は架空Taskストアから再取得する。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { callApi, type TaskView } from './api'
@@ -29,14 +29,14 @@ const statusText: Record<string, string> = {
 const canAnswer = computed(() => selected.value?.status === 'waiting_user')
 const canStop = computed(() => ['queued', 'running', 'waiting_user'].includes(selected.value?.status ?? ''))
 
-/** 選択TaskをURLハッシュに残し、F5後の再取得対象を保持する。 */
+/** F5しても同じ架空Taskを選べるよう、選択IDをURLハッシュに残す。 */
 function selectTask(task: TaskView) {
   selected.value = task
   window.location.hash = 'task=' + encodeURIComponent(task.task_id)
   problem.value = ''
 }
 
-/** 認証済みセッションから一覧と選択Taskを再読込する。 */
+/** ログイン不要の隔離APIから、一覧と選択した架空Taskの状態を取得する。 */
 async function refresh() {
   const response = await callApi<{ items: TaskView[] }>('/api/lab/tasks')
   tasks.value = response.items
@@ -51,7 +51,7 @@ async function refresh() {
   connected.value = true
 }
 
-/** 合成Taskを作成し、完了待ちせず状態照会に切り替える。 */
+/** 架空Taskの受付応答だけ待ち、結果は後続の状態照会で確認する。 */
 async function startTask() {
   if (!requestText.value.trim()) return
   busy.value = true
@@ -92,7 +92,7 @@ async function answerTask() {
   }
 }
 
-/** UIは停止要求だけを送る。結果は次回のTask照会で確認する。 */
+/** 停止要求を隔離APIに送り、停止確定と混同しないようTaskを再照会する。 */
 async function stopTask() {
   if (!selected.value) return
   busy.value = true
@@ -110,7 +110,7 @@ async function stopTask() {
   }
 }
 
-/** 定期照会し、API切断時も旧画面を消さない。 */
+/** API切断時も最後に取得した表示を残し、次回の定期照会で接続を試す。 */
 async function poll() {
   if (busy.value) return
   try {
