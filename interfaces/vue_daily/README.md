@@ -1,6 +1,6 @@
 # Vue日常UI — 保存済みRITSUKO Task読取プレビュー
 
-2026-10-15 時点。Vue 3 / TypeScript / Vite + FastAPIを使い、秘書AIの画面と実行機能を分離していく途中の実装です。
+2026-10-16 時点。Vue 3 / TypeScript / Vite + FastAPIを使い、秘書AIの画面と実行機能を分離していく途中の実装です。
 
 ## 状態・安全境界
 
@@ -36,3 +36,12 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 ## 今後
 
 実Task開始・再開・停止・ReviewのAPIは、既存NiceGUI画面内に残るRunner/状態/PortをTransport非依存のApplication・実行管理へ移し、DB Task/Policyの不変条件を共有してから追加します。Vueに独立のTaskエンジンやDBマスタを作りません。
+
+## 2026-10-16 Stage A — NiceGUIを基準にしたVueの土台（実機未受入）
+
+- `frontend/src/App.vue` は薄いroot。`app/SecretaryLayout.vue` が共通上部ナビ、`features/ritsuko/RitsukoPage.vue` がRITSUKOの中央領域と**右側Task一覧**を合成する。
+- `features/ritsuko/components/` の `CurrentTask`、`TaskSidebar`、`TaskActivity` は機能別表示に限定。`useTasks.ts` がTask選択・URLハッシュからの復元・3秒ごとのAPI再照会・接続失敗表示を管理。`types.ts` はRITSUKO確定TaskとMAGI候補を区別し、`api.ts` はTask照会だけを定義する。
+- `shared/api/http.ts` は共通HTTP read adapter、`shared/navigation.ts` は共通ナビ契約、`shared/styles/base.css` は画面枠と狭い画面向け表示。新規の業務ルールやTask永続状態はVueへ移していない。
+- **未移行のTOP／PKB／家計／設定等**は上部ナビから既存NiceGUI `127.0.0.1:8093` の各画面へ移動できる。空のVue画面や動作しない操作ボタンを完成機能として設置しない。
+- 実Task読取API（8097）と既存NiceGUI（8093）のソース・通常ランチャー・本番Task DBは変更しない。新規依頼・本人回答・停止はNiceGUIで行い、Vue側は読取専用のまま。
+- 以前の `/ui/#task=<UUID>` を維持し、URLハッシュを使ったF5復元、Task選択、ブラウザ戻る・進むを考慮する。**CI build成功と実ブラウザでの同等性は別**。Stage AのサブPC実画面とDB Task再取得は更新後のビルドで確認する。
