@@ -32,6 +32,7 @@ class TaskStartBody(BaseModel):
     request: str = Field(min_length=1, max_length=4000)
     # Task開始時に方式を明示し、API側の暗黙standard選択を避ける。
     decision_strategy: Literal["standard", "llm"]
+    task_id: UUID | None = None  # 通信途絶後の同一依頼再送に使うUUID
 
 
 class TaskAnswerBody(BaseModel):
@@ -166,6 +167,7 @@ def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
         service = require_commands()
         return await accept_command(service.start(
             body.request, decision_strategy=body.decision_strategy,
+            task_id=body.task_id,
         ))
 
     @app.post("/api/v1/ritsuko/tasks/{task_id}/answer", status_code=202)
