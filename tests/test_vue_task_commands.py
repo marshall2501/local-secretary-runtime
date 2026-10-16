@@ -158,6 +158,38 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TaskCommandConflict, "no_running_operation"):
             commands.stop(queries.uid)
 
+    async def test_stop_persisted_task_after_restart(self):
+        """DBに残るTaskへ停止要求を記録し、Worker停止完了とは表示しない。"""
+        queries = FakeQueries()
+        calls = []
+
+        def request_stop(*, task_id):
+            calls.append(task_id)
+            return "paused"
+
+        commands = TaskCommands(
+            FakeApplication(), queries, lambda: [],
+            request_stop=request_stop,
+        )
+        result = commands.stop(queries.uid)
+        self.assertEqual(calls, [queries.uid])
+        self.assertEqual(result["status"], "operation_not_in_process")
+        self.assertEqual(result["source"], "persisted_task")
+        self.assertEqual(result["task_status"], "paused")
+        self.assertTrue(result["stop_requested"])
+        self.assertFalse(result["execution_reconciliation_required"])
+
+    async def test_stop_persisted_running_requires_reconciliation(self):
+        """DBのrunningを停止完了や生存Workerの証拠として扱わない。"""
+        queries = FakeQueries()
+        commands = TaskCommands(
+            FakeApplication(), queries, lambda: [],
+            request_stop=lambda *, task_id: "running",
+        )
+        result = commands.stop(queries.uid)
+        self.assertTrue(result["execution_reconciliation_required"])
+        self.assertEqual(result["status"], "operation_not_in_process")
+
     async def test_answer_review_guard_and_missing_id(self):
         """回答・Reviewを保存済みTaskの状態で絞り、不明IDと未準備記憶反映を拒否する。"""
         queries = FakeQueries()
