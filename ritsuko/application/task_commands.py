@@ -51,6 +51,7 @@ class TaskCommands:
         reserve_start: Callable | None = None,
         pending_starts_loader: Callable | None = None,
         policy_snapshot_loader: Callable | None = None,
+        request_stop: Callable | None = None,
     ) -> None:
         self._application = application
         self._queries = queries
@@ -59,6 +60,7 @@ class TaskCommands:
         self._reserve_start = reserve_start
         self._pending_starts_loader = pending_starts_loader
         self._policy_snapshot_loader = policy_snapshot_loader
+        self._request_stop = request_stop
         self._max_retained = max(1, int(max_retained))
         # 実行中Jobと停止EventはAPIプロセス内だけの一時情報。
         self._jobs: dict[UUID, asyncio.Task] = {}
@@ -270,6 +272,13 @@ class TaskCommands:
         job = self._jobs.get(task_id)
         if job is None or job.done():
             raise TaskCommandConflict("no_running_operation")
+        if self._request_stop is not None:
+            try:
+                # Durable intent is recorded before the in-process Event is set.
+                db_status = self._request_stop(task_id=task_id)
+            except ValueError as exc:
+                raise TaskCommandConflict("task_not_stoppable") from exc
+            self._operations[task_id]["task_status"] = db_status
         self._stops[task_id].set()
         self._operations[task_id]["stop_requested"] = True
         return self.operation(task_id)
