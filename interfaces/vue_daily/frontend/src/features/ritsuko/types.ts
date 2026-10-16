@@ -1,25 +1,28 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** RITSUKO確定TaskとMAGI内部候補を明確に分ける表示用API型。 */
+/** DBに保存したTask、MAGI途中経過、Action/Resultを混同しない表示用の型。 */
 /** Task一覧の絞り込み。サーバー側Queryの範囲指定と一致させる。 */
 export type TaskListView = 'recent' | 'open' | 'completed'
-/** 右側Task一覧のための保存済みTask最小表示情報。 */
+/** 右側Task一覧の表示項目。statusはRITSUKOが保存したTaskの状態。 */
 export interface TaskSummary {
   id: string
   request: string
+  /** RITSUKOが確定した状態。MAGIの回答候補の状態ではない。 */
   status: string
+  /** 同じTask IDの保存更新順序を示す改訂番号。 */
   revision: number
   core_slice?: string
   updated_at?: string
 }
-/** 現在Task欄で表示する確定状態とMAGI進捗の保存情報。 */
+/** 選択Taskの詳細。MAGI情報が存在してもTaskの完了を意味しない。 */
 export interface TaskRecord extends TaskSummary {
   message?: string | null
   question?: string | null
   phase?: string
+  /** MAGI sessionに保存された候補・次の処理。Task.statusとは独立。 */
   magi_session?: { status?: string; next_step?: string } | null
 }
-/** Actionの状態とResultの識別子を別々に保持し、未完了を成功扱いしない。 */
+/** DBに保存されたActionとResultの参照情報。Resultが未記録の場合もある。 */
 export interface TaskAction {
   action_id?: string
   tool?: string
@@ -29,7 +32,7 @@ export interface TaskAction {
   outcome?: string | null
   summary?: string | null
 }
-/** 選択中Taskの正本と監査用履歴を一緒に画面へ渡す。 */
+/** Task詳細APIの応答。現在の画面はAction履歴のみ展開表示する。 */
 export interface TaskTrace {
   task: TaskRecord
   actions: TaskAction[]
@@ -45,7 +48,7 @@ const labels: Record<string, string> = {
 export function taskStatusLabel(status: string): string {
   return labels[status] ?? status
 }
-/** 右一覧の分類に使用する。停止中は再開可能なため終了済みに含めない。 */
+/** 一覧の「終了済み」分類に使う。停止中は終了状態と決めつけない。 */
 export function isTaskClosed(status: string): boolean {
   return ['completed', 'failed', 'cancelled'].includes(status)
 }
