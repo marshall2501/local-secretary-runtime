@@ -9,6 +9,9 @@ from infrastructure.postgres.magi_task_repository import (
     claim_proposal_review,
     claim_user_resume,
     create_task,
+    reserve_start,
+    claim_start,
+    list_pending_starts,
     finalize_proposal_review,
     persist_session,
     prepare_memory_intake,
@@ -43,6 +46,12 @@ class _Cursor(_Context):
         if not self.fetches:
             return None
         return self.fetches.pop(0)
+
+    def fetchall(self):
+        """列挙APIの最小cursorシミュレーション。"""
+        result = list(self.fetches)
+        self.fetches.clear()
+        return result
 
 
 class _DB:
@@ -117,6 +126,73 @@ class MagiTaskStoreTests(unittest.TestCase):
         self.assertFalse(scope["files_read"])
         self.assertFalse(scope["external_actions"])
         self.assertFalse(scope["cloud_private_context"])
+
+    def test_pending_start_reserves_intent_and_claims_once(self):
+        """Taskをpendingとして保存し、同一Intentのclaimのみを許可する。"""
+        members = [{"name": "MELCHIOR", "enabled": True}]
+        policy = {"profile_id": "test-profile", "revision": 1, "grants": []}
+        db = _DB()
+        reserve_start(
+            db, task_id=TASK_ID, request="現在の情報を教えて",
+            member_specs=members, decision_strategy="llm",
+            policy_snapshot=policy,
+        )
+        ins = next(call for call in db.cur.calls
+                   if "INSERT INTO secretary.tasks" in call[0])
+        self.assertIn("'pending'", ins[0])
+        checkpoint = ins[1][-1].obj
+        self.assertEqual(checkpoint["start_intent"]["decision_strategy"], "llm")
+        self.assertEqual(checkpoint["start_intent"]["policy_snapshot"], policy)
+        self.assertEqual(checkpoint["member_specs"], members)
+        self.assertIsNone(checkpoint["magi_session"])
+        self.assertTrue(any("task_accepted" in sql for sql, _ in db.cur.calls))
+
+        db2 = _DB(fetches=[(
+            "現在の情報を教えて", "pending", checkpoint,
+        )])
+        claim_start(
+            db2, task_id=TASK_ID, request="現在の情報を教えて",
+            member_specs=members,
+        )
+        update = next(call for call in db2.cur.calls
+                      if "UPDATE secretary.tasks" in call[0])
+        self.assertIn("status='running'", update[0])
+        self.assertEqual(update[1][0].obj["start_intent"]["state"], "claimed")
+        self.assertIn("FOR UPDATE", db2.cur.calls[0][0])
+
+        db3 = _DB(fetches=[(
+            "現在の情報を教えて", "running", checkpoint,
+        )])
+        with self.assertRaisesRegex(ValueError, "task_start_not_pending"):
+            claim_start(db3, task_id=TASK_ID, request="現在の情報を教えて",
+                        member_specs=members)
+        self.assertFalse(any("UPDATE secretary.tasks" in sql for sql, _ in db3.cur.calls))
+
+    def test_pending_start_rejects_mismatched_intent_and_reads_only_pending(self):
+        """受理時のメンバー設定と本文を書換えたclaimは成功させない。"""
+        checkpoint = {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "member_specs": [{"name": "MELCHIOR", "enabled": True}],
+            "start_intent": {
+                "state": "pending", "decision_strategy": "standard",
+                "policy_snapshot": None,
+            },
+        }
+        db = _DB(fetches=[("本来の依頼", "pending", checkpoint)])
+        with self.assertRaisesRegex(ValueError, "pending_task_intent_mismatch"):
+            claim_start(
+                db, task_id=TASK_ID, request="別の依頼",
+                member_specs=checkpoint["member_specs"],
+            )
+        self.assertFalse(any("UPDATE secretary.tasks" in sql for sql, _ in db.cur.calls))
+
+        pending = _DB(fetches=[(TASK_ID, "本来の依頼", checkpoint)])
+        rows = list_pending_starts(pending, limit=1)
+        self.assertEqual(rows[0]["task_id"], TASK_ID)
+        self.assertEqual(rows[0]["decision_strategy"], "standard")
+        self.assertEqual(rows[0]["request"], "本来の依頼")
+        self.assertIn("status='pending'", pending.cur.calls[0][0])
+        self.assertEqual(rows[0]["member_specs"], checkpoint["member_specs"])
 
     def test_claim_user_resume_requires_waiting_magi_task_and_preserves_snapshot(self):
         saved_session = {
