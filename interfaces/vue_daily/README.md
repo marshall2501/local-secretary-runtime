@@ -73,3 +73,11 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - 有効MAGIの総数と3席の `ENABLED`／`DISABLED`／`NOT_ASSIGNED`、LAN Policyの有無、Task一覧の読取可否だけを出す。Secret値や実Task本文を表示しない。Task書込・MAGI/Source実行を行わない。
 - このスクリプトは**実DBの設定読取のみ**。Model endpoint・接続資格情報の有効性やTask作成/回答/Review/Stopの受入ではない。通常Vue 8097は依然 `read_only`、POSTは503。
 - 初回の実機読取は本人PowerShellの一時プローブで `Composition: OK` / `MAGI active: 1` / `LAN policy: SET` / `Task DB read: OK` を確認済み。**この新しいファイルの実機実行は未実施**、fake隔離CIで検証済み。3席のうち1席有効が意図どおりかは別確認。
+
+## 2026-10-16 P1 Goal判断の既存Task経路への統合 — 第1段階
+
+- `POST /api/v1/ritsuko/tasks` のリクエストは、`request`に加えて`decision_strategy: "standard" | "llm"`の**明示指定を必須**とする。省略・未知の文字列は422。既存NiceGUIの初期判断方式やローカルUI PreferenceとAPI既定が食い違うのを避けるため、ここで暗黙の方式を選ばない。**通常8097は今もread_onlyでPOST 503**（正しいBodyの場合）。
+- `TaskCommands.start`は有効MAGI席設定をスナップショットし、既存Applicationの `dialogue_starter` Portから選択方式を共通Runnerへ渡す。`bootstrap/magi_task_runtime.py`のRunnerは指定されたStarterを利用し、**2個目のGoal実行ループは作らない**。
+- 現行MAGIのLLM判断は試験上有効1席限定。2席以上を選択してもDB割当を自動変更せず409として拒否。1席・3席の自由な選択とLLM判断の組合せはP1の後続改修で扱う。
+- `tests/test_magi_task_runtime_composition.py`で判断方式・同一Task ID・保存・本人回答とReview後の維持、`tests/test_vue_task_commands.py`で無断席数変更拒否、`tests/test_vue_daily_api.py`で方式必須／未知形式422・HTTP配送を隔離確認。Task状態や根拠評価を2系統へ複製しない設計の最初の接続修正に相当する。
+- **未完了**: `goal_loop.py`のWeb限定Schema・Result判定、`magi_bridge.py`のGoal専用Task投影、`observation_loop.py`のGoal専用Result処理、API再起動後のJob/Stop・復旧、実MAGIの多席Goal評価。これらを受入済みとはしない。既存8093・8097の稼働切替や設定変更はしない。
