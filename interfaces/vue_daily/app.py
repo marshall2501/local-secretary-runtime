@@ -1,8 +1,8 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-generated
-"""Vue日常UIへ実DB-backed Taskの読取を提供する独立FastAPI入口。
+"""Vue日常UIから保存済みRITSUKO Taskを参照するためのFastAPI入口。
 
-本APIはTaskの業務判断や保存をしない。既存CoreTaskQueryServiceを再利用し、
+Task一覧・履歴は既存Query Serviceに委譲し、この入口ではTaskを変更しない。
 既存Secretary REST /tasks（別のTask作成契約）には手を加えない。
 新Vue画面・Task write接続は後続段階で行う。
 """
@@ -22,7 +22,7 @@ TaskView = Literal["recent", "open", "completed"]
 
 
 def create_app(*, queries) -> FastAPI:
-    """既存Task Query Applicationを使う読取専用のHTTP入口を構築する。
+    """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
 
     DB接続やSecretはComposition Root側で解決し、この入口には渡さない。
 
@@ -40,9 +40,9 @@ def create_app(*, queries) -> FastAPI:
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        """本人用ローカルプレビューへのHTTPアクセスだけを通す。
+        """ローカルホストでの参照を想定し、外部Originと転送ヘッダを拒否する。
 
-        外部Web入口や既存APIの認可を代替するものではなく、今後の
+        Host・Originの照合は本人認証ではない。外部Web入口の認可を代替せず、今後の
         実Task更新APIを無条件で公開するための許可ではない。
         """
         host = request.headers.get("host", "").split(":", 1)[0].lower()
@@ -66,7 +66,7 @@ def create_app(*, queries) -> FastAPI:
 
     @app.get("/api/v1/ritsuko/health")
     def health():
-        """Vueの接続状況表示向けに、実Taskの読取専用入口の稼働状態を返す。"""
+        """プレビューAPI自体の応答を返す。DB接続の正常性は検査しない。"""
         return {"status": "ok", "synthetic": False, "mode": "read_only"}
 
     @app.get("/api/v1/ritsuko/tasks")
