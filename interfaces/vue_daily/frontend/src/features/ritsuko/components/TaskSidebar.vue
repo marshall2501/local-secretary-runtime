@@ -1,6 +1,9 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** NiceGUIと同じ右側のTask一覧。選択と表示範囲だけを操作する。 */
+/**
+ * NiceGUIの配置を踏襲した右側Task一覧。取得済みの最大20件を表示する。
+ * 進行中・完了の分類は表示用で、Taskの実行可否を決定するものではない。
+ */
 import { computed } from 'vue'
 import { isTaskClosed, taskStatusLabel } from '../types'
 import type { TaskListView, TaskSummary } from '../types'
