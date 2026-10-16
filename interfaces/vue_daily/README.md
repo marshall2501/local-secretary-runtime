@@ -1,6 +1,6 @@
-# Vue日常UI — 保存済みRITSUKO Task読取プレビュー
+# Vue日常UI — RITSUKO Task読取と明示的な操作プレビュー
 
-2026-10-16 時点。Vue 3 / TypeScript / Vite + FastAPIを使い、秘書AIの画面と実行機能を分離していく途中の実装です。
+2026-10-17 更新。Vue 3 / TypeScript / Vite + FastAPIを使い、秘書AIの画面と実行機能を分離していく途中の実装です。通常8097は読取専用を維持し、別ポート8099でのみ明示的に実Taskコマンドを注入できます。
 
 ## 状態・安全境界
 
@@ -107,3 +107,15 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - HTTP `POST /api/v1/ritsuko/tasks` に省略可能な `task_id: UUID` を追加。通信途絶後に**同一UUID・依頼原文・判断方式**で再送した場合はDB `ON CONFLICT DO NOTHING`と読取照合を使い、Jobを二重作成せず `already_accepted` を返す。異なるIntentを同じUUIDに送った場合は409。UUIDなしの新規リクエストは従来どおりServerが採番するため、クライアントの完全な再送冪等性にはUI側でTask IDを再利用する対応が必要。
 - **隔離検証**: fake Repositoryの受付→MAGI→回答→Review、DBコミット失敗時のJob未実行、同じUUIDの再送、API再構築後のpending復旧、pending停止後の復旧拒否、API明示bind時だけの起動処理、SQL unit回帰を追加。[Vue/API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926295720) PASS。使い捨てDocker PostgreSQLで実際に2 Worker同時claim／同じUUID再送／pending Stopを[PostgreSQL CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653819) PASS（`PASS: disposable PG durable intake, replay, 2-worker claim, stop-before-start`）。既存[NiceGUI/PKB回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653778)・[改行](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653795) PASS。
 - **未実証／残課題**: 本人サブPCでの新コード反映・通常実DBのMAGI/Source Task、PC/APIを実際にKill→Restartした場合のジョブ復旧と中断中runningの照合、ユーザー回答・Reviewの202以前永続化、複数pendingの継続drain、Vue操作画面がUUIDを保持して再送する導線、実MAGIの1〜3席Goal判断。現時点で新Runtimeの通常8097 write接続・既存8093起動構成・MAGI席設定／権限は変更していない。
+
+
+## 2026-10-17 Stage B-3c — Vue実Task操作パネルと明示起動
+
+- Vue TaskCommandPanel.vue は、既存Task API経由の依頼開始（判断方式を明示選択）、本人回答、回答のみReview、Stop要求を提供する。Task状態の確定・権限・MAGI判断・Action記録は共有RITSUKO Applicationが担当し、VueはDB確定状態を再取得する。HTTP 202は受付であってTask completedの証明ではない。
+- 画面がhealthの mode=commands_enabled を確認した場合だけ操作パネルを表示する。**通常8097は従来どおり read_only** で、既存NiceGUIへのリンクを案内する。
+- クライアントはUUIDを先に生成し、レスポンス消失時の同一UUID再送に備える。未確認送信のID・依頼本文・判断方式をタブ単位sessionStorageに保持し、受付成功後に消す。ブラウザSession領域には本人原文が一時保持される。別送信先を追加していない。
+- Operationは一時情報、Task TraceはDB確定情報。再起動後のrunningはWorker稼働の証明ではない。Stop要求も停止完了と区別して表示する。
+- **明示的な実Task操作プレビュー**: interfaces/vue_daily/commands_preview.py は --enable-task-commands を指定した時のみ localhostの127.0.0.1:8099 で起動し、build_daily_magi_task_commands() によって既存日常DBとMAGI/Sourceを使用する。このモードは**本番Task DB書込と実LLM呼出しが可能**なので、本人による実際の操作の許可後のみ利用する。通常8097・NiceGUI8093・API8010は変更しない。
+- 8099起動時は recover_pending_at_startup=False にして、過去に受付済みのpendingを勝手に起動しない。実API停止後のrunningや外部Actionを自動再実行しない。
+- 本人が実DB書込を許可した後の実行例（リポジトリ直下のPowerShell）: & ".\.venv\Scripts\python.exe" -m interfaces.vue_daily.commands_preview --enable-task-commands 。画面は http://127.0.0.1:8099/ui/ 。変更したVueソースはサブPCのWSL内で npm run build してdistを再生成する必要がある。
+- CIではVue build、APIのread_only/commands_enabled切替、既存HTTP POST契約、古いpendingの起動なし、明示引数なしの実Task preview起動拒否を検証する。**実ブラウザからの実Task完走、実LLM、本人回答・Review、プロセス再起動後の動作はまだ受入していない**。
