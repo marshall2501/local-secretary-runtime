@@ -60,6 +60,15 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
 .link-button { display:inline-flex; align-items:center; border:1px solid #16948a; border-radius:6px; background:#eef8f6; padding:8px 14px; font-weight:650; text-decoration:none; margin-top:3px; }
 .link-button:hover { background:#def3ec; }
 .request-entry p { font-size:13px; margin:0 0 12px; }
+.command-form { display:flex; flex-direction:column; gap:8px; margin-bottom:13px; }
+.command-form label, .command-row label { font-size:13px; font-weight:650; }
+.command-form textarea { width:100%; padding:9px 11px; border:1px solid #b7c9d8; border-radius:6px; resize:vertical; background:#fff; color:inherit; }
+.command-row { display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin:9px 0; }
+.command-row select { background:#fff; border:1px solid #b7c9d8; padding:7px; border-radius:6px; min-width:150px; }
+.command-row .primary-command { margin-left:auto; }
+.primary-command { background:#087f75; border:1px solid #056b63; border-radius:6px; color:#fff; padding:8px 13px; font-weight:700; }
+.primary-command:hover:not(:disabled) { background:#056d65; }
+.command-feedback { font-size:13px; color:#167454; background:#edfaf2; border-radius:6px; padding:9px 11px; }
 .activity-summary { cursor:pointer; font-weight:700; display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; }
 .activity-entry { border-top:1px solid #e2eaf0; margin-top:12px; padding-top:12px; }
 .activity-entry p { margin:5px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
