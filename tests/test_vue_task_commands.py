@@ -11,6 +11,8 @@ import asyncio
 import unittest
 from uuid import UUID, uuid4
 
+from bootstrap.ritsuko_task_composition import build_task_application
+
 from ritsuko.application.task_commands import (
     TaskCommandConflict, TaskCommandNotFound, TaskCommands,
 )
@@ -149,6 +151,51 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
             if commands.operation(queries.uid)["status"] == "execution_finished":
                 break
         self.assertEqual(commands.operation(queries.uid)["status"], "execution_finished")
+
+
+    async def test_coordinator_uses_shared_ritsuko_application(self):
+        """共通ApplicationからRunnerへTask IDと停止要求が正しく渡ることを確認する。"""
+        calls = []
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        no_op = lambda *args, **kwargs: None
+
+        async def start_runner(request, **kwargs):
+            """受付された同一Task IDと停止関数を観測し、外部処理は実行しない。"""
+            calls.append((request, kwargs))
+            entered.set()
+            await release.wait()
+            return {"status": "waiting_user"}
+
+        app = build_task_application(
+            create_task_record=no_op,
+            execute_source_request=no_op,
+            record_source_read_record=no_op,
+            persist_session_record=no_op,
+            fail_task_record=no_op,
+            claim_user_resume_record=no_op,
+            abort_user_resume_record=no_op,
+            claim_proposal_review_record=no_op,
+            finalize_proposal_review_record=no_op,
+            abort_proposal_review_record=no_op,
+            start_runner=start_runner,
+        )
+        commands = TaskCommands(
+            app, FakeQueries(),
+            lambda: [{"name": "MELCHIOR", "enabled": True, "timeout_seconds": 6}],
+        )
+        accepted = await commands.start("共有経路のテスト")
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        self.assertEqual(str(calls[0][1]["task_id"]), accepted["task_id"])
+        commands.stop(UUID(accepted["task_id"]))
+        self.assertTrue(calls[0][1]["stop_requested"]())
+        release.set()
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if commands.operation(UUID(accepted["task_id"]))["status"] == "execution_finished":
+                break
+        self.assertEqual(commands.operation(UUID(accepted["task_id"]))["status"],
+                         "execution_finished")
 
 
 if __name__ == "__main__":
