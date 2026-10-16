@@ -115,6 +115,8 @@ export function useTasks() {
     draftRequest.value = ''
     selectedId.value = result.task_id
     view.value = 'recent'
+    reply.value = ''
+    operation.value = null
     trace.value = null
     window.history.replaceState(null, '', '#task=' + result.task_id)
     await refresh()
@@ -200,6 +202,10 @@ export function useTasks() {
   function selectTask(id: string): void {
     if (selectedId.value === id) return
     selectedId.value = id
+    reply.value = ''
+    operation.value = null
+    commandFeedback.value = ''
+    commandError.value = ''
     trace.value = null
     window.location.hash = 'task=' + id
     void refresh()
@@ -210,6 +216,10 @@ export function useTasks() {
     if (view.value === next) return
     view.value = next
     selectedId.value = ''
+    reply.value = ''
+    operation.value = null
+    commandFeedback.value = ''
+    commandError.value = ''
     trace.value = null
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
     void refresh()
@@ -220,6 +230,10 @@ export function useTasks() {
     const id = taskIdFromHash()
     if (id !== selectedId.value) {
       selectedId.value = id
+      reply.value = ''
+      operation.value = null
+      commandFeedback.value = ''
+      commandError.value = ''
       trace.value = null
       void refresh()
     }
