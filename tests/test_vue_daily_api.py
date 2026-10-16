@@ -214,6 +214,23 @@ class VueDailyCommandApiTests(unittest.TestCase):
                              "read_only")
         self.assertEqual(self.commands.calls, [("recover_pending", 20)])
 
+    def test_explicit_command_preview_does_not_resume_old_pending_on_boot(self):
+        """実DB操作Previewは明示操作のみ。起動だけでは旧pendingを動かさない。"""
+        base = "http://127.0.0.1:8099"
+        app = create_app(
+            queries=self.query, commands=self.commands,
+            recover_pending_at_startup=False,
+        )
+        with TestClient(app, base_url=base) as client:
+            self.assertEqual(
+                client.get("/api/v1/ritsuko/health").json()["mode"],
+                "commands_enabled",
+            )
+            self.assertEqual(
+                client.get("/api/v1/ritsuko/tasks").status_code, 200,
+            )
+        self.assertFalse(self.commands.calls)
+
     def test_restart_without_in_memory_operation_uses_persisted_task_only(self):
         """Commandサービス再構築後、Taskの実状態だけ取得しWorker生存は推測しない。"""
         from ritsuko.application.task_commands import TaskCommands
