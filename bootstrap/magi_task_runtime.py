@@ -133,9 +133,10 @@ def build_magi_task_commands(
         )
 
     async def start_runner(user_raw: str, **kwargs) -> dict:
-        """DB受付・Source観測・MAGI対話を既存RITSUKO開始ループで実行する。"""
+        """共通Task実行ループへ判断方式に対応したMAGI入口を一つだけ接続する。"""
+        chosen_starter = kwargs.pop("dialogue_starter", begin_dialogue)
         return await run_observation_loop(
-            user_raw, dialogue_starter=begin_dialogue,
+            user_raw, dialogue_starter=chosen_starter,
             observation_continuation=observation_continuation,
             **kwargs,
         )
@@ -170,6 +171,9 @@ def build_magi_task_commands(
     )
     return TaskCommands(
         application, bindings.queries, bindings.member_specs_loader,
+        dialogue_starter_factory=lambda strategy: partial(
+            begin_dialogue, decision_strategy=strategy,
+        ),
     )
 
 
