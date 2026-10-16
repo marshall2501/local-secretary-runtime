@@ -68,8 +68,8 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
 
 
 def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
-                  decision_strategy: str, policy_snapshot: dict | None) -> None:
-    """受付Taskをpendingで確定する。commitの後だけAPIが202を返せる。
+                  decision_strategy: str, policy_snapshot: dict | None) -> bool:
+    """受付Taskをpendingで確定する。commit後にTrue、新規でない再送はFalse。
 
     判定方式・メンバー設定・Task用Policy snapshotは同一checkpointに保存する。
     値そのもののcredentialは保存しない。Task IDの再利用は主キー制約で拒否。
@@ -94,7 +94,8 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
             """INSERT INTO secretary.tasks
                (id, request, requested_by, domain, completion_criteria,
                 permission_scope, status, checkpoint)
-               VALUES (%s, %s, 'local_user', 'general', %s, %s, 'pending', %s)""",
+               VALUES (%s, %s, 'local_user', 'general', %s, %s, 'pending', %s)
+               ON CONFLICT (id) DO NOTHING RETURNING id""" ,
             (
                 task_id, request,
                 "Return a grounded answer from bounded verified read Observations or stop safely.",
@@ -106,6 +107,26 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
                 Jsonb(checkpoint),
             ),
         )
+        inserted = cur.fetchone()
+        if inserted is None:
+            # An acknowledged client can retry with the same UUID after a
+            # network failure. Do not create another Task or reset its state.
+            cur.execute(
+                """SELECT request, requested_by, checkpoint
+                   FROM secretary.tasks WHERE id=%s FOR UPDATE""",
+                (task_id,),
+            )
+            existing = cur.fetchone()
+            if existing is None:
+                raise ValueError("replayed_task_missing")
+            old_request, requester, old_checkpoint = existing
+            old_checkpoint = old_checkpoint or {}
+            old_intent = old_checkpoint.get("start_intent") or {}
+            if (requester != "local_user" or old_request != request
+                    or old_checkpoint.get("core_slice") != CORE_SLICE
+                    or old_intent.get("decision_strategy") != decision_strategy):
+                raise ValueError("task_id_intent_mismatch")
+            return False
         cur.execute(
             """INSERT INTO secretary.audit_events
                (actor, event_type, task_id, object_type, object_id, details)
@@ -117,6 +138,7 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
                 "member_count": sum(bool(m.get("enabled")) for m in member_specs),
             })),
         )
+    return True
 
 
 def claim_start(db, *, task_id: UUID, request: str,
@@ -1179,10 +1201,10 @@ class PostgresMagiTaskRepository:
 
     def reserve_start(self, *, task_id: UUID, request: str,
                       member_specs: list[dict], decision_strategy: str,
-                      policy_snapshot: dict | None) -> None:
+                      policy_snapshot: dict | None) -> bool:
         """既存PostgreSQLにTask受付をatomicに保存する。"""
         with self._connection_factory() as db:
-            reserve_start(
+            return reserve_start(
                 db, task_id=task_id, request=request, member_specs=member_specs,
                 decision_strategy=decision_strategy, policy_snapshot=policy_snapshot,
             )
