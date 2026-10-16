@@ -65,7 +65,9 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   await expect(page.getByText('10件表示')).toBeVisible()
   await expect(page.getByRole('button', { name: 'さらに読み込む' })).toBeVisible()
   await page.getByRole('button', { name: 'さらに読み込む' }).click()
-  await expect(page.getByText('12件表示')).toBeVisible()
+  // 同一fixture内の先行テストでTaskが追加されるため、12件固定でなく実増加を検査する。
+  await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
+  await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Task履歴（既存画面）' }))
     .toHaveAttribute('href', 'http://127.0.0.1:8093/core/history')
