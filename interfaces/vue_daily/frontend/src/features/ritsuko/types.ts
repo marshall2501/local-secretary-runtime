@@ -14,13 +14,29 @@ export interface TaskSummary {
   core_slice?: string
   updated_at?: string
 }
+/** 保存されたMAGI席設定と各Turnの結果。リアルタイム進捗ではない。 */
+export interface MagiMemberResult {
+  name?: string
+  status?: string
+  provider?: string
+  model?: string
+  elapsed_seconds?: number | null
+}
+export interface MagiSession {
+  status?: string
+  next_step?: string
+  user_question?: string | null
+  member_specs?: Array<{ name?: string; enabled?: boolean; provider?: string; model?: string }>
+  turns?: Array<{ stage?: string; status?: string; member_results?: MagiMemberResult[] }>
+}
 /** 選択Taskの詳細。MAGI情報が存在してもTaskの完了を意味しない。 */
 export interface TaskRecord extends TaskSummary {
   message?: string | null
   question?: string | null
   phase?: string
+  reason?: string | null
   /** MAGI sessionに保存された候補・次の処理。Task.statusとは独立。 */
-  magi_session?: { status?: string; next_step?: string } | null
+  magi_session?: MagiSession | null
   /** DBに受理された停止要求。trueでもWorkerが止まった証明ではない。 */
   stop_requested?: boolean | null
   /** MAGI提案は本人が確定したGoalと同義ではない。 */
@@ -40,12 +56,15 @@ export interface TaskAction {
   result_id?: string | null
   outcome?: string | null
   summary?: string | null
+  verified_by?: string | null
+  verified_at?: string | null
+  source_uri?: string | null
 }
 /** Task詳細APIの応答。現在の画面はAction履歴のみ展開表示する。 */
 export interface TaskTrace {
   task: TaskRecord
   actions: TaskAction[]
-  advisor_events: Array<{ event_type: string }>
+  advisor_events: Array<{ event_type: string; occurred_at?: string | null }>
 }
 const labels: Record<string, string> = {
   pending: '受付', queued: '受付', running: '処理中',
