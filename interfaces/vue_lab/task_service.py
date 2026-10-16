@@ -38,9 +38,9 @@ class _Task:
 
 
 class IsolatedTaskService:
-    """アプリケーション入口の契約を隔離試験し、Task正本をメモリに保持する。
+    """本番Taskを変更せず開始・回答・停止のAPI契約を試す。
 
-    プロセスを再起動すると架空Taskは失われる。永続Worker・本番DBではない。
+    架空Taskの状態と非同期Jobはこのプロセス内だけにあり、再起動時には失われる。
     """
 
     def __init__(self) -> None:
@@ -48,7 +48,8 @@ class IsolatedTaskService:
         self._lock = RLock()
         # 架空Taskの唯一の正本。画面や実DBへ複製しない。
         self._tasks: dict[str, _Task] = {}
-        # HTTP応答後に進む合成Runnerの参照。Stop時にTaskと紐付ける。
+        # 受付・回答HTTPが終了した後も合成処理を継続するためJob参照を保持する。
+        # 停止はこの辞書のTask取消ではなく、各Taskのstop Eventで伝える。
         self._jobs: dict[str, asyncio.Task] = {}
         self._application = build_task_application(
             create_task_record=self._create_record,
@@ -100,7 +101,7 @@ class IsolatedTaskService:
             return self._snapshot(self._tasks[uid])
 
     async def _run_start(self, uid: str) -> None:
-        """共通RITSUKOの開始処理を隔離Runnerに渡す。"""
+        """共通Task開始処理へ架空対話関数を渡し、実LLMなしで状態を進める。"""
         try:
             task = self._record(uid)
             await self._application.start(
@@ -190,7 +191,11 @@ class IsolatedTaskService:
 
     def _persist(self, task_id: UUID, session: dict,
                  _selected_capability: str | None = None) -> dict:
-        """RITSUKOの保存境界で合成Task状態を確定する。"""
+        """合成MAGIの状態を架空Taskへ保存し、UI用状態に変換する。
+
+        `candidate_ready` を完了へ変えるのは隔離fixture専用であり、
+        実Taskの完了判断を実装・検証したことにはならない。
+        """
         with self._lock:
             task = self._record(task_id)
             task.session = deepcopy(session)
@@ -199,7 +204,7 @@ class IsolatedTaskService:
                 task.status = "waiting_user"
                 task.question = str(session.get("user_question") or "")
             elif state == "candidate_ready":
-                # 架空fixtureの状態確定。実Taskの完了条件判定とは別物。
+                # ここでの完了は試験用の疑似判定。Production TaskではMAGI候補だけで完了にしない。
                 task.status = "completed"
                 task.message = str((session.get("detail") or {}).get("answer_candidate") or "")
             elif state == "stopped" and session.get("next_step") == "user_requested_stop":
