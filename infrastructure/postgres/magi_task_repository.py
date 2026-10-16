@@ -66,6 +66,131 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
         )
 
 
+
+def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
+                  decision_strategy: str, policy_snapshot: dict | None) -> None:
+    """受付Taskをpendingで確定する。commitの後だけAPIが202を返せる。
+
+    判定方式・メンバー設定・Task用Policy snapshotは同一checkpointに保存する。
+    値そのもののcredentialは保存しない。Task IDの再利用は主キー制約で拒否。
+    """
+    if decision_strategy not in {"standard", "llm"}:
+        raise ValueError("unknown_flow_decision_strategy")
+    if not str(request or "").strip() or not member_specs:
+        raise ValueError("invalid_pending_task_intent")
+    checkpoint = {
+        "core_slice": CORE_SLICE, "phase": "accepted",
+        "protocol": "d19-state-driven-v5-datetime",
+        "selected_capability": None, "question": None, "message": None,
+        "member_specs": deepcopy(member_specs), "magi_session": None,
+        "final_core_decision": None,
+        "start_intent": {
+            "state": "pending", "decision_strategy": decision_strategy,
+            "policy_snapshot": deepcopy(policy_snapshot),
+        },
+    }
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """INSERT INTO secretary.tasks
+               (id, request, requested_by, domain, completion_criteria,
+                permission_scope, status, checkpoint)
+               VALUES (%s, %s, 'local_user', 'general', %s, %s, 'pending', %s)""",
+            (
+                task_id, request,
+                "Return a grounded answer from bounded verified read Observations or stop safely.",
+                Jsonb({
+                    "pkb_read": True, "finance_read": True,
+                    "web_research": True, "files_read": False,
+                    "external_actions": False, "cloud_private_context": False,
+                }),
+                Jsonb(checkpoint),
+            ),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.task_accepted',
+                       %s, 'task', %s, %s)""",
+            (task_id, task_id, Jsonb({
+                "core_slice": CORE_SLICE,
+                "decision_strategy": decision_strategy,
+                "member_count": sum(bool(m.get("enabled")) for m in member_specs),
+            })),
+        )
+
+
+def claim_start(db, *, task_id: UUID, request: str,
+                member_specs: list[dict]) -> None:
+    """同じTaskのpending→runningを単一transactionで一度だけclaimする。
+
+    Job/LLMを呼ぶ前に確定し、二つのWorkerが同じTaskを開始しない。
+    停止/障害後のrunningは自動でclaimし直さない。
+    """
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT request, status, checkpoint
+               FROM secretary.tasks WHERE id=%s FOR UPDATE""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("pending_task_not_found")
+        stored_request, status, checkpoint = row
+        checkpoint = checkpoint or {}
+        intent = checkpoint.get("start_intent") or {}
+        if (
+            status != "pending" or checkpoint.get("core_slice") != CORE_SLICE
+            or intent.get("state") != "pending"
+        ):
+            raise ValueError("task_start_not_pending")
+        if stored_request != request or checkpoint.get("member_specs") != member_specs:
+            raise ValueError("pending_task_intent_mismatch")
+        intent["state"] = "claimed"
+        checkpoint["start_intent"] = intent
+        checkpoint["phase"] = "orient"
+        cur.execute(
+            """UPDATE secretary.tasks SET status='running', checkpoint=%s
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.task_claimed',
+                       %s, 'task', %s, %s)""",
+            (task_id, task_id, Jsonb({"core_slice": CORE_SLICE})),
+        )
+
+
+def list_pending_starts(db, *, limit: int = 20) -> list[dict]:
+    """未着手Taskの復旧用Intentだけをローカル実行管理へ取得する。
+
+    現時点でrunning Taskの自動再実行はしない。
+    """
+    if not 1 <= limit <= 100:
+        raise ValueError("invalid_pending_limit")
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT id, request, checkpoint FROM secretary.tasks
+               WHERE requested_by='local_user' AND status='pending'
+                 AND checkpoint->>'core_slice'=%s
+                 AND checkpoint->'start_intent'->>'state'='pending'
+               ORDER BY created_at, id LIMIT %s""",
+            (CORE_SLICE, limit),
+        )
+        rows = cur.fetchall()
+    pending = []
+    for task_id, request, checkpoint in rows:
+        intent = (checkpoint or {}).get("start_intent") or {}
+        pending.append({
+            "task_id": task_id, "request": request,
+            "member_specs": deepcopy(checkpoint.get("member_specs") or []),
+            "decision_strategy": intent.get("decision_strategy"),
+            "policy_snapshot": deepcopy(intent.get("policy_snapshot")),
+        })
+    return pending
+
+
 def claim_user_resume(
     db,
     *,
@@ -1005,6 +1130,27 @@ class PostgresMagiTaskRepository:
     def create_task(self, *, task_id: UUID, request: str, member_specs: list[dict]) -> None:
         with self._connection_factory() as db:
             create_task(db, task_id=task_id, request=request, member_specs=member_specs)
+
+    def reserve_start(self, *, task_id: UUID, request: str,
+                      member_specs: list[dict], decision_strategy: str,
+                      policy_snapshot: dict | None) -> None:
+        """既存PostgreSQLにTask受付をatomicに保存する。"""
+        with self._connection_factory() as db:
+            reserve_start(
+                db, task_id=task_id, request=request, member_specs=member_specs,
+                decision_strategy=decision_strategy, policy_snapshot=policy_snapshot,
+            )
+
+    def claim_start(self, *, task_id: UUID, request: str,
+                    member_specs: list[dict]) -> None:
+        """二重MAGI実行を避けるためpending Taskをclaimする。"""
+        with self._connection_factory() as db:
+            claim_start(db, task_id=task_id, request=request, member_specs=member_specs)
+
+    def list_pending_starts(self, *, limit: int = 20) -> list[dict]:
+        """再起動後に永続化済みの未着手Taskだけを列挙する。"""
+        with self._connection_factory() as db:
+            return list_pending_starts(db, limit=limit)
 
     def claim_user_resume(self, *, task_id: UUID, reply_length: int, reply_fingerprint: str):
         with self._connection_factory() as db:
