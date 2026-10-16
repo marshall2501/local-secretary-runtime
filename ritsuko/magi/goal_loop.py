@@ -16,17 +16,28 @@ from .async_execution import (
 from .dialogue import _normalized_member_specs
 from .goal_contract import VERSION, validate_goal_turn
 from .runtime_context import create_runtime_context
+from .protocol import default_resource_catalog
+from ritsuko.application.observation_sources import AUTO_READ_SOURCES
 
-# Fail closed for explicit requests to consult external sources; do not treat
-# model-generated "not_required" as a substitute for a user-required Web read.
+# 「私の」「調査」などをWeb限定と取り違えない。暫定の明示要求
+# GateでありSource選択と根拠充足の意味判断はMAGIが行う。
 SOURCE_REQUEST = re.compile(
     r"(?i)(公式|出典|引用|資料|検索|調べて|調査|最新|今日|昨日|現在|最近|価格|私の|自分の|ウェブ|web|website|URL|ネット|サイト|source|reference)"
+)
+WEB_REQUEST = re.compile(
+    r"(?i)(公式(?:サイト|Web|ページ|資料)?|最新(?:情報|ニュース)?|ウェブ|web|website|URL|ネット|サイト|オンライン)"
 )
 MAX_GOAL_TURNS = 6
 
 
-def goal_requires_web(request: str) -> bool:
+def goal_requires_source(request: str) -> bool:
+    """本人が根拠を求めている場合、出典不要回答として即完了させない。"""
     return bool(SOURCE_REQUEST.search(request))
+
+
+def goal_requires_web(request: str) -> bool:
+    """明示的な公開Web根拠要求だけをWeb制約として扱う。"""
+    return bool(WEB_REQUEST.search(request))
 
 
 def goal_task_projection(session: dict) -> dict:
@@ -41,7 +52,7 @@ def goal_task_projection(session: dict) -> dict:
             str(o.get("result_id")): o
             for o in session.get("observations") or []
             if isinstance(o, dict) and o.get("verified") is True and o.get("result_id")
-            and o.get("source") == "web"
+            and o.get("source") in AUTO_READ_SOURCES
         }
         valid_ref = (
             evidence.get("basis") == "result_refs" and bool(ids)
@@ -50,6 +61,7 @@ def goal_task_projection(session: dict) -> dict:
         source_free = (
             evidence.get("basis") == "not_required"
             and not ids
+            and not session.get("requires_source", session.get("requires_web", False))
             and not session.get("requires_web")
             and not session.get("tool_read_executed")
         )
@@ -124,7 +136,8 @@ async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> N
         return
     if next_step == "respond":
         if (evidence["basis"] == "not_required"
-                and (session["requires_web"] or session.get("tool_read_executed"))):
+                and (session.get("requires_source", session.get("requires_web", False))
+                     or session.get("requires_web") or session.get("tool_read_executed"))):
             session.update(status="stopped", next_step="required_source_not_observed")
             return
         if evidence["basis"] != "not_required" and not ids:
@@ -137,7 +150,7 @@ async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> N
         query = request["query"].strip()
         state = "NEED_INFORMATION"
         information_requests = [{
-            "source": "web", "what": query, "reason": request["reason"],
+            "source": request["source"], "what": query, "reason": request["reason"],
         }]
     elif next_step == "ask_user":
         state = "NEED_CLARIFICATION"
@@ -191,8 +204,9 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
         "previous_judgment": deepcopy(session.get("goal_judgment")),
         "user_replies": deepcopy(session.get("user_replies") or []),
         "resource_catalog": {
+            **default_resource_catalog(),
             "web": {
-                "available": True, "access": "bounded_read_only",
+                **default_resource_catalog()["web"],
                 "capability": "provider_search_with_citations",
                 "direct_page_content_fetch": False,
             },
@@ -273,6 +287,7 @@ async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
         "control_mode": VERSION, "member_specs": specs,
         "runtime_context": create_runtime_context(timezone_name="Asia/Tokyo", locale="ja-JP"),
         "status": "running", "next_step": "evaluate_goal",
+        "requires_source": goal_requires_source(request),
         "requires_web": goal_requires_web(request),
         "goal": None, "goal_judgment": None, "observations": [],
         "detail": None, "turns": [], "pending_requests": [],
@@ -295,9 +310,10 @@ async def continue_goal_observations(session: dict, observations: list[dict], *,
     if not observations:
         raise ValueError("goal_observations_required")
     for obs in observations:
-        if (not isinstance(obs, dict) or obs.get("source") != "web"
+        if (not isinstance(obs, dict)
+                or obs.get("source") not in AUTO_READ_SOURCES
                 or not obs.get("result_id")):
-            raise ValueError("goal_web_recorded_observation_required")
+            raise ValueError("goal_recorded_observation_required")
         updated["observations"].append(deepcopy(obs))
     updated["tool_read_executed"] = True
     updated["pending_requests"] = []
