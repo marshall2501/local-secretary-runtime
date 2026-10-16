@@ -1,6 +1,9 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-generated
-"""Vue日常用実Task read-only APIの隔離contract試験（DB未接続）。"""
+"""Task参照APIのHTTP契約をfake Queryで検査する。
+
+実DBへの接続や本人認証の有効性は、このテストの対象ではない。
+"""
 from __future__ import annotations
 
 import unittest
@@ -34,7 +37,7 @@ class FakeQueries:
         return []
 
     def completed(self, limit, offset):
-        """完了Taskの一覧を返し、RITSUKO確定状態を保持する。"""
+        """「完了」を示す固定のテストTaskを返し、一覧の絞り込みを確認する。"""
         self.calls.append(("completed", limit, offset))
         return [self.task]
 
@@ -50,10 +53,10 @@ class FakeQueries:
 
 
 class VueDailyApiTests(unittest.TestCase):
-    """本人専用localhostで実Taskの状態を正本から読む入口を確認。"""
+    """ローカルTask参照APIの応答形式・アクセス制限をfake Queryで確認する。"""
 
     def setUp(self):
-        """実DBを使わずlocalhostのAPI契約を検証するTestClientを作成する。"""
+        """固定Taskを返すfake QueryとローカルURLのHTTPテスト環境を作る。"""
         self.queries = FakeQueries()
         self.client = TestClient(
             create_app(queries=self.queries),
@@ -61,7 +64,7 @@ class VueDailyApiTests(unittest.TestCase):
         )
 
     def test_saved_task_list_and_trace_are_transport_only(self):
-        """Task一覧・履歴が隔離Queryの値を変えずに返すことを確認する。"""
+        """一覧の種類・範囲とTask履歴をHTTP経由で取得し、値の引渡しを検証する。"""
         response = self.client.get("/api/v1/ritsuko/tasks?limit=5&offset=2")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"][0]["status"], "completed")
@@ -85,7 +88,7 @@ class VueDailyApiTests(unittest.TestCase):
         ).status_code, 404)
 
     def test_boundary_does_not_open_task_write_or_external_access(self):
-        """読取専用入口からTask書込や外部Host/Originを許可しない。"""
+        """Task更新APIが存在せず、想定外のHost/Originを拒否することを検査する。"""
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/health"
         ).json(), {"status": "ok", "synthetic": False, "mode": "read_only"})
