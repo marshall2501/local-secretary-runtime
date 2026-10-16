@@ -7,8 +7,12 @@ import type { TaskListView, TaskSummary, TaskTrace } from './types'
 const base = '/api/v1/ritsuko'
 
 /** 最近・進行中・完了の保存済みTask一覧を取得する。更新操作は行わない。 */
-export async function listTasks(view: TaskListView): Promise<TaskSummary[]> {
-  const query = new URLSearchParams({ view, limit: '20' })
+export async function listTasks(
+  view: TaskListView, limit = 10, offset = 0,
+): Promise<TaskSummary[]> {
+  const query = new URLSearchParams({
+    view, limit: String(limit), offset: String(offset),
+  })
   const response = await getJson<{ items: TaskSummary[]; source: string }>(
     base + '/tasks?' + query.toString(),
   )
