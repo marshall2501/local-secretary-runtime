@@ -38,6 +38,7 @@ h3 { font-size:14px; margin:0 0 7px; }
 .task-field p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .task-field .muted { grid-column:2; }
 .task-meta { display:flex; flex-wrap:wrap; gap:8px 20px; margin-top:14px; padding-top:13px; border-top:1px solid #d6e4e8; font-size:12px; color:#66788a; }
+.task-copy-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
 code { overflow-wrap:anywhere; font-size:12px; }
 .question,.result { border:1px solid #b1ddd4; background:#effbf7; border-radius:7px; padding:13px 16px; margin-top:12px; }
 .result { border-color:#b4cee8; background:#edf6ff; }
