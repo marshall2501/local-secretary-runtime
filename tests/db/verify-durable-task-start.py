@@ -247,6 +247,37 @@ def main(project: str, container: str) -> None:
     else:
         raise AssertionError("unknown_persisted_task_not_rejected")
 
+    # Stopを保存した後、古いMAGIが「完了候補」を返す実DB競合の再現。
+    # 表示だけではなく、Repositoryの同一行lockがpausedを確定すること。
+    repository = PostgresMagiTaskRepository(connect)
+    late_candidate = {
+        "status": "candidate_ready",
+        "next_step": "review_answer_candidate",
+        "tool_read_executed": True,
+        "observations": [{"source": "pkb", "verified": True, "text": "synthetic"}],
+        "detail": {"answer_candidate": "stale worker would complete the Task"},
+        "turns": [],
+    }
+    stopped_projection = repository.persist_session(
+        task_id=running_id, session=late_candidate,
+    )
+    assert stopped_projection["task_status"] == "paused"
+    repository.fail_task(task_id=running_id, error="LateWorkerException")
+    assert new_commands().operation(running_id)["task_status"] == "paused"
+    with connect() as db, db.cursor() as cur:
+        cur.execute(
+            """SELECT count(*) FROM secretary.audit_events
+               WHERE task_id=%s AND event_type='core.magi.completed'""",
+            (running_id,),
+        )
+        assert cur.fetchone()[0] == 0, "stale_worker_marked_completed"
+    try:
+        repository.persist_session(task_id=running_id, session=late_candidate)
+    except ValueError as exc:
+        assert str(exc) == "task_not_running"
+    else:
+        raise AssertionError("paused_task_accepted_stale_worker")
+
     for terminal_status in ("completed", "failed"):
         terminal_id = uuid4()
         with connect() as db:
@@ -271,6 +302,7 @@ def main(project: str, container: str) -> None:
         assert terminal_after["task_status"] == terminal_status
         assert terminal_after["stop_requested"] is None
 
+    print("PASS: disposable PG late MAGI completion/error cannot overwrite acknowledged Stop")
     print("PASS: disposable PG TaskCommands new-instance stop, query, concurrent idempotence and terminal guards")
 
     print("PASS: disposable PG durable intake, replay, 2-worker claim, stop-before-start")
