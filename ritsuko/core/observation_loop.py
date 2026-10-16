@@ -143,11 +143,11 @@ async def run_observation_loop(
                 )
                 batch_executions.append(execution)
                 all_executions.append(execution)
+                record_args = [task_uuid, execution, pending]
+                if active_attempt_id is not None:
+                    record_args.append(active_attempt_id)
                 record_ids = await anyio.to_thread.run_sync(
-                    record_source_read_record,
-                    task_uuid,
-                    execution,
-                    pending,
+                    record_source_read_record, *record_args,
                 )
                 observation = verified_source_observation(
                     execution,
