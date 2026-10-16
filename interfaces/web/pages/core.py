@@ -65,10 +65,12 @@ def register(portal_context: dict):
         list_defaults = dict(list_limits)
     
         def more_tasks(key, panel):
+            """右側Task一覧の表示件数を設定値ずつ増やし、一覧パネルを更新する。"""
             list_limits[key] += _UI_PREFERENCES["core"][key]
             panel.refresh()
     
         def current_ooda():
+            """処理中表示・保存済み履歴・直近結果の順で、現在TaskのOODA表示を組み立てる。"""
             if state["busy"] or state["resume_busy"]:
                 return derive_ooda({"status": "received", "phase": "observe"})
             trace = state["trace"]
@@ -77,6 +79,7 @@ def register(portal_context: dict):
             return derive_ooda(state["result"])
     
         def current_advisor_shadow():
+            """非同期Advisorの最新状態をDBのTask履歴から優先して取得する。"""
             # Prefer DB trace because background Advisor updates arrive after the
             # deterministic result object has already been returned to the UI.
             trace = state["trace"]
@@ -88,6 +91,7 @@ def register(portal_context: dict):
             return result.get("advisor_shadow")
     
         def load_current_trace():
+            """選択中Taskの保存済み履歴を取得し、状態・実行ログの表示を揃える。"""
             # Share one snapshot between the bar, Task detail and execution log.
             state["trace"] = None
             state["trace_error"] = None
@@ -99,6 +103,7 @@ def register(portal_context: dict):
                     state["trace_error"] = str(exc)
     
         async def poll_advisor_shadow():
+            """Advisor処理が継続中ならDBを再照会し、画面の古い状態を更新する。"""
             result = state["result"] or {}
             task_id = result.get("task_id")
             if not task_id:
@@ -138,7 +143,9 @@ def register(portal_context: dict):
         )
     
         def remember_core_expansion(key: str):
+            """アコーディオンの開閉を画面設定へ保存するイベント関数を作る。"""
             def _remember(event):
+                """指定されたアコーディオンの開閉状態を画面設定に反映する。"""
                 _set_core_ui_open(key, event.value)
             return _remember
     
@@ -156,6 +163,7 @@ def register(portal_context: dict):
                 default_magi_model = None
     
             def copy_protocol_json(text: str, label: str) -> None:
+                """対話結果などのJSON文字列をクリップボードへコピーして通知する。"""
                 ui.run_javascript(
                     "navigator.clipboard.writeText("
                     + json.dumps(text, ensure_ascii=False) + ")"
@@ -303,6 +311,7 @@ def register(portal_context: dict):
                     )
     
                 def collect_guided_assignments() -> list[dict]:
+                    """MAGI各席の有効状態・モデル・重み・Timeoutを画面入力から集める。"""
                     return [
                         {
                             "name": member,
@@ -320,6 +329,7 @@ def register(portal_context: dict):
                     ]
     
                 def save_guided_assignments(*, notify: bool = True) -> list[dict] | None:
+                    """画面で選択したMAGI構成をDBへ保存し、失敗時はエラーを表示する。"""
                     try:
                         saved = _save_magi_assignments(collect_guided_assignments())
                         state["magi_member_specs"] = saved
@@ -346,6 +356,7 @@ def register(portal_context: dict):
                     )
     
                 def guided_timeout_seconds(session: dict | None = None) -> float:
+                    """有効なMAGI席の設定から、今回の実行に必要な最大Timeoutを求める。"""
                     specs = (session or {}).get("member_specs") or state.get("magi_member_specs") or []
                     enabled = [
                         int(item.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
@@ -361,6 +372,7 @@ def register(portal_context: dict):
                     task_id_value: str | None = None,
                     request_text: str | None = None,
                 ) -> Event:
+                    """新しいTurnの進行表示と協調停止Eventを初期化して返す。"""
                     stop_event = Event()
                     state["guided_stop_event"] = stop_event
                     state["guided_stop_requested"] = False
@@ -374,6 +386,7 @@ def register(portal_context: dict):
                     return stop_event
 
                 def note_guided_turn(turn_number: int) -> None:
+                    """Turnが切り替わったら前TurnのMAGI進捗を消し、現在Turnを表示する。"""
                     next_turn = max(1, int(turn_number))
                     if next_turn != int(state.get("guided_turn") or 0):
                         state["guided_member_progress"] = {}
@@ -381,6 +394,7 @@ def register(portal_context: dict):
                     guided_result_panel.refresh()
 
                 def note_member_progress(event: dict) -> None:
+                    """別Taskの通知を除外し、現在TaskのMAGI席別進捗を更新する。"""
                     normalized = normalize_member_progress_event(event)
                     if (
                         normalized["task_id"]
@@ -399,6 +413,7 @@ def register(portal_context: dict):
                     timeout: float = DEFAULT_TIMEOUT_SECONDS,
                     member_specs: list[dict] | None = None,
                 ) -> dict:
+                    """今回有効なMAGI席とTimeoutを使い、選択したLLM経由でパネルを実行する。"""
                     active_specs = list(member_specs or [])
                     active_names = {
                         str(item.get("name") or "")
@@ -430,6 +445,7 @@ def register(portal_context: dict):
                     )
 
                 async def guided_dialogue_starter(user_raw: str, **kwargs) -> dict:
+                    """新規Taskの権限snapshotを確定させてからMAGIの初回対話を始める。"""
                     # Profile is bound once at Task creation and persisted in
                     # the MAGI session. A later UI change does not silently
                     # alter the permissions of an in-flight/resumed Task.
@@ -447,6 +463,7 @@ def register(portal_context: dict):
                 async def guided_observation_continuation(
                     session: dict, observations: list[dict], **kwargs
                 ) -> dict:
+                    """検証済みObservationをMAGIへ渡し、同じTaskの評価を続ける。"""
                     return await continue_with_verified_observations_async(
                         session,
                         observations,
@@ -458,6 +475,7 @@ def register(portal_context: dict):
                 async def guided_user_continuation(
                     session: dict, user_text: str, **kwargs
                 ) -> dict:
+                    """本人の追加回答を保存済みMAGI対話へ渡し、同じTaskを再開する。"""
                     return await continue_with_user_clarification_async(
                         session,
                         user_text,
@@ -469,6 +487,7 @@ def register(portal_context: dict):
                 async def guided_review_continuation(
                     session: dict, observation: dict, **kwargs
                 ) -> dict:
+                    """本人が選んだProposal Review結果をMAGI対話の次Turnへ渡す。"""
                     return await continue_with_proposal_review_async(
                         session,
                         observation,
@@ -477,6 +496,7 @@ def register(portal_context: dict):
                     )
     
                 def request_guided_stop() -> None:
+                    """現在Taskに協調停止を要求する。即時完了や強制終了とは扱わない。"""
                     stop_event = state.get("guided_stop_event")
                     if not state.get("guided_busy") or stop_event is None:
                         return
@@ -489,6 +509,7 @@ def register(portal_context: dict):
                     guided_result_panel.refresh()
     
                 def saved_task_for_session(session: dict) -> dict:
+                    """画面のMAGI対話とTask IDが一致する保存済みTaskだけを返す。"""
                     trace_task = (state.get("trace") or {}).get("task") or {}
                     trace_task_id = str(
                         trace_task.get("id") or trace_task.get("task_id") or ""
@@ -499,6 +520,7 @@ def register(portal_context: dict):
                     return trace_task
     
                 def render_guided_verification(session: dict) -> None:
+                    """対話JSON・確認情報など、選択Taskの検証材料を表示する。"""
                     session_text = json.dumps(
                         export_dialogue(session),
                         ensure_ascii=False,
@@ -621,6 +643,7 @@ def register(portal_context: dict):
 
                 @ui.refreshable
                 def guided_result_panel():
+                    """MAGI各席の進捗・質問・回答候補・Review操作をTask状態と共に描画する。"""
                     session = state.get("guided_session")
                     saved_task = saved_task_for_session(session) if session else {}
                     presentation = build_task_presentation(
@@ -886,6 +909,7 @@ def register(portal_context: dict):
                         ).classes("w-full")
     
                         async def continue_guided():
+                            """画面の試験用Observationを渡し、同じMAGI Taskの次Turnを実行する。"""
                             if state["guided_busy"]:
                                 return
                             if not str(observation_input.value or "").strip():
@@ -971,6 +995,7 @@ def register(portal_context: dict):
                             ).props("rows=2 outlined dense").classes("w-full")
     
                             async def continue_with_user():
+                                """画面で入力した本人回答を既存Taskへ渡して対話を再開する。"""
                                 if state["guided_busy"]:
                                     return
                                 if not str(clarification_input.value or "").strip():
@@ -1121,6 +1146,7 @@ def register(portal_context: dict):
                                     ).classes("text-xs text-blue-800")
     
                                 async def load_after_proposal_review() -> None:
+                                    """Review後の確定Task履歴を再取得し、結果と画面選択を更新する。"""
                                     saved_trace = await run.io_bound(
                                         _portal("load_core_task_trace"),
                                         UUID(session["task_id"]),
@@ -1138,6 +1164,7 @@ def register(portal_context: dict):
                                 async def execute_proposal_review(
                                     decision: str,
                                 ) -> None:
+                                    """回答のみ完了か記憶反映かの本人選択を既存Taskへ適用する。"""
                                     if state["guided_busy"]:
                                         return
                                     notification_client = context.client
@@ -1242,9 +1269,11 @@ def register(portal_context: dict):
                                         )
     
                                 async def complete_answer_only():
+                                    """PKBへの記憶反映を要求せず、回答のみでReviewを確定する。"""
                                     await execute_proposal_review("answer_only")
     
                                 async def remember_and_complete():
+                                    """回答を記憶へ反映するReview経路を実行する。"""
                                     await execute_proposal_review("remember")
     
                                 with ui.row().classes("gap-2 flex-wrap"):
@@ -1310,6 +1339,7 @@ def register(portal_context: dict):
     
     
                 def selected_guided_goal_mode() -> bool:
+                    """表示用の切替が無い場合も保存設定からGoal判断方式を取得する。"""
                     # Hidden test control must keep the saved default.
                     return (
                         bool(goal_mode_checkbox.value)
@@ -1318,7 +1348,7 @@ def register(portal_context: dict):
                     )
 
                 def save_guided_goal_mode(*, notify: bool = True) -> bool:
-                    """Persist the selected mode independently of Task execution."""
+                    """判断方式の選択をTask実行とは独立して画面設定へ保存する。"""
                     try:
                         selected = selected_guided_goal_mode()
                         _save_core_goal_mode(selected)
@@ -1338,6 +1368,7 @@ def register(portal_context: dict):
                     return True
 
                 async def start_guided():
+                    """入力した自然言語依頼で新規MAGI Taskを開始し、進捗を画面へ結び付ける。"""
                     if state["guided_busy"]:
                         return
                     request_text = str(guided_input.value or "").strip()
@@ -1475,6 +1506,7 @@ def register(portal_context: dict):
                     guided_result_panel()
     
                 def refresh_guided_progress() -> None:
+                    """Task実行中のMAGI状態表示だけを定期更新する。"""
                     if state.get("guided_busy"):
                         guided_result_panel.refresh()
     
@@ -1482,6 +1514,7 @@ def register(portal_context: dict):
     
             @ui.refreshable
             def trace_panel():
+                """選択Taskに紐づくAction・Result・監査情報を展開表示する。"""
                 result = state["result"] or {}
                 task_id = result.get("task_id")
                 if not task_id:
@@ -1567,6 +1600,7 @@ def register(portal_context: dict):
 
             @ui.refreshable
             def screen_log_panel():
+                """横断履歴を右側一覧へ移したため、旧ログ枠は表示しない。"""
                 # Cross-Task history belongs to the right drawer and /core/history.
                 return
 
@@ -1631,6 +1665,7 @@ def register(portal_context: dict):
     
                     @ui.refreshable
                     def protocol_result_panel():
+                        """比較用の旧Protocol v1の応答とエラーを表示する。"""
                         result=state.get("protocol_result")
                         if state.get("protocol_busy"):
                             ui.label("RITSUKOがMAGI依頼を実行中...").classes(
@@ -1702,6 +1737,7 @@ def register(portal_context: dict):
                             ui.code(envelope_text,language="json").classes("w-full")
     
                     async def submit_protocol_v1():
+                        """旧Protocol比較経路で選択LLMを呼び、結果を専用パネルへ表示する。"""
                         if state.get("protocol_busy"):
                             return
                         selected_model=str(protocol_model_select.value or "").strip()
@@ -1780,6 +1816,7 @@ def register(portal_context: dict):
                     ).classes("text-xs text-grey-7")
     
                     def save_advisor_model():
+                        """Advisor用モデル・Timeout設定を検証して保存する。"""
                         selected = str(advisor_model_select.value or "").strip() or None
                         if selected and selected not in advisor_model_select.options:
                             ui.notify("インストール済みモデルを選択してください", type="negative")
@@ -1801,6 +1838,7 @@ def register(portal_context: dict):
                         )
     
                     def refresh_advisor_models():
+                        """利用可能なAdvisorモデルを再取得し、現在の選択値を可能なら保持する。"""
                         try:
                             available = list_advisor_models()
                         except Exception as exc:
@@ -1832,6 +1870,7 @@ def register(portal_context: dict):
     
                 @ui.refreshable
                 def ooda_bar():
+                    """RITSUKOの観測・判断・行動段階を現在Taskの状態から表示する。"""
                     display = current_ooda()
                     with ui.column().classes("w-full gap-1").props('role=status aria-live=polite'):
                         with ui.row().classes("w-full items-center gap-2 flex-wrap"):
@@ -1863,6 +1902,7 @@ def register(portal_context: dict):
                 ).classes("text-sm text-orange-700")
     
                 def select_saved_task(item: dict):
+                    """既存Taskを選び、確定結果とMAGI対話・履歴を同じIDで読み直す。"""
                     if state["busy"] or state["resume_busy"]:
                         return
                     state["result"] = core_task_selection_result(item)
@@ -1898,6 +1938,7 @@ def register(portal_context: dict):
     
                 @ui.refreshable
                 def completed_tasks_panel():
+                    """完了したTaskを保存済みの表示件数に合わせて右側へ一覧表示する。"""
                     try:
                         rows, has_more = load_core_task_window(_portal("load_completed_core_tasks"), list_limits["completed_limit"])
                     except Exception as exc:
@@ -1941,6 +1982,7 @@ def register(portal_context: dict):
     
                 @ui.refreshable
                 def open_tasks_panel():
+                    """進行中・本人確認待ちなど未完了Taskを右側へ一覧表示する。"""
                     try:
                         rows, has_more = load_core_task_window(_portal("load_open_core_tasks"), list_limits["open_limit"])
                     except Exception as exc:
@@ -1983,6 +2025,7 @@ def register(portal_context: dict):
                         ui.button("さらに読み込む", on_click=lambda: more_tasks("open_limit", open_tasks_panel)).props("flat dense")
     
                 def sync_task_preferences():
+                    """Task一覧の表示件数設定が変わった場合に一覧を再描画する。"""
                     changed = False
                     for key in list_defaults:
                         value = _UI_PREFERENCES["core"][key]
@@ -2020,6 +2063,7 @@ def register(portal_context: dict):
     
                     @ui.refreshable
                     def core_result():
+                        """TaskのOODA状態・Advisor情報・実行結果を現在Task欄へ表示する。"""
                         result = state["result"]
                         if result or state["busy"] or state["resume_busy"]:
                             display = current_ooda()
@@ -2137,6 +2181,7 @@ def register(portal_context: dict):
                                     )
     
                                     def copy_advisor_log(text: str = export_text) -> None:
+                                        """Advisorの稼働ログをクリップボードへ渡してコピー完了を通知する。"""
                                         ui.run_javascript(
                                             'navigator.clipboard.writeText('
                                             + json.dumps(text, ensure_ascii=False)
@@ -2425,6 +2470,7 @@ def register(portal_context: dict):
     
                     @ui.refreshable
                     def resume_panel():
+                        """旧形式Taskが本人回答待ちの場合だけ、再開用の入力欄を表示する。"""
                         result = state["result"] or {}
                         if result.get("status") != "waiting_external" or not result.get("task_id"):
                             return
@@ -2457,6 +2503,7 @@ def register(portal_context: dict):
                             ).classes("w-full")
     
                             async def submit_resume():
+                                """旧形式Taskへの本人回答を保存Taskへ渡し、結果を更新する。"""
                                 if state["busy"] or state["resume_busy"]:
                                     return
                                 state["resume_busy"] = True
@@ -2490,6 +2537,7 @@ def register(portal_context: dict):
                             )
     
                     async def submit_core():
+                        """旧形式のRITSUKO依頼を実行し、保存結果と状態表示を更新する。"""
                         if state["busy"] or state["resume_busy"]:
                             return
                         state["busy"] = True
