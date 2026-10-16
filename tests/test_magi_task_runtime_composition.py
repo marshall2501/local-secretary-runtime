@@ -340,6 +340,43 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await commands.start("違う依頼", task_id=task_id,
                                  decision_strategy="standard")
 
+    async def test_user_stops_immediately_before_pending_claim(self):
+        """受付直後のStopはpendingをpausedにし、MAGIを起動しない。"""
+        from uuid import uuid4
+
+        repo = FakeMagiRepository()
+        llm_calls = []
+        uid = uuid4()
+
+        async def fake_start(*_args, **_kwargs):
+            """Stop済みTaskでLLM呼出しが起きたら検出する。"""
+            llm_calls.append("called")
+            return {}
+
+        bindings = MagiTaskBindings(
+            magi_repository=repo, pkb_repository=object(),
+            finance_repository=object(), queries=FakeQueries(repo),
+            member_specs_loader=lambda: [{
+                "name": "MELCHIOR", "enabled": True, "timeout_seconds": 5,
+            }],
+            policy_snapshot_loader=lambda: None,
+        )
+        commands = build_magi_task_commands(bindings, dialogue_starter=fake_start)
+        accepted = await commands.start("停止する依頼", task_id=uid)
+        self.assertEqual(repo.tasks[uid]["status"], "pending")
+        stopped = commands.stop(uid)
+        self.assertTrue(stopped["stop_requested"])
+        self.assertEqual(stopped["task_status"], "paused")
+        self.assertTrue(repo.tasks[uid]["stop_requested"])
+        for _ in range(100):
+            if commands.operation(uid)["status"] not in {"accepted", "running"}:
+                break
+            await asyncio.sleep(0.005)
+        self.assertEqual(commands.operation(uid)["status"], "interrupted")
+        self.assertEqual(repo.tasks[uid]["status"], "paused")
+        self.assertEqual(llm_calls, [])
+        self.assertEqual(repo.calls.count("claim_start"), 0)
+
     async def test_failed_reservation_does_not_accept_or_schedule_task(self):
         """DB保存に失敗しても202相当の受付やMAGI実行へ進まない。"""
         repo = FakeMagiRepository()
