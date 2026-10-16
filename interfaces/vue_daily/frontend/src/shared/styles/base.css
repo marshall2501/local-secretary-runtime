@@ -73,6 +73,13 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
 .primary-command:hover:not(:disabled) { background:#056d65; }
 .command-feedback { font-size:13px; color:#167454; background:#edfaf2; border-radius:6px; padding:9px 11px; }
 .activity-summary { cursor:pointer; font-weight:700; display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; }
+/* MAGIは保存済みTurnの席別結果を最大3列で示す。実行中の状態と混同しない。 */
+.magi-members { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:11px; }
+.magi-member { border:1px solid #d4e0e9; background:#f8fbfe; border-radius:8px; padding:12px; min-width:0; overflow-wrap:anywhere; }
+.magi-member p { margin:5px 0 0; }
+.goal-criteria { margin:7px 0; padding-left:20px; overflow-wrap:anywhere; }
+.source-uri { font-size:12px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.audit-events { margin-top:13px; padding-top:9px; border-top:1px solid #e2eaf0; }
 .activity-entry { border-top:1px solid #e2eaf0; margin-top:12px; padding-top:12px; }
 .activity-entry p { margin:5px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .error { color:#9d3039; background:#fff0f0; padding:12px; border-radius:6px; overflow-wrap:anywhere; }
@@ -86,4 +93,5 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
   .workspace { display:flex; flex-direction:column; }
   .ritsuko-main,.task-sidebar { width:100%; }
   .task-field { grid-template-columns:85px minmax(0,1fr); }
+  .magi-members { grid-template-columns:1fr; }
 }
