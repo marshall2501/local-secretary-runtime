@@ -6,6 +6,7 @@
  */
 import { computed } from 'vue'
 import { isTaskClosed, taskStatusLabel } from '../types'
+import { legacyPageUrl } from '../../../shared/navigation'
 import type { TaskListView, TaskSummary } from '../types'
 
 const props = defineProps<{
@@ -13,10 +14,13 @@ const props = defineProps<{
   view: TaskListView
   selectedId: string
   commandsEnabled: boolean
+  hasMore: boolean
+  loading: boolean
 }>()
 const emit = defineEmits<{
   select: [id: string]
   filter: [view: TaskListView]
+  more: []
 }>()
 const pending = computed(() => props.items.filter(task => !isTaskClosed(task.status)))
 const closed = computed(() => props.items.filter(task => isTaskClosed(task.status)))
@@ -56,6 +60,11 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
       </button>
     </section>
     <p v-if="!items.length" class="muted small">該当する保存済みTaskはありません。</p>
+    <div class="task-list-more">
+      <button v-if="hasMore" type="button" class="secondary" :disabled="loading"
+        @click="emit('more')">さらに読み込む</button>
+      <a :href="legacyPageUrl('/core/history')" class="small">Task履歴（既存画面）</a>
+    </div>
     <p class="muted small task-sidebar-foot">{{ commandsEnabled ? "Taskの確定状態はDBから再照会します。" : "保存済みTaskの参照専用です。" }}</p>
   </aside>
 </template>
