@@ -53,6 +53,17 @@ class FakeMagiRepository:
         self.calls.append("claim_start")
         task["status"] = "running"
 
+    def request_stop(self, *, task_id):
+        """Task状態ごとの停止要求を保存し、未着手はpausedに確定する。"""
+        task = self.tasks[task_id]
+        if task["status"] not in {"pending", "running"}:
+            raise ValueError("task_not_stoppable")
+        self.calls.append("request_stop")
+        task["stop_requested"] = True
+        if task["status"] == "pending":
+            task["status"] = "paused"
+        return task["status"]
+
     def list_pending_starts(self, *, limit=20):
         """中断時にもfake DBに残る未着手Taskだけを列挙する。"""
         self.calls.append("list_pending")
@@ -257,6 +268,31 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         second = build_magi_task_commands(bindings, dialogue_starter=fake_start)
         self.assertEqual(await second.recover_pending(), [])
         self.assertEqual(repo.calls.count("claim_start"), 1)
+
+    async def test_pending_stop_is_persisted_and_excluded_from_restart(self):
+        """Stop済み未着手Taskは再起動後にMAGIを起動しない。"""
+        from uuid import uuid4
+
+        repo = FakeMagiRepository()
+        task_id = uuid4()
+        repo.reserve_start(
+            task_id=task_id, request="中止する依頼",
+            member_specs=[{"name": "MELCHIOR", "enabled": True, "timeout_seconds": 5}],
+            decision_strategy="standard", policy_snapshot=None,
+        )
+        self.assertEqual(repo.request_stop(task_id=task_id), "paused")
+        self.assertTrue(repo.tasks[task_id]["stop_requested"])
+        self.assertEqual(repo.list_pending_starts(), [])
+
+        bindings = MagiTaskBindings(
+            magi_repository=repo, pkb_repository=object(),
+            finance_repository=object(), queries=FakeQueries(repo),
+            member_specs_loader=lambda: [],
+            policy_snapshot_loader=lambda: None,
+        )
+        commands = build_magi_task_commands(bindings)
+        self.assertEqual(await commands.recover_pending(), [])
+        self.assertEqual(repo.calls.count("claim_start"), 0)
 
     async def test_failed_reservation_does_not_accept_or_schedule_task(self):
         """DB保存に失敗しても202相当の受付やMAGI実行へ進まない。"""
