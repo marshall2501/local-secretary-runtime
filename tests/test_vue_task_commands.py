@@ -120,6 +120,21 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
             await commands.start("依頼", decision_strategy="llm")
         self.assertEqual(commands._operations, {})
 
+        # standard判断は複数席でも1席へ書き換えず、既存Applicationへ渡す。
+        specs[1]["enabled"] = True
+        accepted = await commands.start("依頼", decision_strategy="standard")
+        await asyncio.wait_for(app.entered.wait(), timeout=1)
+        self.assertEqual(accepted["kind"], "start")
+        self.assertEqual(app.called[0][2]["member_specs"], specs)
+        self.assertEqual([item["enabled"] for item in specs], [True, True])
+        app.release.set()
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if commands.operation(UUID(accepted["task_id"]))["status"] == "execution_finished":
+                break
+        self.assertEqual(commands.operation(UUID(accepted["task_id"]))["status"],
+                         "execution_finished")
+
     async def test_answer_review_guard_and_missing_id(self):
         """回答・Reviewを保存済みTaskの状態で絞り、不明IDと未準備記憶反映を拒否する。"""
         queries = FakeQueries()
