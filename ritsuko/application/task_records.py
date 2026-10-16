@@ -27,9 +27,9 @@ def reserve_start_record(repository: MagiTaskRepository, *,
 
 
 def claim_start_record(repository: MagiTaskRepository, task_id: UUID,
-                       request: str, member_specs: list[dict]) -> None:
+                       request: str, member_specs: list[dict]) -> UUID:
     """既にpendingで永続化されたTaskを原子的に実行中へ遷移させる。"""
-    repository.claim_start(
+    return repository.claim_start(
         task_id=task_id, request=request, member_specs=member_specs,
     )
 
@@ -76,11 +76,12 @@ def prepare_memory_intake_record(repository: MagiTaskRepository,
 
 def persist_session_record(repository: MagiTaskRepository, task_id: UUID,
                            session: dict,
-                           selected_capability: str | None = None) -> dict:
+                           selected_capability: str | None = None,
+                           expected_attempt_id: UUID | None = None) -> dict:
     return repository.persist_session(
-        task_id=task_id,
-        session=session,
+        task_id=task_id, session=session,
         selected_capability=selected_capability,
+        expected_attempt_id=expected_attempt_id,
     )
 
 
@@ -105,5 +106,7 @@ def record_pkb_read_record(repository: MagiTaskRepository, task_id: UUID,
 
 
 def fail_task_record(repository: MagiTaskRepository, task_id: UUID,
-                     error_type: str) -> None:
-    repository.fail_task(task_id=task_id, error=error_type)
+                     error_type: str,
+                     expected_attempt_id: UUID | None = None) -> None:
+    repository.fail_task(task_id=task_id, error=error_type,
+                         expected_attempt_id=expected_attempt_id)
