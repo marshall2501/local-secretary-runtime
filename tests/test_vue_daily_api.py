@@ -87,18 +87,18 @@ class VueDailyApiTests(unittest.TestCase):
             f"/api/v1/ritsuko/tasks/{uuid4()}"
         ).status_code, 404)
 
-    def test_boundary_does_not_open_task_write_or_external_access(self):
-        """Task更新APIが存在せず、想定外のHost/Originを拒否することを検査する。"""
+    def test_unbound_commands_remain_disabled_and_external_access_denied(self):
+        """Task依存を注入しなければ操作は503で、外部Origin等も拒否する。"""
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/health"
         ).json(), {"status": "ok", "synthetic": False, "mode": "read_only"})
         self.assertEqual(self.client.post(
             "/api/v1/ritsuko/tasks", json={"request": "do something"}
-        ).status_code, 405)
+        ).status_code, 503)
         self.assertEqual(self.client.post(
             "/api/v1/ritsuko/tasks/" + str(self.queries.uid) + "/answer",
             json={"reply": "test"},
-        ).status_code, 404)
+        ).status_code, 503)
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks", headers={"Host": "evil.invalid"},
         ).status_code, 403)
@@ -117,6 +117,86 @@ class VueDailyApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/tasks?limit=51"
         ).status_code, 422)
+
+
+class FakeCommands:
+    """HTTP transportの呼出しだけを確認するTaskコマンド代役。DB操作は行わない。"""
+
+    def __init__(self):
+        """固定Task IDを保持し、APIから呼び出した操作を記録する。"""
+        self.uid = uuid4()
+        self.calls = []
+
+    async def start(self, request):
+        """非同期の受付契約を模倣するが、実Taskは作成しない。"""
+        self.calls.append(("start", request))
+        return {"task_id": str(self.uid), "kind": "start", "status": "accepted"}
+
+    async def answer(self, task_id, reply):
+        """APIから受け取った本人回答のTask IDと本文を記録する。"""
+        self.calls.append(("answer", task_id, reply))
+        return {"task_id": str(task_id), "kind": "answer", "status": "accepted"}
+
+    async def review(self, task_id, decision):
+        """回答のみReviewの依頼を記録する。MAGI実行はしない。"""
+        self.calls.append(("review", task_id, decision))
+        return {"task_id": str(task_id), "kind": "review", "status": "accepted"}
+
+    def stop(self, task_id):
+        """停止要求の配送だけ記録し、Task停止確定にはしない。"""
+        self.calls.append(("stop", task_id))
+        return {"task_id": str(task_id), "status": "running", "stop_requested": True}
+
+    def operation(self, task_id):
+        """実Taskとは別のプロセス内Operation状態を返す。"""
+        self.calls.append(("operation", task_id))
+        return {"task_id": str(task_id), "status": "running", "stop_requested": False}
+
+
+class VueDailyCommandApiTests(unittest.TestCase):
+    """Task操作APIを注入した場合だけ受付し、既存のGETを壊さないことを確認する。"""
+
+    def setUp(self):
+        """fake Queryとfake Commandを注入したHTTP TestClientを用意する。"""
+        self.query = FakeQueries()
+        self.commands = FakeCommands()
+        self.client = TestClient(
+            create_app(queries=self.query, commands=self.commands),
+            base_url="http://127.0.0.1:8097",
+        )
+
+    def test_opt_in_task_commands_return_accepted_without_persisting(self):
+        """受付は202であり、Taskの確定・完了を返したと見なさない。"""
+        base = "/api/v1/ritsuko"
+        self.assertEqual(self.client.get(base + "/health").json()["mode"], "commands_enabled")
+        start = self.client.post(base + "/tasks", json={"request": "調査"})
+        self.assertEqual(start.status_code, 202)
+        self.assertEqual(start.json()["status"], "accepted")
+        uid = str(self.commands.uid)
+        answer = self.client.post(base + "/tasks/" + uid + "/answer", json={"reply": "追加"})
+        self.assertEqual(answer.status_code, 202)
+        review = self.client.post(base + "/tasks/" + uid + "/review", json={"decision": "answer_only"})
+        self.assertEqual(review.status_code, 202)
+        self.assertEqual(self.client.post(base + "/tasks/" + uid + "/stop").status_code, 200)
+        self.assertEqual(self.client.get(base + "/operations/" + uid).json()["status"], "running")
+        self.assertEqual([call[0] for call in self.commands.calls],
+                         ["start", "answer", "review", "stop", "operation"])
+        self.assertEqual(self.client.get(base + "/tasks").status_code, 200)
+        self.assertEqual(self.query.calls[-1][0], "recent")
+
+    def test_invalid_input_and_cross_origin_do_not_call_commands(self):
+        """無効な入力・他Originの書込要求を拒否し、コマンドを呼び出さない。"""
+        base = "/api/v1/ritsuko"
+        self.assertEqual(self.client.post(base + "/tasks", json={"request": ""}).status_code, 422)
+        self.assertEqual(self.client.post(
+            base + "/tasks", json={"request": "依頼"},
+            headers={"Origin": "https://evil.invalid"},
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            base + "/tasks/" + str(self.commands.uid) + "/review",
+            json={"decision": "arbitrary"},
+        ).status_code, 422)
+        self.assertEqual(self.commands.calls, [])
 
 
 if __name__ == "__main__":
