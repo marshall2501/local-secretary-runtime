@@ -8,6 +8,16 @@ from pkb.memory_contracts import MemoryIntake
 
 
 class MagiTaskRepository(Protocol):
+    def reserve_start(
+        self, *, task_id: UUID, request: str, member_specs: list[dict],
+        decision_strategy: str, policy_snapshot: dict | None,
+    ) -> None: ...
+
+    def claim_start(
+        self, *, task_id: UUID, request: str, member_specs: list[dict],
+    ) -> None: ...
+
+    def list_pending_starts(self, *, limit: int = 20) -> list[dict]: ...
     def create_task(
         self, *, task_id: UUID, request: str, member_specs: list[dict]
     ) -> None: ...
