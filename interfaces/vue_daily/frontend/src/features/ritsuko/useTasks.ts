@@ -1,16 +1,22 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** Taskの画面状態と再照会だけを管理。完了判定・永続化はRITSUKOが所有する。 */
+/**
+ * 保存済みTaskを表示するための画面側の選択・再取得処理。
+ * Taskの完了判断と保存はRITSUKOが行う。MAGIの候補状態は別に表示する。
+ */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getTaskTrace, listTasks } from './api'
 import type { TaskListView, TaskSummary, TaskTrace } from './types'
 
-/** 既存URL #task=<UUID> のF5復元を維持する。 */
+/** URLハッシュから選択TaskのIDを読み取る。見つからなければ初回一覧で選ぶ。 */
 function taskIdFromHash(): string {
   return window.location.hash.match(/^#task=([a-f\d-]{36})$/i)?.[1] ?? ''
 }
 
-/** 画面表示用Task選択・取得・接続状態を管理し、バックエンドの確定値だけを表示する。 */
+/**
+ * 一覧と選択TaskのTrace、接続失敗、フィルタの状態をまとめる。
+ * DB由来のTask確定状態とMAGI候補を区別して保持し、Vueでは確定判断しない。
+ */
 export function useTasks() {
   const items = ref<TaskSummary[]>([])
   const view = ref<TaskListView>('recent')
@@ -20,11 +26,14 @@ export function useTasks() {
   const refreshing = ref(false)
   const problem = ref('')
   const selected = computed(() => trace.value?.task ?? null)
-  // フィルタ変更・Task選択後に古い非同期結果が返っても画面を巻き戻さない。
+  // 同時に走った照会のうち最新の呼び出しだけを採用するための世代番号。
   let version = 0
   let timer: ReturnType<typeof setInterval> | undefined
 
-  /** 一覧と選択Taskの履歴を再取得し、同じ世代の結果だけ画面に反映する。 */
+  /**
+   * 現在の表示条件で一覧を取得し、選択IDのTraceを続けて取得する。
+   * 遅れて返る旧条件の結果は破棄し、失敗時には最後の画面情報を残す。
+   */
   async function refresh(): Promise<void> {
     const seq = ++version
     const filter = view.value
@@ -53,7 +62,7 @@ export function useTasks() {
     }
   }
 
-  /** 右側一覧から選んだTask IDをURLに残し、再読込・戻る操作に備える。 */
+  /** Task一覧で選択したIDを画面とURLへ反映し、履歴を取り直す。 */
   function selectTask(id: string): void {
     if (selectedId.value === id) return
     selectedId.value = id
@@ -62,7 +71,7 @@ export function useTasks() {
     void refresh()
   }
 
-  /** 表示対象を切り替え、前のTaskを新しい一覧の選択状態に残さない。 */
+  /** 最近・進行中・完了の表示条件を切り替え、前の選択を解除する。 */
   function selectView(next: TaskListView): void {
     if (view.value === next) return
     view.value = next
@@ -72,7 +81,7 @@ export function useTasks() {
     void refresh()
   }
 
-  /** ブラウザの戻る・進むでURLに戻ったTaskを再照会する。 */
+  /** ブラウザ履歴からTask IDが変わったときに選択内容を更新する。 */
   function onHashChange(): void {
     const id = taskIdFromHash()
     if (id !== selectedId.value) {
@@ -82,8 +91,8 @@ export function useTasks() {
     }
   }
 
-  // API接続中も現在Taskの状態が変わるため定期照会する。
-  // Vue画面の終了時には照会を止め、アプリのTask実行は停止させない。
+  // 他の画面からTaskが進む可能性があるため、表示中は3秒ごとに再照会する。
+  // 画面を閉じる際はTimerとイベント購読だけを解除する。Task停止要求は送らない。
   onMounted(() => {
     window.addEventListener('hashchange', onHashChange)
     void refresh()
