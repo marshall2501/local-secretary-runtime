@@ -204,6 +204,92 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("finalize_review", repo.calls)
         self.assertEqual(policies, ["loaded"])
 
+    async def test_restart_recovers_pending_once_and_never_replays_running(self):
+        """受付済み未実行Taskのみ、新Applicationで同じIDからclaimする。"""
+        from uuid import uuid4
+
+        repo = FakeMagiRepository()
+        task_id = uuid4()
+        member_specs = [{"name": "MELCHIOR", "enabled": True, "timeout_seconds": 5}]
+        stored_policy = {"profile_id": "saved-before-restart", "revision": 1}
+        repo.reserve_start(
+            task_id=task_id, request="再起動前の未着手Task",
+            member_specs=member_specs, decision_strategy="llm",
+            policy_snapshot=stored_policy,
+        )
+        calls = []
+        loads = []
+
+        async def fake_start(user_raw, *, policy_snapshot, **kwargs):
+            """復旧中に現行Policyへすり替わらないことを確認する。"""
+            calls.append((user_raw, kwargs["task_id"], policy_snapshot))
+            return {
+                "task_id": kwargs["task_id"], "user_raw": user_raw,
+                "member_specs": kwargs["member_specs"],
+                "decision_strategy": kwargs["decision_strategy"],
+                "status": "waiting_user",
+            }
+
+        def latest_policy():
+            """復旧時は新しいPolicy設定を読まない。"""
+            loads.append("called")
+            return {"profile_id": "current-but-not-for-existing-task"}
+
+        bindings = MagiTaskBindings(
+            magi_repository=repo, pkb_repository=object(),
+            finance_repository=object(), queries=FakeQueries(repo),
+            member_specs_loader=lambda: member_specs,
+            policy_snapshot_loader=latest_policy,
+        )
+        commands = build_magi_task_commands(bindings, dialogue_starter=fake_start)
+        recovered = await commands.recover_pending()
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0]["task_id"], str(task_id))
+        self.assertEqual(repo.tasks[task_id]["status"], "pending")
+        await self._wait_for(commands, task_id)
+        self.assertEqual(repo.calls.count("claim_start"), 1)
+        self.assertEqual(repo.tasks[task_id]["status"], "waiting_external")
+        self.assertEqual(calls, [(
+            "再起動前の未着手Task", str(task_id), stored_policy,
+        )])
+        self.assertEqual(loads, [])
+        # Task has left pending; a restarted Worker does not replay it.
+        second = build_magi_task_commands(bindings, dialogue_starter=fake_start)
+        self.assertEqual(await second.recover_pending(), [])
+        self.assertEqual(repo.calls.count("claim_start"), 1)
+
+    async def test_failed_reservation_does_not_accept_or_schedule_task(self):
+        """DB保存に失敗しても202相当の受付やMAGI実行へ進まない。"""
+        repo = FakeMagiRepository()
+        calls = []
+
+        def broken_reserve(**_kwargs):
+            """コミット失敗を再現する。"""
+            raise RuntimeError("simulated_db_write_failure")
+
+        repo.reserve_start = broken_reserve
+
+        async def fake_start(*_args, **_kwargs):
+            """予約が失敗したTaskで呼ばれてはならない。"""
+            calls.append("llm")
+            return {}
+
+        bindings = MagiTaskBindings(
+            magi_repository=repo, pkb_repository=object(),
+            finance_repository=object(), queries=FakeQueries(repo),
+            member_specs_loader=lambda: [{
+                "name": "MELCHIOR", "enabled": True, "timeout_seconds": 5,
+            }],
+            policy_snapshot_loader=lambda: None,
+        )
+        commands = build_magi_task_commands(bindings, dialogue_starter=fake_start)
+        with self.assertRaisesRegex(RuntimeError, "simulated_db_write_failure"):
+            await commands.start("失敗すべき依頼", decision_strategy="llm")
+        self.assertEqual(repo.tasks, {})
+        self.assertEqual(commands._operations, {})
+        self.assertEqual(commands._jobs, {})
+        self.assertEqual(calls, [])
+
     async def _wait_for(self, commands, task_id: UUID) -> None:
         """Operationが終了するまで待つ。TaskのDB確定とは別に判定する。"""
         for _ in range(100):
