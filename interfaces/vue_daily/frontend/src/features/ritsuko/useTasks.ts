@@ -32,7 +32,8 @@ export function useTasks() {
 
   /**
    * 現在の表示条件で一覧を取得し、選択IDのTraceを続けて取得する。
-   * 遅れて返る旧条件の結果は破棄し、失敗時には最後の画面情報を残す。
+   * 遅れて返る旧条件の結果は破棄する。失敗時は取得済み一覧を残すが、
+   * Taskを選び直した直後の詳細は未取得のままになることがある。
    */
   async function refresh(): Promise<void> {
     const seq = ++version
@@ -55,7 +56,8 @@ export function useTasks() {
     } catch (error) {
       if (seq !== version) return
       connected.value = false
-      problem.value = 'Task APIに接続できません。表示は最後に取得した内容です。（' +
+      problem.value = 'Task情報を取得できません。取得済みの一覧は保持しています。' +
+        '選択中の詳細は未取得の場合があります。（' +
         String(error) + '）'
     } finally {
       if (seq === version) refreshing.value = false
