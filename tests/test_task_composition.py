@@ -26,14 +26,17 @@ class TaskCompositionTests(unittest.IsolatedAsyncioTestCase):
         ports = {name: (lambda *args, **kwargs: None) for name in PORT_NAMES}
 
         async def start_runner(request, **kwargs):
+            """新規受付時に注入Portを記録し、質問待ち状態を模倣する。"""
             record.append(("start", request, kwargs))
             return {"task_id": "synthetic", "status": "waiting_user"}
 
         async def answer_runner(task_id, reply, **kwargs):
+            """同じTask IDへの本人回答再開とPort配線を記録する。"""
             record.append(("answer", task_id, kwargs))
             return {"task_id": str(task_id), "status": "completed", "reply": reply}
 
         async def review_runner(task_id, decision, **kwargs):
+            """Proposal Reviewの決定を外部Action無しで記録する。"""
             record.append(("review", task_id, kwargs))
             return {"task_id": str(task_id), "decision": decision}
 
