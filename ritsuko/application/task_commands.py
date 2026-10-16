@@ -305,7 +305,7 @@ class TaskCommands:
             "task_id": str(task_id),
             "kind": None,
             "status": "operation_not_in_process",
-            "stop_requested": None,
+            "stop_requested": task.get("stop_requested"),
             "error_type": None,
             "source": "persisted_task",
             "task_status": persisted_status,
