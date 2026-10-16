@@ -148,6 +148,58 @@ class FakeQueries:
 class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """非GUI構成のTask開始・再開・Review・権限Snapshot保存を検証する。"""
 
+    async def test_db_claim_attempt_is_forwarded_to_completion(self):
+        """実Repositoryが発行したWorker試行IDを共通Applicationが失わない。"""
+        from uuid import uuid4
+
+        attempt = uuid4()
+
+        class AttemptRepository(FakeMagiRepository):
+            """新しい永続Taskの試行IDを返すfake Repository。"""
+
+            def __init__(self):
+                super().__init__()
+                self.persisted_attempts = []
+
+            def claim_start(self, *, task_id, request, member_specs):
+                """Taskをclaimして発行した試行IDをRunnerへ渡す。"""
+                super().claim_start(
+                    task_id=task_id, request=request,
+                    member_specs=member_specs,
+                )
+                return attempt
+
+            def persist_session(self, *, task_id, session,
+                                selected_capability=None,
+                                expected_attempt_id=None):
+                """確定書込にclaimした試行IDが渡ることを確認する。"""
+                self.persisted_attempts.append(expected_attempt_id)
+                return super().persist_session(
+                    task_id=task_id, session=session,
+                    selected_capability=selected_capability,
+                )
+
+        repo = AttemptRepository()
+
+        async def synthetic_dialogue(user_raw, *, policy_snapshot, **kwargs):
+            """外部LLMを呼ばず、待機Taskを一つ生成する。"""
+            return {
+                "task_id": kwargs["task_id"], "status": "waiting_user",
+                "member_specs": kwargs["member_specs"], "user_raw": user_raw,
+            }
+
+        commands = build_magi_task_commands(MagiTaskBindings(
+            magi_repository=repo, pkb_repository=object(),
+            finance_repository=object(), queries=FakeQueries(repo),
+            member_specs_loader=lambda: [
+                {"name": "MELCHIOR", "enabled": True, "timeout_seconds": 6},
+            ],
+            policy_snapshot_loader=lambda: {},
+        ), dialogue_starter=synthetic_dialogue)
+        accepted = await commands.start("試行IDを保存するGoal")
+        await self._wait_for(commands, UUID(accepted["task_id"]))
+        self.assertEqual(repo.persisted_attempts, [attempt])
+
     async def test_start_answer_review_reuse_real_application_ports(self):
         """fake DB上の同一Task IDに、起動時PolicyとMAGI判断結果を保存する。"""
         repo = FakeMagiRepository()
