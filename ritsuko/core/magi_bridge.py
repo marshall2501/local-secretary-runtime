@@ -212,7 +212,7 @@ def _goal_completion_projection(session: dict) -> dict:
             available[result_id].get("verification_level") == "provider_cited"
             for result_id in result_ids
         ):
-            note = "\\n\\n注: 出典は検索Providerが報告した引用であり、本文の独立確認は未実施です。"
+            note = "\n\n注: 出典は検索Providerが報告した引用であり、本文の独立確認は未実施です。"
         return {
             "task_status": "completed", "phase": "completed",
             "next_step": "respond", "message": answer.strip() + note,
