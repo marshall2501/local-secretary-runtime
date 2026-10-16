@@ -1,20 +1,21 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
 /**
- * RITSUKO画面を中央の選択Taskと右側Task一覧に分けて配置する。
- * 本段階は読取専用。依頼・回答・停止は既存NiceGUIへの実リンクで案内する。
+ * RITSUKO画面の中央に保存済みTask・操作・履歴、右にTask一覧を置く。
+ * 実Task操作はcommands_enabledのときだけ既存APIへ配送する。
  */
-import { legacyPageUrl } from '../../shared/navigation'
 import { useTasks } from './useTasks'
 import CurrentTask from './components/CurrentTask.vue'
+import TaskCommandPanel from './components/TaskCommandPanel.vue'
 import TaskActivity from './components/TaskActivity.vue'
 import TaskSidebar from './components/TaskSidebar.vue'
 
 const {
   items, view, selectedId, trace, selected, connected, refreshing,
   problem, selectTask, selectView,
+  commandsEnabled, commandBusy, commandFeedback, commandError, operation,
+  draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
 } = useTasks()
-const niceguiCore = legacyPageUrl('/core')
 </script>
 
 <template>
@@ -25,22 +26,21 @@ const niceguiCore = legacyPageUrl('/core')
       {{ connected ? '保存済みTask API接続中' : 'API未接続' }}
     </div>
   </div>
-  <p class="read-only-notice">
-    <strong>Vue移行中・実Task読取専用</strong>
-    保存済みTask一覧・状態・結果を参照できます。依頼開始、回答、停止、Review、MAGI実行はまだ既存画面で操作してください。
+  <p v-if="!commandsEnabled" class="read-only-notice">
+    <strong>実Task読取専用</strong>
+    このプレビューからの操作は有効化されていません。保存済みTaskは閲覧できます。
   </p>
   <p v-if="problem" class="error" role="alert">{{ problem }}</p>
   <div class="workspace">
     <main class="ritsuko-main">
       <CurrentTask :task="selected" :loading="refreshing" />
-      <section class="card request-entry" aria-label="新しい依頼">
-        <div class="section-head"><h2>新しい依頼・本人回答</h2></div>
-        <p class="muted">
-          実Task操作APIの移行後は、この領域から新規受付・本人回答・停止を行えます。
-          現在は既存NiceGUIのRITSUKOで操作できます。
-        </p>
-        <a class="link-button" :href="niceguiCore">既存画面で依頼・回答する</a>
-      </section>
+      <TaskCommandPanel
+        v-model:request="draftRequest" v-model:strategy="strategy" v-model:reply="reply"
+        :commands-enabled="commandsEnabled" :busy="commandBusy"
+        :task="selected" :feedback="commandFeedback" :error="commandError"
+        :operation="operation"
+        @start="sendStart" @answer="sendAnswer" @review="sendReview" @stop="sendStop"
+      />
       <TaskActivity :trace="trace" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
