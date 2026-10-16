@@ -101,6 +101,25 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TaskCommandConflict, "no_running_operation"):
             commands.stop(UUID(uid))
 
+    async def test_judgment_strategy_does_not_change_member_assignments(self):
+        """LLM判断の旧1席制約を明示し、他メンバー設定は変更しない。"""
+        app = FakeApplication()
+        specs = [
+            {"name": "MELCHIOR", "enabled": True, "timeout_seconds": 9},
+            {"name": "CASPER", "enabled": True, "timeout_seconds": 10},
+        ]
+        commands = TaskCommands(app, FakeQueries(), lambda: specs)
+        with self.assertRaisesRegex(ValueError, "unknown_flow_decision_strategy"):
+            await commands.start("依頼", decision_strategy="new_mode")
+        with self.assertRaisesRegex(TaskCommandConflict, "currently_requires_one_member"):
+            await commands.start("依頼", decision_strategy="llm")
+        self.assertEqual([item["enabled"] for item in specs], [True, True])
+        self.assertEqual(commands._operations, {})
+        specs[1]["enabled"] = False
+        with self.assertRaisesRegex(TaskCommandConflict, "llm_strategy_not_connected"):
+            await commands.start("依頼", decision_strategy="llm")
+        self.assertEqual(commands._operations, {})
+
     async def test_answer_review_guard_and_missing_id(self):
         """回答・Reviewを保存済みTaskの状態で絞り、不明IDと未準備記憶反映を拒否する。"""
         queries = FakeQueries()
