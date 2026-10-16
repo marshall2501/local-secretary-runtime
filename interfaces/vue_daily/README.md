@@ -97,3 +97,13 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - もとのTaskがDBに存在しない（202後DB作成前にAPI停止など）場合は引き続き404。HTTP 202はなお**プロセス内受付のみ**。永続受付・Worker/PC再起動後の安全な再実行は未実装。
 - `tests/test_vue_task_commands.py` でDBに存在する `running/waiting_external/paused/completed/failed` とWorker不在・stop不可、`tests/test_vue_daily_api.py` で再生成されたAPIと404をfake Queriesで検証。
 - 通常8097は実Task Command未注入の`read_only`でPOST 503。今回の変更はデフォルト8097やNiceGUI/DBの運用を変更しない。
+
+## Stage B-3b: 永続Task受付・未着手復旧（2026-10-17）
+
+- **実Task Commandを明示的に注入した時だけ**、`TaskCommands.start` はJob実行より先に同じPostgreSQLの `tasks.status=pending` と `checkpoint.start_intent` をatomicにcommitする。保存するものは依頼本文・選択判断方式・メンバー設定・Task固定Policy snapshotであり、Secret値・Credential原文ではない。DB保存が失敗したら202を返さず、Jobも動かさない。
+- `run_observation_loop` は従来どおり一系統。`bootstrap/magi_task_runtime.py` は従来の `create_task_record` Portに `claim_start_record` を注入し、`pending→running` の `FOR UPDATE` claimが成功したJobだけMAGIへ進める。既存NiceGUIの個別Task作成経路は変更しない。
+- `TaskCommands.recover_pending()` は保存済みで**未着手のpending Taskだけ**を列挙し、同じTask ID、当時の判断方式／member設定／Policyを使って再開。API `create_app(..., commands=...)` は起動時に最大20件のpending復旧を要求する。**通常8097の`create_app(queries=...)`はcommands未注入のread-onlyなので、起動時復旧やTask writeは実行しない**。DB上で既にrunningのTaskを自動再実行しない。
+- StopはRepositoryの `request_stop` で永続化。pendingは`paused`へ確定してclaim不許可。runningはまず `stop_requested=true` を記録し、Workerによる停止完了は別。API再起動後は保存済みStopの有無をTaskの照会から確認でき、`running`をWorker生存と見なさない。
+- HTTP `POST /api/v1/ritsuko/tasks` に省略可能な `task_id: UUID` を追加。通信途絶後に**同一UUID・依頼原文・判断方式**で再送した場合はDB `ON CONFLICT DO NOTHING`と読取照合を使い、Jobを二重作成せず `already_accepted` を返す。異なるIntentを同じUUIDに送った場合は409。UUIDなしの新規リクエストは従来どおりServerが採番するため、クライアントの完全な再送冪等性にはUI側でTask IDを再利用する対応が必要。
+- **隔離検証**: fake Repositoryの受付→MAGI→回答→Review、DBコミット失敗時のJob未実行、同じUUIDの再送、API再構築後のpending復旧、pending停止後の復旧拒否、API明示bind時だけの起動処理、SQL unit回帰を追加。[Vue/API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926295720) PASS。使い捨てDocker PostgreSQLで実際に2 Worker同時claim／同じUUID再送／pending Stopを[PostgreSQL CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653819) PASS（`PASS: disposable PG durable intake, replay, 2-worker claim, stop-before-start`）。既存[NiceGUI/PKB回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653778)・[改行](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653795) PASS。
+- **未実証／残課題**: 本人サブPCでの新コード反映・通常実DBのMAGI/Source Task、PC/APIを実際にKill→Restartした場合のジョブ復旧と中断中runningの照合、ユーザー回答・Reviewの202以前永続化、複数pendingの継続drain、Vue操作画面がUUIDを保持して再送する導線、実MAGIの1〜3席Goal判断。現時点で新Runtimeの通常8097 write接続・既存8093起動構成・MAGI席設定／権限は変更していない。
