@@ -47,12 +47,18 @@ class TaskCommands:
         member_specs_loader: Callable[[], list[dict]],
         *,
         max_retained: int = 100,
-        dialogue_starter_factory: Callable[[str], Callable] | None = None,
+        dialogue_starter_factory: Callable | None = None,
+        reserve_start: Callable | None = None,
+        pending_starts_loader: Callable | None = None,
+        policy_snapshot_loader: Callable | None = None,
     ) -> None:
         self._application = application
         self._queries = queries
         self._member_specs_loader = member_specs_loader
         self._dialogue_starter_factory = dialogue_starter_factory
+        self._reserve_start = reserve_start
+        self._pending_starts_loader = pending_starts_loader
+        self._policy_snapshot_loader = policy_snapshot_loader
         self._max_retained = max(1, int(max_retained))
         # 実行中Jobと停止EventはAPIプロセス内だけの一時情報。
         self._jobs: dict[UUID, asyncio.Task] = {}
@@ -135,24 +141,81 @@ class TaskCommands:
             raise TaskCommandConflict("llm_strategy_currently_requires_one_member")
         if decision_strategy == "llm" and self._dialogue_starter_factory is None:
             raise TaskCommandConflict("llm_strategy_not_connected")
-        timeout = max(float(item.get("timeout_seconds") or 120) for item in enabled)
         task_id = uuid4()
-
-        # Applicationの既存dialogue_starter Portを使い、Task実行ループを複製しない。
-        start_options = {}
-        if self._dialogue_starter_factory is not None:
-            start_options["dialogue_starter"] = (
-                self._dialogue_starter_factory(decision_strategy)
+        policy = None
+        if self._reserve_start is not None:
+            if self._policy_snapshot_loader is None:
+                raise TaskCommandConflict("durable_start_policy_loader_missing")
+            policy = await asyncio.to_thread(self._policy_snapshot_loader)
+            # DB transaction must commit before 202 is returned or any Job is scheduled.
+            await asyncio.to_thread(
+                self._reserve_start, task_id=task_id, request=text,
+                member_specs=deepcopy(specs), decision_strategy=decision_strategy,
+                policy_snapshot=deepcopy(policy),
             )
+        self._launch_start(task_id, text, specs, decision_strategy, policy)
+        return self.operation(task_id)
+
+    def _launch_start(self, task_id: UUID, request: str,
+                      member_specs: list[dict], decision_strategy: str,
+                      policy_snapshot: dict | None) -> None:
+        """保存済み受付Taskを既存Applicationへつなぎ、Runnerは一種類に保つ。"""
+        starter_options = {}
+        if self._dialogue_starter_factory is not None:
+            if self._reserve_start is not None:
+                starter_options["dialogue_starter"] = self._dialogue_starter_factory(
+                    decision_strategy, deepcopy(policy_snapshot),
+                )
+            else:
+                starter_options["dialogue_starter"] = (
+                    self._dialogue_starter_factory(decision_strategy)
+                )
+        timeout = max(
+            (float(item.get("timeout_seconds") or 120)
+             for item in member_specs if item.get("enabled")),
+            default=120,
+        )
 
         async def run(stop: Event) -> None:
-            """同じTask IDと固定した判断方式で共通RITSUKOのTaskを開始する。"""
+            """DB pendingのclaim後、既存のRITSUKO/MAGI共通Taskループを起動する。"""
             await self._application.start(
-                text, task_id=task_id, member_specs=deepcopy(specs),
-                timeout=timeout, stop_requested=stop.is_set,
-                **start_options,
+                request, task_id=task_id, member_specs=deepcopy(member_specs),
+                timeout=timeout, stop_requested=stop.is_set, **starter_options,
             )
-        return self._schedule(task_id, "start", run)
+        self._schedule(task_id, "start", run)
+
+    async def recover_pending(self, *, limit: int = 20) -> list[dict]:
+        """DBに残った未着手Taskだけを選び、通常の実行経路へ再投入する。
+
+        既存のrunningは自動再実行しない。同時Workerの衝突はRepositoryの
+        pending→running原子claimで拒否される。API/PC自動起動は別段階。
+        """
+        if self._reserve_start is None or self._pending_starts_loader is None:
+            raise TaskCommandConflict("durable_start_not_configured")
+        pending = await asyncio.to_thread(self._pending_starts_loader, limit=limit)
+        results = []
+        for item in pending:
+            task_id = UUID(str(item["task_id"]))
+            strategy = item["decision_strategy"]
+            specs = deepcopy(item["member_specs"])
+            if strategy not in {"standard", "llm"} or not any(
+                member.get("enabled") for member in specs
+            ):
+                continue
+            if strategy == "llm" and sum(
+                bool(member.get("enabled")) for member in specs
+            ) != 1:
+                continue
+            try:
+                self._launch_start(
+                    task_id, item["request"], specs, strategy,
+                    item.get("policy_snapshot"),
+                )
+            except TaskCommandConflict:
+                # Another request in this process already started this Task.
+                continue
+            results.append(self.operation(task_id))
+        return results
 
     async def answer(self, task_id: UUID, reply: str) -> dict:
         """DB上で本人回答待ちのTaskだけを同一IDで再開受付する。"""
