@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from ritsuko.application.task_commands import (
     TaskCommandConflict, TaskCommandNotFound, TaskCommands,
@@ -80,8 +80,8 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted["status"], "accepted")
         self.assertFalse(accepted["stop_requested"])
         await asyncio.wait_for(app.entered.wait(), timeout=1)
-        self.assertEqual(commands.operation(__import__("uuid").UUID(uid))["status"], "running")
-        stop = commands.stop(__import__("uuid").UUID(uid))
+        self.assertEqual(commands.operation(UUID(uid))["status"], "running")
+        stop = commands.stop(UUID(uid))
         self.assertTrue(stop["stop_requested"])
         self.assertTrue(app.called[0][2]["stop_requested"]())
         self.assertEqual(app.called[0][1], "調査依頼")
@@ -89,11 +89,11 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         app.release.set()
         for _ in range(10):
             await asyncio.sleep(0)
-            if commands.operation(__import__("uuid").UUID(uid))["status"] == "execution_finished":
+            if commands.operation(UUID(uid))["status"] == "execution_finished":
                 break
-        self.assertEqual(commands.operation(__import__("uuid").UUID(uid))["status"], "execution_finished")
+        self.assertEqual(commands.operation(UUID(uid))["status"], "execution_finished")
         with self.assertRaisesRegex(TaskCommandConflict, "no_running_operation"):
-            commands.stop(__import__("uuid").UUID(uid))
+            commands.stop(UUID(uid))
 
     async def test_answer_review_guard_and_missing_id(self):
         """回答・Reviewを保存済みTaskの状態で絞り、不明IDと未準備記憶反映を拒否する。"""
