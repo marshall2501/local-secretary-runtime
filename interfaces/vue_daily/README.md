@@ -60,3 +60,16 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - `bootstrap/magi_task_runtime.py` の `MagiTaskBindings`／`build_magi_task_commands` は、既存 `StateDrivenTaskApplication` と Task/Action/Result Repository、MAGI席設定、Task開始時のPolicy Snapshot、PKB/Web/家計のSourceを画面と独立して結合する。`build_daily_magi_task_commands()` は日常Runtimeの既存DB・Service Connection経路を使うが、**通常8097では呼び出していない**。
 - `tests/test_magi_task_runtime_composition.py` はfake DBとfake MAGIを使い、Task開始→本人回答→回答のみReviewとPolicy Snapshotの再利用を検査。`tests/test_magi_shared_source.py` は曖昧なPKB対象で広い検索に拡張しないこと、権限のないWeb検索を実行しないこと、Web fallback時にも同じ公開検索文を使うことを確認。既存NiceGUIのPKB/Web回帰も維持する。
 - **未受入**: 本人のサブPC実DBと実MAGI/Source接続での受付・回答・停止・Review、MAGI設定/権限Snapshotの実機照合、Goal判断方式の画面選択同等性、JobのAPI process再起動後復旧。これらを確認するまで通常8097から実Taskのwriteを有効化しない。Vue画面の操作UIも未接続。
+
+## Stage B-2 日常DB設定の読取プローブ
+
+サブPCの実機で日常DB・MAGI設定・LAN Policy・Task一覧を確認するための再利用可能なコマンド：
+
+```powershell
+& "D:\AI\projects\local-secretary-runtime\.venv\Scripts\python.exe" "D:\AI\projects\local-secretary-runtime\scripts\db\probe_magi_runtime_readonly.py"
+```
+
+- 既存Vue Launcherと同じ `.env.postgres` のPortと `secrets/secretary-daily-runtime-password.txt` の**ファイルパス**を検証プロセス内だけに設定する。親PowerShellの環境変数・Secretファイル・DB設定を変更しない。
+- 有効MAGIの総数と3席の `ENABLED`／`DISABLED`／`NOT_ASSIGNED`、LAN Policyの有無、Task一覧の読取可否だけを出す。Secret値や実Task本文を表示しない。Task書込・MAGI/Source実行を行わない。
+- このスクリプトは**実DBの設定読取のみ**。Model endpoint・接続資格情報の有効性やTask作成/回答/Review/Stopの受入ではない。通常Vue 8097は依然 `read_only`、POSTは503。
+- 初回の実機読取は本人PowerShellの一時プローブで `Composition: OK` / `MAGI active: 1` / `LAN policy: SET` / `Task DB read: OK` を確認済み。**この新しいファイルの実機実行は未実施**、fake隔離CIで検証済み。3席のうち1席有効が意図どおりかは別確認。
