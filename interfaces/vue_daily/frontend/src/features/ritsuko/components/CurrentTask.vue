@@ -1,6 +1,10 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** 現在TaskとDB確定状態、MAGI中間候補を混同せず表示する。 */
+/**
+ * 右側の一覧で選択した保存済みTaskを表示する。
+ * 「現在のTask」は画面の選択対象であり、必ずしも実行中という意味ではない。
+ * Taskの確定状態とMAGIの途中状態は別項目で示す。
+ */
 import { taskStatusLabel } from '../types'
 import type { TaskRecord } from '../types'
 defineProps<{ task: TaskRecord | null; loading: boolean }>()
