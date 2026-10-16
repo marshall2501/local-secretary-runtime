@@ -309,6 +309,17 @@ def main(project: str, container: str) -> None:
         },
     }
     try:
+        repository.record_source_read(
+            task_id=goal_id,
+            execution={"source": "pkb", "status": "ok", "result": {}},
+            pending_request={"source": "pkb", "request_ids": ["wrong-worker"]},
+            expected_attempt_id=uuid4(),
+        )
+    except ValueError as exc:
+        assert str(exc) == "task_attempt_mismatch"
+    else:
+        raise AssertionError("stale_worker_recorded_source_result")
+    try:
         repository.persist_session(
             task_id=goal_id, session=proposed_goal,
             expected_attempt_id=uuid4(),
@@ -372,6 +383,7 @@ def main(project: str, container: str) -> None:
         assert terminal_after["task_status"] == terminal_status
         assert terminal_after["stop_requested"] is None
 
+    print("PASS: disposable PG stale Source write rejected by worker attempt")
     print("PASS: disposable PG worker attempt fences stale completion and failure")
     print("PASS: disposable PG Task Goal interpretation, revision and read-only query")
     print("PASS: disposable PG late MAGI completion/error cannot overwrite acknowledged Stop")
