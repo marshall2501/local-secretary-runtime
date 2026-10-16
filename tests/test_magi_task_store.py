@@ -12,6 +12,7 @@ from infrastructure.postgres.magi_task_repository import (
     reserve_start,
     claim_start,
     list_pending_starts,
+    request_stop,
     finalize_proposal_review,
     persist_session,
     prepare_memory_intake,
@@ -193,6 +194,26 @@ class MagiTaskStoreTests(unittest.TestCase):
         self.assertEqual(rows[0]["request"], "本来の依頼")
         self.assertIn("status='pending'", pending.cur.calls[0][0])
         self.assertEqual(rows[0]["member_specs"], checkpoint["member_specs"])
+
+    def test_stop_before_claim_pauses_task_and_marks_running_as_request_only(self):
+        """未着手の停止だけを確定し、実行中は要求と停止完了を混同しない。"""
+        db = _DB(fetches=[("pending", {"phase": "accepted"})])
+        self.assertEqual(request_stop(db, task_id=TASK_ID), "paused")
+        update = next(call for call in db.cur.calls if "UPDATE secretary.tasks" in call[0])
+        self.assertEqual(update[1][0], "paused")
+        self.assertTrue(update[1][1].obj["stop_requested"])
+        self.assertEqual(update[1][1].obj["final_core_decision"]["task_status"], "paused")
+
+        running = _DB(fetches=[("running", {"phase": "observe"})])
+        self.assertEqual(request_stop(running, task_id=TASK_ID), "running")
+        update2 = next(call for call in running.cur.calls if "UPDATE secretary.tasks" in call[0])
+        self.assertEqual(update2[1][0], "running")
+        self.assertTrue(update2[1][1].obj["stop_requested"])
+        self.assertNotIn("final_core_decision", update2[1][1].obj)
+        blocked = _DB(fetches=[("completed", {"phase": "completed"})])
+        with self.assertRaisesRegex(ValueError, "task_not_stoppable"):
+            request_stop(blocked, task_id=TASK_ID)
+        self.assertFalse(any("UPDATE secretary.tasks" in sql for sql, _ in blocked.cur.calls))
 
     def test_claim_user_resume_requires_waiting_magi_task_and_preserves_snapshot(self):
         saved_session = {
