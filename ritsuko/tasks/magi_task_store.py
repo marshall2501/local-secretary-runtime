@@ -15,7 +15,7 @@ class MagiTaskRepository(Protocol):
 
     def claim_start(
         self, *, task_id: UUID, request: str, member_specs: list[dict],
-    ) -> None: ...
+    ) -> UUID: ...
 
     def list_pending_starts(self, *, limit: int = 20) -> list[dict]: ...
 
@@ -36,6 +36,7 @@ class MagiTaskRepository(Protocol):
         task_id: UUID,
         session: dict,
         selected_capability: str | None = None,
+        expected_attempt_id: UUID | None = None,
     ) -> dict: ...
 
     def prepare_memory_intake(self, *, task_id: UUID) -> MemoryIntake: ...
@@ -66,7 +67,8 @@ class MagiTaskRepository(Protocol):
         self, *, task_id: UUID, execution: dict, pending_request: dict
     ) -> tuple[str, str]: ...
 
-    def fail_task(self, *, task_id: UUID, error: str) -> None: ...
+    def fail_task(self, *, task_id: UUID, error: str,
+                  expected_attempt_id: UUID | None = None) -> None: ...
 
 
 def create_task(repository: MagiTaskRepository, **kwargs) -> None:
