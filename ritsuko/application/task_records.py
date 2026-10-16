@@ -86,12 +86,12 @@ def persist_session_record(repository: MagiTaskRepository, task_id: UUID,
 
 
 def record_source_read_record(repository: MagiTaskRepository, task_id: UUID,
-                              execution: dict,
-                              pending_request: dict) -> tuple[str, str]:
+                              execution: dict, pending_request: dict,
+                              expected_attempt_id: UUID | None = None) -> tuple[str, str]:
     return repository.record_source_read(
-        task_id=task_id,
-        execution=execution,
+        task_id=task_id, execution=execution,
         pending_request=pending_request,
+        expected_attempt_id=expected_attempt_id,
     )
 
 
