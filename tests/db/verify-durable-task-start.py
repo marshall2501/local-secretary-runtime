@@ -10,6 +10,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -46,7 +47,7 @@ def disposable_port(project: str, container: str) -> int:
     if len(bindings) != 1 or bindings[0]["HostIp"] != "127.0.0.1":
         raise RuntimeError("non_loopback_postgres")
     port = int(bindings[0]["HostPort"])
-    if (ROOT / ".env.postgres").read_text(encoding="utf-8").strip() != (
+    if Path(os.environ.get("LSA_TEST_DB_ENV_FILE", str(ROOT / ".env.postgres"))).read_text(encoding="utf-8").strip() != (
         f"LSA_DB_PORT={port}"
     ):
         raise RuntimeError("isolated_port_mismatch")
