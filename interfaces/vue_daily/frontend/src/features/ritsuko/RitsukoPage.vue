@@ -12,8 +12,8 @@ import TaskActivity from './components/TaskActivity.vue'
 import TaskSidebar from './components/TaskSidebar.vue'
 
 const {
-  items, view, selectedId, trace, selected, connected, refreshing,
-  problem, selectTask, selectView,
+  items, view, hasMore, selectedId, trace, selected, connected, refreshing,
+  problem, selectTask, selectView, loadMore,
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
   draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
 } = useTasks()
@@ -42,8 +42,8 @@ const {
       <TaskActivity :trace="trace" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
-      :commands-enabled="commandsEnabled"
-      @select="selectTask" @filter="selectView"
+      :commands-enabled="commandsEnabled" :has-more="hasMore" :loading="refreshing"
+      @select="selectTask" @filter="selectView" @more="loadMore"
     />
   </div>
 </template>
