@@ -1,6 +1,6 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** 製品Vueの薄いroot。日常画面は共通Shellへfeatureを挿入する。 */
+/** 現段階のRITSUKO画面を共通レイアウトへ載せる。業務処理やAPI通信は置かない。 */
 import SecretaryLayout from './app/SecretaryLayout.vue'
 import RitsukoPage from './features/ritsuko/RitsukoPage.vue'
 </script>
