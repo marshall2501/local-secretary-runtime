@@ -2,7 +2,7 @@
 <script setup lang="ts">
 /**
  * Task履歴APIに含まれるAction・Resultの記録を折りたたんで表示する。
- * 結果IDがないActionは未記録のまま示し、成功したとは表示しない。
+ * Result IDは保存されている場合だけ表示し、要約も結果もない場合は未記録と示す。
  */
 import type { TaskTrace } from '../types'
 defineProps<{ trace: TaskTrace | null }>()
