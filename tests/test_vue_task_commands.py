@@ -135,6 +135,29 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commands.operation(UUID(accepted["task_id"]))["status"],
                          "execution_finished")
 
+    async def test_operation_after_restart_reports_db_state_without_fake_worker(self):
+        """APIインスタンス再生成後、既存TaskとWorker稼働情報を混同しない。"""
+        queries = FakeQueries()
+        commands = TaskCommands(FakeApplication(), queries, lambda: [])
+        for saved_status in ("waiting_external", "running", "completed", "paused", "failed"):
+            with self.subTest(saved_status=saved_status):
+                queries.task["status"] = saved_status
+                result = commands.operation(queries.uid)
+                self.assertEqual(result["task_id"], str(queries.uid))
+                self.assertEqual(result["status"], "operation_not_in_process")
+                self.assertEqual(result["source"], "persisted_task")
+                self.assertEqual(result["task_status"], saved_status)
+                self.assertIsNone(result["stop_requested"])
+                self.assertEqual(
+                    result["execution_reconciliation_required"],
+                    saved_status == "running",
+                )
+                self.assertNotIn("magi_session", result)
+        with self.assertRaises(TaskCommandNotFound):
+            commands.operation(uuid4())
+        with self.assertRaisesRegex(TaskCommandConflict, "no_running_operation"):
+            commands.stop(queries.uid)
+
     async def test_answer_review_guard_and_missing_id(self):
         """回答・Reviewを保存済みTaskの状態で絞り、不明IDと未準備記憶反映を拒否する。"""
         queries = FakeQueries()
