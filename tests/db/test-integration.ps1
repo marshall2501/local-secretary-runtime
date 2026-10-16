@@ -4,6 +4,8 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $dbScript = Join-Path $root 'scripts/db/postgres.ps1'
+$python = Join-Path $root '.venv/Scripts/python.exe'
+if (-not (Test-Path -LiteralPath $python)) { throw 'Project .venv Python not found. Create the runtime virtual environment first.' }
 $project = 'local-secretary-test-' + [guid]::NewGuid().ToString('N').Substring(0,12)
 $testEnvFile = Join-Path $root ('.env.postgres.' + $project + '.tmp')
 $probe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
@@ -66,14 +68,14 @@ try {
     Run-Sql (Join-Path $PSScriptRoot 'assertions.sql') 'secretary'
     # The same freshly migrated disposable DB also exercises the RITSUKO
     # external Action repository, not the in-memory test double.
-    & python (Join-Path $PSScriptRoot 'verify-external-action.py') $project $script:container
+    & $python (Join-Path $PSScriptRoot 'verify-external-action.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated external Action PostgreSQL verification failed.' }
     # Policy migration 009 is verified against the same disposable DB.
-    & python (Join-Path $PSScriptRoot 'verify-runtime-policy.py') $project $script:container
+    & $python (Join-Path $PSScriptRoot 'verify-runtime-policy.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated runtime policy PostgreSQL verification failed.' }
-    & python (Join-Path $PSScriptRoot 'verify-durable-task-start.py') $project $script:container
+    & $python (Join-Path $PSScriptRoot 'verify-durable-task-start.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated durable Task PostgreSQL verification failed.' }
-    & python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
+    & $python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -EnvFile $testEnvFile -BackupPath $backup
     Invoke-TestDocker ($compose + @('restart','secretary-postgres'))
@@ -87,7 +89,7 @@ try {
     try { & $dbScript -Action Restore -Project $project -EnvFile $testEnvFile -BackupPath $backup -RestoreDatabase 'secretary_restore_test' }
     catch { $rejected = $true }
     if (-not $rejected) { throw 'Existing restore destination was not rejected.' }
-    & python (Join-Path $PSScriptRoot 'verify-observation-sources.py')
+    & $python (Join-Path $PSScriptRoot 'verify-observation-sources.py')
     if ($LASTEXITCODE -ne 0) { throw 'Observation source persistence verification failed.' }
     Write-Host 'PASS: port conflict, migrations/reapply/drift rejection, constraints/roles, restart, binary backup/restore, overwrite refusal.'
 } finally {
