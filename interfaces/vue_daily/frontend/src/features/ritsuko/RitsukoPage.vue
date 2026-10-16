@@ -7,6 +7,7 @@
 import { useTasks } from './useTasks'
 import CurrentTask from './components/CurrentTask.vue'
 import TaskCommandPanel from './components/TaskCommandPanel.vue'
+import MagiProgress from './components/MagiProgress.vue'
 import TaskActivity from './components/TaskActivity.vue'
 import TaskSidebar from './components/TaskSidebar.vue'
 
@@ -37,6 +38,7 @@ const {
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @stop="sendStop"
       />
       <CurrentTask :task="selected" :loading="refreshing" />
+      <MagiProgress :task="selected" />
       <TaskActivity :trace="trace" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
