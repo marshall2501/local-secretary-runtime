@@ -173,11 +173,67 @@ def proposal_review_observation(
     }
 
 
+def _goal_completion_projection(session: dict) -> dict:
+    """MAGIのGoal充足提案をTask内に保存されたResultだけで評価する。
+
+    根拠の意味的な十分性はMAGI提案だが、実在するSource/Resultとの
+    突き合わせとTask確定はRITSUKOが行う。失敗読取や未登録IDは根拠でない。
+    """
+    from ritsuko.application.observation_sources import AUTO_READ_SOURCES
+
+    judgment = session.get("goal_judgment") or {}
+    evidence = judgment.get("evidence") or {}
+    result_ids = evidence.get("result_ids") or []
+    available = {
+        str(item.get("result_id")): item
+        for item in (session.get("observations") or [])
+        if isinstance(item, dict)
+        and item.get("verified") is True
+        and item.get("result_id")
+        and item.get("source") in AUTO_READ_SOURCES
+    }
+    valid_refs = (
+        evidence.get("basis") == "result_refs" and bool(result_ids)
+        and all(ref in available for ref in result_ids)
+    )
+    source_free = (
+        evidence.get("basis") == "not_required" and not result_ids
+        and not session.get("requires_source", session.get("requires_web", False))
+        and not session.get("requires_web")
+        and not session.get("tool_read_executed")
+    )
+    answer = judgment.get("answer")
+    if (judgment.get("next") == "respond"
+            and judgment.get("fulfillment") == "met"
+            and (valid_refs or source_free)
+            and isinstance(answer, str) and answer.strip()):
+        note = ""
+        if valid_refs and any(
+            available[result_id].get("verification_level") == "provider_cited"
+            for result_id in result_ids
+        ):
+            note = "\\n\\n注: 出典は検索Providerが報告した引用であり、本文の独立確認は未実施です。"
+        return {
+            "task_status": "completed", "phase": "completed",
+            "next_step": "respond", "message": answer.strip() + note,
+            "question": None,
+            "reason": "goal_evaluated_with_recorded_evidence"
+            if valid_refs else "goal_evaluated_source_free",
+        }
+    return {
+        "task_status": "failed", "phase": "failed",
+        "next_step": "goal_evidence_or_source_requirement_not_met",
+        "message": session.get("status_message"),
+        "question": None, "reason": "goal_evidence_or_source_requirement_not_met",
+    }
+
+
 def task_projection(session: dict) -> dict:
-    """Map one dialogue state to the deterministic Task state RITSUKO owns."""
-    if session.get("control_mode") == "goal_loop_v1":
-        from ritsuko.magi.goal_loop import goal_task_projection
-        return goal_task_projection(session)
+    """RITSUKOの単一Task状態変換。判断方式が違っても制御状態を統一する。"""
+    goal_mode = (session.get("decision_strategy") == "llm"
+                 or session.get("control_mode") == "goal_loop_v1")
+    if goal_mode and session.get("status") == "candidate_ready":
+        return _goal_completion_projection(session)
     detail = session.get("detail") or {}
     status = session.get("status")
     answer = detail.get("answer_candidate")
@@ -234,7 +290,7 @@ def task_projection(session: dict) -> dict:
             "task_status": "waiting_external",
             "phase": "awaiting_information",
             "next_step": "review_information_requests",
-            "message": None,
+            "message": session.get("status_message") if goal_mode else None,
             "question": None,
             "reason": session.get("next_step"),
         }
@@ -263,7 +319,7 @@ def task_projection(session: dict) -> dict:
         "task_status": "failed" if status == "stopped" else "running",
         "phase": "failed" if status == "stopped" else "orient",
         "next_step": session.get("next_step"),
-        "message": None,
+        "message": session.get("status_message") if goal_mode else None,
         "question": session.get("user_question"),
         "reason": session.get("next_step"),
     }
