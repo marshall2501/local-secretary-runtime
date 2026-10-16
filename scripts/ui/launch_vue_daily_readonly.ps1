@@ -1,7 +1,7 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-generated
 # Vue日常UI移行中の実Task読取専用プレビュー。
-# 明示起動のみ。NiceGUI/API/PVAを停止せず、DBへ変更操作を行わない。
+# この入口は既存NiceGUIやAPIを置き換えず、8097に読取専用画面を追加起動する。
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -26,13 +26,14 @@ if ($portLines.Count -ne 1) { throw 'Expected exactly one LSA_DB_PORT setting.' 
 $port = [int]($portLines[0] -replace '^LSA_DB_PORT=', '')
 if ($port -lt 1024 -or $port -gt 65535) { throw 'Invalid database port.' }
 
-# 実在する運用DB接続境界を再利用する。資格情報の値は表示しない。
+# 普段のTaskを参照するため既存の日常DB接続先を使う。Secretの中身は表示・複製しない。
 $values = @{
     LSA_DAILY_DB_MODE = 'production'
     LSA_DAILY_DB_NAME = 'secretary'
     LSA_PKB_DAILY_PORT = "$port"
     LSA_PKB_DAILY_SECRET = "$secret"
 }
+# 実行中だけ環境変数を上書きし、終了・例外時には呼び出し元の値へ戻す。
 $previous = @{}
 foreach ($key in $values.Keys) {
     $previous[$key] = [Environment]::GetEnvironmentVariable(
