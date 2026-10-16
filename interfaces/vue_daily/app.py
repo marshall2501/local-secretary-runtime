@@ -2,9 +2,9 @@
 # Provenance-AI: AI-generated
 """Vue日常UIから保存済みRITSUKO Taskを参照するためのFastAPI入口。
 
-Task一覧・履歴は既存Query Serviceに委譲し、この入口ではTaskを変更しない。
-既存Secretary REST /tasks（別のTask作成契約）には手を加えない。
-新Vue画面・Task write接続は後続段階で行う。
+Task一覧・履歴は既存Query Serviceへ委譲する。Stage B-1ではコマンドを
+外部から注入できる契約だけ追加し、デフォルト起動は読取専用のまま。
+既存Secretary REST /tasks（別のTask作成契約）は変更しない。
 """
 from __future__ import annotations
 
@@ -16,19 +16,45 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from ritsuko.application.task_commands import (
+    TaskCommandConflict, TaskCommandNotFound, TaskCommands,
+)
 
 
 TaskView = Literal["recent", "open", "completed"]
 
 
-def create_app(*, queries) -> FastAPI:
+class TaskStartBody(BaseModel):
+    """新規RITSUKO Taskへ送る依頼。空白だけの入力は受付時に拒否する。"""
+
+    request: str = Field(min_length=1, max_length=4000)
+
+
+class TaskAnswerBody(BaseModel):
+    """保存済みTaskの本人質問に対する追加回答。"""
+
+    reply: str = Field(min_length=1, max_length=4000)
+
+
+class TaskReviewBody(BaseModel):
+    """既存Taskの提案への本人判断。記憶反映はまだ公開しない。"""
+
+    decision: Literal["answer_only", "remember"]
+
+
+
+
+def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
     """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
 
     DB接続やSecretはComposition Root側で解決し、この入口には渡さない。
 
     Args:
-        queries: 保存済みTask一覧とTask履歴を取得する共有Query Service。
-            この関数では接続・Task実行・DB更新を行わない。
+        queries: 保存済みTask一覧と履歴を読み取る共有Query Service。
+        commands: 実DB・権限・Sourceを正しく組み立てた場合だけ渡すコマンド受付サービス。
+            省略時は従来どおり読取専用（POSTは503）とする。
 
     Returns:
         FastAPI: ローカルTask参照と、ビルド済みVueだけを公開するアプリ。
@@ -67,7 +93,10 @@ def create_app(*, queries) -> FastAPI:
     @app.get("/api/v1/ritsuko/health")
     def health():
         """プレビューAPI自体の応答を返す。DB接続の正常性は検査しない。"""
-        return {"status": "ok", "synthetic": False, "mode": "read_only"}
+        return {
+            "status": "ok", "synthetic": False,
+            "mode": "commands_enabled" if commands is not None else "read_only",
+        }
 
     @app.get("/api/v1/ritsuko/tasks")
     def list_tasks(
@@ -109,6 +138,61 @@ def create_app(*, queries) -> FastAPI:
             raise HTTPException(404, "task_not_found") from None
         except (RuntimeError, OSError):
             raise HTTPException(503, "task_query_unavailable") from None
+
+    def require_commands() -> TaskCommands:
+        """正しい実Task依存が注入されていない間は操作を明示的に拒否する。"""
+        if commands is None:
+            raise HTTPException(503, "task_commands_not_configured")
+        return commands
+
+    async def accept_command(awaitable) -> dict:
+        """HTTP受付エラーを整理し、Taskの失敗理由や機密本文をHTTPへ漏らさない。"""
+        try:
+            return await awaitable
+        except TaskCommandNotFound:
+            raise HTTPException(404, "task_not_found") from None
+        except TaskCommandConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except (OSError, RuntimeError):
+            raise HTTPException(503, "task_command_unavailable") from None
+
+    @app.post("/api/v1/ritsuko/tasks", status_code=202)
+    async def start_task(body: TaskStartBody):
+        """実Taskの新規受付。Operationの受理とDBへのTask保存・完了は別段階。"""
+        service = require_commands()
+        return await accept_command(service.start(body.request))
+
+    @app.post("/api/v1/ritsuko/tasks/{task_id}/answer", status_code=202)
+    async def answer_task(task_id: UUID, body: TaskAnswerBody):
+        """同一Task IDへの本人回答を受付ける。DBの最終競合判定はRITSUKOが行う。"""
+        service = require_commands()
+        return await accept_command(service.answer(task_id, body.reply))
+
+    @app.post("/api/v1/ritsuko/tasks/{task_id}/review", status_code=202)
+    async def review_task(task_id: UUID, body: TaskReviewBody):
+        """回答のみのReviewを受付ける。記憶反映には別のMemory Intake接続が必要。"""
+        service = require_commands()
+        return await accept_command(service.review(task_id, body.decision))
+
+    @app.post("/api/v1/ritsuko/tasks/{task_id}/stop")
+    def stop_task(task_id: UUID):
+        """実行中Jobへ協調停止を要求し、確定停止と混同しない。"""
+        service = require_commands()
+        try:
+            return service.stop(task_id)
+        except TaskCommandConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.get("/api/v1/ritsuko/operations/{task_id}")
+    def task_operation(task_id: UUID):
+        """プロセス内の受付状況を返す。確定Taskは従来のTask詳細APIを使う。"""
+        service = require_commands()
+        try:
+            return service.operation(task_id)
+        except TaskCommandNotFound:
+            raise HTTPException(404, "operation_not_found") from None
 
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
     dist = Path(__file__).parent / "frontend" / "dist"
