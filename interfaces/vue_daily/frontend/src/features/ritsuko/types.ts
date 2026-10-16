@@ -21,6 +21,15 @@ export interface TaskRecord extends TaskSummary {
   phase?: string
   /** MAGI sessionに保存された候補・次の処理。Task.statusとは独立。 */
   magi_session?: { status?: string; next_step?: string } | null
+  /** DBに受理された停止要求。trueでもWorkerが止まった証明ではない。 */
+  stop_requested?: boolean | null
+  /** MAGI提案は本人が確定したGoalと同義ではない。 */
+  goal_definition?: {
+    version: number
+    resolution: 'unresolved' | 'proposed' | 'confirmed'
+    interpreted_goal?: string | null
+    criteria?: string[]
+  } | null
 }
 /** DBに保存されたActionとResultの参照情報。Resultが未記録の場合もある。 */
 export interface TaskAction {
