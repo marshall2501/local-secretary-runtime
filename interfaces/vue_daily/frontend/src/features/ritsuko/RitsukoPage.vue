@@ -23,17 +23,12 @@ const {
     <h1>RITSUKO — Secretary Core / Orchestrator</h1>
     <div class="connection" :class="{ disconnected: !connected }">
       <span class="dot" />
-      {{ connected ? '保存済みTask API接続中' : 'API未接続' }}
+      {{ connected ? (commandsEnabled ? '実Task操作API接続中' : 'Task参照API接続中（読取専用）') : 'API未接続' }}
     </div>
   </div>
-  <p v-if="!commandsEnabled" class="read-only-notice">
-    <strong>実Task読取専用</strong>
-    このプレビューからの操作は有効化されていません。保存済みTaskは閲覧できます。
-  </p>
   <p v-if="problem" class="error" role="alert">{{ problem }}</p>
   <div class="workspace">
     <main class="ritsuko-main">
-      <CurrentTask :task="selected" :loading="refreshing" />
       <TaskCommandPanel
         v-model:request="draftRequest" v-model:strategy="strategy" v-model:reply="reply"
         :commands-enabled="commandsEnabled" :busy="commandBusy"
@@ -41,6 +36,7 @@ const {
         :operation="operation"
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @stop="sendStop"
       />
+      <CurrentTask :task="selected" :loading="refreshing" />
       <TaskActivity :trace="trace" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
