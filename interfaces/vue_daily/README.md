@@ -81,3 +81,11 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - 現行MAGIのLLM判断は試験上有効1席限定。2席以上を選択してもDB割当を自動変更せず409として拒否。1席・3席の自由な選択とLLM判断の組合せはP1の後続改修で扱う。
 - `tests/test_magi_task_runtime_composition.py`で判断方式・同一Task ID・保存・本人回答とReview後の維持、`tests/test_vue_task_commands.py`で無断席数変更拒否、`tests/test_vue_daily_api.py`で方式必須／未知形式422・HTTP配送を隔離確認。Task状態や根拠評価を2系統へ複製しない設計の最初の接続修正に相当する。
 - **未完了**: `goal_loop.py`のWeb限定Schema・Result判定、`magi_bridge.py`のGoal専用Task投影、`observation_loop.py`のGoal専用Result処理、API再起動後のJob/Stop・復旧、実MAGIの多席Goal評価。これらを受入済みとはしない。既存8093・8097の稼働切替や設定変更はしない。
+
+## 2026-10-16 P1 Goal判断の情報源・Task確定の共通化（隔離テスト）
+
+- `ritsuko/magi/goal_contract.py` が `AUTO_READ_SOURCES` と同じ `pkb/web/finance` をGoal判断の `request_read` で受け、`goal_loop.py` は選択されたSourceをRITSUKOへ渡す。Taskの取得可否は従来Resource Catalog/権限のもとで判定し、任意Tool・外部Actionを開放しない。
+- `goal_requires_source` と `goal_requires_web` を区別し、「私の家計」等をWeb検索必須とみなさない。明示根拠を要するGoalを未読の `not_required` で即時完了させない。表層語句による暫定Gateであり、**意味的Goal評価や情報源選択をPythonで完全解決したという主張ではない**。
+- `goal_loop.py::goal_task_projection` は保存済み旧Task用の互換関数とし、確定状態の正本は `ritsuko/core/magi_bridge.py::task_projection` に統合。根拠IDはRITSUKO Task内の検証済み `pkb/web/finance` 観測のみ認める。未実行・読取失敗・他TaskのID申告だけで完了としない。Web検索Providerの引用報告と本文確認も区別する。
+- `tests/test_goal_source_neutral.py` はfake Task/LLM/Policy/Sourceで、Source選択、同じTask IDのread→記録→評価→完了、未取得・偽Resultでの拒否を検証。既存 `test_goal_loop.py` および `test_magi_core_bridge.py` とともにCIへ追加。
+- **未受入**: 実モデルでのPKB/Finance Goal達成、1〜3席のLLM判断実装、操作/Operationの永続化と再起動復旧、本人用Vue Task操作、複数Sourceや外部Actionによる実際のGoal完走。通常8097はread-only/POST503。
