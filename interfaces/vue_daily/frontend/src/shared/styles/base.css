@@ -62,7 +62,10 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
 .request-entry p { font-size:13px; margin:0 0 12px; }
 .command-form { display:flex; flex-direction:column; gap:8px; margin-bottom:13px; }
 .command-form label, .command-row label { font-size:13px; font-weight:650; }
-.command-form textarea { width:100%; padding:9px 11px; border:1px solid #b7c9d8; border-radius:6px; resize:vertical; background:#fff; color:inherit; }
+.command-form textarea { display:block; width:100%; min-height:110px; padding:11px 13px; border:1px solid #8da9bd; border-radius:8px; resize:vertical; background:#fff; color:inherit; }
+.command-form textarea:focus { outline:2px solid #00887e; outline-offset:2px; }
+.command-form textarea:disabled { background:#eef2f5; color:#788897; cursor:not-allowed; }
+.command-mode-enabled { color:#056e64; font-weight:700; }
 .command-row { display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin:9px 0; }
 .command-row select { background:#fff; border:1px solid #b7c9d8; padding:7px; border-radius:6px; min-width:150px; }
 .command-row .primary-command { margin-left:auto; }
