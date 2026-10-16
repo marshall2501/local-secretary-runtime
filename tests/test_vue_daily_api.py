@@ -15,6 +15,7 @@ class FakeQueries:
     """DBを使わずTask Query Application契約だけを再現する。"""
 
     def __init__(self):
+        """Task IDと呼び出し履歴を保持する隔離Query fixtureを用意する。"""
         self.uid = uuid4()
         self.calls = []
         self.task = {
@@ -23,18 +24,22 @@ class FakeQueries:
         }
 
     def recent(self, limit, offset):
+        """指定ページの「最近」の代表Taskを返し、受領した範囲を記録する。"""
         self.calls.append(("recent", limit, offset))
         return [self.task]
 
     def open(self, limit, offset):
+        """進行中一覧の空結果を返して表示条件の切替を検査する。"""
         self.calls.append(("open", limit, offset))
         return []
 
     def completed(self, limit, offset):
+        """完了Taskの一覧を返し、RITSUKO確定状態を保持する。"""
         self.calls.append(("completed", limit, offset))
         return [self.task]
 
     def trace(self, task_id: UUID):
+        """既知IDのTask履歴だけ返し、不明IDでは404相当を検査させる。"""
         self.calls.append(("trace", task_id))
         if task_id != self.uid:
             raise ValueError("missing")
@@ -48,6 +53,7 @@ class VueDailyApiTests(unittest.TestCase):
     """本人専用localhostで実Taskの状態を正本から読む入口を確認。"""
 
     def setUp(self):
+        """実DBを使わずlocalhostのAPI契約を検証するTestClientを作成する。"""
         self.queries = FakeQueries()
         self.client = TestClient(
             create_app(queries=self.queries),
@@ -55,6 +61,7 @@ class VueDailyApiTests(unittest.TestCase):
         )
 
     def test_saved_task_list_and_trace_are_transport_only(self):
+        """Task一覧・履歴が隔離Queryの値を変えずに返すことを確認する。"""
         response = self.client.get("/api/v1/ritsuko/tasks?limit=5&offset=2")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"][0]["status"], "completed")
@@ -78,6 +85,7 @@ class VueDailyApiTests(unittest.TestCase):
         ).status_code, 404)
 
     def test_boundary_does_not_open_task_write_or_external_access(self):
+        """読取専用入口からTask書込や外部Host/Originを許可しない。"""
         self.assertEqual(self.client.get(
             "/api/v1/ritsuko/health"
         ).json(), {"status": "ok", "synthetic": False, "mode": "read_only"})
