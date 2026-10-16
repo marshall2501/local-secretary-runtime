@@ -1,5 +1,5 @@
 # Provenance-Origin: original
-# Provenance-AI: AI-assisted-refactor
+# Provenance-AI: AI-generated
 """MAGIから要求されたPKB・Web・Finance観測の共通実行入口。
 
 画面から業務処理を外すため、検索関数とRepositoryをPortとして受け取る。
