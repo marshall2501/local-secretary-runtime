@@ -93,7 +93,7 @@ class VueDailyApiTests(unittest.TestCase):
             "/api/v1/ritsuko/health"
         ).json(), {"status": "ok", "synthetic": False, "mode": "read_only"})
         self.assertEqual(self.client.post(
-            "/api/v1/ritsuko/tasks", json={"request": "do something"}
+            "/api/v1/ritsuko/tasks", json={"request": "do something", "decision_strategy": "llm"}
         ).status_code, 503)
         self.assertEqual(self.client.post(
             "/api/v1/ritsuko/tasks/" + str(self.queries.uid) + "/answer",
@@ -127,9 +127,9 @@ class FakeCommands:
         self.uid = uuid4()
         self.calls = []
 
-    async def start(self, request):
-        """非同期の受付契約を模倣するが、実Taskは作成しない。"""
-        self.calls.append(("start", request))
+    async def start(self, request, *, decision_strategy):
+        """選択した判断方式を含む非同期の受付契約だけ模倣する。"""
+        self.calls.append(("start", request, decision_strategy))
         return {"task_id": str(self.uid), "kind": "start", "status": "accepted"}
 
     async def answer(self, task_id, reply):
@@ -169,9 +169,12 @@ class VueDailyCommandApiTests(unittest.TestCase):
         """受付は202であり、Taskの確定・完了を返したと見なさない。"""
         base = "/api/v1/ritsuko"
         self.assertEqual(self.client.get(base + "/health").json()["mode"], "commands_enabled")
-        start = self.client.post(base + "/tasks", json={"request": "調査"})
+        start = self.client.post(base + "/tasks", json={
+            "request": "調査", "decision_strategy": "llm",
+        })
         self.assertEqual(start.status_code, 202)
         self.assertEqual(start.json()["status"], "accepted")
+        self.assertEqual(self.commands.calls[0], ("start", "調査", "llm"))
         uid = str(self.commands.uid)
         answer = self.client.post(base + "/tasks/" + uid + "/answer", json={"reply": "追加"})
         self.assertEqual(answer.status_code, 202)
@@ -187,9 +190,17 @@ class VueDailyCommandApiTests(unittest.TestCase):
     def test_invalid_input_and_cross_origin_do_not_call_commands(self):
         """無効な入力・他Originの書込要求を拒否し、コマンドを呼び出さない。"""
         base = "/api/v1/ritsuko"
-        self.assertEqual(self.client.post(base + "/tasks", json={"request": ""}).status_code, 422)
+        self.assertEqual(self.client.post(base + "/tasks", json={
+            "request": "", "decision_strategy": "standard",
+        }).status_code, 422)
+        self.assertEqual(self.client.post(base + "/tasks", json={
+            "request": "依頼",
+        }).status_code, 422)
+        self.assertEqual(self.client.post(base + "/tasks", json={
+            "request": "依頼", "decision_strategy": "future_mode",
+        }).status_code, 422)
         self.assertEqual(self.client.post(
-            base + "/tasks", json={"request": "依頼"},
+            base + "/tasks", json={"request": "依頼", "decision_strategy": "llm"},
             headers={"Origin": "https://evil.invalid"},
         ).status_code, 403)
         self.assertEqual(self.client.post(
