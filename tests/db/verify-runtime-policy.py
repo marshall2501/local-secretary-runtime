@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 import json
+import os
 import re
 import subprocess
 import sys
@@ -44,7 +45,7 @@ def verify_fixture_identity(project: str, container: str) -> int:
     if len(bindings) != 1 or bindings[0]["HostIp"] != "127.0.0.1":
         raise RuntimeError("non_loopback_postgres")
     port = int(bindings[0]["HostPort"])
-    if (ROOT / ".env.postgres").read_text(encoding="utf-8").strip() != f"LSA_DB_PORT={port}":
+    if Path(os.environ["LSA_TEST_DB_ENV_FILE"]).read_text(encoding="utf-8").strip() != f"LSA_DB_PORT={port}":
         raise RuntimeError("disposable_port_mismatch")
     return port
 
