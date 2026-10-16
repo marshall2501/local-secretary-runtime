@@ -35,7 +35,12 @@ class FakeMagiRepository:
                       decision_strategy, policy_snapshot):
         """最初にpending Taskを確定するfake transaction境界。"""
         if task_id in self.tasks:
-            raise ValueError("duplicate_task")
+            current = self.tasks[task_id]
+            if (current["request"] != request
+                    or current["decision_strategy"] != decision_strategy):
+                raise ValueError("task_id_intent_mismatch")
+            self.calls.append("replay")
+            return False
         self.calls.append("reserve")
         self.tasks[task_id] = {
             "id": str(task_id), "request": request, "status": "pending",
@@ -43,6 +48,7 @@ class FakeMagiRepository:
             "decision_strategy": decision_strategy,
             "policy_snapshot": deepcopy(policy_snapshot),
         }
+        return True
 
     def claim_start(self, *, task_id, request, member_specs):
         """1件のpending TaskだけがWorkerを開始できる。"""
@@ -293,6 +299,46 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         commands = build_magi_task_commands(bindings)
         self.assertEqual(await commands.recover_pending(), [])
         self.assertEqual(repo.calls.count("claim_start"), 0)
+
+    async def test_same_client_task_uuid_retries_without_second_magi_start(self):
+        """レスポンス喪失後、同じTask ID/Goalなら二重Jobを作らない。"""
+        from uuid import uuid4
+
+        repo = FakeMagiRepository()
+        seen = []
+
+        async def fake_start(text, *, policy_snapshot, **kwargs):
+            """有効なTask作成時だけLLM開始が呼ばれる。"""
+            seen.append(kwargs["task_id"])
+            return {
+                "task_id": kwargs["task_id"], "status": "waiting_user",
+                "user_raw": text, "member_specs": kwargs["member_specs"],
+                "decision_strategy": kwargs["decision_strategy"],
+            }
+
+        bindings = MagiTaskBindings(
+            magi_repository=repo, pkb_repository=object(),
+            finance_repository=object(), queries=FakeQueries(repo),
+            member_specs_loader=lambda: [{
+                "name": "MELCHIOR", "enabled": True, "timeout_seconds": 5,
+            }],
+            policy_snapshot_loader=lambda: {"profile_id": "fixture"},
+        )
+        commands = build_magi_task_commands(bindings, dialogue_starter=fake_start)
+        task_id = uuid4()
+        first = await commands.start("同じ依頼", task_id=task_id,
+                                     decision_strategy="standard")
+        self.assertEqual(first["task_id"], str(task_id))
+        second = await commands.start("同じ依頼", task_id=task_id,
+                                      decision_strategy="standard")
+        self.assertEqual(second["status"], "already_accepted")
+        await self._wait_for(commands, task_id)
+        self.assertEqual(seen, [str(task_id)])
+        self.assertEqual(repo.calls.count("reserve"), 1)
+        self.assertEqual(repo.calls.count("claim_start"), 1)
+        with self.assertRaisesRegex(Exception, "task_id_intent_mismatch"):
+            await commands.start("違う依頼", task_id=task_id,
+                                 decision_strategy="standard")
 
     async def test_failed_reservation_does_not_accept_or_schedule_task(self):
         """DB保存に失敗しても202相当の受付やMAGI実行へ進まない。"""
