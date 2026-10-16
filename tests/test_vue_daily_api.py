@@ -127,9 +127,9 @@ class FakeCommands:
         self.uid = uuid4()
         self.calls = []
 
-    async def start(self, request, *, decision_strategy):
-        """選択した判断方式を含む非同期の受付契約だけ模倣する。"""
-        self.calls.append(("start", request, decision_strategy))
+    async def start(self, request, *, decision_strategy, task_id=None):
+        """選択方式と再送時のTask UUIDを受け取るfake受付。"""
+        self.calls.append(("start", request, decision_strategy, task_id))
         return {"task_id": str(self.uid), "kind": "start", "status": "accepted"}
 
     async def answer(self, task_id, reply):
@@ -174,7 +174,16 @@ class VueDailyCommandApiTests(unittest.TestCase):
         })
         self.assertEqual(start.status_code, 202)
         self.assertEqual(start.json()["status"], "accepted")
-        self.assertEqual(self.commands.calls[0], ("start", "調査", "llm"))
+        self.assertEqual(self.commands.calls[0], ("start", "調査", "llm", None))
+        # UUID固定の再送では、HTTP経路が同じIDをCommandsへ渡す。
+        stable_id = uuid4()
+        replay = self.client.post(base + "/tasks", json={
+            "request": "再送依頼", "decision_strategy": "standard",
+            "task_id": str(stable_id),
+        })
+        self.assertEqual(replay.status_code, 202)
+        self.assertEqual(self.commands.calls[1],
+                         ("start", "再送依頼", "standard", stable_id))
         uid = str(self.commands.uid)
         answer = self.client.post(base + "/tasks/" + uid + "/answer", json={"reply": "追加"})
         self.assertEqual(answer.status_code, 202)
@@ -183,7 +192,7 @@ class VueDailyCommandApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(base + "/tasks/" + uid + "/stop").status_code, 200)
         self.assertEqual(self.client.get(base + "/operations/" + uid).json()["status"], "running")
         self.assertEqual([call[0] for call in self.commands.calls],
-                         ["start", "answer", "review", "stop", "operation"])
+                         ["start", "start", "answer", "review", "stop", "operation"])
         self.assertEqual(self.client.get(base + "/tasks").status_code, 200)
         self.assertEqual(self.query.calls[-1][0], "recent")
 
