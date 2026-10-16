@@ -1,5 +1,5 @@
 # Provenance-Origin: original
-# Provenance-AI: AI-assisted-refactor
+# Provenance-AI: AI-generated
 """RITSUKOとMAGIが利用する既存PKB観測の画面非依存処理。
 
 旧NiceGUIの対象PC/部品解決ロジックを移し、repositoryと読取関数を注入する。
