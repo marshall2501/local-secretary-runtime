@@ -26,7 +26,7 @@ export function useTasks() {
   const view = ref<TaskListView>('recent')
   // NiceGUIの追加読み込みと同様に、右一覧で見る件数は本人が増やす。
   const visibleLimit = ref(10)
-  const hasMore = computed(() => items.value.length >= visibleLimit.value)
+  const hasMore = ref(false)
   const selectedId = ref(taskIdFromHash())
   const trace = ref<TaskTrace | null>(null)
   const connected = ref(false)
@@ -190,7 +190,7 @@ export function useTasks() {
     refreshing.value = true
     try {
       const [enabled, list] = await Promise.all([
-        detectCommands(), loadTaskWindow(filter, visibleLimit.value),
+        detectCommands(), loadTaskWindow(filter, visibleLimit.value + 1),
       ])
       if (seq !== version) return
       commandsEnabled.value = enabled
@@ -199,7 +199,8 @@ export function useTasks() {
       const nextOperation = id && enabled
         ? await getTaskOperation(id).catch(() => null) : null
       if (seq !== version || (selectedId.value && selectedId.value !== id)) return
-      items.value = list
+      hasMore.value = list.length > visibleLimit.value
+      items.value = list.slice(0, visibleLimit.value)
       if (!selectedId.value && id) {
         selectedId.value = id
         window.history.replaceState(null, '', '#task=' + id)
