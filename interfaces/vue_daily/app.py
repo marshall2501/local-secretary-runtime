@@ -30,6 +30,8 @@ class TaskStartBody(BaseModel):
     """新規RITSUKO Taskへ送る依頼。空白だけの入力は受付時に拒否する。"""
 
     request: str = Field(min_length=1, max_length=4000)
+    # Task開始時に方式を明示し、API側の暗黙standard選択を避ける。
+    decision_strategy: Literal["standard", "llm"]
 
 
 class TaskAnswerBody(BaseModel):
@@ -162,7 +164,9 @@ def create_app(*, queries, commands: TaskCommands | None = None) -> FastAPI:
     async def start_task(body: TaskStartBody):
         """実Taskの新規受付。Operationの受理とDBへのTask保存・完了は別段階。"""
         service = require_commands()
-        return await accept_command(service.start(body.request))
+        return await accept_command(service.start(
+            body.request, decision_strategy=body.decision_strategy,
+        ))
 
     @app.post("/api/v1/ritsuko/tasks/{task_id}/answer", status_code=202)
     async def answer_task(task_id: UUID, body: TaskAnswerBody):
