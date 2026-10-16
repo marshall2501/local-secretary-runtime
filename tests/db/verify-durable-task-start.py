@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from infrastructure.postgres.core_task_query_repository import PostgresCoreTaskQueryRepository
-from ritsuko.application.task_commands import TaskCommandConflict, TaskCommands
+from ritsuko.application.task_commands import (
+    TaskCommandConflict, TaskCommandNotFound, TaskCommands,
+)
 from infrastructure.postgres.magi_task_repository import (
     PostgresMagiTaskRepository, claim_start, list_pending_starts, request_stop,
     reserve_start,
@@ -237,6 +239,13 @@ def main(project: str, container: str) -> None:
             (running_id,),
         )
         assert cur.fetchone()[0] == 1, "duplicate_stop_audit_event"
+
+    try:
+        new_commands().stop(uuid4())
+    except TaskCommandNotFound:
+        pass
+    else:
+        raise AssertionError("unknown_persisted_task_not_rejected")
 
     for terminal_status in ("completed", "failed"):
         terminal_id = uuid4()
