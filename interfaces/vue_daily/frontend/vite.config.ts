@@ -1,6 +1,6 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** 秘書AIのVue日常UIを実Task読取APIへ接続する開発設定。 */
+/** Vue画面を/ui/配下へビルドし、開発時はTask参照API（8097）へ転送する設定。 */
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
