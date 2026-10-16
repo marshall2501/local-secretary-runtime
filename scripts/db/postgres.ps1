@@ -4,6 +4,7 @@ param(
     [ValidatePattern('^local-secretary-(runtime-db|test-[a-z0-9-]+)$')][string]$Project = 'local-secretary-runtime-db',
     [ValidateRange(1024,65535)][int]$Port = 55432,
     [string]$BackupPath,
+    [string]$EnvFile,
     [ValidatePattern('^secretary_restore_[a-z0-9_]+$')][string]$RestoreDatabase
 )
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,7 @@ Set-StrictMode -Version Latest
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $composeFile = Join-Path $repoRoot 'docker/compose.postgres.yml'
 $composeDirectory = Split-Path $composeFile
-$envFile = Join-Path $repoRoot '.env.postgres'
+$envFile = if ($EnvFile) { [IO.Path]::GetFullPath($EnvFile) } else { Join-Path $repoRoot '.env.postgres' }
 $secretFile = Join-Path $repoRoot 'secrets/postgres-password.txt'
 $service = 'secretary-postgres'
 
