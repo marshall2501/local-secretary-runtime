@@ -23,6 +23,14 @@ defineProps<{ task: TaskRecord | null; loading: boolean }>()
       <div class="task-field"><span class="field-name">現在</span>
         <p>{{ taskStatusLabel(task.status) }}（Task確定状態）</p>
       </div>
+      <div v-if="task.goal_definition" class="task-field">
+        <span class="field-name">Goal</span>
+        <p v-if="task.goal_definition.resolution === 'proposed'">
+          {{ task.goal_definition.interpreted_goal }}
+          <span class="muted small">（MAGIの解釈候補 / v{{ task.goal_definition.version }}。本人確定ではありません）</span>
+        </p>
+        <p v-else class="muted">依頼固有の達成条件はまだ未確定です。</p>
+      </div>
       <div class="task-field"><span class="field-name">MAGI</span>
         <p>{{ task.magi_session?.status ?? '保存済み候補なし' }}</p>
         <span class="muted small">MAGI候補だけではTask完了になりません。</span>
