@@ -13,7 +13,7 @@ import TaskSidebar from './components/TaskSidebar.vue'
 
 const {
   items, view, hasMore, selectedId, trace, selected, connected, refreshing,
-  problem, selectTask, selectView, loadMore,
+  problem, refresh, selectTask, selectView, loadMore,
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
   draftRequest, strategy, defaultStrategy, showStrategySelector,
   activeDefaultStrategy, activeShowStrategySelector, preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
@@ -44,7 +44,7 @@ const {
         :task="selected" :feedback="commandFeedback" :error="commandError"
         :operation="operation"
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @stop="sendStop"
-        @save-preferences="savePreferences"
+        @save-preferences="savePreferences" @refresh="refresh"
       />
       <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
       <MagiProgress :task="selected" :operation="operation" />
