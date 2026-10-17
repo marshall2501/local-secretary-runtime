@@ -447,6 +447,53 @@ class MagiTaskStoreTests(unittest.TestCase):
         replay = prepare_memory_intake(replay_db, task_id=TASK_ID)
         self.assertEqual(replay.input_id, intake.input_id)
 
+    def test_plain_ready_answer_is_reviewable_without_memory_eligibility(self):
+        """従来MAGIのREADY候補を回答のみReviewできるがPKB候補にはしない。"""
+        session = {
+            "task_id": str(TASK_ID),
+            "status": "candidate_ready", "next_step": "review_answer_candidate",
+            "detail": {"state": "READY",
+                       "answer_candidate": "辞書はキーと値の組です。",
+                       "knowledge_candidate": None},
+            "pending_requests": [], "observations": [], "turns": [],
+        }
+        checkpoint = {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "selected_capability": None,
+            "magi_session": session,
+        }
+        db = _DB(fetches=[("waiting_external", checkpoint)])
+        selected, capability, observation, review = claim_proposal_review(
+            db, task_id=TASK_ID, decision="answer_only",
+        )
+        self.assertEqual(selected["status"], "candidate_ready")
+        self.assertIsNone(capability)
+        self.assertEqual(review["answer"], "辞書はキーと値の組です。")
+        self.assertIsNone(review["knowledge_candidate"])
+        self.assertEqual(observation["source"], "proposal_review")
+        self.assertEqual(observation["review_decision"], "answer_only")
+        self.assertTrue(observation["verified"])
+
+        memory_db = _DB(fetches=[("waiting_external", checkpoint)])
+        with self.assertRaisesRegex(ValueError, "proposal_not_reviewable"):
+            prepare_memory_intake(memory_db, task_id=TASK_ID)
+
+    def test_plain_ready_answer_cannot_change_to_memory_review(self):
+        """通常の回答候補から永続記憶登録へ昇格させない。"""
+        session = {
+            "status": "candidate_ready", "detail": {
+                "state": "READY", "answer_candidate": "一般説明です。",
+                "knowledge_candidate": None,
+            },
+            "pending_requests": [],
+        }
+        db = _DB(fetches=[("waiting_external", {
+            "core_slice": "ritsuko_magi_observation_v1",
+            "magi_session": session,
+        })])
+        with self.assertRaisesRegex(ValueError, "proposal_not_reviewable"):
+            claim_proposal_review(db, task_id=TASK_ID, decision="remember")
+
     def test_claim_answer_only_builds_verified_review_observation(self):
         db = _DB(fetches=[("waiting_external", self.review_checkpoint())])
         session, capability, observation, review = claim_proposal_review(
