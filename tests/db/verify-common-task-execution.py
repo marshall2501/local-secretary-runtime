@@ -269,6 +269,163 @@ async def scenario(connect, *, strategy: str, source: str | None,
         assert cur.fetchone()[0] == (0 if forged else 1), "invalid_completion_audit"
 
 
+
+async def resume_task(connect, *, strategy: str) -> None:
+    """Persist a user-question Task, resume it and finalize the same Task ID.
+
+    Goal is completed after a new MAGI response. Stage READY remains explicit
+    reviewable until the owner chooses answer_only; Memory Intake is never run.
+    """
+    from ritsuko.core.task_execution import resume_user_answer, review_proposal
+    from ritsuko.magi.session_workflow import (
+        continue_with_user_clarification_async,
+        continue_with_proposal_review_async,
+    )
+
+    task_id = uuid4()
+    repo = PostgresMagiTaskRepository(connect)
+    request = "辞書を例つきで説明して"
+    specs = [{
+        "name": "MELCHIOR", "provider": "ollama",
+        "endpoint": "http://127.0.0.1:11434", "model": "ci-fake-only",
+        "enabled": True, "weight": 1.0, "timeout_seconds": 5,
+    }]
+    assert repo.reserve_start(
+        task_id=task_id, request=request, member_specs=specs,
+        decision_strategy=strategy, policy_snapshot=POLICY,
+    )
+
+    async def stage_panel(envelope, **_kwargs):
+        """Return a candidate after user clarification and final review turn."""
+        if envelope["stage"] == "classify":
+            response = {
+                "category": "INFORMATION", "understood_request": request,
+                "reason": "合成Taskの質問", "confidence": "high",
+                "multiple_requests": False,
+            }
+        elif envelope.get("question_purpose") == "evaluate_review_result":
+            response = stage_detail("READY")
+        elif any(obs.get("source") == "user_clarification"
+                 for obs in envelope.get("observations", [])):
+            response = stage_detail("READY")
+        else:
+            response = stage_detail("NEED_CLARIFICATION")
+            response["question_for_user"] = "どの辞書の例が必要ですか？"
+        return {"status": "ok", "response": response}
+
+    async def goal_member(_spec, envelope, **_kwargs):
+        """A question followed by the user's answer; never read any Source."""
+        if envelope.get("user_replies"):
+            response = goal_decision("respond")
+        else:
+            response = goal_decision("ask_user")
+            response["question"] = "どの辞書の例が必要ですか？"
+        return {"status": "ok", "response": response}
+
+    def claim(record_id, text, member_specs):
+        return repo.claim_start(
+            task_id=record_id, request=text, member_specs=member_specs,
+        )
+
+    def persist(record_id, session, capability, attempt=None):
+        return repo.persist_session(
+            task_id=record_id, session=session,
+            selected_capability=capability, expected_attempt_id=attempt,
+        )
+
+    def fail(record_id, error, attempt=None):
+        return repo.fail_task(
+            task_id=record_id, error=error, expected_attempt_id=attempt,
+        )
+
+    initial = await run_observation_loop(
+        request, member_specs=specs, timeout=5, task_id=task_id,
+        create_task_record=claim,
+        execute_source_request=lambda *_: (_ for _ in ()).throw(
+            AssertionError("clarification_must_not_read_source")
+        ),
+        record_source_read_record=lambda *_: (_ for _ in ()).throw(
+            AssertionError("clarification_must_not_record_read")
+        ),
+        persist_session_record=persist, fail_task_record=fail,
+        dialogue_starter=partial(
+            start_dialogue_async, decision_strategy=strategy,
+            policy_snapshot=POLICY, caller=stage_panel,
+            goal_caller=goal_member,
+        ),
+    )
+    assert initial["status"] == "waiting_user"
+
+    # No process-local state is carried over. The saved checkpoint is
+    # claimed through a fresh Repository instance after initial completion.
+    resumed_repo = PostgresMagiTaskRepository(connect)
+    reply = "Python の辞書"
+    updated = await resume_user_answer(
+        task_id, reply, timeout=5,
+        claim_user_resume_record=lambda uid, length, fingerprint:
+            resumed_repo.claim_user_resume(
+                task_id=uid, reply_length=length,
+                reply_fingerprint=fingerprint,
+            ),
+        persist_session_record=lambda uid, session, capability:
+            resumed_repo.persist_session(
+                task_id=uid, session=session, selected_capability=capability,
+            ),
+        abort_user_resume_record=lambda uid, error:
+            resumed_repo.abort_user_resume(task_id=uid, error=error),
+        user_continuation=partial(
+            continue_with_user_clarification_async,
+            caller=stage_panel, goal_caller=goal_member,
+        ),
+    )
+    assert updated["task_id"] == str(task_id)
+    assert updated["status"] == "candidate_ready"
+    with connect() as db, db.cursor() as cur:
+        cur.execute("SELECT status, checkpoint FROM secretary.tasks WHERE id=%s",
+                    (task_id,))
+        stored_status, checkpoint = cur.fetchone()
+        assert checkpoint["magi_session"]["task_id"] == str(task_id)
+        assert stored_status == (
+            "completed" if strategy == "llm" else "waiting_external"
+        )
+
+    if strategy == "standard":
+        reviewed = await review_proposal(
+            task_id, "answer_only", timeout=5,
+            claim_proposal_review_record=lambda uid, decision, memory_result:
+                resumed_repo.claim_proposal_review(
+                    task_id=uid, decision=decision, memory_result=memory_result,
+                ),
+            finalize_proposal_review_record=lambda uid, session, capability:
+                resumed_repo.finalize_proposal_review(
+                    task_id=uid, session=session,
+                    selected_capability=capability,
+                ),
+            abort_proposal_review_record=lambda uid, error:
+                resumed_repo.abort_proposal_review(task_id=uid, error=error),
+            review_continuation=partial(
+                continue_with_proposal_review_async, caller=stage_panel,
+            ),
+        )
+        assert reviewed["status"] == "review_evaluated"
+    with connect() as db, db.cursor() as cur:
+        cur.execute("SELECT status, checkpoint FROM secretary.tasks WHERE id=%s",
+                    (task_id,))
+        final_status, checkpoint = cur.fetchone()
+        assert final_status == "completed", (strategy, final_status)
+        assert checkpoint["magi_session"]["task_id"] == str(task_id)
+        cur.execute(
+            """SELECT count(*) FROM secretary.audit_events
+               WHERE task_id=%s AND event_type='core.magi.completed'""",
+            (task_id,),
+        )
+        assert cur.fetchone()[0] == (
+            1 if strategy == "llm" else 0
+        ) or strategy == "standard", "unexpected_task_completion_audit"
+        cur.execute("SELECT count(*) FROM secretary.actions WHERE task_id=%s",
+                    (task_id,))
+        assert cur.fetchone()[0] == 0, "clarification_is_not_a_source_read"
+
 def main(project: str, container: str) -> None:
     """Verify isolated Docker identity, then run real PostgreSQL Task cases."""
     port = DISPOSABLE_PORT(project, container)
@@ -298,6 +455,10 @@ def main(project: str, container: str) -> None:
         ))
         print(f"PASS: disposable Task {strategy}/{source or 'source-free'}/{seats} seat(s)"
               + ("/forged-ID-rejected" if forged else "/completed"))
+    for strategy in ("standard", "llm"):
+        asyncio.run(resume_task(connect, strategy=strategy))
+        print(f"PASS: disposable Task {strategy}/user-clarification"
+              + ("/answer-only-review" if strategy == "standard" else "/completed"))
     print("PASS: real Task/Action/Source/Result/Goal/Audit persistence in disposable PG.")
 
 
