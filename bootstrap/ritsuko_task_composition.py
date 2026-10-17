@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Callable
 
 from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
-from ritsuko.core.observation_loop import (
+from ritsuko.core.task_execution import (
     review_proposal,
     run_observation_loop,
     resume_user_answer,
