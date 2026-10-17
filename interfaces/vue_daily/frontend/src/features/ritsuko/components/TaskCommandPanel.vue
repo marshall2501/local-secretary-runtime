@@ -33,6 +33,7 @@ const emit = defineEmits<{
   review: []
   remember: []
   stop: []
+  resume: []
   refresh: []
   savePreferences: []
 }>()
@@ -164,6 +165,16 @@ const niceguiCore = legacyPageUrl('/core')
       <p v-else-if="task.stop_requested" class="muted small">
         停止要求は保存されています。Taskの確定状態を確認してください。
       </p>
+      <div v-if="task.status === 'paused'" class="command-row">
+        <button v-if="task.can_resume" type="button" class="secondary"
+          :disabled="busy || operationBusy" @click="emit('resume')">
+          同じTaskを再開
+        </button>
+        <span v-else class="muted small">
+          この停止済みTaskは先頭から安全に再開できません。
+          実行済みの内容を重複させないため、途中復元は未対応です。
+        </span>
+      </div>
       <div v-if="operation?.execution_reconciliation_required"
         class="question" role="status" aria-label="Worker照合待ち">
         <strong>Workerの稼働状況を確認できません</strong>
