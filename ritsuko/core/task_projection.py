@@ -92,10 +92,10 @@ def _completion_from_standard_candidate(session: dict) -> dict:
 
 
 def can_requeue_paused_task(status: str, checkpoint: dict, action_count: int) -> bool:
-    """停止済みTaskを同じIDで「未実行から再開」できる条件を統一する。
+    """停止済みTaskの同一ID再開に使うCheckpointの最低条件を判定する。
 
-    前回のSource/Action、本人回答、記憶Reviewが残るTaskを新規のように
-    再実行してはいけない。この入口は実行済みStepの復旧機構ではない。
+    Action実行済みの場合はSource ResultとSessionの対応が保存されている
+    ケースだけ復元対象とする。本人回答や外部変更Actionは再実行しない。
     Repositoryは同じ条件をFOR UPDATEの中で再検査する。
 
     Args:
@@ -104,7 +104,7 @@ def can_requeue_paused_task(status: str, checkpoint: dict, action_count: int) ->
         action_count: 同じTaskに永続化済みのAction件数。
 
     Returns:
-        bool: 原文・設定を保持したまま未実行Taskを再キュー可能ならTrue。
+        bool: 未着手、または観測Checkpointから安全に継続可能ならTrue。
     """
     if status != "paused" or not isinstance(checkpoint, dict):
         return False
@@ -120,8 +120,25 @@ def can_requeue_paused_task(status: str, checkpoint: dict, action_count: int) ->
         or checkpoint.get("user_resume") is not None
         or checkpoint.get("proposal_review") is not None
         or checkpoint.get("proposal_memory_intake") is not None
-        or action_count != 0
     ):
+        return False
+    if action_count:
+        saved = checkpoint.get("source_resume")
+        if (
+            not isinstance(saved, dict)
+            or saved.get("version") != 1
+            or not isinstance(saved.get("session"), dict)
+            or saved["session"].get("status") != "waiting_information"
+            or not isinstance(saved.get("observations"), list)
+            or not saved["observations"]
+            or not isinstance(saved.get("result_ids"), list)
+            or len(saved["result_ids"]) != action_count
+            or not all(isinstance(v, str) and v for v in saved["result_ids"])
+            or len(set(saved["result_ids"])) != action_count
+        ):
+            return False
+    elif checkpoint.get("source_resume") is not None:
+        # An incomplete checkpoint must never turn into a fresh Task run.
         return False
     members = checkpoint.get("member_specs")
     return isinstance(members, list) and any(
