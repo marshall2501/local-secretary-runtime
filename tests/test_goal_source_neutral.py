@@ -10,7 +10,7 @@ from functools import partial
 import unittest
 from uuid import uuid4
 
-from ritsuko.core.observation_loop import run_observation_loop
+from ritsuko.core.task_execution import run_observation_loop
 from ritsuko.magi.async_execution import (
     continue_with_verified_observations_async,
     start_dialogue_async,
