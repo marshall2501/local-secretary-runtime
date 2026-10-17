@@ -30,7 +30,7 @@ from infrastructure.postgres.runtime_policy_repository import (
     PostgresRuntimePolicyRepository,
 )
 from ritsuko.application.context_policy import restrict_members
-from ritsuko.magi.async_execution import continue_with_user_clarification_async
+from ritsuko.magi.session_workflow import continue_with_user_clarification_async
 
 DBNAME = "secretary"
 DBUSER = "secretary_daily_runtime"
