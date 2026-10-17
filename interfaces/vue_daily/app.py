@@ -21,7 +21,10 @@ from pydantic import BaseModel, Field
 from ritsuko.application.task_commands import (
     TaskCommandConflict, TaskCommandNotFound, TaskCommands,
 )
-from ritsuko.core.magi_bridge import reviewable_user_knowledge_proposal
+from ritsuko.core.magi_bridge import (
+    reviewable_answer_candidate,
+    reviewable_user_knowledge_proposal,
+)
 from interfaces.vue_daily.preferences import (
     read_judgment_preferences, save_judgment_preferences,
 )
@@ -168,10 +171,26 @@ def create_app(*, queries, commands: TaskCommands | None = None,
             session = task.get("magi_session") or {}
             # The Core determines reviewability; Vue must not infer whether
             # an ungrounded MAGI knowledge candidate can be written.
-            task["can_remember"] = (
+            reviewing = (
                 task.get("status") == "waiting_external"
                 and task.get("phase") == "awaiting_review"
-                and reviewable_user_knowledge_proposal(session) is not None
+            )
+            knowledge = (
+                reviewable_user_knowledge_proposal(session)
+                if reviewing else None
+            )
+            ordinary = reviewable_answer_candidate(session) if reviewing else None
+            # This is a preview of the actual checked candidate, not a model
+            # status flag. It is only available to the existing local Task UI.
+            task["can_remember"] = knowledge is not None
+            task["can_answer_only"] = knowledge is not None or ordinary is not None
+            task["memory_review_candidate"] = (
+                {
+                    "knowledge_candidate": knowledge["knowledge_candidate"],
+                    "answer": knowledge["answer"],
+                    "user_text": knowledge["user_text"],
+                }
+                if knowledge is not None else None
             )
             return {"trace": {**saved, "task": task}, "source": "persisted"}
         except ValueError:
