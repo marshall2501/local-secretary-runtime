@@ -6,10 +6,11 @@
  */
 import { computed } from 'vue'
 import { legacyPageUrl } from '../../../shared/navigation'
-import type { TaskOperation } from '../api'
+import type { DecisionStrategy, TaskOperation } from '../api'
 import type { TaskRecord } from '../types'
 
 const request = defineModel<string>('request', { required: true })
+const strategy = defineModel<DecisionStrategy>('strategy', { required: true })
 const reply = defineModel<string>('reply', { required: true })
 const props = defineProps<{
   commandsEnabled: boolean
@@ -60,7 +61,11 @@ const niceguiCore = legacyPageUrl('/core')
         :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : '8099番の実Task操作画面で入力できます'"
         :disabled="busy || !commandsEnabled" required />
       <div class="command-row">
-        <span class="muted small">Goal・次の行動は設定済みMAGIが判断し、RITSUKOが実行・結果・Task状態を管理します。</span>
+        <label for="task-strategy">判断方式</label>
+        <select id="task-strategy" v-model="strategy" :disabled="busy || !commandsEnabled">
+          <option value="standard">通常（MAGI）</option>
+          <option value="llm">Goal判断（有効MAGI 1席）</option>
+        </select>
         <button type="submit" class="primary-command"
           :disabled="busy || !commandsEnabled || !request.trim()">
           {{ busy ? '受付中…' : '依頼を送信' }}
