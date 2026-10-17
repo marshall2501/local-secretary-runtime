@@ -101,7 +101,8 @@ async def scenario(connect, *, strategy: str, source: str | None,
     repo = PostgresMagiTaskRepository(connect)
     task_id = uuid4()
     request = (
-        "辞書の構造を説明して"
+        ("Pythonの辞書（dict）とは何か、簡単なコード例を1つ添えて日本語で説明してください。"
+         "外部検索や個人PKBの参照は不要です。")
         if source is None else f"合成の{source}資料を調べて回答して"
     )
     specs = [
