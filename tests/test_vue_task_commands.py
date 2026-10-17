@@ -101,6 +101,46 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TaskCommandConflict, "no_running_operation"):
             commands.stop(UUID(uid))
 
+    async def test_both_judgment_methods_share_task_runner_with_multiple_magi_seats(self):
+        """判断方式とMAGI席数は独立し、共通Task Applicationへ同じ形で渡る。"""
+        for count in (1, 2, 3):
+            app = FakeApplication()
+            specs = [
+                {"name": name, "enabled": True, "timeout_seconds": 9}
+                for name in ("MELCHIOR", "CASPER", "BALTHASAR")[:count]
+            ]
+            chosen = []
+            def starter(strategy):
+                chosen.append(strategy)
+                return lambda *_args, **_kwargs: None
+            commands = TaskCommands(
+                app, FakeQueries(), lambda: specs,
+                dialogue_starter_factory=starter,
+            )
+            for strategy in ("standard", "llm"):
+                app.entered.clear()
+                app.release.clear()
+                accepted = await commands.start(
+                    f"各席{count}方式{strategy}", decision_strategy=strategy,
+                )
+                await asyncio.wait_for(app.entered.wait(), timeout=1)
+                called = app.called[-1]
+                self.assertEqual(called[0], "start")
+                self.assertEqual(called[2]["member_specs"], specs)
+                self.assertTrue(callable(called[2]["dialogue_starter"]))
+                self.assertEqual(chosen[-1], strategy)
+                app.release.set()
+                for _ in range(30):
+                    await asyncio.sleep(0)
+                    if commands.operation(UUID(accepted["task_id"]))["status"] == "execution_finished":
+                        break
+                self.assertEqual(
+                    commands.operation(UUID(accepted["task_id"]))["status"],
+                    "execution_finished",
+                )
+            self.assertEqual(len(app.called), 2)
+            self.assertTrue(all(spec["enabled"] for spec in specs))
+
     async def test_judgment_strategy_does_not_change_member_assignments(self):
         """LLM判断に1席制限を置かず、現在のMAGI席設定を一切書き換えない。"""
         app = FakeApplication()
