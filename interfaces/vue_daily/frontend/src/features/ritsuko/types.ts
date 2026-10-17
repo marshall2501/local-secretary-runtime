@@ -51,6 +51,8 @@ export interface TaskRecord extends TaskSummary {
   } | null
   /** DBに受理された停止要求。trueでもWorkerが止まった証明ではない。 */
   stop_requested?: boolean | null
+  /** Core/DBが判定した同一Task再開可否。Taskの状態文字列から推測しない。 */
+  can_resume?: boolean
   /** MAGI提案は本人が確定したGoalと同義ではない。 */
   goal_definition?: {
     version: number
