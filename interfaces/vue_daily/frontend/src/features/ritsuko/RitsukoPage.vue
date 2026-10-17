@@ -15,7 +15,7 @@ const {
   items, view, hasMore, selectedId, trace, selected, connected, refreshing,
   problem, selectTask, selectView, loadMore,
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
-  draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
+  draftRequest, reply, sendStart, sendAnswer, sendReview, sendStop,
 } = useTasks()
 </script>
 
@@ -31,7 +31,7 @@ const {
   <div class="workspace">
     <main class="ritsuko-main">
       <TaskCommandPanel
-        v-model:request="draftRequest" v-model:strategy="strategy" v-model:reply="reply"
+        v-model:request="draftRequest" v-model:reply="reply"
         :commands-enabled="commandsEnabled" :busy="commandBusy"
         :task="selected" :feedback="commandFeedback" :error="commandError"
         :operation="operation"
