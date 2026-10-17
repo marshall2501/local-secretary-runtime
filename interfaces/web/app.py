@@ -1,8 +1,7 @@
 """Daily Local Secretary Web UI.
 
-The same application runs against an explicitly selected daily-runtime database
-boundary: production secretary for normal use or the historical isolated DB
-for regression-only validation.
+The legacy NiceGUI interface uses the same canonical daily-runtime database
+as the API. It remains available until necessary flows are accepted in Vue.
 
 Run with: python -m interfaces.web.app
 """
