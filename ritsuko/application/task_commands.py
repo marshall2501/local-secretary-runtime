@@ -15,6 +15,7 @@ from typing import Callable
 from uuid import UUID, uuid4
 
 from ritsuko.application.task_runtime import StateDrivenTaskApplication
+from ritsuko.core.magi_bridge import reviewable_answer_candidate
 
 
 class TaskCommandConflict(ValueError):
@@ -263,13 +264,9 @@ class TaskCommands:
             raise ValueError("review_decision_not_enabled")
         task = await self._task_for_command(task_id)
         session = task.get("magi_session") or {}
-        detail = session.get("detail") or {}
-        answer_ready = (
-            session.get("status") == "candidate_ready"
-            and detail.get("state") == "READY"
-            and bool(str(detail.get("answer_candidate") or "").strip())
-            and not session.get("pending_requests")
-        )
+        # The same reviewability guard is used by the persisted Task store;
+        # the GUI must not become a second authority for READY candidates.
+        answer_ready = reviewable_answer_candidate(session) is not None
         if (task.get("status") != "waiting_external"
                 or (session.get("status") != "proposal_ready" and not answer_ready)):
             raise TaskCommandConflict("task_not_waiting_for_review")
