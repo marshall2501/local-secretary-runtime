@@ -153,28 +153,31 @@ async def run_observation_loop(
                     execution,
                     pending,
                 )
-                if session.get("control_mode") == "goal_loop_v1":
-                    # Returned IDs belong to the current Task's committed read
-                    # record; LLM-provided IDs must never become evidence.
-                    if (not isinstance(record_ids, tuple) or len(record_ids) != 2
-                            or not all(record_ids)):
-                        raise ValueError("goal_result_ids_required")
-                    if observation is None:
-                        # A failed Tool is evidence of failure, not a verified
-                        # factual Source. Allow MAGI to suggest wait/next step.
-                        observation = {
-                            "source": pending["source"],
-                            "verified": False,
-                            "text": str(execution.get("error_type") or "source_read_failed"),
-                            "responds_to": pending.get("request_ids") or [],
-                        }
-                    observation["action_id"] = str(record_ids[0])
-                    observation["result_id"] = str(record_ids[1])
-                    observation["verification_level"] = (
-                        "provider_cited"
-                        if execution.get("verified_by") == "provider_reported_web_citations"
-                        else "bounded_read" if observation["verified"] else "read_failed"
-                    )
+                # All strategies use one Source/Action/Result identity contract.
+                # Record IDs come only from RITSUKO's committed Source port, not
+                # from model output; an unrecorded read cannot complete a Task.
+                if (
+                    not isinstance(record_ids, tuple) or len(record_ids) != 2
+                    or not all(record_ids)
+                ):
+                    raise ValueError("source_result_ids_required")
+                if observation is None:
+                    # A failed read is recorded as failure, never promoted into
+                    # a verified factual observation for either strategy.
+                    observation = {
+                        "source": pending["source"],
+                        "verified": False,
+                        "text": str(execution.get("error_type") or "source_read_failed"),
+                        "responds_to": pending.get("request_ids") or [],
+                    }
+                observation["action_id"] = str(record_ids[0])
+                observation["result_id"] = str(record_ids[1])
+                observation["verification_level"] = (
+                    "provider_cited"
+                    if execution.get("verified_by") == "provider_reported_web_citations"
+                    and observation["verified"]
+                    else "bounded_read" if observation["verified"] else "read_failed"
+                )
                 if observation is not None:
                     observations.append(observation)
 
