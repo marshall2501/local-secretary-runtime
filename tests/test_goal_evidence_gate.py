@@ -15,14 +15,16 @@ class GoalEvidenceGateTests(unittest.TestCase):
     @staticmethod
     def session(
         basis: str, ids: list[str], *, observations: list[dict] | None = None,
-        requires_source: bool = False, tool_read_executed: bool = False,
+        pending_requests: list[dict] | None = None,
+        historical_source_flag: bool = False, tool_read_executed: bool = False,
     ) -> dict:
         """同一の確定Task投影で使うGoal候補を作る。"""
         return {
             "decision_strategy": "llm", "status": "candidate_ready",
-            "requires_source": requires_source,
+            "requires_source": historical_source_flag,
             "tool_read_executed": tool_read_executed,
-            "observations": observations or [], "pending_requests": [],
+            "observations": observations or [],
+            "pending_requests": pending_requests or [],
             "goal_judgment": {
                 "next": "respond", "fulfillment": "met",
                 "answer": "回答候補",
@@ -53,8 +55,8 @@ class GoalEvidenceGateTests(unittest.TestCase):
         )
         self.assertIn("Provider", task_projection(allowed)["message"])
 
-    def test_source_free_is_allowed_only_before_any_required_read(self):
-        """出典が不要な説明は完了するが必要な読取は省略できない。"""
+    def test_source_free_is_model_judgment_but_pending_execution_is_checked(self):
+        """意味判断はMAGI、Coreは未完了Sourceと実Resultの照合のみ担当。"""
         public = self.session("not_required", [])
         status, refs = check_goal_response_evidence(
             public, public["goal_judgment"]["evidence"],
@@ -62,16 +64,33 @@ class GoalEvidenceGateTests(unittest.TestCase):
         self.assertEqual((status, refs), ("source_free", {}))
         self.assertEqual(task_projection(public)["task_status"], "completed")
 
-        for kw in ({"requires_source": True}, {"tool_read_executed": True}):
+        # Old persisted Session's regex-derived flags have no authority to
+        # override a later valid MAGI judgment. A previous unrelated read
+        # also doesn't automatically make every Goal Source-dependent.
+        for kw in (
+            {"historical_source_flag": True},
+            {"tool_read_executed": True},
+        ):
             with self.subTest(kw=kw):
-                blocked = self.session("not_required", [], **kw)
-                status, _ = check_goal_response_evidence(
-                    blocked, blocked["goal_judgment"]["evidence"],
+                historical = self.session("not_required", [], **kw)
+                self.assertEqual(
+                    check_goal_response_evidence(
+                        historical, historical["goal_judgment"]["evidence"],
+                    )[0], "source_free",
                 )
-                self.assertEqual(status, "required_source_not_observed")
-                self.assertNotEqual(
-                    task_projection(blocked)["task_status"], "completed",
-                )
+                self.assertEqual(task_projection(historical)["task_status"], "completed")
+
+        # Source requested but not yet completed is a workflow fact. It cannot
+        # be silently discarded by a model's Source-free response.
+        pending = self.session("not_required", [], pending_requests=[
+            {"request_id": "REQ-1", "source": "web", "what": "公式ページ"},
+        ])
+        self.assertEqual(
+            check_goal_response_evidence(
+                pending, pending["goal_judgment"]["evidence"],
+            )[0], "pending_source_request_not_completed",
+        )
+        self.assertNotEqual(task_projection(pending)["task_status"], "completed")
 
     def test_mismatched_evidence_basis_never_completes(self):
         """根拠なし・余分な参照IDとbasisの矛盾を完了扱いしない。"""
