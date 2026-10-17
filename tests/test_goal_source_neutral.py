@@ -17,8 +17,7 @@ from ritsuko.magi.async_execution import (
 )
 from ritsuko.magi.goal_contract import GOAL_SCHEMA, validate_goal_turn
 from ritsuko.magi.goal_loop import (
-    goal_requires_source, goal_requires_web, goal_task_projection,
-    start_goal_dialogue,
+    goal_task_projection, start_goal_dialogue,
 )
 
 
@@ -76,23 +75,21 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
             "request_read", source="external_service",
         )))
 
-    async def test_private_request_is_not_assumed_to_require_web(self) -> None:
-        """本人の情報は根拠が必要だが、Webという判断をPythonで固定しない。"""
-        self.assertTrue(goal_requires_source("私の家計を調べて"))
-        self.assertFalse(goal_requires_web("私の家計を調べて"))
-        self.assertFalse(goal_requires_web("私のPCのGPU構成を教えて"))
-        self.assertTrue(goal_requires_web("公式サイトの最新情報を調べて"))
-
-        async def fake_member(_member, _envelope, **_kwargs):
-            """Source未読で完了を宣言する誤ったMAGI回答を模倣する。"""
+    async def test_private_source_is_chosen_by_magi_not_python(self) -> None:
+        """私的Sourceの判断と選択はMAGI、実行はRITSUKOが行う。"""
+        async def fake_member(_member, envelope, **_kwargs):
+            self.assertEqual(envelope["user_input"]["raw"], "私の家計を調べて")
+            self.assertIn("finance", envelope["resource_catalog"])
             return {"status": "ok", "response": judgment(
-                "respond", basis="not_required", answer="記録を確認した",
+                "request_read", source="finance",
             )}
         session = await start_goal_dialogue(
             "私の家計を調べて", member_specs=SPEC, timeout=5,
             policy_snapshot=POLICY, caller=fake_member,
         )
-        self.assertEqual(session["next_step"], "required_source_not_observed")
+        self.assertEqual(session["status"], "waiting_information")
+        self.assertEqual(session["pending_requests"][0]["source"], "finance")
+        self.assertFalse(session["tool_read_executed"])
         self.assertNotEqual(goal_task_projection(session)["task_status"], "completed")
 
     async def test_pkb_and_finance_use_same_task_recording_and_evidence(self) -> None:
@@ -179,7 +176,6 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
                 "source": "finance", "verified": False,
                 "result_id": "recorded-failure", "verification_level": "read_failed",
             }],
-            "requires_source": True, "requires_web": False,
             "goal_judgment": None, "pending_requests": [],
             "user_question": None,
         }
