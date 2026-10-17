@@ -33,6 +33,7 @@ const emit = defineEmits<{
   review: []
   remember: []
   stop: []
+  refresh: []
   savePreferences: []
 }>()
 // MAGI's intermediate state is informational; RITSUKO's persisted phase is
@@ -163,13 +164,23 @@ const niceguiCore = legacyPageUrl('/core')
       <p v-else-if="task.stop_requested" class="muted small">
         停止要求は保存されています。Taskの確定状態を確認してください。
       </p>
+      <div v-if="operation?.execution_reconciliation_required"
+        class="question" role="status" aria-label="Worker照合待ち">
+        <strong>Workerの稼働状況を確認できません</strong>
+        <p>DB上のTaskは処理中ですが、現在のAPIプロセスに実行中のOperationはありません。
+          他のWorkerが動作している可能性は残るため、完了や停止と断定しません。</p>
+        <p class="muted small">自動再実行は行いません。必要なら状態を再取得し、
+          保存済みTaskの停止要求を利用してください。</p>
+      </div>
       <p v-if="operation" class="muted small">
         操作状態: {{ operation.status }}
-        <span v-if="operation.execution_reconciliation_required">
-          （Workerの実行状態は照合が必要）
-        </span>
       </p>
     </template>
+    <div class="command-row" v-if="task">
+      <button type="button" class="secondary" :disabled="busy"
+        @click="emit('refresh')">保存済みTaskを再取得</button>
+      <span class="muted small">既存のTaskを再照会します。再実行やDB変更はしません。</span>
+    </div>
     <p v-if="feedback" class="command-feedback" role="status">{{ feedback }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="commandsEnabled" class="muted small">
