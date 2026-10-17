@@ -45,6 +45,37 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
   }
 })
 
+test('保存した既定方式で選択欄なしでも同じTask APIを利用する', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8099/')
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8099\/ui\//)
+  const endpoint = 'http://127.0.0.1:8099/api/v1/ritsuko/preferences'
+  const original = await (await page.request.get(endpoint)).json() as {
+    default_strategy: 'standard' | 'llm'; show_strategy_selector: boolean
+  }
+  try {
+    await page.getByText('判断方式の設定').click()
+    await page.getByLabel('新規Taskの既定方式').selectOption('llm')
+    await page.getByLabel('新規依頼に検証用の判断方式選択を表示').uncheck()
+    await page.getByRole('button', { name: '設定を保存' }).click()
+    await expect(page.getByText('保存しました。これから開始するTaskに適用します。')).toBeVisible()
+    await expect(page.locator('#task-strategy')).toHaveCount(0)
+    await expect(page.getByText('既定判断方式：Goal / LLM')).toBeVisible()
+
+    const request = '既定LLM方式の受付を確認する'
+    await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
+    await page.getByRole('button', { name: '依頼を送信' }).click()
+    await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
+    const taskId = page.url().split('#task=')[1]
+    const saved = await page.request.get(
+      'http://127.0.0.1:8099/api/v1/ritsuko/tasks/' + taskId,
+    )
+    expect((await saved.json()).trace.task.magi_session.decision_strategy).toBe('llm')
+  } finally {
+    const reset = await page.request.post(endpoint, { data: original })
+    expect(reset.ok()).toBeTruthy()
+  }
+})
+
 test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
   const previousUrl = page.url()
