@@ -622,6 +622,153 @@ async def verify_safe_paused_restart(connect) -> None:
             else:
                 raise AssertionError("stale_attempt_wrote_source_after_restart")
 
+
+async def verify_source_resume_after_stop(connect) -> None:
+    """Recover a real saved Result into MAGI without executing its Source twice."""
+    from infrastructure.postgres.core_task_query_repository import (
+        PostgresCoreTaskQueryRepository,
+    )
+    repo = PostgresMagiTaskRepository(connect)
+    queries = PostgresCoreTaskQueryRepository(connect)
+    uid = uuid4()
+    request = "合成PKBの資料を調べて説明する"
+    specs = [{
+        "name": "CASPER", "provider": "ollama", "model": "fake-ci",
+        "endpoint": "http://127.0.0.1:11434", "enabled": True,
+        "weight": 1.0, "timeout_seconds": 5,
+    }]
+    assert repo.reserve_start(
+        task_id=uid, request=request, member_specs=specs,
+        decision_strategy="llm", policy_snapshot=POLICY,
+    )
+    read_calls = []
+    requested_stop = [False]
+
+    async def model(_spec, envelope, **_kwargs):
+        observations = envelope.get("observations") or []
+        response = (
+            goal_decision("respond", result_id=observations[-1]["result_id"])
+            if observations else goal_decision("request_read", source="pkb")
+        )
+        return {"status": "ok", "response": response, "errors": []}
+
+    def source(_text, pending, _session):
+        read_calls.append(pending["source"])
+        assert len(read_calls) == 1, "source_read_repeated"
+        return {
+            "status": "ok", "source": "pkb", "tool": "pkb",
+            "operation": "read", "capability": pending["capability"],
+            "confidentiality": pending["confidentiality"], "total": 1,
+            "answer": "合成PKB1件", "verified_by": "ci_bounded_read_fixture",
+            "result": {"result_kind": "ci_fixture"},
+        }
+
+    def claim(task_id, text, members):
+        return repo.claim_start(
+            task_id=task_id, request=text, member_specs=members,
+        )
+
+    def record(task_id, execution, pending, attempt):
+        return repo.record_source_read(
+            task_id=task_id, execution=execution,
+            pending_request=pending, expected_attempt_id=attempt,
+        )
+
+    def persist(task_id, session, capability, attempt):
+        return repo.persist_session(
+            task_id=task_id, session=session,
+            selected_capability=capability, expected_attempt_id=attempt,
+        )
+
+    def fail(task_id, error, attempt):
+        return repo.fail_task(
+            task_id=task_id, error=error,
+            expected_attempt_id=attempt,
+        )
+
+    def save_and_stop(task_id, session, observations, cycles, attempt):
+        repo.save_source_resume(
+            task_id=task_id, session=session, observations=observations,
+            cycles=cycles, expected_attempt_id=attempt,
+        )
+        assert repo.request_stop(task_id=task_id) == "running"
+        requested_stop[0] = True
+
+    common = dict(
+        task_id=uid, member_specs=specs, timeout=5,
+        create_task_record=claim, execute_source_request=source,
+        record_source_read_record=record,
+        persist_session_record=persist, fail_task_record=fail,
+        observation_continuation=partial(
+            continue_with_verified_observations_async, goal_caller=model,
+        ),
+    )
+    stopped = await run_observation_loop(
+        request, **common, checkpoint_source_progress=save_and_stop,
+        stop_requested=lambda: requested_stop[0],
+        dialogue_starter=partial(
+            start_dialogue_async, decision_strategy="llm",
+            policy_snapshot=POLICY, goal_caller=model,
+        ),
+    )
+    assert stopped["status"] == "stopped"
+    before = queries.trace(uid)
+    assert before["task"]["status"] == "paused"
+    assert before["task"]["can_resume"] is True
+    assert len(before["actions"]) == 1
+    original_result = before["actions"][0]["result_id"]
+
+    saved = repo.requeue_paused(task_id=uid)
+    snapshot = saved["resume_snapshot"]
+    assert snapshot["observations"][0]["result_id"] == original_result
+    assert saved["policy_snapshot"] == POLICY
+
+    resumed = await run_observation_loop(
+        request, **common, resume_snapshot=snapshot,
+        dialogue_starter=None,
+    )
+    assert resumed["status"] == "candidate_ready"
+    after = queries.trace(uid)
+    assert after["task"]["status"] == "completed"
+    assert len(after["actions"]) == 1
+    assert after["actions"][0]["result_id"] == original_result
+    assert after["task"]["magi_session"]["observations"][0]["result_id"] == original_result
+    assert read_calls == ["pkb"]
+
+    # A saved read without its corresponding Session checkpoint must never
+    # be replayed as a new Task run.
+    orphan = uuid4()
+    assert repo.reserve_start(
+        task_id=orphan, request=request, member_specs=specs,
+        decision_strategy="llm", policy_snapshot=POLICY,
+    )
+    attempt = repo.claim_start(
+        task_id=orphan, request=request, member_specs=specs,
+    )
+    repo.record_source_read(
+        task_id=orphan,
+        execution={
+            "status": "ok", "source": "pkb", "tool": "pkb",
+            "operation": "read", "capability": "pkb_search",
+            "total": 1, "answer": "合成結果",
+            "verified_by": "ci_bounded_read_fixture",
+            "result": {"result_kind": "ci_fixture"},
+        },
+        pending_request={
+            "source": "pkb", "capability": "pkb_search",
+            "what": "合成", "request_ids": ["uncommitted-checkpoint"],
+        },
+        expected_attempt_id=attempt,
+    )
+    assert repo.request_stop(task_id=orphan) == "running"
+    repo.persist_session(
+        task_id=orphan,
+        session={"status": "stopped", "next_step": "user_requested_stop"},
+        expected_attempt_id=attempt,
+    )
+    assert queries.trace(orphan)["task"]["can_resume"] is False
+
+
 def main(project: str, container: str) -> None:
     """Verify isolated Docker identity, then run real PostgreSQL Task cases."""
     port = DISPOSABLE_PORT(project, container)
@@ -656,6 +803,8 @@ def main(project: str, container: str) -> None:
         print(f"PASS: disposable Task {strategy}/user-clarification"
               + ("/answer-only-review" if strategy == "standard" else "/completed"))
     asyncio.run(verify_safe_paused_restart(connect))
+    asyncio.run(verify_source_resume_after_stop(connect))
+    print("PASS: Source checkpoint resumes with original Result without repeat; incomplete checkpoint denied")
     print("PASS: paused Task requeues same ID/intent with no Action; old attempts fenced; executed read restart denied")
     print("PASS: real Task/Action/Source/Result/Goal/Audit persistence in disposable PG.")
 
