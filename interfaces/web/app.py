@@ -82,6 +82,8 @@ from ritsuko.application.context_policy import public_web_search_permission
 from ritsuko.core.magi_bridge import reviewable_user_knowledge_proposal
 from ritsuko.magi.async_execution import (
     call_guided_panel_async,
+)
+from ritsuko.magi.session_workflow import (
     continue_with_observation_async,
     continue_with_proposal_review_async,
     continue_with_user_clarification_async,
