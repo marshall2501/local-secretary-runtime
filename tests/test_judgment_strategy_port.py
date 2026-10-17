@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import unittest
 
-from ritsuko.magi.async_execution import (
-    continue_with_user_clarification_async, start_dialogue_async,
+from ritsuko.magi.session_workflow import (
+    continue_with_user_clarification_async,
+    start_dialogue_async,
 )
 from ritsuko.magi.judgment_strategies import (
     strategy_for_name, strategy_for_session,
