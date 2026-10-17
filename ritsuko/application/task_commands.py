@@ -57,6 +57,7 @@ class TaskCommands:
         pending_starts_loader: Callable | None = None,
         policy_snapshot_loader: Callable | None = None,
         request_stop: Callable | None = None,
+        requeue_paused: Callable | None = None,
         memory_review_writer: Callable | None = None,
     ) -> None:
         self._application = application
@@ -67,6 +68,7 @@ class TaskCommands:
         self._pending_starts_loader = pending_starts_loader
         self._policy_snapshot_loader = policy_snapshot_loader
         self._request_stop = request_stop
+        self._requeue_paused = requeue_paused
         self._memory_review_writer = memory_review_writer
         self._max_retained = max(1, int(max_retained))
         # 実行中Jobと停止EventはAPIプロセス内だけの一時情報。
@@ -359,6 +361,40 @@ class TaskCommands:
                 ),
             )
         return self._schedule(task_id, "review", run)
+
+    async def resume(self, task_id: UUID) -> dict:
+        """停止した未実行Taskを元の設定・同じIDで再び実行受付する。
+
+        Stage/Goal方式とPolicy/MAGI席は保存済みIntentから復元する。
+        実行済みActionのあるTaskを新Taskとして繰り返すことは許可しない。
+        複数APIインスタンスの競合はRepositoryのFOR UPDATEが防止する。
+
+        Args:
+            task_id: 再開したい永続TaskのID。
+
+        Returns:
+            dict: 再開を受付けたプロセス内Operation。
+        """
+        if self._requeue_paused is None or self._dialogue_starter_factory is None:
+            raise TaskCommandConflict("task_resume_not_configured")
+        job = self._jobs.get(task_id)
+        if job is not None and not job.done():
+            raise TaskCommandConflict("task_operation_already_running")
+        try:
+            saved = await asyncio.to_thread(
+                self._requeue_paused, task_id=task_id,
+            )
+        except ValueError as exc:
+            if str(exc) == "task_not_found":
+                raise TaskCommandNotFound("task_not_found") from exc
+            raise TaskCommandConflict("paused_task_not_requeueable") from exc
+        # Task is now pending in the DB. The ordinary atomic claim and
+        # single MAGI/Application runner handle this same Task ID.
+        self._launch_start(
+            task_id, saved["request"], saved["member_specs"],
+            saved["decision_strategy"], saved.get("policy_snapshot"),
+        )
+        return self.operation(task_id)
 
     def stop(self, task_id: UUID) -> dict:
         """実行中Jobへ停止Eventを送る。Taskが停止した保証は返さない。"""
