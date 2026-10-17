@@ -221,7 +221,9 @@ export function useTasks() {
     // reconstruct review eligibility from MAGI's provisional session shape.
     if (!task || task.status !== 'waiting_external' ||
         task.phase !== 'awaiting_review' ||
-        (decision === 'remember' && !task.can_remember)) return
+        (decision === 'remember'
+          ? (!task.can_remember || !task.memory_review_candidate)
+          : !task.can_answer_only)) return
     const result = await sendCommand(
       () => reviewTask(task.id, decision),
       decision === 'remember'
