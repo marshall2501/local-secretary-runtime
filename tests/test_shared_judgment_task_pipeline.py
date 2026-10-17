@@ -6,7 +6,7 @@ from __future__ import annotations
 import unittest
 from uuid import uuid4
 
-from ritsuko.core.observation_loop import run_observation_loop
+from ritsuko.core.task_execution import run_observation_loop
 from ritsuko.core.task_projection import task_projection
 
 
