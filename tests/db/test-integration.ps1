@@ -85,6 +85,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Isolated runtime policy PostgreSQL verification failed.' }
     & $python (Join-Path $PSScriptRoot 'verify-durable-task-start.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated durable Task PostgreSQL verification failed.' }
+    # Both MAGI strategies must reach the real Task/Action/Result/Audit DB
+    # through the rebuilt common Core, not an in-memory persistence mock.
+    & $python (Join-Path $PSScriptRoot 'verify-common-task-execution.py') $project $script:container
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated common RITSUKO Task execution PostgreSQL verification failed.' }
     & $python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -EnvFile $testEnvFile -BackupPath $backup
