@@ -29,10 +29,10 @@ class CorrectionTests(unittest.TestCase):
         self.assertFalse(explicit_reassignment_quote(
             "訂正：RCカーBではなくRCカーAのSERVO-X1", "RCカーA", "RCカーB", "SERVO-X1"))
 
-    def test_production_db_refused_before_sql(self):
+    def test_wrong_login_refused_before_sql(self):
         class Forbidden:
             info = SimpleNamespace(dbname="secretary", host="localhost",
-                                   user="secretary_pkb_proto_writer_20260927")
+                                   user="secretary_admin")
             def transaction(self):
                 raise AssertionError("no SQL allowed")
         record = InputRecord("fixture-correction", "user_statement", "fixture://correction",
@@ -40,14 +40,14 @@ class CorrectionTests(unittest.TestCase):
         claim = ProposedClaim("fake", "メインPC", "driver_updated", "DRV-A1", 0,
                               len(record.text), record.text, "correction",
                               "00000000-0000-0000-0000-000000000001")
-        with self.assertRaisesRegex(ValueError, "Refusing non-isolated"):
+        with self.assertRaisesRegex(ValueError, "Refusing unauthorized"):
             correct_entity(Forbidden(), record, claim)
 
-    def test_non_fixture_rejected_before_sql(self):
-        class Isolated:
-            info = SimpleNamespace(dbname="secretary_pkb_proto_20260927",
+    def test_nonlocal_source_rejected_before_sql(self):
+        class DailyDB:
+            info = SimpleNamespace(dbname="secretary",
                                    host="localhost",
-                                   user="secretary_pkb_proto_writer_20260927")
+                                   user="secretary_daily_runtime")
             def transaction(self):
                 raise AssertionError("no SQL allowed")
         record = InputRecord("fixture-correction", "user_statement", "personal://source",
@@ -55,8 +55,8 @@ class CorrectionTests(unittest.TestCase):
         claim = ProposedClaim("fake", "メインPC", "driver_updated", "DRV-A1", 0,
                               len(record.text), record.text, "correction",
                               "00000000-0000-0000-0000-000000000001")
-        self.assertEqual(correct_entity(Isolated(), record, claim).reason,
-                         "fictional_fixture_only")
+        self.assertEqual(correct_entity(DailyDB(), record, claim).reason,
+                         "unsupported_source_ref")
 
 
 if __name__ == "__main__":
