@@ -47,6 +47,7 @@ class StateDrivenTaskApplication:
     async def start(self, request: str, *, member_specs: list[dict],
                     timeout: float, task_id: UUID | None = None,
                     stop_requested=None, on_turn_start=None,
+                    on_member_progress=None,
                     dialogue_starter=None, observation_continuation=None) -> dict:
         options = {
             "member_specs": member_specs,
@@ -60,6 +61,8 @@ class StateDrivenTaskApplication:
             "stop_requested": stop_requested,
             "on_turn_start": on_turn_start,
         }
+        if on_member_progress is not None:
+            options["on_member_progress"] = on_member_progress
         if dialogue_starter is not None:
             options["dialogue_starter"] = dialogue_starter
         if observation_continuation is not None:
