@@ -15,9 +15,8 @@ on:
       - "scripts/ui/**"
       - "scripts/db/**"
       - "config/**"
-      - "db/isolated/pkb_proto/**"
-      - "scripts/pkb/isolated/run_pending_setup.ps1"
-      - "scripts/pkb/isolated/verify_finance_versioning.ps1"
+      - "db/migrations/**"
+
       - "tests/test_*.py"
       - "tests/db/**"
       - "requirements-web.txt"
@@ -36,9 +35,8 @@ on:
       - "scripts/ui/**"
       - "scripts/db/**"
       - "config/**"
-      - "db/isolated/pkb_proto/**"
-      - "scripts/pkb/isolated/run_pending_setup.ps1"
-      - "scripts/pkb/isolated/verify_finance_versioning.ps1"
+      - "db/migrations/**"
+
       - "tests/test_*.py"
       - "tests/db/**"
       - "requirements-web.txt"
