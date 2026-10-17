@@ -32,13 +32,11 @@ cd D:\AI\projects\local-secretary-runtime
 
 `Doctor` はhealth、localhost binding、認証、migration履歴等を検査します。migration前に失敗する項目がある場合は `Start → Migrate → Doctor` の順で確認します。
 
-## Migration / clean rebuild
+## Migration / disposable tests / recovery
 
-稼働中DBに適用済みのmigration履歴は書き換えません。通常の差分変更では、現在のactive migration列へ新しいmigrationを追加します。
+構造化データの通常運用DBは `secretary` 一つです。Gitの現行schemaは `db/migrations/` を正本とし、使い捨てPostgreSQLの隔離テストも同一のMigration列から構築します。旧 `db/isolated/pkb_proto/` と旧DB専用スクリプトはGit追跡ファイルから撤去済みで、必要ならGit履歴から確認できます。
 
-一方、構成整理などで永続化構造そのものを整理し直す場合は、旧migrationを新DBへ再演することを目的にしません。旧DBと旧migrationはrollback／履歴資産として保全し、現在採用schemaから別名のclean replacement DBを作り、必要データを選別移植できます。切替前に新DBで既存機能を確認し、旧DBは戻し先として残します。
-
-`db/isolated/pkb_proto` は隔離PKB試験の履歴・回帰資産であり、通常production DBへ直接適用しません。
+運用DBのMigration履歴は本変更で変更しません。新Migrationを実機へ適用する場合や新DBへ切り替える場合は個別の高影響操作承認を分けて扱います。復旧能力は以下の `Backup` / `Restore drill` と既存の管理手順で保ちます。過去のPKB隔離DBを通常運用へ再昇格する処理は使用しません。
 
 ## 権限と操作境界
 
