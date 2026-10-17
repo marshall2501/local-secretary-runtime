@@ -219,7 +219,7 @@ class WebTaskRoundtripTests(unittest.IsolatedAsyncioTestCase):
             verified_source_observation, web_query_from_request,
         )
         from ritsuko.core.magi_bridge import task_projection
-        from ritsuko.core.observation_loop import run_observation_loop
+        from ritsuko.core.task_execution import run_observation_loop
 
         query = "Public official Python dict.get definition"
         events = []
