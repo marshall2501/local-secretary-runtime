@@ -7,7 +7,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   answerTask, getJudgmentPreferences, getTaskApiMode, getTaskOperation,
-  getTaskTrace, listTasks, reviewTask, saveJudgmentPreferences, startTask, stopTask,
+  getTaskTrace, listTasks, reviewTask, resumeTask, saveJudgmentPreferences, startTask, stopTask,
 } from './api'
 import type { DecisionStrategy, ReviewDecision, TaskOperation } from './api'
 import type { TaskListView, TaskSummary, TaskTrace } from './types'
@@ -240,6 +240,20 @@ export function useTasks() {
     await sendReview('remember')
   }
 
+  /** 再開可否はCoreの保存済み判定に従い、同一Task IDへ受付を送る。 */
+  async function sendResume(): Promise<void> {
+    const task = selected.value
+    if (!task || !task.can_resume || task.status !== 'paused') return
+    const result = await sendCommand(
+      () => resumeTask(task.id),
+      '同じTask IDで再開を受付けました。DB上の処理状況を再照会します。',
+    )
+    if (result) {
+      operation.value = result
+      await refresh()
+    }
+  }
+
   async function sendStop(): Promise<void> {
     const task = selected.value
     if (!task || !['pending', 'running'].includes(task.status)) return
@@ -421,6 +435,6 @@ export function useTasks() {
     draftRequest, strategy, defaultStrategy, showStrategySelector,
     activeDefaultStrategy, activeShowStrategySelector,
     preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
-    reply, sendStart, sendAnswer, sendReview, sendRemember, sendStop,
+    reply, sendStart, sendAnswer, sendReview, sendRemember, sendStop, sendResume,
   }
 }
