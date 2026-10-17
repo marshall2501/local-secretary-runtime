@@ -41,6 +41,14 @@ export interface TaskRecord extends TaskSummary {
   magi_session?: MagiSession | null
   /** RITSUKOが確認した記憶反映Review可否。候補の文章では推測しない。 */
   can_remember?: boolean
+  /** RITSUKOが確定した回答Review候補の有無（MAGI statusを画面で再解釈しない）。 */
+  can_answer_only?: boolean
+  /** 本人が明示承認する前に表示する登録文と、その根拠となる本人回答。 */
+  memory_review_candidate?: {
+    knowledge_candidate: string
+    answer: string
+    user_text: string
+  } | null
   /** DBに受理された停止要求。trueでもWorkerが止まった証明ではない。 */
   stop_requested?: boolean | null
   /** MAGI提案は本人が確定したGoalと同義ではない。 */
