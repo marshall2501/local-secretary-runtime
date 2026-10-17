@@ -28,7 +28,6 @@ if ($port -lt 1024 -or $port -gt 65535) { throw 'Invalid database port.' }
 
 # 普段のTaskを参照するため既存の日常DB接続先を使う。Secretの中身は表示・複製しない。
 $values = @{
-    LSA_DAILY_DB_MODE = 'production'
     LSA_DAILY_DB_NAME = 'secretary'
     LSA_PKB_DAILY_PORT = "$port"
     LSA_PKB_DAILY_SECRET = "$secret"
