@@ -16,6 +16,8 @@ const showStrategySelector = defineModel<boolean>('showStrategySelector', { requ
 const reply = defineModel<string>('reply', { required: true })
 const props = defineProps<{
   commandsEnabled: boolean
+  activeDefaultStrategy: DecisionStrategy
+  activeShowStrategySelector: boolean
   preferencesLoaded: boolean
   preferencesBusy: boolean
   preferencesMessage: string
@@ -73,7 +75,7 @@ const niceguiCore = legacyPageUrl('/core')
         :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : '8099番の実Task操作画面で入力できます'"
         :disabled="busy || !commandsEnabled" required />
       <div class="command-row">
-        <template v-if="showStrategySelector">
+        <template v-if="activeShowStrategySelector">
           <label for="task-strategy">判断方式（検証用）</label>
           <select id="task-strategy" v-model="strategy"
             :disabled="busy || !commandsEnabled || !preferencesLoaded">
@@ -82,7 +84,7 @@ const niceguiCore = legacyPageUrl('/core')
           </select>
         </template>
         <span v-else class="muted small">
-          既定判断方式：{{ defaultStrategy === 'llm' ? 'Goal / LLM' : '従来' }}
+          既定判断方式：{{ activeDefaultStrategy === 'llm' ? 'Goal / LLM' : '従来' }}
         </span>
         <button type="submit" class="primary-command"
           :disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()">
