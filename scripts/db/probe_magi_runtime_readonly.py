@@ -3,7 +3,7 @@
 """サブPCの日常DBでMAGI設定・権限・Task読取の接続だけを確認する。
 
 利用者に長い一時PowerShellを貼り付けてもらわず、既存ランチャーと同じ
-DBモード・Port・Secretファイルへの参照を一回のPython実行へ閉じ込める。
+DB Port・Secretファイルへの参照を一回のPython実行へ閉じ込める。
 Task作成・保存・外部MAGI呼出しは行わず、Secret・Task本文を表示しない。
 """
 from __future__ import annotations
@@ -36,7 +36,6 @@ def configure_daily_environment(root: Path) -> None:
     if not secret_path.is_file():
         raise RuntimeError("daily runtime secret file missing")
     os.environ.update({
-        "LSA_DAILY_DB_MODE": "production",
         "LSA_DAILY_DB_NAME": "secretary",
         "LSA_PKB_DAILY_PORT": str(port),
         "LSA_PKB_DAILY_SECRET": str(secret_path),
@@ -65,7 +64,7 @@ def main() -> None:
     """共有MAGI Compositionと実DB参照を確認する。Task・Policyは変更しない。"""
     configure_daily_environment(ROOT)
 
-    # DBのモードはmodule import時に固定されるため、設定後にimportする。
+    # DB接続先はmodule import時に確定するため、設定後にimportする。
     from bootstrap.magi_task_runtime import build_daily_magi_task_commands
     from bootstrap.web_runtime import (
         build_core_task_queries,
