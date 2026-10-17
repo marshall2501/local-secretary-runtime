@@ -204,29 +204,14 @@ def _goal_completion_projection(session: dict) -> dict:
     根拠の意味的な十分性はMAGI提案だが、実在するSource/Resultとの
     突き合わせとTask確定はRITSUKOが行う。失敗読取や未登録IDは根拠でない。
     """
-    from ritsuko.application.observation_sources import AUTO_READ_SOURCES
+    from ritsuko.core.goal_evidence import check_goal_response_evidence
 
     judgment = session.get("goal_judgment") or {}
     evidence = judgment.get("evidence") or {}
     result_ids = evidence.get("result_ids") or []
-    available = {
-        str(item.get("result_id")): item
-        for item in (session.get("observations") or [])
-        if isinstance(item, dict)
-        and item.get("verified") is True
-        and item.get("result_id")
-        and item.get("source") in AUTO_READ_SOURCES
-    }
-    valid_refs = (
-        evidence.get("basis") == "result_refs" and bool(result_ids)
-        and all(ref in available for ref in result_ids)
-    )
-    source_free = (
-        evidence.get("basis") == "not_required" and not result_ids
-        and not session.get("requires_source", session.get("requires_web", False))
-        and not session.get("requires_web")
-        and not session.get("tool_read_executed")
-    )
+    evidence_status, available = check_goal_response_evidence(session, evidence)
+    valid_refs = evidence_status == "verified_results"
+    source_free = evidence_status == "source_free"
     answer = judgment.get("answer")
     if (judgment.get("next") == "respond"
             and judgment.get("fulfillment") == "met"
