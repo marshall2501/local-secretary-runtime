@@ -203,14 +203,46 @@ class BrowserFixtureCommands:
         return operation
 
 
+class BrowserFixtureReadService:
+    """Fake SQL-first PKB data for isolated browser tests only."""
+
+    def search_memory(self, q=None, domain=None, kind=None,
+                      include_history=False, limit=20, offset=0):
+        """Filter fictional source records without any database connection."""
+        items = [{
+            "id": "synthetic-memory-1", "kind": "claim", "domain": "pc",
+            "entity_name": "架空サブPC", "title": "GPU",
+            "value_text": '"架空GPU"', "evidence": "隔離テストの記録",
+            "state": "verified", "source_citation": "架空の本人申告",
+            "source_uri": "fixture://vue-pkb/1",
+            "recorded_at": "2026-10-17T00:00:00+09:00",
+        }]
+        if q:
+            items = [x for x in items if q.lower() in (
+                x["entity_name"] + x["title"] + x["value_text"] +
+                x["source_citation"]).lower()]
+        if domain:
+            items = [x for x in items if x["domain"] == domain]
+        if kind:
+            items = [x for x in items if x["kind"] == kind]
+        total = len(items)
+        return {
+            "total": total, "limit": limit, "offset": offset,
+            "include_history": include_history,
+            "items": items[offset:offset + limit],
+        }
+
+
 async def serve() -> None:
     """既存の本番サーバーと独立したCIコンテナで2つのfake UIを起動する。"""
     import uvicorn
 
     store = BrowserFixtureStore()
-    readonly = create_app(queries=store)
+    reader = BrowserFixtureReadService()
+    readonly = create_app(queries=store, read_service=reader)
     writable = create_app(
         queries=store, commands=BrowserFixtureCommands(store),
+        read_service=reader,
         recover_pending_at_startup=False,
     )
     servers = [
