@@ -1,10 +1,10 @@
-name: Memory Intake isolated PostgreSQL
+name: Memory Intake current-schema PostgreSQL
 on:
   push:
     branches: [main]
-    paths: ['pkb/**', 'ritsuko/**', 'infrastructure/**', 'interfaces/web/**', 'db/isolated/pkb_proto/**', 'scripts/pkb/isolated/run_pending_setup.ps1', 'tests/test_memory_intake*.py', 'tests/test_pkb_corrections.py', 'tests/test_pkb_query.py', '.github/workflows/pkb-memory-intake.yml']
+    paths: ['pkb/**', 'ritsuko/**', 'infrastructure/**', 'interfaces/web/**', 'db/migrations/**', 'tests/db/**', 'tests/test_memory_intake*.py', 'tests/test_pkb_corrections.py', 'tests/test_pkb_query.py', '.github/workflows/pkb-memory-intake.yml']
   pull_request:
-    paths: ['db/isolated/pkb_proto/**', 'scripts/pkb/isolated/**', 'tests/test_memory_intake*.py', '.github/workflows/pkb-memory-intake.yml']
+    paths: ['db/migrations/**', 'tests/db/**', 'tests/test_memory_intake*.py', '.github/workflows/pkb-memory-intake.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: secretary_pkb_proto_20260927
+          POSTGRES_DB: secretary
           POSTGRES_PASSWORD: fictional-ci-disposable-password
         ports: ['5432:5432']
         options: >-
