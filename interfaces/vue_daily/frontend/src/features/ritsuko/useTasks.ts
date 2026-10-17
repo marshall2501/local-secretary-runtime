@@ -266,9 +266,15 @@ export function useTasks() {
     if (timer !== undefined) clearTimeout(timer)
     timer = undefined
     if (!mounted || document.visibilityState === 'hidden') return
-    const running = commandBusy.value ||
-      ['pending', 'running'].includes(selected.value?.status ?? '') ||
-      hasActiveOperation(selectedId.value)
+    // A persisted "running" status does not establish that this API process
+    // still owns a Worker. After a restart, avoid a 3-second DB polling loop
+    // unless a live in-process Operation is confirmed.
+    const workerUnknown = operation.value?.task_id === selectedId.value &&
+      operation.value.status === 'operation_not_in_process' &&
+      operation.value.execution_reconciliation_required === true
+    const running = connected.value && (commandBusy.value ||
+      hasActiveOperation(selectedId.value) ||
+      (['pending', 'running'].includes(selected.value?.status ?? '') && !workerUnknown))
     timer = setTimeout(() => { void refresh() }, running ? 3000 : 45000)
   }
 
