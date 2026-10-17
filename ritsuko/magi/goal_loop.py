@@ -17,24 +17,37 @@ from .protocol import default_resource_catalog
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES
 from ritsuko.core.goal_evidence import check_goal_response_evidence
 
-# 「私の」「調査」などをWeb限定と取り違えない。暫定の明示要求
-# GateでありSource選択と根拠充足の意味判断はMAGIが行う。
+# Sourceについて「言及した」だけでは、取得を「要求した」ことにならない。
+# 例: 「外部検索や個人PKBの参照は不要」は取得要求ではない。
+# 意味的な必要性はMAGIが判断し、Coreには本人による積極的な
+# 取得/引用指示だけを限定的なSource-requiredガードとして残す。
+_SOURCE_DIRECTIVE = (
+    r"[^。、．!?！？\\n]{0,48}"
+    r"(?:調べて|調査して|検索して|参照して|確認して|引用して|提示して|示して|明記して|使って|基づいて)"
+)
 SOURCE_REQUEST = re.compile(
-    r"(?i)(公式|出典|引用|資料|検索|調べて|調査|最新|今日|昨日|現在|最近|価格|私の|自分の|ウェブ|web|website|URL|ネット|サイト|source|reference)"
+    r"(?i)(?:公式|出典|引用|資料|検索|調査|最新|今日|昨日|現在|最近|価格|私の|自分の|ウェブ|web|website|URL|ネット|サイト|source|reference|PKB)"
+    + _SOURCE_DIRECTIVE
 )
 WEB_REQUEST = re.compile(
-    r"(?i)(公式(?:サイト|Web|ページ|資料)?|最新(?:情報|ニュース)?|ウェブ|web|website|URL|ネット|サイト|オンライン)"
+    r"(?i)(?:公式(?:サイト|Web|ページ|資料)?|ウェブ|web|website|URL|ネット|サイト|オンライン)"
+    + _SOURCE_DIRECTIVE
 )
 MAX_GOAL_TURNS = 6
 
 
 def goal_requires_source(request: str) -> bool:
-    """本人が根拠を求めている場合、出典不要回答として即完了させない。"""
+    """本人の積極的な取得・引用指示だけを補助ガードとして扱う。
+
+    最新性や出典の意味的必要性はMAGIが判断する。単語だけの一致で
+    not_requiredを覆すと「検索不要」の依頼まで失敗するため、
+    出典・取得対象と操作指示が同じ句に現れた場合だけTrueとする。
+    """
     return bool(SOURCE_REQUEST.search(request))
 
 
 def goal_requires_web(request: str) -> bool:
-    """明示的な公開Web根拠要求だけをWeb制約として扱う。"""
+    """Webを積極的に使う指示だけをWeb制約として扱う。"""
     return bool(WEB_REQUEST.search(request))
 
 
