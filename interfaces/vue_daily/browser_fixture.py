@@ -2,7 +2,7 @@
 # Provenance-AI: AI-generated
 """Vue日常UIの実ブラウザ隔離テスト専用。日常DB/MAGI/Secretへ接続しない。
 
-8097のread-only UIと8099のTask-command UIを同じfixtureで動かし、
+単一Secretary Serverの同一OriginでVue/Task API/PKB APIを起動し、
 HTML/JS実ロードからTask受付・回答・Review・停止・F5まで検証する。
 本番entrypointからimportしない。実Taskデータとの混用を防ぐ。
 """
@@ -12,7 +12,7 @@ import asyncio
 from copy import deepcopy
 from uuid import UUID, uuid5, NAMESPACE_DNS
 
-from interfaces.vue_daily.app import create_app
+from interfaces.api.secretary_server import create_app
 
 
 class BrowserFixtureStore:
@@ -234,22 +234,19 @@ class BrowserFixtureReadService:
 
 
 async def serve() -> None:
-    """既存の本番サーバーと独立したCIコンテナで2つのfake UIを起動する。"""
+    """Start one fake Secretary Server with no DB/MAGI or external calls."""
     import uvicorn
 
     store = BrowserFixtureStore()
     reader = BrowserFixtureReadService()
-    readonly = create_app(queries=store, read_service=reader)
-    writable = create_app(
+    app = create_app(
         queries=store, commands=BrowserFixtureCommands(store),
-        read_service=reader,
-        recover_pending_at_startup=False,
+        read_service=reader, recover_pending_at_startup=False,
     )
-    servers = [
-        uvicorn.Server(uvicorn.Config(readonly, host="127.0.0.1", port=8097, log_level="warning")),
-        uvicorn.Server(uvicorn.Config(writable, host="127.0.0.1", port=8099, log_level="warning")),
-    ]
-    await asyncio.gather(*(server.serve() for server in servers))
+    server = uvicorn.Server(uvicorn.Config(
+        app, host="127.0.0.1", port=8097, log_level="warning",
+    ))
+    await server.serve()
 
 
 if __name__ == "__main__":
