@@ -1097,7 +1097,7 @@ async def start_dialogue_async(
     task_timezone: str = "Asia/Tokyo",
     task_locale: str = "ja-JP",
     policy_snapshot: dict | None = None,
-    decision_strategy: str = "llm",
+    decision_strategy: str = "standard",
     on_member_progress=None,
     goal_caller=None,
 ) -> dict:
