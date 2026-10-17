@@ -80,6 +80,7 @@ from .settings import (
 from integrations.llm.ollama_runtime import configured_magi_num_predict, normalize_context_tokens, normalize_magi_num_predict
 from .protocol import default_resource_catalog
 from .runtime_context import create_runtime_context, runtime_context_from_session
+from .judgment_strategies import strategy_for_name, strategy_for_session
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -1066,33 +1067,15 @@ async def _advance_async(
     )
 
 
-def _uses_llm_flow(session: dict) -> bool:
-    """Honor the persisted strategy, including older Goal Task sessions."""
-    return (session.get("decision_strategy") == "llm"
-            or session.get("control_mode") == "goal_loop_v1")
-
-
 async def _advance_by_strategy(
     session: dict, *, timeout: float, caller=call_guided_panel_async,
     stop_requested=None, on_turn_start=None, on_member_progress=None,
     goal_caller=None, member_specs_override=None, context_policy=None,
 ) -> dict:
-    """One strategy selection point for MAGI's next-flow judgment."""
-    if _uses_llm_flow(session):
-        from .goal_loop import MAX_GOAL_TURNS, _run_goal_turn
-        # Sessions persisted by the older dedicated Goal code may lack fields
-        # of the shared state handler; preserve their Task and Turn history.
-        session.setdefault("previous_request_signatures", [])
-        session.setdefault("turn_limit", MAX_GOAL_TURNS)
-        return await _run_goal_turn(
-            session, timeout=timeout, caller=goal_caller,
-            stop_requested=stop_requested, on_turn_start=on_turn_start,
-            on_member_progress=on_member_progress,
-            member_specs_override=member_specs_override,
-            context_policy=context_policy,
-        )
-    return await _advance_async(
+    """永続Sessionの判断Adapterだけを選び、共通Task実行処理へ結果を返す。"""
+    return await strategy_for_session(session).advance(
         session, timeout=timeout, caller=caller,
+        goal_caller=goal_caller,
         stop_requested=stop_requested, on_turn_start=on_turn_start,
         on_member_progress=on_member_progress,
         member_specs_override=member_specs_override,
@@ -1117,13 +1100,8 @@ async def start_dialogue_async(
     on_member_progress=None,
     goal_caller=None,
 ) -> dict:
-    if decision_strategy not in {"standard", "llm"}:
-        raise ValueError("unknown_flow_decision_strategy")
+    strategy = strategy_for_name(decision_strategy)
     specs = _normalized_member_specs(member_specs, model)
-    if decision_strategy == "llm":
-        specs = [spec for spec in specs if spec["enabled"]]
-        if not specs:
-            raise ValueError("no_enabled_magi_member")
     from uuid import uuid4
 
     session = {
@@ -1160,49 +1138,12 @@ async def start_dialogue_async(
         session.update(status="stopped", next_step="no_magi_member")
         return session
 
-    if decision_strategy == "llm":
-        from .goal_loop import MAX_GOAL_TURNS, goal_requires_source, goal_requires_web
-        session.update(
-            control_mode="goal_loop_v1",
-            status="running", next_step="evaluate_goal",
-            requires_source=goal_requires_source(session["user_raw"]),
-            requires_web=goal_requires_web(session["user_raw"]),
-            goal=None, goal_judgment=None, user_replies=[],
-            previous_queries=[], status_message=None,
-            turn_limit=MAX_GOAL_TURNS,
-        )
-        return await _advance_by_strategy(
-            session, timeout=timeout,
-            stop_requested=stop_requested, on_turn_start=on_turn_start,
-            on_member_progress=on_member_progress, goal_caller=goal_caller,
-        )
-
-    classification = await _send_async(
-        session,
-        "classify",
-        "classify",
-        CLASSIFY_QUESTION,
-        timeout=timeout,
-        caller=caller,
-        stop_requested=stop_requested,
-        on_turn_start=on_turn_start,
+    strategy.initialize(session)
+    return await strategy.start(
+        session, timeout=timeout, caller=caller, goal_caller=goal_caller,
+        stop_requested=stop_requested, on_turn_start=on_turn_start,
         on_member_progress=on_member_progress,
     )
-    if classification is None:
-        return session
-    session["classification"] = deepcopy(classification)
-    if classification["multiple_requests"]:
-        session.update(status="stopped", next_step="multiple_requests_detected")
-        return session
-    return await _advance_async(
-        session,
-        timeout=timeout,
-        caller=caller,
-        stop_requested=stop_requested,
-        on_turn_start=on_turn_start,
-        on_member_progress=on_member_progress,
-    )
-
 
 async def continue_with_observation_async(
     session: dict,
@@ -1279,10 +1220,8 @@ async def continue_with_verified_observations_async(
         raise ValueError("not_waiting_for_information")
     if not isinstance(observations, list) or not observations:
         raise ValueError("verified_observations_required")
-    if _uses_llm_flow(updated):
-        from .goal_loop import MAX_GOAL_TURNS
-        updated.setdefault("turn_limit", MAX_GOAL_TURNS)
-        updated.setdefault("previous_request_signatures", [])
+    judgment = strategy_for_session(updated)
+    judgment.prepare_resume(updated)
     if len(updated["turns"]) >= _turn_limit(updated):
         updated.update(status="stopped", next_step="max_turns_reached")
         return updated
@@ -1295,7 +1234,7 @@ async def continue_with_verified_observations_async(
         # A failed read is a recorded failure, not a verified Source.
         # Tool失敗は検証済み根拠でなく、Goal判断だけが記録済み失敗を再評価する。
         failed_goal_read = (
-            _uses_llm_flow(updated)
+            judgment.allows_recorded_read_failure
             and observation.get("source") in {"pkb", "web", "finance"}
             and observation.get("verified") is False
             and bool(observation.get("result_id"))
@@ -1470,88 +1409,10 @@ async def continue_with_user_clarification_async(
     if local_specs == []:
         return updated
 
-    if _uses_llm_flow(updated):
-        updated.setdefault("user_replies", []).append(text)
-        updated["user_replies"] = updated["user_replies"][-3:]
-        updated["pending_requests"] = []
-        updated["next_step"] = "evaluate_user_clarification"
-        return await _advance_by_strategy(
-            updated, timeout=timeout, caller=caller,
-            stop_requested=stop_requested, on_turn_start=on_turn_start,
-            on_member_progress=on_member_progress, goal_caller=goal_caller,
-            member_specs_override=local_specs, context_policy=context_policy,
-        )
-
-    if updated.get("classification") is None:
-        updated["next_step"] = "classify_with_context"
-        classification = await _send_async(
-            updated,
-            "classify",
-            "classify",
-            CLASSIFY_QUESTION,
-            timeout=timeout,
-            caller=caller,
-            stop_requested=stop_requested,
-            on_turn_start=on_turn_start,
-            on_member_progress=on_member_progress,
-            member_specs_override=local_specs,
-            context_policy=context_policy,
-        )
-        if classification is None:
-            return updated
-        updated["classification"] = deepcopy(classification)
-        if classification["multiple_requests"]:
-            updated.update(status="stopped", next_step="multiple_requests_detected")
-            return updated
-        return await _advance_async(
-            updated,
-            timeout=timeout,
-            caller=caller,
-            stop_requested=stop_requested,
-            on_turn_start=on_turn_start,
-            on_member_progress=on_member_progress,
-            member_specs_override=local_specs,
-            context_policy=context_policy,
-        )
-
-    responds_to = [
-        item["request_id"]
-        for item in updated.get("pending_requests") or []
-        if isinstance(item, dict) and item.get("request_id")
-    ]
-    updated["observations"].append({
-        "source": "user_clarification",
-        "verified": False,
-        "text": text,
-        "responds_to": responds_to,
-    })
-    updated["pending_requests"] = []
-    updated["next_step"] = "evaluate_user_clarification"
-    prompt = _compose_question(updated, "evaluate_observation")
-    response = await _send_async(
-        updated,
-        "analyze",
-        "evaluate_observation",
-        prompt,
-        timeout=timeout,
-        caller=caller,
-        stop_requested=stop_requested,
-        on_turn_start=on_turn_start,
+    return await strategy_for_session(updated).resume_user(
+        updated, text, timeout=timeout, caller=caller,
+        goal_caller=goal_caller,
+        stop_requested=stop_requested, on_turn_start=on_turn_start,
         on_member_progress=on_member_progress,
-        member_specs_override=local_specs,
-        context_policy=context_policy,
-    )
-    if response is None:
-        return updated
-    return await _apply_detail_async(
-        updated,
-        response,
-        timeout=timeout,
-        purpose="evaluate_observation",
-        caller=caller,
-        stop_requested=stop_requested,
-        on_turn_start=on_turn_start,
-        on_member_progress=on_member_progress,
-        member_specs_override=local_specs,
-        context_policy=context_policy,
+        member_specs_override=local_specs, context_policy=context_policy,
     )
