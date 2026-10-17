@@ -17,9 +17,6 @@ from capabilities.finance.finance_import import (
 from capabilities.finance.finance_preview import FinancePreview
 from config.runtime_database import LOCAL_HOSTS, allowed_daily_connection
 
-EXPECTED_DB = "secretary_pkb_proto_20260927"
-EXPECTED_USER = "secretary_pkb_proto_writer_20260927"
-
 
 def _finance_filter_clause(
     start_date: str | None = None,
@@ -68,11 +65,8 @@ def _guard_db(db) -> None:
     info = db.info
     if (info.host or "") not in LOCAL_HOSTS:
         raise ValueError("Refusing non-local finance database")
-    if allowed_daily_connection(db):
-        return
-    if (info.dbname or "") != EXPECTED_DB:
-        raise ValueError("Refusing non-prototype finance database")
-    raise ValueError("Refusing non-dedicated finance writer")
+    if not allowed_daily_connection(db):
+        raise ValueError("Refusing unauthorized finance database or writer")
 
 
 def load_finance_dashboard(
