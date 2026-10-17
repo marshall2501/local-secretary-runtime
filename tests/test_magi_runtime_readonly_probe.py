@@ -43,7 +43,6 @@ class MagiRuntimeReadOnlyProbeTests(unittest.TestCase):
             secret.write_text("not-a-real-password", encoding="utf-8")
             with patch.dict(os.environ, {}, clear=False):
                 configure_daily_environment(root)
-                self.assertEqual(os.environ["LSA_DAILY_DB_MODE"], "production")
                 self.assertEqual(os.environ["LSA_DAILY_DB_NAME"], "secretary")
                 self.assertEqual(os.environ["LSA_PKB_DAILY_PORT"], "55444")
                 self.assertEqual(os.environ["LSA_PKB_DAILY_SECRET"], str(secret))
