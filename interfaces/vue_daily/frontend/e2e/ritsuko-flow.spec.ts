@@ -58,6 +58,48 @@ test('待機中のVueは3秒毎の多重GETを発行しない', async ({ page })
   expect(requests).toEqual([])
 })
 
+
+test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻度で再照会できる', async ({ page }) => {
+  const origin = 'http://127.0.0.1:8099'
+  const list = await (await page.request.get(origin + '/api/v1/ritsuko/tasks?view=recent&limit=10&offset=0')).json()
+  const id = list.items[0].id as string
+  // The persisted Task may say running even if the API process has no
+  // in-memory Operation. Only real Repository status is authoritative.
+  await page.route('**/api/v1/ritsuko/tasks/' + id, async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    body.trace.task.status = 'running'
+    body.trace.task.stop_requested = false
+    await route.fulfill({ response, json: body })
+  })
+  await page.route('**/api/v1/ritsuko/operations/' + id, async route => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: id, status: 'operation_not_in_process', kind: null,
+        task_status: 'running', source: 'persisted_task',
+        execution_reconciliation_required: true,
+      }),
+    })
+  })
+  await page.goto(origin + '/ui/#task=' + id)
+  await expect(page.getByRole('status', { name: 'Worker照合待ち' })).toBeVisible()
+  await expect(page.getByText('処理中（Task確定状態）')).toBeVisible()
+
+  // A detached worker should not trigger another 3-second DB request wave.
+  const apiCalls: string[] = []
+  page.on('request', request => {
+    if (request.url().includes('/api/v1/ritsuko/')) apiCalls.push(request.url())
+  })
+  await page.waitForTimeout(7_000)
+  expect(apiCalls).toEqual([])
+
+  // Manual retry is one ordinary read-only query; it never re-executes Task.
+  await page.getByRole('button', { name: '保存済みTaskを再取得' }).click()
+  await expect.poll(() => apiCalls.length).toBeGreaterThan(0)
+  await expect(page.getByRole('status', { name: 'Worker照合待ち' })).toBeVisible()
+})
+
 test('保存した既定方式で選択欄なしでも同じTask APIを利用する', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/')
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8099\/ui\//)
