@@ -191,7 +191,24 @@ async def apply_judgment(
 
         if _latest_verified_pkb_observation(session) is not None and requests:
             if all(item.get("source") == "pkb" for item in requests):
-                # Do not keep reading the same verified personal facts indefinitely.
+                # A single MAGI repair opportunity distinguishes missing
+                # attributes from an actually different next read. Afterwards
+                # RITSUKO stops repetitive reads and requests user context.
+                if (
+                    repair is not None and purpose != "review_or_repair"
+                    and len(session["turns"]) < _turn_limit(session)
+                ):
+                    replacement = await repair(
+                        "verified PKB Observation直後のPKB再要求。未確認だった"
+                        "blocking属性だけをuserに聞くか、既存Observationで答える"
+                    )
+                    if replacement is None:
+                        return session
+                    return await apply_judgment(
+                        session, replacement, strategy=strategy,
+                        purpose="review_or_repair",
+                        stop_requested=stop_requested,
+                    )
                 return _wait_for_user_after_exhausted_pkb(session, requests)
 
     signatures = _request_signatures(requests)
