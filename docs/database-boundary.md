@@ -1,53 +1,42 @@
-# Runtime database boundary and clean rebuild plan
+# Runtime database boundary — current single-master architecture
 
-The logical subsystem boundary is not the physical database boundary.
+PostgreSQL stores current structured PKB, RITSUKO Task/Action/Result, Finance,
+MAGI/Connection/Billing and runtime Policy settings in one operational database:
+`secretary`. Logical subsystem ownership does not require separate databases.
 
-## Adopted target
+## Current access boundary
 
-Normal structured runtime data uses one physical PostgreSQL database, `secretary`, by default. The improved source layout remains responsibility-oriented; package layout is not mechanically mirrored as PostgreSQL databases or schemas.
+- Normal localhost Runtime: `secretary_daily_runtime` using the configured local port
+  and a protected secret file. Its database name is `secretary` except for an
+  explicitly selected `secretary_rebuild_*` disposable/recovery target.
+- Recovery/admin: `secretary_admin`, kept separate from normal application access.
+- External API/MCP and high-impact Action: application route, identity, Policy,
+  Approval, Source/Result and audit boundaries — not a second feature database.
+- MAGI semantic judgment: replaceable `standard` / `llm` strategies.
+  Task persistence and state transitions remain owned by shared RITSUKO.
 
-Logical ownership remains useful for design and code responsibility:
+## Migrations and test isolation
 
-| No. | Owner | Tables / views |
-| --- | --- | --- |
-| 1 | PKB | `entities`, `sources`, `claims`, `current_claims`, `pending_claims`, `issues`, `hypotheses`, `decisions`, `entity_relations`, `pkb_*` receipts/intake |
-| 2 | RITSUKO | `tasks`, `task_steps`, task dependency tables, `approvals`, `actions`, `results`, `audit_events` |
-| 3 | Finance | `finance_*` |
-| 4 | MAGI runtime settings | `llm_profiles`, `magi_member_assignments` |
-| 5 | Service Connections | `service_connections` |
-| 6 | Service Billing | `service_billing_profiles` |
+`db/migrations/` is the only tracked operational schema history. Disposable PostgreSQL
+tests use the same DDL series on their own freshly provisioned service/database.
+They must never target the user's `secretary` or personal files. Fictional Workbench
+fixtures may still exist, but are neither a second runtime DB nor a second migration
+series.
 
-Intentional cross-owner references include RITSUKO Task/Result records pointing at PKB Entity/Source data and MAGI/Billing settings pointing at Service Connections. These references preserve consistency; they are not a reason to duplicate persistence or access code.
+The historical `db/isolated/pkb_proto/`, `scripts/pkb/isolated/`, prototype
+promotion/transfer tools and old Task import facade were removed from tracked
+current source on 2026-10-17. Their history remains available in Git.
+The user's historical database itself, if present on their sub-PC, has **not**
+been dropped or altered by these GitHub changes.
 
-## Internal runtime access boundary
+## Operational recovery and safety
 
-The local internal runtime does not use fine-grained writer-role segmentation as a product goal. Database administration/recovery credentials remain separate from normal runtime access, while the normal runtime may use one shared login that can read and write the tables required by PKB, RITSUKO, Finance, MAGI settings, Service Connections and Service Billing.
+`scripts/db/postgres.ps1` retains Setup/Start/Migrate/Doctor/Backup/Restore.
+A restore drill uses a distinct target and must not overwrite the running DB.
+`scripts/db/initialize-fresh-production.ps1` is reserved for explicitly named
+fresh schema targets and is not a daily launcher.
 
-External exposure and consequential actions are controlled where they are actually invoked: Web/API/MCP route and tool surfaces, authentication, and RITSUKO Policy / Approval / Executor. Additional DB-role separation is introduced only when a concrete operational requirement justifies it.
-
-## Current physical state
-
-- Existing operational database: `secretary`, historically built from the old production migration series.
-- Historical isolated database: `secretary_pkb_proto_20260927`, which contains the pre-refactor daily PKB/RITSUKO/Finance/settings data.
-- Historical isolated migrations: `db/isolated/pkb_proto/`.
-- Isolated verification scripts: `scripts/pkb/isolated/`.
-- Improved runtime source layout: `ritsuko/`, `pkb/`, `capabilities/`, `integrations/`, `infrastructure/`, `interfaces/`, `bootstrap/`.
-
-The source refactor is retained. Restoring pre-refactor functionality means making those capabilities work on this layout, not reverting the layout.
-
-## Clean rebuild sequence
-
-1. Preserve the current `secretary` and `secretary_pkb_proto_20260927` as source/rollback databases; do not overwrite them during rehearsal.
-2. Create a separate replacement production database from the schema currently required by the improved runtime.
-3. Keep old production/prototype migration series as history; do not reproduce obsolete role/prototype complexity merely to make the new database look historically identical.
-4. Copy data needed for current daily use:
-   - operational data that exists only in the old `secretary`;
-   - personal PKB data plus its referential closure from the isolated database;
-   - Finance data;
-   - Service Connections, LLM Profiles, MAGI Assignments and Service Billing Profiles.
-5. Exclude known development fixtures by positive identification. Do not discard rows only because older daily code used fixture-shaped URIs.
-6. Verify collisions, foreign references, row counts, settings references and Secret non-disclosure.
-7. Run the existing daily capabilities against the replacement database: PKB, RITSUKO, MAGI, Finance, Service Connections, Service Billing, Web/System Debug, Secretary API and MCP read paths.
-8. Cut over only after the replacement database passes those checks. Keep the old databases available for rollback until the sub-PC result is accepted.
-
-Physical separation can still be reconsidered later for measured load, retention, backup/restore, lifecycle, or a concrete security boundary. It is not introduced merely to mirror subsystem names.
+This source migration is **not** a production DB migration, automatic deployment,
+service stop or daily Vue cutover. Those changes require their own acceptance and
+operation-specific authorization. See the design repository STATUS and the
+2026-10-17 Level C retirement plan for verification evidence.
