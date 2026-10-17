@@ -12,7 +12,7 @@ AT = datetime(2026, 9, 27, tzinfo=timezone.utc)
 
 
 def record(input_id="test-01", text="メインPCをDRV-A2へ更新した。"):
-    return InputRecord(input_id, "user_statement", "fixture://pc-04", text, AT, AT)
+    return InputRecord(input_id, "user_statement", "local://daily-pkb/pc-04", text, AT, AT)
 
 
 def proposal(text="メインPCをDRV-A2へ更新した。", value="DRV-A2"):
@@ -45,18 +45,18 @@ class WriteSliceTests(unittest.TestCase):
         self.assertEqual(_literal_gate(record(text), proposal(text)),
                          "uncertain_or_correction_language")
 
-    def test_prototype_dbname_guard_before_any_sql(self):
+    def test_missing_runtime_login_guard_before_any_sql(self):
         class ForbiddenDB:
             info = SimpleNamespace(dbname="secretary", host="localhost")
             def transaction(self):
                 raise AssertionError("must not open a transaction")
 
-        with self.assertRaisesRegex(ValueError, "Refusing non-prototype"):
+        with self.assertRaisesRegex(ValueError, "Refusing unauthorized"):
             write_one(ForbiddenDB(), record(), proposal())
 
     def test_nonlocal_host_guard_before_any_sql(self):
         class ForbiddenDB:
-            info = SimpleNamespace(dbname="secretary_pkb_proto_20260927", host="example.invalid", user="secretary_pkb_proto_writer_20260927")
+            info = SimpleNamespace(dbname="secretary", host="example.invalid", user="secretary_admin")
             def transaction(self):
                 raise AssertionError("must not open a transaction")
 
@@ -65,22 +65,22 @@ class WriteSliceTests(unittest.TestCase):
 
     def test_non_dedicated_login_guard_before_any_sql(self):
         class ForbiddenDB:
-            info = SimpleNamespace(dbname="secretary_pkb_proto_20260927", host="localhost", user="secretary_admin")
+            info = SimpleNamespace(dbname="secretary", host="localhost", user="secretary_admin")
             def transaction(self):
                 raise AssertionError("must not open a transaction")
-        with self.assertRaisesRegex(ValueError, "Refusing non-prototype"):
+        with self.assertRaisesRegex(ValueError, "Refusing unauthorized"):
             write_one(ForbiddenDB(), record(), proposal())
 
-    def test_only_fixture_sources_in_first_slice(self):
-        class IsolatedDB:
-            info = SimpleNamespace(dbname="secretary_pkb_proto_20260927", host="localhost", user="secretary_pkb_proto_writer_20260927")
+    def test_only_local_sources_in_daily_runtime(self):
+        class DailyDB:
+            info = SimpleNamespace(dbname="secretary", host="localhost", user="secretary_daily_runtime")
             def transaction(self):
                 raise AssertionError("must reject before opening a transaction")
 
         r = InputRecord("input", "user_statement", "real://not-allowed",
                         "メインPCをDRV-A2へ更新した。", AT, AT)
-        self.assertEqual(write_one(IsolatedDB(), r, proposal()).reason,
-                         "fictional_fixture_only")
+        self.assertEqual(write_one(DailyDB(), r, proposal()).reason,
+                         "unsupported_source_ref")
 
     def test_event_semantics_are_append_only(self):
         from pkb.entity_model_service import classify_predicate
