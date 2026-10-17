@@ -59,12 +59,17 @@ async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> N
     session["user_question"] = None
     session["pending_requests"] = []
     next_step = decision["next"]
+    # Reject fabricated references even when the next step is a read or a
+    # question; a partial Goal proposal cannot forge execution history.
+    evidence_status, _ = check_goal_response_evidence(
+        session, decision["evidence"],
+    )
+    if evidence_status == "unrecorded_task_result_reference":
+        session.update(status="stopped", next_step=evidence_status)
+        return
     if next_step == "respond":
-        # RITSUKO checks persisted Result IDs, not the LLM's claim of success.
-        # Task projection calls the same gate before committing completion.
-        evidence_status, _ = check_goal_response_evidence(
-            session, decision["evidence"],
-        )
+        # Completion additionally requires genuine evidence or an allowed
+        # source-free response. Task projection repeats this same Core gate.
         if evidence_status not in {"verified_results", "source_free"}:
             session.update(status="stopped", next_step=evidence_status)
             return
