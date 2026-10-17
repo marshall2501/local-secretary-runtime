@@ -825,9 +825,7 @@ def prepare_memory_intake(db, *, task_id: UUID) -> MemoryIntake:
             input_id=issued.input_id,
             raw_text=issued.raw_text,
             source_kind=issued.source_kind,
-            source_ref=(
-                f"fixture://magi-task/{task_id}/{issued.input_id}"
-            ),
+            source_ref=f"local://magi-task/{task_id}/{issued.input_id}",
             recorded_at=issued.recorded_at,
             confidentiality=issued.confidentiality,
             timezone=issued.timezone,
