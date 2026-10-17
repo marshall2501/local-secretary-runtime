@@ -67,6 +67,7 @@ class MagiTaskBindings:
     member_specs_loader: Callable[[], list[dict]]
     policy_snapshot_loader: Callable[[], dict | None]
     native_web_search: Callable = search_magi_web
+    memory_review_writer: Callable | None = None
 
 
 def build_magi_task_commands(
@@ -187,6 +188,7 @@ def build_magi_task_commands(
         pending_starts_loader=magi.list_pending_starts,
         policy_snapshot_loader=bindings.policy_snapshot_loader,
         request_stop=magi.request_stop,
+        memory_review_writer=bindings.memory_review_writer,
     )
 
 
@@ -221,11 +223,24 @@ def build_daily_magi_task_commands() -> TaskCommands:
     )
     settings = build_magi_settings_repository()
     policy = build_runtime_policy_repository()
+    from pkb.application.memory_intake import register_memory_intake
+
+    magi_repository = build_magi_task_repository()
+    pkb_repository = build_pkb_repository()
+
+    def remember_from_task(task_id):
+        """Reuse NiceGUI's existing Prepare → Memory Intake write sequence."""
+        intake = task_records.prepare_memory_intake_record(
+            magi_repository, task_id,
+        )
+        return register_memory_intake(pkb_repository, intake)
+
     return build_magi_task_commands(MagiTaskBindings(
-        magi_repository=build_magi_task_repository(),
-        pkb_repository=build_pkb_repository(),
+        magi_repository=magi_repository,
+        pkb_repository=pkb_repository,
         finance_repository=build_finance_repository(),
         queries=build_core_task_queries(),
         member_specs_loader=lambda: load_member_specs(settings),
         policy_snapshot_loader=lambda: policy.load_snapshot_or_none("lan"),
+        memory_review_writer=remember_from_task,
     ))
