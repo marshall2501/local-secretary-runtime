@@ -219,11 +219,16 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   await page.goto('http://127.0.0.1:8097/ui/')
   await expect(page.getByText('10件表示')).toBeVisible()
   await expect(page.getByRole('button', { name: 'さらに読み込む' })).toBeVisible()
-  await page.getByRole('button', { name: 'さらに読み込む' }).click()
-  // 同一fixture内の先行テストでTaskが追加されるため、12件固定でなく実増加を検査する。
+  const more = page.getByRole('button', { name: 'さらに読み込む' })
+  await more.click()
+  // 先行テストが作成するTask数によって総件数は変わる。複数回の追加
+  // 読込後に最終的な終端へ到達する契約を検査し、件数を固定しない。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
   await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
-  await expect(page.getByRole('button', { name: 'さらに読み込む' })).toHaveCount(0)
+  for (let attempt = 0; attempt < 8 && await more.count() > 0; attempt++) {
+    await more.click()
+  }
+  await expect(more).toHaveCount(0)
   // 先行の停止試験Taskが選択済みの場合もある。固定の旧Taskを明示的に選ぶ。
   await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
