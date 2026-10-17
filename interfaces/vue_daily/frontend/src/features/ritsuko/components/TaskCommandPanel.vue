@@ -171,8 +171,8 @@ const niceguiCore = legacyPageUrl('/core')
           同じTaskを再開
         </button>
         <span v-else class="muted small">
-          この停止済みTaskは先頭から安全に再開できません。
-          実行済みの内容を重複させないため、途中復元は未対応です。
+          このTaskには安全に使える再開点がありません。
+          実行済み内容の重複を避けるため、自動的な再実行はできません。
         </span>
       </div>
       <div v-if="operation?.execution_reconciliation_required"
