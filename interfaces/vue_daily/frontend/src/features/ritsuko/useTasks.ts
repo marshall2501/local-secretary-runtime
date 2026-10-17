@@ -305,7 +305,7 @@ export function useTasks() {
    * 遅れて返る旧条件の結果は破棄する。失敗時は取得済み一覧を残すが、
    * Taskを選び直した直後の詳細は未取得のままになることがある。
    */
-  async function refresh(): Promise<void> {
+  async function refresh(forceTrace = false): Promise<void> {
     if (refreshing.value) {
       queuedRefresh = true
       ++version
@@ -322,7 +322,7 @@ export function useTasks() {
       commandsEnabled.value = enabled
       const id = selectedId.value || list[0]?.id || ''
       const summary = list.find(item => item.id === id)
-      const unchanged = Boolean(summary && trace.value?.task.id === id &&
+      const unchanged = !forceTrace && Boolean(summary && trace.value?.task.id === id &&
         trace.value?.task.revision === summary.revision)
       const nextTrace = id ? (unchanged ? trace.value : await getTaskTrace(id)) : null
       const activeTask = ['pending', 'running'].includes(nextTrace?.task.status ?? '')
