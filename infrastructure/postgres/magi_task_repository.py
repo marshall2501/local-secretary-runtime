@@ -10,6 +10,7 @@ from ritsuko.core.magi_bridge import (
     CORE_SLICE,
     proposal_review_observation,
     reviewable_user_knowledge_proposal,
+    reviewable_answer_candidate,
     task_projection,
 )
 from pkb.memory_contracts import MemoryIntake
@@ -613,7 +614,9 @@ def persist_session(
     return projection
 
 
-def _load_reviewable_proposal(cur, task_id: UUID) -> tuple[dict, dict]:
+def _load_reviewable_proposal(
+    cur, task_id: UUID, *, answer_only: bool = False,
+) -> tuple[dict, dict]:
     cur.execute(
         """SELECT status, checkpoint
            FROM secretary.tasks
@@ -637,8 +640,11 @@ def _load_reviewable_proposal(cur, task_id: UUID) -> tuple[dict, dict]:
     if not isinstance(session, dict):
         raise ValueError("missing_magi_session")
     proposal = reviewable_user_knowledge_proposal(session)
+    if proposal is None and answer_only:
+        # Answer-only approval must not broaden what Memory Intake can write.
+        proposal = reviewable_answer_candidate(session)
     if proposal is None:
-        raise ValueError("knowledge_proposal_not_user_grounded")
+        raise ValueError("proposal_not_reviewable")
     return checkpoint, proposal
 
 
@@ -748,7 +754,9 @@ def claim_proposal_review(
         raise ValueError("invalid_proposal_review_decision")
 
     with db.transaction(), db.cursor() as cur:
-        checkpoint, proposal = _load_reviewable_proposal(cur, task_id)
+        checkpoint, proposal = _load_reviewable_proposal(
+            cur, task_id, answer_only=decision == "answer_only",
+        )
         session = checkpoint.get("magi_session")
         if not isinstance(session, dict):
             raise ValueError("missing_magi_session")
