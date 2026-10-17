@@ -169,6 +169,7 @@ def build_magi_task_commands(
         record_source_read_record=partial(task_records.record_source_read_record, magi),
         persist_session_record=partial(task_records.persist_session_record, magi),
         fail_task_record=partial(task_records.fail_task_record, magi),
+        checkpoint_source_progress=partial(task_records.save_source_resume_record, magi),
         claim_user_resume_record=partial(task_records.claim_user_resume_record, magi),
         abort_user_resume_record=partial(task_records.abort_user_resume_record, magi),
         claim_proposal_review_record=partial(task_records.claim_proposal_review_record, magi),
