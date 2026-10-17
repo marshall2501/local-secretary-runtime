@@ -17,7 +17,7 @@ const {
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
   draftRequest, strategy, defaultStrategy, showStrategySelector,
   activeDefaultStrategy, activeShowStrategySelector, preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
-  reply, sendStart, sendAnswer, sendReview, sendStop,
+  reply, sendStart, sendAnswer, sendReview, sendRemember, sendStop,
 } = useTasks()
 </script>
 
@@ -43,7 +43,7 @@ const {
         :commands-enabled="commandsEnabled" :busy="commandBusy"
         :task="selected" :feedback="commandFeedback" :error="commandError"
         :operation="operation"
-        @start="sendStart" @answer="sendAnswer" @review="sendReview" @stop="sendStop"
+        @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @stop="sendStop"
         @save-preferences="savePreferences"
       />
       <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
