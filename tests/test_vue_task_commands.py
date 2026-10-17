@@ -294,6 +294,28 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TaskCommandNotFound):
             commands.operation(uuid4())
 
+    async def test_saved_standard_ready_answer_can_be_reviewed(self):
+        """従来方式の候補が確認待ちで止まり、APIから完了できない回帰を防ぐ。"""
+        queries = FakeQueries()
+        queries.task["magi_session"] = {
+            "status": "candidate_ready",
+            "detail": {"state": "READY", "answer_candidate": "辞書の説明"},
+            "pending_requests": [],
+            "member_specs": [{"name": "MELCHIOR", "enabled": True, "timeout_seconds": 9}],
+        }
+        app = FakeApplication()
+        commands = TaskCommands(app, queries, lambda: [])
+        accepted = await commands.review(queries.uid, "answer_only")
+        self.assertEqual(accepted["kind"], "review")
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if app.called:
+                break
+        self.assertEqual(app.called[-1][0:3], ("review", queries.uid, "answer_only"))
+        queries.task["magi_session"]["pending_requests"] = [{"source": "web"}]
+        with self.assertRaisesRegex(TaskCommandConflict, "task_not_waiting_for_review"):
+            await commands.review(queries.uid, "answer_only")
+
     async def test_same_task_inflight_conflict(self):
         """同じTaskを二重に処理する受付を拒否するが、DB claimの代用にはしない。"""
         app = FakeApplication()
