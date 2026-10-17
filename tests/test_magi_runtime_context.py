@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from ritsuko.application.observation_sources import finance_query_from_request
 from ritsuko.magi.async_execution import (
     _send_async,
+)
+from ritsuko.magi.session_workflow import (
     start_dialogue_async,
 )
 from ritsuko.magi.dialogue import _send, start_dialogue, COMMON_INSTRUCTIONS
@@ -154,7 +156,7 @@ class AsyncTaskClockContractTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import patch
 
         from ritsuko.core.task_execution import resume_user_answer
-        from ritsuko.magi.async_execution import continue_with_user_clarification_async
+        from ritsuko.magi.session_workflow import continue_with_user_clarification_async
 
         task_id = UUID("11111111-1111-4111-8111-111111111111")
         frozen = create_runtime_context(
@@ -243,7 +245,7 @@ class AsyncTaskClockContractTests(unittest.IsolatedAsyncioTestCase):
                     aborted.append(args)
 
                 # Resume must not call the new-Task constructor to replace the old clock.
-                with patch("ritsuko.magi.async_execution.create_runtime_context",
+                with patch("ritsuko.magi.session_workflow.create_runtime_context",
                            side_effect=AssertionError("resume must not set a new clock")):
                     result = await resume_user_answer(
                         task_id,
