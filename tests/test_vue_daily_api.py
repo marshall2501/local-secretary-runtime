@@ -486,7 +486,7 @@ class VueTaskInputLayoutTests(unittest.TestCase):
         self.assertIn('href="http://127.0.0.1:8099/ui/"', panel)
         self.assertIn('@submit.prevent="emit(\'start\')"', panel)
         # ユーザーが確認するまで「実Task API有効」の場合以外は送信不可。
-        self.assertIn(':disabled="busy || !commandsEnabled || !request.trim()"', panel)
+        self.assertIn(':disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()"', panel)
         # かつ入力フォーム自体を commandsEnabled の v-if で隠さない。
         form_start = panel.index('<form class="command-form"')
         form_end = panel.index("</form>", form_start)
