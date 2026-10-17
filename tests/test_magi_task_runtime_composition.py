@@ -70,6 +70,28 @@ class FakeMagiRepository:
             task["status"] = "paused"
         return task["status"]
 
+    def requeue_paused(self, *, task_id):
+        """実DBと同じ、Action未実行の停止済みTaskだけの再受付を模倣する。"""
+        task = self.tasks.get(task_id)
+        if task is None:
+            raise ValueError("task_not_found")
+        if (
+            task["status"] != "paused"
+            or task.get("stop_requested") is not True
+            or task.get("magi_session") is not None
+            or task.get("source_reads", 0)
+        ):
+            raise ValueError("paused_task_not_requeueable")
+        self.calls.append("requeue_paused")
+        task["status"] = "pending"
+        task["stop_requested"] = False
+        return {
+            "task_id": task_id, "request": task["request"],
+            "member_specs": deepcopy(task["member_specs"]),
+            "decision_strategy": task["decision_strategy"],
+            "policy_snapshot": deepcopy(task["policy_snapshot"]),
+        }
+
     def list_pending_starts(self, *, limit=20):
         """中断時にもfake DBに残る未着手Taskだけを列挙する。"""
         self.calls.append("list_pending")
@@ -128,6 +150,7 @@ class FakeMagiRepository:
     def record_source_read(self, *, task_id, execution, pending_request):
         """本テストでは実Sourceを使わないため呼出し有無だけ検出する。"""
         self.calls.append("source_read")
+        self.tasks[task_id]["source_reads"] = self.tasks[task_id].get("source_reads", 0) + 1
         return "a1", "r1"
 
 
