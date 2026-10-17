@@ -201,8 +201,11 @@ try {
         throw 'Role password DDL must quote the generated secret with psycopg sql.Literal.'
     }
     $launcherText = Get-Content -LiteralPath (Join-Path $root 'scripts/ui/launch_daily_pkb.ps1') -Raw
-    if ($launcherText -notmatch "\[ValidateSet\('isolated','production'\)\]") {
-        throw 'Daily launcher must expose an explicit isolated/production cutover mode.'
+    if ($launcherText -match '\\$DatabaseMode|LSA_DAILY_DB_MODE|secretary_pkb_proto_20260927') {
+        throw 'Daily launcher must not select the retired prototype database.'
+    }
+    if ($launcherText -notmatch 'secretary_daily_runtime') {
+        throw 'Daily launcher must use the canonical runtime login.'
     }
     if ($launcherText -notmatch '008_runtime_privileges.sql') {
         throw 'Production daily launcher must remain compatible with migration 008 until 009 is explicitly applied.'
