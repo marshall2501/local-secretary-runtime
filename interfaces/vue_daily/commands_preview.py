@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     from interfaces.vue_daily.app import create_app
     import uvicorn
+    from interfaces.vue_daily.server_logging import build_vue_log_config
 
     commands = build_daily_magi_task_commands()
     app = create_app(
@@ -41,7 +42,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     print("Vue Task command preview: http://127.0.0.1:8099/ui/")
     print("New Task write is enabled; existing pending Tasks are NOT resumed automatically.")
-    uvicorn.run(app, host="127.0.0.1", port=8099)
+    uvicorn.run(app, host="127.0.0.1", port=8099,
+                log_config=build_vue_log_config())
 
 
 if __name__ == "__main__":
