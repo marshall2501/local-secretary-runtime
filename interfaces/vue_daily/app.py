@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from ritsuko.application.task_commands import (
     TaskCommandConflict, TaskCommandNotFound, TaskCommands,
 )
+from ritsuko.core.magi_bridge import reviewable_user_knowledge_proposal
 from interfaces.vue_daily.preferences import (
     read_judgment_preferences, save_judgment_preferences,
 )
@@ -52,7 +53,7 @@ class TaskAnswerBody(BaseModel):
 
 
 class TaskReviewBody(BaseModel):
-    """既存Taskの提案への本人判断。記憶反映はまだ公開しない。"""
+    """既存Taskへの本人の明示的な回答のみ／記憶反映Review。"""
 
     decision: Literal["answer_only", "remember"]
 
@@ -162,7 +163,17 @@ def create_app(*, queries, commands: TaskCommands | None = None,
             HTTPException: Task不在なら404、Query Service利用不能なら503。
         """
         try:
-            return {"trace": queries.trace(task_id), "source": "persisted"}
+            saved = queries.trace(task_id)
+            task = dict(saved.get("task") or {})
+            session = task.get("magi_session") or {}
+            # The Core determines reviewability; Vue must not infer whether
+            # an ungrounded MAGI knowledge candidate can be written.
+            task["can_remember"] = (
+                task.get("status") == "waiting_external"
+                and task.get("phase") == "awaiting_review"
+                and reviewable_user_knowledge_proposal(session) is not None
+            )
+            return {"trace": {**saved, "task": task}, "source": "persisted"}
         except ValueError:
             raise HTTPException(404, "task_not_found") from None
         except (RuntimeError, OSError):
@@ -223,7 +234,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
 
     @app.post("/api/v1/ritsuko/tasks/{task_id}/review", status_code=202)
     async def review_task(task_id: UUID, body: TaskReviewBody):
-        """回答のみのReviewを受付ける。記憶反映には別のMemory Intake接続が必要。"""
+        """Task Commandsへ本人の明示選択を渡す。Memory IntakeはRuntime Port側。"""
         service = require_commands()
         return await accept_command(service.review(task_id, body.decision))
 
