@@ -63,7 +63,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_pkb_daily.py -v
       - run: python -m unittest discover -s tests -p test_core_gui.py -v
       - run: python -m unittest discover -s tests -p test_task_runtime.py -v
-      - run: python -m unittest discover -s tests -p test_goal_loop.py -v
+      - run: python -m unittest discover -s tests -p test_goal_contract.py -v
       - run: python -m unittest discover -s tests -p test_judgment_strategy_port.py -v
       - run: python -m unittest discover -s tests -p test_goal_evidence_gate.py -v
       - run: python -m unittest discover -s tests -p test_shared_judgment_task_pipeline.py -v
