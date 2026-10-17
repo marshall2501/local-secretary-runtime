@@ -168,6 +168,16 @@ def create_ritsuko_task_router(*, queries, commands: TaskCommands | None = None)
         service = require_commands()
         return await accept_command(service.review(task_id, body.decision))
 
+    @router.post("/api/v1/ritsuko/tasks/{task_id}/resume", status_code=202)
+    async def resume_task(task_id: UUID):
+        """本人が停止した未実行Taskを元の同一IDで再開受付する。
+
+        再開可否はDBの停止状態とAction履歴を原子的に確認する。
+        出典読取・外部Action実施済みのTaskを先頭から再実行しない。
+        """
+        service = require_commands()
+        return await accept_command(service.resume(task_id))
+
     @router.post("/api/v1/ritsuko/tasks/{task_id}/stop")
     def stop_task(task_id: UUID):
         """実行中Jobへ協調停止を要求し、確定停止と混同しない。"""
