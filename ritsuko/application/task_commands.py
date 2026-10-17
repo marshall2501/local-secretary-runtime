@@ -128,7 +128,7 @@ class TaskCommands:
             raise TaskCommandNotFound("task_not_found") from exc
         return dict(trace.get("task") or {})
 
-    async def start(self, request: str, *, decision_strategy: str = "llm",
+    async def start(self, request: str, *, decision_strategy: str = "standard",
                     task_id: UUID | None = None) -> dict:
         """Taskの判断方式とメンバー設定を受付時に確定して共通Applicationへ渡す。
 
