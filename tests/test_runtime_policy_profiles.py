@@ -20,7 +20,11 @@ from ritsuko.application.context_policy import (
     redact_observation_text,
 )
 from ritsuko.magi.async_execution import (
-    _private_observation_local_scope, _send_async, start_dialogue_async,
+    _send_async,
+)
+from ritsuko.magi.session_workflow import (
+    _private_observation_local_scope,
+    start_dialogue_async,
     continue_with_verified_observations_async,
 )
 
