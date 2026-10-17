@@ -147,6 +147,7 @@ def main() -> None:
         build_core_task_queries, build_daily_memory_read_service,
     )
     import uvicorn
+    from interfaces.vue_daily.server_logging import build_vue_log_config
 
     port = int(os.getenv("LSA_VUE_DAILY_PORT", "8097"))
     if port in {8010, 8015, 8092, 8093, 8098} or not 1024 <= port <= 65535:
@@ -154,7 +155,7 @@ def main() -> None:
     uvicorn.run(create_app(
         queries=build_core_task_queries(),
         read_service=build_daily_memory_read_service(),
-    ), host="127.0.0.1", port=port)
+    ), host="127.0.0.1", port=port, log_config=build_vue_log_config())
 
 
 if __name__ == "__main__":
