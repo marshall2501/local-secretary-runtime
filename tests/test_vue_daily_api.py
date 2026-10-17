@@ -159,6 +159,45 @@ class VueDailyApiTests(unittest.TestCase):
                 ).status_code, 503)
                 self.assertEqual(target.read_text(encoding="utf-8"), "{invalid")
 
+    def test_memory_review_choice_comes_from_core_and_requires_write_mode(self):
+        """本人が根拠を確認したKnowledge候補だけ記憶反映選択可にする。"""
+        self.queries.task.update({
+            "status": "waiting_external", "phase": "awaiting_review",
+            "magi_session": {
+                "status": "proposal_ready", "tool_read_executed": True,
+                "detail": {
+                    "state": "KNOWLEDGE_CANDIDATE",
+                    "answer_candidate": "Fedoraの利用",
+                    "knowledge_candidate": "Fedoraの利用",
+                },
+                "observations": [
+                    {"source": "pkb", "verified": True},
+                    {"source": "user_clarification", "text": "Fedora",
+                     "responds_to": ["REQ-1"]},
+                ],
+            },
+        })
+        path = f"/api/v1/ritsuko/tasks/{self.queries.uid}"
+        self.assertTrue(self.client.get(path).json()["trace"]["task"]["can_remember"])
+        self.assertEqual(self.client.post(
+            path + "/review", json={"decision": "remember"},
+        ).status_code, 503)
+        commands = FakeCommands()
+        writer = TestClient(
+            create_app(queries=self.queries, commands=commands,
+                       recover_pending_at_startup=False),
+            base_url="http://127.0.0.1:8099",
+        )
+        accepted = writer.post(path + "/review", json={"decision": "remember"})
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        self.assertEqual(commands.calls[-1], ("review", self.queries.uid, "remember"))
+
+        # Model text without a verified owner clarification is never eligible.
+        self.queries.task["magi_session"]["observations"] = [
+            {"source": "pkb", "verified": True},
+        ]
+        self.assertFalse(writer.get(path).json()["trace"]["task"]["can_remember"])
+
     def test_task_command_preview_needs_explicit_write_flag(self):
         """コマンドプレビューはimportや通常実行では実DBを開かない。"""
         from contextlib import redirect_stderr
