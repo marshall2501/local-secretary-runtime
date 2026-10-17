@@ -7,7 +7,6 @@ from psycopg.types.json import Jsonb
 
 from config.runtime_database import (
     allowed_daily_connection,
-    connection_mode,
     source_ref_allowed,
 )
 from pkb.entity_model_service import classify_predicate
@@ -21,9 +20,9 @@ from infrastructure.postgres.pkb_entity_repository import (
 
 def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
     if not allowed_daily_connection(db):
-        raise ValueError("Refusing non-prototype or non-local PostgreSQL connection")
+        raise ValueError("Refusing unauthorized or non-local daily PostgreSQL connection")
     if not source_ref_allowed(db, record.source_ref):
-        return WriteResult("rejected", "fictional_fixture_only")
+        return WriteResult("rejected", "unsupported_source_ref")
 
     fingerprint = payload_hash(record, claim)
     with db.transaction():
@@ -83,11 +82,6 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
                     record.recorded_at, record.recorded_at,
                     record.confidentiality,
                     Jsonb({
-                        **(
-                            {"fictional_only": True}
-                            if connection_mode(db) == "isolated"
-                            else {}
-                        ),
                         "input_id": record.input_id,
                         "original_text": record.text,
                     }),
@@ -126,10 +120,6 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
             )
             return WriteResult(
                 "inserted",
-                (
-                    "fictional_single_claim_committed"
-                    if connection_mode(db) == "isolated"
-                    else "single_claim_committed"
-                ),
+"single_claim_committed",
                 str(claim_id), str(source_id),
             )
