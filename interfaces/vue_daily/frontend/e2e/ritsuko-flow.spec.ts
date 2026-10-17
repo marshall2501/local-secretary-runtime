@@ -162,6 +162,28 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
 })
 
+test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送信する', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8099/ui/')
+  const request = '記憶反映試験：本人が回答したOSを登録する'
+  await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
+  await page.getByRole('button', { name: '依頼を送信' }).click()
+  await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
+  await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
+  const remember = page.getByRole('button', { name: '記憶に反映して完了を依頼' })
+  await expect(remember).toBeEnabled()
+  const taskId = page.url().split('#task=')[1]
+  await remember.click()
+  await expect(page.getByText('完了（Task確定状態）')).toBeVisible()
+  await expect(page.getByText('架空Taskの記憶反映を確定しました。')).toBeVisible()
+  expect(page.url()).toContain('#task=' + taskId)
+
+  // Source-free/ordinary candidate has no recorded user knowledge to write.
+  await page.getByRole('textbox', { name: '依頼内容' }).fill('回答候補試験：一般説明')
+  await page.getByRole('button', { name: '依頼を送信' }).click()
+  await expect(page.getByText('MAGI回答候補（未確定・本人確認待ち）')).toBeVisible()
+  await expect(page.getByRole('button', { name: '記憶に反映して完了を依頼' })).toHaveCount(0)
+})
+
 test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを完了できる', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
   await page.locator('#task-strategy').selectOption('standard')
