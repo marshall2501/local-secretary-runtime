@@ -2,6 +2,14 @@
 
 2026-10-17 更新。Vue 3 / TypeScript / Vite + FastAPIを使い、秘書AIの画面と実行機能を分離していく途中の実装です。通常8097は読取専用を維持し、別ポート8099でのみ明示的に実Taskコマンドを注入できます。
 
+## 2026-10-17 時点の現在のソース構造
+
+Web APIはVueアプリから独立した `interfaces/api/ritsuko_tasks.py` の `create_ritsuko_task_router` が正本です。Task一覧・詳細・Start・Answer・Review・Stop・OperationはどのFastAPI Hostからも同じTask Query／Commandを注入して利用できます。Vue Host `interfaces/vue_daily/app.py` はこの共通Routerを組み込み、画面配信・localhost/Origin gate・既定read-onlyを担当します。**Router単体にHost認証・通信制限はないため、直接外部公開しません**。
+
+MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判断／Goal判断Adapterに移し、`async_execution.py` の共通Runnerが保存済みTask方式を選びます。RITSUKOのTask／Source／Action／Result／状態投影は両方式で共通です。登録前に記憶候補文・本人根拠回答を表示するVue Reviewと、MAGI席別ライブ進捗も隔離コードへ反映済みです。
+
+根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapter回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行正本はこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
+
 ## 状態・安全境界
 
 - 実際のTaskを**既存の`CoreTaskQueryService`とPostgreSQLの正本**から取得します。架空Task専用 `interfaces/vue_lab`（8098）とは別です。
