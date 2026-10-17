@@ -89,6 +89,35 @@ test('保存した既定方式で選択欄なしでも同じTask APIを利用す
   }
 })
 
+test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8099/ui/')
+  const request = '進捗を確認する回答試験'
+  await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
+  await page.getByRole('button', { name: '依頼を送信' }).click()
+  await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
+  const taskId = page.url().split('#task=')[1]
+  // Fake API simulates an in-process Answer MAGI call while the persisted
+  // Task has not yet changed from awaiting_clarification/awaiting_review.
+  await page.route('**/api/v1/ritsuko/operations/' + taskId, async route => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: taskId, status: 'running', kind: 'answer', live_turn: 2,
+        member_progress: {
+          MELCHIOR: {
+            member: 'MELCHIOR', provider: 'ollama', model: 'fixture',
+            state: 'running', turn: 2,
+          },
+        },
+      }),
+    })
+  })
+  await page.getByRole('textbox', { name: '選択中のTaskへの本人回答' }).fill('Python')
+  await page.getByRole('button', { name: '本人回答を送る' }).click()
+  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('running')).toBeVisible()
+  await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
+})
+
 test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
   const previousUrl = page.url()
