@@ -45,7 +45,7 @@ def goal_requires_web(request: str) -> bool:
 
 def goal_task_projection(session: dict) -> dict:
     """保存済みGoal Task互換入口。確定判断はRITSUKOの共通Task投影が行う。"""
-    from ritsuko.core.magi_bridge import task_projection
+    from ritsuko.core.task_projection import task_projection
 
     return task_projection(session)
 
