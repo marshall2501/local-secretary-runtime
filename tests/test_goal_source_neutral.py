@@ -185,7 +185,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(task_projection(session)["task_status"], "completed")
 
         session["status"] = "running"
-        await _apply_judgment(session, judgment(
+        await apply_judgment(session, judgment(
             "respond", refs=["other-task-result"], basis="result_refs",
             answer="別Taskの情報",
         ), timeout=5)
