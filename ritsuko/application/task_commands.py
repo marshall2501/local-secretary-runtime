@@ -294,6 +294,9 @@ class TaskCommands:
             """保存済みMAGI対話の本人回答再開をRITSUKOへ委譲する。"""
             await self._application.answer(
                 task_id, text, timeout=timeout, stop_requested=stop.is_set,
+                on_member_progress=lambda event: self._report_member_progress(
+                    task_id, event,
+                ),
             )
         return self._schedule(task_id, "answer", run)
 
@@ -323,6 +326,9 @@ class TaskCommands:
             """提案を再評価し、既存Task Storeへ確定判断を委譲する。"""
             await self._application.review(
                 task_id, "answer_only", timeout=timeout, stop_requested=stop.is_set,
+                on_member_progress=lambda event: self._report_member_progress(
+                    task_id, event,
+                ),
             )
         return self._schedule(task_id, "review", run)
 
