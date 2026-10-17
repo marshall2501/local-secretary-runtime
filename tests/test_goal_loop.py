@@ -322,8 +322,8 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
                         request, member_specs=SPEC, timeout=5,
                         decision_strategy="llm", goal_caller=respond,
                     )
-                self.assertFalse(session["requires_source"])
-                self.assertFalse(session["requires_web"])
+                self.assertNotIn("requires_source", session)
+                self.assertNotIn("requires_web", session)
                 self.assertEqual(session["status"], "candidate_ready")
                 self.assertEqual(goal_task_projection(session)["task_status"], "completed")
                 self.assertEqual(
