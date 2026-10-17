@@ -31,6 +31,7 @@ const emit = defineEmits<{
   start: []
   answer: []
   review: []
+  remember: []
   stop: []
   savePreferences: []
 }>()
@@ -42,6 +43,8 @@ const answerable = computed(() =>
 const reviewable = computed(() =>
   props.task?.status === 'waiting_external' &&
   props.task.phase === 'awaiting_review')
+const operationBusy = computed(() =>
+  ['accepted', 'running'].includes(props.operation?.status ?? ''))
 const stoppable = computed(() =>
   props.task !== null &&
   ['pending', 'running'].includes(props.task.status) &&
@@ -130,9 +133,16 @@ const niceguiCore = legacyPageUrl('/core')
       </form>
       <div v-if="reviewable" class="command-row">
         <span class="muted small">回答候補の確認</span>
-        <button type="button" class="secondary" :disabled="busy"
+        <button type="button" class="secondary"
+          :disabled="busy || operationBusy"
           @click="emit('review')">回答のみで完了を依頼</button>
-        <span class="muted small">記憶への反映は既存画面から操作してください。</span>
+        <button v-if="task?.can_remember" type="button" class="secondary"
+          :disabled="busy || operationBusy" @click="emit('remember')">
+          記憶に反映して完了を依頼
+        </button>
+        <span v-if="task?.can_remember" class="muted small">
+          本人の選択後にMemory Intakeへ記録し、MAGI再評価とTask確定を行います。
+        </span>
       </div>
       <div v-if="stoppable" class="command-row">
         <button type="button" class="secondary" :disabled="busy"
