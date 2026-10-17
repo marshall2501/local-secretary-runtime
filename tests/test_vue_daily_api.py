@@ -90,6 +90,16 @@ class VueDailyApiTests(unittest.TestCase):
             f"/api/v1/ritsuko/tasks/{uuid4()}"
         ).status_code, 404)
 
+    def test_home_without_build_does_not_pretend_ui_exists(self):
+        """ビルド成果が無い環境では操作画面の存在を偽装しない。"""
+        with TemporaryDirectory() as workspace:
+            with patch("interfaces.vue_daily.app.__file__", str(Path(workspace) / "app.py")):
+                app = create_app(queries=self.queries)
+            with TestClient(app, base_url="http://127.0.0.1:8097") as client:
+                response = client.get("/", follow_redirects=False)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.json()["detail"], "vue_frontend_not_built")
+
     def test_task_command_preview_needs_explicit_write_flag(self):
         """コマンドプレビューはimportや通常実行では実DBを開かない。"""
         from contextlib import redirect_stderr
@@ -168,6 +178,16 @@ class VueNavigationBrowserHeaderTests(unittest.TestCase):
                     recover_pending_at_startup=False,
                 )
             with TestClient(app, base_url="http://127.0.0.1:8099") as client:
+                home = client.get("/", follow_redirects=False)
+                self.assertEqual(home.status_code, 307)
+                self.assertEqual(home.headers["location"], "/ui/")
+                # 既存のChatGPTリンクや通常のアドレス入力からも同じ画面を開く。
+                navigated = client.get("/", headers={
+                    "Sec-Fetch-Site": "cross-site",
+                    "Sec-Fetch-Mode": "navigate",
+                })
+                self.assertEqual(navigated.status_code, 200)
+                self.assertIn("RITSUKO Task form", navigated.text)
                 # 外部ChatGPTのリンクを押したとき、8097から8099へ移動したとき、
                 # URLを手入力したとき、F5のときの各ブラウザheaderを再現する。
                 for site, referer in (
