@@ -1,5 +1,7 @@
 # SOURCE_MAP — ソース構成と機能対応
 
+2026-10-17 記憶Review候補の表示と受付判定整合（`main@27d8071`、GitHub CI検証中）: `TaskCommands.review(answer_only)`は任意の`proposal_ready`表示を承認せず、RITSUKO `reviewable_user_knowledge_proposal`または`reviewable_answer_candidate`による実際の候補を必須とする。Vue `GET /api/v1/ritsuko/tasks/{id}` は確定Task PhaseとCore検証で`can_answer_only`／`can_remember`を返し、記憶反映可能な場合に限り登録対象の`knowledge_candidate`、既存回答候補、本人確認に用いた`user_text`を表示する。本人に登録文が見えない状態で`remember`ボタンを出さず、候補のないReviewも誘導しない。画面上の文章とTask確定・PKB登録が一致するか、実DB／実MAGIは別受入。通常運用サーバーには反映していない。
+
 2026-10-17 Vue Memory Review（`main@cee5d6f`、隔離検証）: `TaskCommands.review`が本人の明示的`answer_only`／`remember`を受け取る。rememberは既存RITSUKO `reviewable_user_knowledge_proposal`が認め、`build_daily_magi_task_commands`がPKB Memory Intake Portを注入した場合のみ実行する。`ritsuko.application.task_records.prepare_memory_intake_record → pkb.application.memory_intake.register_memory_intake → StateDrivenTaskApplication.review(memory_result=receipt)` の既存NiceGUIと同じ経路を使う。Receipt異常時はTaskを成功確定しない。Vue `GET /api/v1/ritsuko/tasks/{id}` にCore由来の`can_remember`を表示用に加え、画面で本人が選択してからのみPOST。通常8097は引き続きread-only、偽ブラウザテストは運用DB/PKBを書かない。実PKB反映／MAGI再評価の本人日常受入は未実施。
 
 
