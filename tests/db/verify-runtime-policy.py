@@ -23,7 +23,7 @@ import psycopg
 from infrastructure.postgres.runtime_policy_repository import PostgresRuntimePolicyRepository
 from ritsuko.application.context_policy import restrict_members, redact_observation_text
 from infrastructure.postgres.magi_task_repository import PostgresMagiTaskRepository
-from ritsuko.magi.async_execution import continue_with_user_clarification_async
+from ritsuko.magi.session_workflow import continue_with_user_clarification_async
 from scripts.db.probe_magi_task_resume_rollback import exercise_transaction
 
 
