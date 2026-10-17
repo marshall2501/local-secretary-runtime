@@ -148,7 +148,13 @@ class BrowserFixtureCommands:
         task["status"] = "waiting_external"
         task["revision"] += 1
         task["phase"] = "awaiting_review"
-        task["magi_session"]["status"] = "proposal_ready"
+        # This synthetic answer is an ordinary READY candidate, not an
+        # invented user-grounded PKB knowledge proposal.
+        task["magi_session"]["status"] = "candidate_ready"
+        task["magi_session"]["detail"] = {
+            "state": "READY", "answer_candidate": f"回答候補：{reply}",
+        }
+        task["magi_session"]["pending_requests"] = []
         task["message"] = f"回答候補：{reply}"
         task["question"] = None
         return {"task_id": str(task_id), "kind": "answer", "status": "accepted"}
