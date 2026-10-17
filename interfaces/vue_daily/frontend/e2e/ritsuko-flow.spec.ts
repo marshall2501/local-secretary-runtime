@@ -139,7 +139,7 @@ test('停止済みTaskの再開ボタンはCore許可時のみ表示し同じID�
   canResume = false
   await page.getByRole('button', { name: '保存済みTaskを再取得' }).click()
   await expect(button).toHaveCount(0)
-  await expect(page.getByText('この停止済みTaskは先頭から安全に再開できません。', {
+  await expect(page.getByText('このTaskには安全に使える再開点がありません。', {
     exact: false,
   })).toBeVisible()
 })
