@@ -100,6 +100,50 @@ test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻�
   await expect(page.getByRole('status', { name: 'Worker照合待ち' })).toBeVisible()
 })
 
+test('停止済みTaskの再開ボタンはCore許可時のみ表示し同じIDへ送信する', async ({ page }) => {
+  const origin = 'http://127.0.0.1:8099'
+  const list = await (await page.request.get(
+    origin + '/api/v1/ritsuko/tasks?view=recent&limit=10&offset=0',
+  )).json()
+  const id = list.items[0].id as string
+  let canResume = true
+  const resumePosts: string[] = []
+
+  await page.route('**/api/v1/ritsuko/tasks/' + id, async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    body.trace.task.status = 'paused'
+    body.trace.task.phase = 'paused'
+    body.trace.task.stop_requested = true
+    body.trace.task.can_resume = canResume
+    await route.fulfill({ response, json: body })
+  })
+  await page.route('**/api/v1/ritsuko/tasks/' + id + '/resume', async route => {
+    resumePosts.push(route.request().url())
+    await route.fulfill({
+      status: 202, contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: id, status: 'accepted', kind: 'start', stop_requested: false,
+      }),
+    })
+  })
+  await page.goto(origin + '/ui/#task=' + id)
+  const button = page.getByRole('button', { name: '同じTaskを再開' })
+  await expect(button).toBeEnabled()
+  await button.click()
+  await expect.poll(() => resumePosts.length).toBe(1)
+  expect(resumePosts[0]).toContain('/tasks/' + id + '/resume')
+
+  // The UI must trust Core's saved eligibility rather than the paused
+  // status alone. Source-executed tasks are not blind-restarted.
+  canResume = false
+  await page.getByRole('button', { name: '保存済みTaskを再取得' }).click()
+  await expect(button).toHaveCount(0)
+  await expect(page.getByText('この停止済みTaskは先頭から安全に再開できません。', {
+    exact: false,
+  })).toBeVisible()
+})
+
 test('保存した既定方式で選択欄なしでも同じTask APIを利用する', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/')
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8099\/ui\//)
