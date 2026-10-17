@@ -102,7 +102,7 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
             commands.stop(UUID(uid))
 
     async def test_judgment_strategy_does_not_change_member_assignments(self):
-        """LLM判断の旧1席制約を明示し、他メンバー設定は変更しない。"""
+        """LLM判断に1席制限を置かず、現在のMAGI席設定を一切書き換えない。"""
         app = FakeApplication()
         specs = [
             {"name": "MELCHIOR", "enabled": True, "timeout_seconds": 9},
@@ -111,7 +111,8 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         commands = TaskCommands(app, FakeQueries(), lambda: specs)
         with self.assertRaisesRegex(ValueError, "unknown_flow_decision_strategy"):
             await commands.start("依頼", decision_strategy="new_mode")
-        with self.assertRaisesRegex(TaskCommandConflict, "currently_requires_one_member"):
+        # 実LLMの配線がないfixtureは席数によらず拒否する。
+        with self.assertRaisesRegex(TaskCommandConflict, "llm_strategy_not_connected"):
             await commands.start("依頼", decision_strategy="llm")
         self.assertEqual([item["enabled"] for item in specs], [True, True])
         self.assertEqual(commands._operations, {})
