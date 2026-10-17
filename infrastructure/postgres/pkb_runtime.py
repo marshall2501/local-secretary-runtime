@@ -7,22 +7,13 @@ from pathlib import Path
 import psycopg
 
 from config.runtime_database import (
-    ISOLATED_DB,
-    ISOLATED_USER,
     PRODUCTION_USER,
     production_database_name,
 )
 
 HOST = "127.0.0.1"
-MODE = os.environ.get("LSA_DAILY_DB_MODE", "isolated").strip().lower()
-if MODE == "production":
-    DBNAME = production_database_name()
-    WRITER = PRODUCTION_USER
-elif MODE == "isolated":
-    DBNAME = ISOLATED_DB
-    WRITER = ISOLATED_USER
-else:
-    raise RuntimeError("LSA_DAILY_DB_MODE must be production or isolated")
+DBNAME = production_database_name()
+WRITER = PRODUCTION_USER
 
 
 def _port() -> int:
