@@ -128,7 +128,7 @@ class TaskCommands:
             raise TaskCommandNotFound("task_not_found") from exc
         return dict(trace.get("task") or {})
 
-    async def start(self, request: str, *, decision_strategy: str = "standard",
+    async def start(self, request: str, *, decision_strategy: str = "llm",
                     task_id: UUID | None = None) -> dict:
         """Taskの判断方式とメンバー設定を受付時に確定して共通Applicationへ渡す。
 
@@ -145,9 +145,6 @@ class TaskCommands:
         enabled = [item for item in specs if item.get("enabled")]
         if not enabled:
             raise TaskCommandConflict("no_enabled_magi_member")
-        # 先行Goal判断実装の現行制約。席数を勝手に変更・保存しない。
-        if decision_strategy == "llm" and len(enabled) != 1:
-            raise TaskCommandConflict("llm_strategy_currently_requires_one_member")
         if decision_strategy == "llm" and self._dialogue_starter_factory is None:
             raise TaskCommandConflict("llm_strategy_not_connected")
         task_id = task_id or uuid4()
@@ -222,10 +219,6 @@ class TaskCommands:
             if strategy not in {"standard", "llm"} or not any(
                 member.get("enabled") for member in specs
             ):
-                continue
-            if strategy == "llm" and sum(
-                bool(member.get("enabled")) for member in specs
-            ) != 1:
                 continue
             try:
                 self._launch_start(
