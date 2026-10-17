@@ -298,20 +298,10 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_explicitly_unneeded_sources_allow_real_goal_answer(self):
         """実機事象: 『外部検索と個人PKBは不要』をSource必須と誤認しない。"""
-        from ritsuko.magi.goal_loop import (
-            goal_requires_source, goal_requires_web,
-        )
-
         request = (
             "Pythonの辞書（dict）とは何か、簡単なコード例を1つ添えて日本語で"
             "説明してください。外部検索や個人PKBの参照は不要です。"
         )
-        self.assertFalse(goal_requires_source(request))
-        self.assertFalse(goal_requires_web(request))
-        self.assertTrue(goal_requires_source("Python公式資料でdict.getを調べて"))
-        self.assertTrue(goal_requires_web("公式サイトで調べて"))
-        self.assertFalse(goal_requires_source("Web検索は不要です。辞書の説明だけをしてください。"))
-
         async def respond(_spec, _envelope, **_kwargs):
             return {"status": "ok", "response": judgment(
                 "respond", goal="Pythonの辞書をコード例付きで説明する",
@@ -413,18 +403,42 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
                          ["queued", "running", "invalid"])
         self.assertEqual(events[-1]["error_kind"], "respond:answer_or_goal_missing")
 
-    async def test_explicit_official_source_cannot_be_dismissed_as_unneeded(self):
-        async def responder(*_args, **_kwargs):
+    async def test_explicit_source_request_uses_magi_planned_read(self):
+        """公式資料の検索要否とSource選択はMAGIが意味判断する。"""
+        async def responder(_spec, envelope, **_kwargs):
+            self.assertIn("公式資料", envelope["user_input"]["raw"])
             return {"status": "ok", "response": judgment(
-                "respond", answer="公式サイトで確認しました",
-                fulfillment="met", basis="not_required")}
+                "request_read", request={
+                    "source": "web", "query": "Python公式dict.get",
+                    "reason": "本人が公式資料の確認を希望した",
+                },
+            )}
         s = await start_goal_dialogue(
             "Python公式資料でdict.getを調べて", member_specs=SPEC,
             timeout=5, caller=responder,
         )
-        self.assertEqual(s["status"], "stopped")
-        self.assertEqual(s["next_step"], "required_source_not_observed")
+        self.assertEqual(s["status"], "waiting_information")
+        self.assertEqual(s["pending_requests"][0]["source"], "web")
         self.assertNotEqual(goal_task_projection(s)["task_status"], "completed")
+
+    async def test_source_free_magi_judgment_not_replaced_by_string_matching(self):
+        """Source必須のキーワードを持つ原文でも、LLM以外が意味を上書きしない。"""
+        async def responder(_spec, _envelope, **_kwargs):
+            return {"status": "ok", "response": judgment(
+                "respond", answer="一般的な説明", fulfillment="met",
+                basis="not_required",
+            )}
+        s = await start_goal_dialogue(
+            "公式資料を調べて", member_specs=SPEC, timeout=5,
+            caller=responder,
+        )
+        self.assertEqual(s["status"], "candidate_ready")
+        self.assertEqual(goal_task_projection(s)["reason"], "goal_evaluated_source_free")
+        # This is an intentionally poor MAGI semantic judgment. Core must
+        # not claim that a Source read occurred, and provider quality remains
+        # a distinct acceptance requirement.
+        self.assertFalse(s["tool_read_executed"])
+        self.assertEqual(s["observations"], [])
 
     async def test_shared_ritsuko_loop_three_llm_goal_seats_source_free(self):
         """MAGIの席数が3でも共通Task/Observationに1回だけ保存する。"""
