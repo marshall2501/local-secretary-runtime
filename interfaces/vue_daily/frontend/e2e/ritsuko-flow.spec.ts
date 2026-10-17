@@ -228,7 +228,15 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   // 読込後に最終的な終端へ到達する契約を検査し、件数を固定しない。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
   await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
-  for (let attempt = 0; attempt < 8 && await more.count() > 0; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    // While the current page is loading, the same button is disabled;
+    // a count alone does not imply that it can be clicked. The final refresh
+    // may remove it, so wait for either enabled or absent.
+    await expect.poll(async () => {
+      if (await more.count() === 0) return 'end'
+      return await more.isEnabled() ? 'ready' : 'loading'
+    }).not.toBe('loading')
+    if (await more.count() === 0) break
     await more.click()
   }
   await expect(more).toHaveCount(0)
