@@ -85,14 +85,28 @@ class BrowserFixtureCommands:
         uid = str(task_id or uuid5(NAMESPACE_DNS, request))
         if uid not in self.store.items:
             is_stop = "停止試験" in request
+            is_ready_candidate = "回答候補試験" in request
             self.store.items[uid] = {
                 "id": uid, "request": request,
                 "status": "pending" if is_stop else "waiting_external",
-                "revision": 1, "question": "好きな言語を教えてください。",
+                "revision": 1, "question": (
+                    None if is_ready_candidate else "好きな言語を教えてください。"
+                ),
                 "magi_session": {
                     "decision_strategy": decision_strategy,
-                    "status": "running" if is_stop else "waiting_user",
-                    "next_step": "ask_user",
+                    "status": (
+                        "running" if is_stop else
+                        "candidate_ready" if is_ready_candidate else "waiting_user"
+                    ),
+                    "next_step": (
+                        "review_answer_candidate" if is_ready_candidate else "ask_user"
+                    ),
+                    "detail": (
+                        {"state": "READY",
+                         "answer_candidate": "辞書はキーと値の組です。"}
+                        if is_ready_candidate else None
+                    ),
+                    "pending_requests": [],
                     "member_specs": [
                         {"name": "MELCHIOR", "enabled": True, "provider": "ollama", "model": "fixture"},
                         {"name": "CASPER", "enabled": True, "provider": "openai", "model": "fixture"},
