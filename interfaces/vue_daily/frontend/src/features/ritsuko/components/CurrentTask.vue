@@ -70,7 +70,7 @@ async function copyText(text: string, label: string): Promise<void> {
       <div v-if="task.status === 'waiting_external' && task.phase === 'awaiting_clarification'"
         class="question">
         <strong>次の操作：本人回答</strong>
-        <p>{{ task.question || task.magi_session.user_question || '回答入力欄から追加情報を送信してください。' }}</p>
+        <p>{{ task.question || task.magi_session?.user_question || '回答入力欄から追加情報を送信してください。' }}</p>
       </div>
       <div v-else-if="task.status === 'waiting_external' && task.phase === 'awaiting_review' && task.can_answer_only"
         class="question">
