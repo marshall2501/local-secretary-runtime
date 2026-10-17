@@ -263,8 +263,15 @@ class TaskCommands:
             raise ValueError("review_decision_not_enabled")
         task = await self._task_for_command(task_id)
         session = task.get("magi_session") or {}
+        detail = session.get("detail") or {}
+        answer_ready = (
+            session.get("status") == "candidate_ready"
+            and detail.get("state") == "READY"
+            and bool(str(detail.get("answer_candidate") or "").strip())
+            and not session.get("pending_requests")
+        )
         if (task.get("status") != "waiting_external"
-                or session.get("status") != "proposal_ready"):
+                or (session.get("status") != "proposal_ready" and not answer_ready)):
             raise TaskCommandConflict("task_not_waiting_for_review")
         timeout = max(
             (float(item.get("timeout_seconds") or 120)
