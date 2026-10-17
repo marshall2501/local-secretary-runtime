@@ -1,8 +1,6 @@
-# Daily PKB Web UI prototype. Uses only the existing isolated fictional DB.
+# Legacy NiceGUI daily launcher; the only operating database is secretary.
 [CmdletBinding()]
 param(
-    [ValidateSet('isolated','production')]
-    [string]$DatabaseMode = 'isolated',
     [ValidatePattern('^(secretary|secretary_rebuild_[a-z0-9_]{1,40})$')]
     [string]$ProductionDatabase = 'secretary',
     [switch]$AutoReload
@@ -14,19 +12,11 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $envFile = Join-Path $root '.env.postgres'
 $runtimeEnvFile = Join-Path $root '.env'
-if ($DatabaseMode -eq 'production') {
-    $secret = Join-Path $root 'secrets\secretary-daily-runtime-password.txt'
-    $db = $ProductionDatabase
-    $role = 'secretary_daily_runtime'
-    # Keep normal daily launch available before separately approved migration 009.
-    # Policy settings display an explicit migration-needed notice until then.
-    $requiredMigration = '008_runtime_privileges.sql'
-} else {
-    $secret = Join-Path $root 'secrets\pkb-proto-writer-password.txt'
-    $db = 'secretary_pkb_proto_20260927'
-    $role = 'secretary_pkb_proto_writer_20260927'
-    $requiredMigration = '026_service_billing.sql'
-}
+$secret = Join-Path $root 'secrets\\secretary-daily-runtime-password.txt'
+$db = $ProductionDatabase
+$role = 'secretary_daily_runtime'
+# Keep existing daily compatibility while migration 009 activation is separate.
+$requiredMigration = '008_runtime_privileges.sql'
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw 'Expected the existing runtime virtualenv.'
@@ -149,10 +139,7 @@ try {
     # 開発用ランチャーが選ばれたときだけNiceGUIのPython監視を有効にする。
     # Pythonプロセスを再起動するため、処理中Taskがないときだけソースを更新する。
     $env:LSA_WEB_AUTO_RELOAD = if ($AutoReload) { '1' } else { '0' }
-    $env:LSA_DAILY_DB_MODE = $DatabaseMode
-    if ($DatabaseMode -eq 'production') {
-        $env:LSA_DAILY_DB_NAME = $db
-    }
+    $env:LSA_DAILY_DB_NAME = $db
     $env:LSA_PKB_DAILY_PORT = "$port"
     $env:LSA_PKB_DAILY_SECRET = $secret
     $env:LSA_PKB_DAILY_MIGRATION_COUNT = $migrationCount
@@ -164,7 +151,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Daily PKB Web UI stopped with an error.' }
 } finally {
     Remove-Item Env:LSA_WEB_AUTO_RELOAD -ErrorAction SilentlyContinue
-    Remove-Item Env:LSA_DAILY_DB_MODE -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_DAILY_DB_NAME -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_PORT -ErrorAction SilentlyContinue
     Remove-Item Env:LSA_PKB_DAILY_SECRET -ErrorAction SilentlyContinue
