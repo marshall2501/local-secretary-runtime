@@ -421,7 +421,15 @@ async def resume_task(connect, *, strategy: str) -> None:
         )
         assert cur.fetchone()[0] == (
             1 if strategy == "llm" else 0
-        ) or strategy == "standard", "unexpected_task_completion_audit"
+        ), "unexpected_automatic_completion_audit"
+        if strategy == "standard":
+            cur.execute(
+                """SELECT count(*) FROM secretary.audit_events
+                   WHERE task_id=%s
+                     AND event_type='core.magi.proposal_review_completed'""",
+                (task_id,),
+            )
+            assert cur.fetchone()[0] == 1, "missing_review_completion_audit"
         cur.execute("SELECT count(*) FROM secretary.actions WHERE task_id=%s",
                     (task_id,))
         assert cur.fetchone()[0] == 0, "clarification_is_not_a_source_read"
