@@ -37,6 +37,8 @@ async def run_observation_loop(
     record_source_read_record: Callable,
     persist_session_record: Callable,
     fail_task_record: Callable,
+    checkpoint_source_progress: Callable | None = None,
+    resume_snapshot: dict | None = None,
     stop_requested=None,
     on_turn_start=None,
     on_member_progress=None,
@@ -77,10 +79,36 @@ async def run_observation_loop(
         }
         if on_member_progress is not None:
             start_args["on_member_progress"] = on_member_progress
-        session = await dialogue_starter(request, **start_args)
-
         catalog = resource_catalog or default_resource_catalog()
         cycles = 0
+        if resume_snapshot is not None:
+            # The DB validated the full Result ID set before returning this
+            # snapshot. Never call a fresh MAGI start or re-read its Source.
+            if (
+                not isinstance(resume_snapshot, dict)
+                or resume_snapshot.get("version") != 1
+                or not isinstance(resume_snapshot.get("session"), dict)
+                or not isinstance(resume_snapshot.get("observations"), list)
+                or resume_snapshot["session"].get("status") != "waiting_information"
+                or not resume_snapshot["observations"]
+            ):
+                raise ValueError("invalid_source_resume_snapshot")
+            session = resume_snapshot["session"]
+            cycles = int(resume_snapshot.get("cycles") or 0)
+            if stop_requested is None or not stop_requested():
+                continuation_args = {
+                    "timeout": timeout, "stop_requested": stop_requested,
+                    "on_turn_start": on_turn_start,
+                }
+                if on_member_progress is not None:
+                    continuation_args["on_member_progress"] = on_member_progress
+                session = await observation_continuation(
+                    session, resume_snapshot["observations"], **continuation_args,
+                )
+                cycles += 1
+        else:
+            session = await dialogue_starter(request, **start_args)
+
         while (
             session.get("status") == "waiting_information"
             and cycles < max_observation_cycles
@@ -185,6 +213,16 @@ async def run_observation_loop(
 
             if not observations:
                 break
+            if checkpoint_source_progress is not None and active_attempt_id is not None:
+                # Persist exact model-input Session + verified Result IDs
+                # before requesting another LLM judgment. If this commit is
+                # lost, the DB rejects restart rather than repeating Sources.
+                await anyio.to_thread.run_sync(
+                    checkpoint_source_progress,
+                    task_uuid, session, observations, cycles, active_attempt_id,
+                )
+            if stop_requested is not None and stop_requested():
+                break
 
             continuation_args = {
                 "timeout": timeout,
@@ -205,7 +243,9 @@ async def run_observation_loop(
             session["status_message"] = "許可された情報取得回数の上限に達したため、追加取得せず待機しています。"
 
         persist_args = [
-            task_uuid, session, selected_capability_for_batch(all_executions),
+            task_uuid, session,
+            (selected_capability_for_batch(all_executions)
+             or (resume_snapshot or {}).get("selected_capability")),
         ]
         if active_attempt_id is not None:
             persist_args.append(active_attempt_id)
