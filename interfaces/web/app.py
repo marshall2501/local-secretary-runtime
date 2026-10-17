@@ -88,7 +88,7 @@ from ritsuko.magi.async_execution import (
     continue_with_verified_observations_async,
     start_dialogue_async,
 )
-from ritsuko.core.observation_loop import (
+from ritsuko.core.task_execution import (
     review_proposal as review_magi_proposal,
     run_observation_loop,
     run_pkb_observation_loop,
