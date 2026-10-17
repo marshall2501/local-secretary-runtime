@@ -93,6 +93,12 @@ export async function reviewTask(
     { decision },
   )
 }
+/** DBが再開可能と判定した停止済みTaskだけを、同じIDで実行受付する。 */
+export async function resumeTask(id: string): Promise<TaskOperation> {
+  return await postJson<TaskOperation>(
+    base + '/tasks/' + encodeURIComponent(id) + '/resume',
+  )
+}
 export async function stopTask(id: string): Promise<TaskOperation> {
   return await postJson<TaskOperation>(
     base + '/tasks/' + encodeURIComponent(id) + '/stop',
