@@ -648,6 +648,7 @@ async def _send_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
     member_specs_override: list[dict] | None = None,
     context_policy: dict | None = None,
 ) -> dict | None:
@@ -694,12 +695,14 @@ async def _send_async(
         if member_specs_override is not None
         else session.get("member_specs")
     )
-    result = await caller(
-        envelope,
-        model=session.get("model") or "",
-        timeout=timeout,
-        member_specs=active_specs,
-    )
+    call_options = {
+        "model": session.get("model") or "",
+        "timeout": timeout,
+        "member_specs": active_specs,
+    }
+    if on_member_progress is not None:
+        call_options["on_member_progress"] = on_member_progress
+    result = await caller(envelope, **call_options)
     response = result.get("response")
     errors = list(result.get("errors") or [])
     result_status = result.get("status")
@@ -752,6 +755,7 @@ async def _apply_detail_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
     member_specs_override: list[dict] | None = None,
     context_policy: dict | None = None,
 ) -> dict:
@@ -777,6 +781,7 @@ async def _apply_detail_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress,
             member_specs_override=member_specs_override,
             context_policy=context_policy,
         )
@@ -790,6 +795,7 @@ async def _apply_detail_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress,
             member_specs_override=member_specs_override,
             context_policy=context_policy,
         )
@@ -817,6 +823,7 @@ async def _apply_detail_async(
                 caller=caller,
                 stop_requested=stop_requested,
                 on_turn_start=on_turn_start,
+                on_member_progress=on_member_progress,
                 member_specs_override=member_specs_override,
                 context_policy=context_policy,
             )
@@ -830,6 +837,7 @@ async def _apply_detail_async(
                 caller=caller,
                 stop_requested=stop_requested,
                 on_turn_start=on_turn_start,
+                on_member_progress=on_member_progress,
                 member_specs_override=member_specs_override,
                 context_policy=context_policy,
             )
@@ -907,6 +915,7 @@ async def _apply_detail_async(
                         caller=caller,
                         stop_requested=stop_requested,
                         on_turn_start=on_turn_start,
+                        on_member_progress=on_member_progress,
                         member_specs_override=member_specs_override,
                         context_policy=context_policy,
                     )
@@ -920,6 +929,7 @@ async def _apply_detail_async(
                         caller=caller,
                         stop_requested=stop_requested,
                         on_turn_start=on_turn_start,
+                        on_member_progress=on_member_progress,
                         member_specs_override=member_specs_override,
                         context_policy=context_policy,
                     )
@@ -946,6 +956,7 @@ async def _apply_detail_async(
                     caller=caller,
                     stop_requested=stop_requested,
                     on_turn_start=on_turn_start,
+                    on_member_progress=on_member_progress,
                     member_specs_override=member_specs_override,
                     context_policy=context_policy,
                 )
@@ -959,6 +970,7 @@ async def _apply_detail_async(
                     caller=caller,
                     stop_requested=stop_requested,
                     on_turn_start=on_turn_start,
+                    on_member_progress=on_member_progress,
                     member_specs_override=member_specs_override,
                     context_policy=context_policy,
                 )
@@ -1017,6 +1029,7 @@ async def _advance_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
     member_specs_override: list[dict] | None = None,
     context_policy: dict | None = None,
 ) -> dict:
@@ -1033,6 +1046,7 @@ async def _advance_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
         member_specs_override=member_specs_override,
         context_policy=context_policy,
     )
@@ -1046,6 +1060,7 @@ async def _advance_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
         member_specs_override=member_specs_override,
         context_policy=context_policy,
     )
@@ -1079,6 +1094,7 @@ async def _advance_by_strategy(
     return await _advance_async(
         session, timeout=timeout, caller=caller,
         stop_requested=stop_requested, on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
         member_specs_override=member_specs_override,
         context_policy=context_policy,
     )
@@ -1170,6 +1186,7 @@ async def start_dialogue_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
     )
     if classification is None:
         return session
@@ -1183,6 +1200,7 @@ async def start_dialogue_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
     )
 
 
@@ -1473,6 +1491,7 @@ async def continue_with_user_clarification_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress,
             member_specs_override=local_specs,
             context_policy=context_policy,
         )
@@ -1488,6 +1507,7 @@ async def continue_with_user_clarification_async(
             caller=caller,
             stop_requested=stop_requested,
             on_turn_start=on_turn_start,
+            on_member_progress=on_member_progress,
             member_specs_override=local_specs,
             context_policy=context_policy,
         )
@@ -1515,6 +1535,7 @@ async def continue_with_user_clarification_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
         member_specs_override=local_specs,
         context_policy=context_policy,
     )
@@ -1528,6 +1549,7 @@ async def continue_with_user_clarification_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
         member_specs_override=local_specs,
         context_policy=context_policy,
     )
