@@ -9,7 +9,7 @@ import {
   answerTask, getJudgmentPreferences, getTaskApiMode, getTaskOperation,
   getTaskTrace, listTasks, reviewTask, saveJudgmentPreferences, startTask, stopTask,
 } from './api'
-import type { DecisionStrategy, TaskOperation } from './api'
+import type { DecisionStrategy, ReviewDecision, TaskOperation } from './api'
 import type { TaskListView, TaskSummary, TaskTrace } from './types'
 
 /** URLハッシュから選択TaskのIDを読み取る。見つからなければ初回一覧で選ぶ。 */
@@ -215,20 +215,27 @@ export function useTasks() {
     }
   }
 
-  async function sendReview(): Promise<void> {
+  async function sendReview(decision: ReviewDecision = 'answer_only'): Promise<void> {
     const task = selected.value
     // RITSUKO's persisted Task phase is authoritative. Do not independently
     // reconstruct review eligibility from MAGI's provisional session shape.
     if (!task || task.status !== 'waiting_external' ||
-        task.phase !== 'awaiting_review') return
+        task.phase !== 'awaiting_review' ||
+        (decision === 'remember' && !task.can_remember)) return
     const result = await sendCommand(
-      () => reviewTask(task.id),
-      '回答のみのReviewを受付けました。完了の確定ではありません。',
+      () => reviewTask(task.id, decision),
+      decision === 'remember'
+        ? '記憶反映Reviewを受付けました。Memory IntakeとTask確定の結果を再照会します。'
+        : '回答のみのReviewを受付けました。完了の確定ではありません。',
     )
     if (result) {
       operation.value = result
       await refresh()
     }
+  }
+
+  async function sendRemember(): Promise<void> {
+    await sendReview('remember')
   }
 
   async function sendStop(): Promise<void> {
@@ -406,6 +413,6 @@ export function useTasks() {
     draftRequest, strategy, defaultStrategy, showStrategySelector,
     activeDefaultStrategy, activeShowStrategySelector,
     preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
-    reply, sendStart, sendAnswer, sendReview, sendStop,
+    reply, sendStart, sendAnswer, sendReview, sendRemember, sendStop,
   }
 }
