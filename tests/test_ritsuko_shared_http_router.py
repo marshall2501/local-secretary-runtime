@@ -71,6 +71,11 @@ class Commands:
         self.calls.append(("operation", task_id))
         return {"status": "operation_not_in_process", "task_id": str(task_id)}
 
+    async def resume(self, task_id):
+        """保存済みTask IDの明示再開を共通Routerが変えず渡すことを確認する。"""
+        self.calls.append(("resume", task_id))
+        return {"kind": "start", "status": "accepted", "task_id": str(task_id)}
+
     def stop(self, task_id):
         """停止要求を受付けた事実だけを返す。"""
         self.calls.append(("stop", task_id))
@@ -98,6 +103,7 @@ class SharedRitsukoHttpRouterTests(unittest.TestCase):
             json={"request": "一般説明", "decision_strategy": "llm"},
         ).status_code, 503)
         self.assertEqual(client.get(f"/api/v1/ritsuko/operations/{queries.uid}").status_code, 503)
+        self.assertEqual(client.post(uri + "/resume").status_code, 503)
 
     def test_router_passes_identical_command_contract_when_port_injected(self):
         """UI以外のHostからもStrategyやTask IDを変えず受付ける。"""
@@ -115,6 +121,7 @@ class SharedRitsukoHttpRouterTests(unittest.TestCase):
         ).status_code, 202)
         self.assertEqual(client.post(url + "/answer", json={"reply": "本人回答"}).status_code, 202)
         self.assertEqual(client.post(url + "/review", json={"decision": "answer_only"}).status_code, 202)
+        self.assertEqual(client.post(url + "/resume").status_code, 202)
         self.assertEqual(client.post(url + "/stop").status_code, 200)
         self.assertEqual(client.get(
             f"/api/v1/ritsuko/operations/{queries.uid}"
@@ -123,6 +130,7 @@ class SharedRitsukoHttpRouterTests(unittest.TestCase):
             ("start", "調べて", "llm", queries.uid),
             ("answer", queries.uid, "本人回答"),
             ("review", queries.uid, "answer_only"),
+            ("resume", queries.uid),
             ("stop", queries.uid),
             ("operation", queries.uid),
         ])
