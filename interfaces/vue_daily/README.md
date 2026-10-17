@@ -10,6 +10,12 @@ MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判�
 
 根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapter回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行正本はこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
 
+## 2026-10-17 Worker所在不明時のVueの操作と照会
+
+- Runtime `main@f9349f4` で `useTasks.ts` が確定Task `running` と、現在のAPIプロセスに残る一時Operationを区別。DB上は実行中でも `operation_not_in_process` ＋ `execution_reconciliation_required` の場合、3秒周期のDB照会を続けず待機時と同じ45秒周期にする。HTTP切断時も同じ省力化を使う。Workerの生存・停止・完了を推測しない。
+- `TaskCommandPanel.vue` がWorker照合待ちを示し、「保存済みTaskを再取得」で既存の読取APIを手動照会できる。**Taskの再実行・Worker再起動・DB状態変更は行わない。** 停止は既存の本人指示・永続Stop経路を維持。
+- [Vue API/Chromium隔離CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39003028095) **PASS（Chromium 11件）**、[PostgreSQL foundation](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39003028033) PASS。ChromiumはAPI再起動後に似た「実行中TaskだがOperationなし」を架空応答で作り、7秒間の追加GETゼロと本人クリックによる再読取を検証。**実API process kill/restartや実Worker復旧は未検証。**
+
 ## 状態・安全境界
 
 - 実際のTaskを**既存の`CoreTaskQueryService`とPostgreSQLの正本**から取得します。架空Task専用 `interfaces/vue_lab`（8098）とは別です。
