@@ -178,7 +178,14 @@ class VueDailyApiTests(unittest.TestCase):
             },
         })
         path = f"/api/v1/ritsuko/tasks/{self.queries.uid}"
-        self.assertTrue(self.client.get(path).json()["trace"]["task"]["can_remember"])
+        review_task = self.client.get(path).json()["trace"]["task"]
+        self.assertTrue(review_task["can_remember"])
+        self.assertTrue(review_task["can_answer_only"])
+        self.assertEqual(review_task["memory_review_candidate"], {
+            "knowledge_candidate": "Fedoraの利用",
+            "answer": "Fedoraの利用",
+            "user_text": "Fedora",
+        })
         self.assertEqual(self.client.post(
             path + "/review", json={"decision": "remember"},
         ).status_code, 503)
@@ -196,7 +203,20 @@ class VueDailyApiTests(unittest.TestCase):
         self.queries.task["magi_session"]["observations"] = [
             {"source": "pkb", "verified": True},
         ]
-        self.assertFalse(writer.get(path).json()["trace"]["task"]["can_remember"])
+        rejected = writer.get(path).json()["trace"]["task"]
+        self.assertFalse(rejected["can_remember"])
+        self.assertFalse(rejected["can_answer_only"])
+        self.assertIsNone(rejected["memory_review_candidate"])
+        # A READY candidate is answer-reviewable, but never memory-writeable.
+        self.queries.task["magi_session"] = {
+            "status": "candidate_ready",
+            "detail": {"state": "READY", "answer_candidate": "一般説明"},
+            "pending_requests": [],
+        }
+        ready = writer.get(path).json()["trace"]["task"]
+        self.assertTrue(ready["can_answer_only"])
+        self.assertFalse(ready["can_remember"])
+        self.assertIsNone(ready["memory_review_candidate"])
 
     def test_task_command_preview_needs_explicit_write_flag(self):
         """コマンドプレビューはimportや通常実行では実DBを開かない。"""
