@@ -233,7 +233,21 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 "provider": "ollama", "model": "fake", "turn": 2,
                 "state": "completed",
             })
-            return {**session, "status": "proposal_ready"}
+            return {
+                **session, "status": "proposal_ready",
+                "tool_read_executed": True,
+                "detail": {
+                    "state": "KNOWLEDGE_CANDIDATE",
+                    "answer_candidate": "本人の回答を確認しました。",
+                    "knowledge_candidate": "本人の回答を確認しました。",
+                },
+                "observations": [
+                    {"source": "pkb", "verified": True,
+                     "text": "保存事実を照会した記録"},
+                    {"source": "user_clarification",
+                     "text": "本人の回答", "responds_to": ["REQ-1"]},
+                ],
+            }
 
         async def evaluate_review(session, observation, **kwargs):
             """回答のみReviewの観測をMAGIへ渡して再評価済みを模倣する。"""
