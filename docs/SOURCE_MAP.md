@@ -1,5 +1,8 @@
 # SOURCE_MAP — ソース構成と機能対応
 
+2026-10-17 統合RITSUKO判断実行構造・第二段階（`main@8c3b801`、隔離CI）: `ritsuko/core/task_projection.py`が単一Task状態投影の正本になり、`magi_bridge.py`からGoal専用の状態Writer/分岐を削除。MAGI判断Strategyは引き続き既存`async_execution.py::_advance_by_strategy`で切替え、RITSUKOの`observation_loop.py`はどのStrategyでも記録済みAction/Result IDをObservationへ付与して同じPortへ保存する（ID不在では失敗、偽の根拠で完了しない）。`task_commands.py`は回答候補Review可能性を共通Core helperへ委譲。VueはMAGI候補を状態の正本とせず、DBのTask `phase`で本人回答・Reviewを表示/送信。`test_shared_judgment_task_pipeline.py`は両方式の同一Source/Result/Task縦断を完全fakeで検査する。**これらは実MAGI・本人実機での完走ではない。**
+
+
 2026-10-17 Task・Goal状態管理の構造整理（Runtime `main@bb906dc`、使い捨てPostgreSQL／Vue/API isolated CI PASS）: 既存 `secretary.tasks.checkpoint.goal_definition` をGoal理解状況のTask側マスタとして新規Taskへ保存する。本人原文は `tasks.request` を唯一のマスタとし、MAGIの解釈を `resolution=proposed`／版管理付きで格納し `core_task_query_repository.py` のread-only APIから参照できる。Task行lockでStopと遅いcompleted/failed／Review結果の状態競合を整理し、`claim_start` が発行した `active_attempt_id` により開始Workerの古いGoal・Source/Result・失敗書込みを拒否。通常8097のwrite公開、Production DB操作は行わない。詳細・受入境界は[設計側の変更計画](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/05_Implementation/WorkPlans/2026-10-17-0612-task-goal-state-redesign.md)。
 
 
