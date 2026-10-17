@@ -21,6 +21,30 @@ test('8097から8099へ通常リンク遷移し、フォームを実際に編集
   await expect(page.getByText('実Task操作API接続中')).toBeVisible()
 })
 
+test('Vueの両判断方式は同じTask APIに保存され、方式はTask単位で固定される', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8099/ui/')
+  const selector = page.getByLabel('判断方式')
+  await expect(selector).toHaveValue('standard')
+  const strategies = [
+    { value: 'llm', label: 'LLM判断の受付試験' },
+    { value: 'standard', label: '従来判断の受付試験' },
+  ]
+  for (const item of strategies) {
+    await selector.selectOption(item.value)
+    await page.getByRole('textbox', { name: '依頼内容' }).fill(item.label)
+    await page.getByRole('button', { name: '依頼を送信' }).click()
+    await expect(page.locator('.current-task').getByText(item.label, { exact: true }))
+      .toBeVisible()
+    const taskId = page.url().split('#task=')[1]
+    const response = await page.request.get(
+      'http://127.0.0.1:8099/api/v1/ritsuko/tasks/' + taskId,
+    )
+    expect(response.status()).toBe(200)
+    const persisted = await response.json()
+    expect(persisted.task.magi_session.decision_strategy).toBe(item.value)
+  }
+})
+
 test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
   const previousUrl = page.url()
