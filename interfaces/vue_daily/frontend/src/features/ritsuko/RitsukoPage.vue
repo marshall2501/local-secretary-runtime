@@ -47,7 +47,7 @@ const {
         @save-preferences="savePreferences"
       />
       <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
-      <MagiProgress :task="selected" />
+      <MagiProgress :task="selected" :operation="operation" />
       <TaskActivity :trace="trace" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
