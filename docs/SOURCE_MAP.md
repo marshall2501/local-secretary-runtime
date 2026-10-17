@@ -1,11 +1,11 @@
 # SOURCE_MAP — 現行Runtimeソース索引
 
-更新: 2026-10-17（旧Runtime資産撤去後のGitHub source構造）。実機稼働状態や受入結果は設計repoの [STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を正本とし、この文書は**存在する実装の索引**とする。採用する責務境界は設計側の Runtime Source Architecture を参照。
+更新: 2026-10-18（単一Secretary Serverの実装初段を反映）。実機稼働状態や受入結果は設計repoの [STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を正本とし、この文書は**存在する実装の索引**とする。採用する責務境界は設計側の Runtime Source Architecture を参照。
 
 ## 1. 正式な目標実行経路
 
 ```text
-本人 → Vue (interfaces/vue_daily/frontend/)
+本人 → Vue (interfaces/vue_daily/frontend/) → 単一Secretary Server (interfaces/api/secretary_server.py)
        → 共通RITSUKO FastAPI Router (interfaces/api/ritsuko_tasks.py)
        → Task Commands (ritsuko/application/task_commands.py)
        → Task Application (ritsuko/application/task_runtime.py)
@@ -27,8 +27,10 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 
 | 機能・責務 | 正規ソース | 備考 |
 | --- | --- | --- |
-| RITSUKO Task REST | `interfaces/api/ritsuko_tasks.py`, `interfaces/api/app.py` | Vue以外のAPI Hostからも利用できるRouter |
-| Vue日常画面 | `interfaces/vue_daily/frontend/src/`, `interfaces/vue_daily/app.py` | 共通HTTP APIを呼ぶ。日常正式切替は本人受入待ち |
+| 正式Secretary Server（実装初段） | `interfaces/api/secretary_server.py`, `bootstrap/secretary_server.py` | Vue静的配信・Task操作/PKB検索の共通Hostを一プロセスへ構成。本人実機未受入、通常ランチャー未切替 |
+| Product console/file log | `infrastructure/secretary_logging.py` | コンソール＋`logs/secretary.log`、ポート別ログ設計にしない |
+| RITSUKO Task REST | `interfaces/api/ritsuko_tasks.py` | Web画面と他API Clientから再利用するTask Router |
+| Vue日常画面 | `interfaces/vue_daily/frontend/src/`, `interfaces/api/secretary_server.py` | 同一Originの共通Task/PKB APIを呼ぶ。正式切替は本人受入待ち |
 | Vue PKB検索（読取のみ） | `interfaces/api/pkb_read.py`, `interfaces/vue_daily/frontend/src/features/pkb/`, `bootstrap/web_runtime.py::build_daily_memory_read_service` | 既存 `application/read_service.py` とPostgreSQL ReadRepositoryを共用。登録・訂正・Pendingは旧NiceGUI、実機受入待ち |
 | 共通Task受付・操作 | `ritsuko/application/task_commands.py`, `task_runtime.py` | start、answer、review、stop、resume |
 | 共通実行・Source | `ritsuko/core/task_execution.py`, `ritsuko/application/source_execution.py` | 記録済みAction/Result IDを使用 |
@@ -43,7 +45,9 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | Service接続・設定 | `integrations/connections/`, `infrastructure/postgres/service_connection_repository.py`, `magi_settings_repository.py` | SecretはAPI/Prompt等へ直接渡さない |
 | Policy Profile | `ritsuko/application/context_policy.py`, `infrastructure/postgres/runtime_policy_repository.py` | verification-lan/production-lanは同一DBの切替設定 |
 | Billing | `infrastructure/postgres/service_billing_settings_repository.py` | Service Connectionを参照 |
-| NiceGUI（暫定） | `interfaces/web/app.py`, `interfaces/web/pages/` | Vueで必要機能を本人受入後にのみ撤去 |
+| NiceGUI（旧コード／撤去対象） | `interfaces/web/app.py`, `interfaces/web/pages/` | 新API＋Vueで能力を置換後に撤去。旧UIの保守は開発目標ではない |
+| 旧Vue Host互換 | `interfaces/vue_daily/app.py`, `commands_preview.py` | 現在の旧ランチャー用。API実装は正式Secretary Hostに委譲、正式切替後撤去 |
+| 旧8010 REST | `interfaces/api/app.py`, `api/secretary_api.py` | 外部MCP/PVA read用の現存Server。別Task契約は統合対象、既存実環境は未変更 |
 | 独立開発Workbench | `interfaces/workbench/` | 架空入力の診断、旧運用DBの代替ではない |
 | MCP | `interfaces/mcp/server.py` | 独立入口、責務と公開境界を維持 |
 
@@ -58,7 +62,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 使い捨てPostgreSQL隔離検証 | `tests/db/test-integration.ps1`, `.github/workflows/postgres.yml` |
 | PKB/Memory実PostgreSQL試験 | `tests/test_memory_intake_postgres.py`, `.github/workflows/pkb-memory-intake.yml` |
 | 共通Task/Strategy縦断 | `tests/test_shared_judgment_task_pipeline.py`, `tests/db/verify-common-task-execution.py` |
-| Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `tests/test_vue_pkb_read.py`, `.github/workflows/vue-secretary-ui-lab.yml` |
+| Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `tests/test_secretary_server.py`, `tests/test_vue_pkb_read.py`, `.github/workflows/vue-secretary-ui-lab.yml` |
 | ローカルプローブ | `scripts/db/probe_magi_runtime_readonly.py`, `probe_runtime_policy_readonly.py` |
 | Source静的・整合性 | `tests/db/test-static.ps1`, `tests/test_architecture_boundaries.py` |
 
