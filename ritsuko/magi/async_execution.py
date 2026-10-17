@@ -1351,6 +1351,8 @@ async def continue_with_proposal_review_async(
 ) -> dict:
     """Re-evaluate a user-approved proposal review before RITSUKO finalizes."""
     updated = deepcopy(session)
+    if not isinstance(observation, dict):
+        raise ValueError("invalid_review_observation")
     # Knowledge proposal and plain READY answer use the same user-approved
     # review/Task finalization pipeline. Plain READY never authorizes PKB write.
     if updated.get("status") not in {"proposal_ready", "candidate_ready"}:
@@ -1362,8 +1364,6 @@ async def continue_with_proposal_review_async(
                 or observation.get("source") != "proposal_review"
                 or observation.get("review_decision") != "answer_only"):
             raise ValueError("answer_candidate_review_not_permitted")
-    if not isinstance(observation, dict):
-        raise ValueError("invalid_review_observation")
     if observation.get("source") not in {"proposal_review", "memory_intake"}:
         raise ValueError("invalid_review_observation_source")
     if observation.get("verified") is not True:
