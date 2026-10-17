@@ -29,6 +29,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | --- | --- | --- |
 | RITSUKO Task REST | `interfaces/api/ritsuko_tasks.py`, `interfaces/api/app.py` | Vue以外のAPI Hostからも利用できるRouter |
 | Vue日常画面 | `interfaces/vue_daily/frontend/src/`, `interfaces/vue_daily/app.py` | 共通HTTP APIを呼ぶ。日常正式切替は本人受入待ち |
+| Vue PKB検索（読取のみ） | `interfaces/api/pkb_read.py`, `interfaces/vue_daily/frontend/src/features/pkb/`, `bootstrap/web_runtime.py::build_daily_memory_read_service` | 既存 `application/read_service.py` とPostgreSQL ReadRepositoryを共用。登録・訂正・Pendingは旧NiceGUI、実機受入待ち |
 | 共通Task受付・操作 | `ritsuko/application/task_commands.py`, `task_runtime.py` | start、answer、review、stop、resume |
 | 共通実行・Source | `ritsuko/core/task_execution.py`, `ritsuko/application/source_execution.py` | 記録済みAction/Result IDを使用 |
 | Task状態・Goal評価 | `ritsuko/core/task_projection.py`, `judgment_application.py`, `goal_evidence.py` | 提案だけでTool完了にしない |
@@ -57,7 +58,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 使い捨てPostgreSQL隔離検証 | `tests/db/test-integration.ps1`, `.github/workflows/postgres.yml` |
 | PKB/Memory実PostgreSQL試験 | `tests/test_memory_intake_postgres.py`, `.github/workflows/pkb-memory-intake.yml` |
 | 共通Task/Strategy縦断 | `tests/test_shared_judgment_task_pipeline.py`, `tests/db/verify-common-task-execution.py` |
-| Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `.github/workflows/vue-secretary-ui-lab.yml` |
+| Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `tests/test_vue_pkb_read.py`, `.github/workflows/vue-secretary-ui-lab.yml` |
 | ローカルプローブ | `scripts/db/probe_magi_runtime_readonly.py`, `probe_runtime_policy_readonly.py` |
 | Source静的・整合性 | `tests/db/test-static.ps1`, `tests/test_architecture_boundaries.py` |
 
