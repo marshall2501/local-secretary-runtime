@@ -90,6 +90,7 @@ class BrowserFixtureCommands:
                 "status": "pending" if is_stop else "waiting_external",
                 "revision": 1, "question": "好きな言語を教えてください。",
                 "magi_session": {
+                    "decision_strategy": decision_strategy,
                     "status": "running" if is_stop else "waiting_user",
                     "next_step": "ask_user",
                     "member_specs": [
