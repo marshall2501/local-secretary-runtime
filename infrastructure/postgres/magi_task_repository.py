@@ -279,6 +279,80 @@ def request_stop(db, *, task_id: UUID) -> str:
 
 
 
+
+def save_source_resume(db, *, task_id: UUID, session: dict,
+                       observations: list[dict], cycles: int,
+                       expected_attempt_id: UUID) -> None:
+    """記録済みSource Resultを使ってMAGI再評価直前の再開点を保存する。
+
+    Source読取記録とCheckpoint保存の間に中断してAction数がずれた場合、
+    再開可否の照合で拒否する。モデル結果や架空IDを保存済みResultへ
+    昇格しないため、全Action/Resultを同一Taskから確認する。
+
+    Args:
+        db: 既存Secretary DBへの接続。
+        task_id: 再開点を保存する実TaskのID。
+        session: 観測を受け取る直前のMAGI Session。
+        observations: Action/Resultを記録済みの今回の観測。
+        cycles: これまで完了したMAGI観測サイクル数。
+        expected_attempt_id: 現Workerがclaimした実行試行ID。
+    """
+    if (
+        session.get("status") != "waiting_information"
+        or str(session.get("task_id")) != str(task_id)
+        or not isinstance(observations, list) or not 1 <= len(observations) <= 12
+        or type(cycles) is not int or not 0 <= cycles < 4
+    ):
+        raise ValueError("invalid_source_resume_snapshot")
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, checkpoint FROM secretary.tasks
+               WHERE id=%s FOR UPDATE""", (task_id,),
+        )
+        row = cur.fetchone()
+        if (
+            row is None or row[0] != "running"
+            or (row[1] or {}).get("active_attempt_id") != str(expected_attempt_id)
+        ):
+            raise ValueError("task_attempt_mismatch")
+        checkpoint = row[1] or {}
+        cur.execute(
+            """SELECT a.id, r.id FROM secretary.actions a
+               LEFT JOIN secretary.results r ON r.action_id=a.id
+               WHERE a.task_id=%s""", (task_id,),
+        )
+        persisted = {(str(a), str(b)) for a, b in cur.fetchall() if b is not None}
+        prior = list((session.get("observations") or []))
+        combined = prior + observations
+        observed = {
+            (str(obs.get("action_id")), str(obs.get("result_id")))
+            for obs in combined if isinstance(obs, dict)
+        }
+        if (
+            len(combined) != len(persisted)
+            or observed != persisted
+            or not all(
+                isinstance(obs, dict)
+                and isinstance(obs.get("text"), str)
+                and obs["text"].strip()
+                for obs in combined
+            )
+        ):
+            raise ValueError("source_resume_results_mismatch")
+        checkpoint["source_resume"] = {
+            "version": 1,
+            "session": deepcopy(session),
+            "observations": deepcopy(observations),
+            "cycles": cycles,
+            "result_ids": sorted(result_id for _, result_id in persisted),
+        }
+        cur.execute(
+            """UPDATE secretary.tasks SET checkpoint=%s WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+
+
+
 def requeue_paused(db, *, task_id: UUID) -> dict:
     """本人が停止した未実行Taskだけを同じIDのpendingへ戻す。
 
@@ -311,6 +385,16 @@ def requeue_paused(db, *, task_id: UUID) -> dict:
         action_count = int(cur.fetchone()[0])
         if not can_requeue_paused_task(status, checkpoint, action_count):
             raise ValueError("paused_task_not_requeueable")
+        resume_snapshot = deepcopy(checkpoint.get("source_resume"))
+        if action_count:
+            cur.execute(
+                """SELECT r.id FROM secretary.actions a
+                   JOIN secretary.results r ON r.action_id=a.id
+                   WHERE a.task_id=%s""", (task_id,),
+            )
+            recorded = sorted(str(item[0]) for item in cur.fetchall())
+            if recorded != resume_snapshot["result_ids"]:
+                raise ValueError("paused_task_results_mismatch")
 
         intent = dict(checkpoint["start_intent"])
         # A paused Task cannot be silently changed to the caller's present
@@ -345,6 +429,7 @@ def requeue_paused(db, *, task_id: UUID) -> dict:
         "member_specs": members,
         "decision_strategy": intent["decision_strategy"],
         "policy_snapshot": deepcopy(intent.get("policy_snapshot")),
+        "resume_snapshot": resume_snapshot,
     }
 
 
@@ -630,6 +715,7 @@ def persist_session(
         if active_attempt is not None and str(expected_attempt_id or "") != active_attempt:
             raise ValueError("task_attempt_mismatch")
         checkpoint.update(checkpoint_patch)
+        checkpoint.pop("source_resume", None)
         if projection["task_status"] != "running":
             checkpoint.pop("active_attempt_id", None)
         goal_changed = _merge_goal_interpretation(checkpoint, session)
@@ -1446,6 +1532,17 @@ class PostgresMagiTaskRepository:
         """再起動後に永続化済みの未着手Taskだけを列挙する。"""
         with self._connection_factory() as db:
             return list_pending_starts(db, limit=limit)
+
+    def save_source_resume(self, *, task_id: UUID, session: dict,
+                           observations: list[dict], cycles: int,
+                           expected_attempt_id: UUID) -> None:
+        """MAGI再評価前の検証済み観測とResult IDを保存する。"""
+        with self._connection_factory() as db:
+            save_source_resume(
+                db, task_id=task_id, session=session,
+                observations=observations, cycles=cycles,
+                expected_attempt_id=expected_attempt_id,
+            )
 
     def requeue_paused(self, *, task_id: UUID) -> dict:
         """未実行で停止したTaskだけを元の固定Intentで再キューする。"""
