@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ritsuko.core.observation_loop import (
+from ritsuko.core.task_execution import (
     review_proposal,
     run_observation_loop,
     run_pkb_observation_loop,
@@ -449,7 +449,7 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         def fail(*args):
             calls.append(("fail",))
 
-        from ritsuko.core.observation_loop import resume_user_answer
+        from ritsuko.core.task_execution import resume_user_answer
         updated = await resume_user_answer(
             task_id,
             "Radeon RX 9070 XT",
@@ -506,7 +506,7 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             ValueError,
             "user_resume_re_evaluation_failed",
         ):
-            from ritsuko.core.observation_loop import resume_user_answer
+            from ritsuko.core.task_execution import resume_user_answer
             await resume_user_answer(
                 task_id,
                 "Radeon RX 9070 XT",
@@ -548,7 +548,7 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             calls.append(("abort", str(saved_id), error_type))
 
         with self.assertRaisesRegex(RuntimeError, "transport failed"):
-            from ritsuko.core.observation_loop import resume_user_answer
+            from ritsuko.core.task_execution import resume_user_answer
             await resume_user_answer(
                 task_id,
                 "Radeon RX 9070 XT",
