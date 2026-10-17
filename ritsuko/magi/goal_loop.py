@@ -20,6 +20,7 @@ from .goal_contract import VERSION, validate_goal_turn
 from .runtime_context import create_runtime_context
 from .protocol import default_resource_catalog
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES
+from ritsuko.core.goal_evidence import check_goal_response_evidence
 
 # 「私の」「調査」などをWeb限定と取り違えない。暫定の明示要求
 # GateでありSource選択と根拠充足の意味判断はMAGIが行う。
@@ -58,28 +59,14 @@ async def _apply_judgment(session: dict, decision: dict, *, timeout: float) -> N
     session["user_question"] = None
     session["pending_requests"] = []
     next_step = decision["next"]
-    evidence = decision["evidence"]
-    ids = evidence["result_ids"]
-    recorded = {
-        str(o["result_id"]): o
-        for o in session.get("observations") or []
-        if isinstance(o, dict) and o.get("source") in AUTO_READ_SOURCES
-        and o.get("result_id")
-    }
-    if (any(ref not in recorded for ref in ids)
-            or (evidence["basis"] == "result_refs"
-                and (not ids or any(not recorded[ref].get("verified")
-                                    for ref in ids)))):
-        session.update(status="stopped", next_step="unrecorded_task_result_reference")
-        return
     if next_step == "respond":
-        if (evidence["basis"] == "not_required"
-                and (session.get("requires_source", session.get("requires_web", False))
-                     or session.get("requires_web") or session.get("tool_read_executed"))):
-            session.update(status="stopped", next_step="required_source_not_observed")
-            return
-        if evidence["basis"] != "not_required" and not ids:
-            session.update(status="stopped", next_step="goal_evidence_missing")
+        # RITSUKO checks persisted Result IDs, not the LLM's claim of success.
+        # Task projection calls the same gate before committing completion.
+        evidence_status, _ = check_goal_response_evidence(
+            session, decision["evidence"],
+        )
+        if evidence_status not in {"verified_results", "source_free"}:
+            session.update(status="stopped", next_step=evidence_status)
             return
         state = "READY"
         information_requests = []
