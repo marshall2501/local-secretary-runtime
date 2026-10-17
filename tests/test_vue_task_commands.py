@@ -403,6 +403,15 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app.called[0][3]["timeout"], 9)
 
         queries.task["magi_session"]["status"] = "proposal_ready"
+        # An arbitrary MAGI proposal without user-grounded content cannot
+        # invoke a Review that would be rejected by the atomic DB claim.
+        with self.assertRaisesRegex(TaskCommandConflict, "task_not_waiting_for_review"):
+            await commands.review(queries.uid, "answer_only")
+        queries.task["magi_session"].update({
+            "status": "candidate_ready",
+            "detail": {"state": "READY", "answer_candidate": "本人確認待ちの回答"},
+            "pending_requests": [],
+        })
         with self.assertRaisesRegex(ValueError, "review_decision_not_enabled"):
             await commands.review(queries.uid, "remember")
         result = await commands.review(queries.uid, "answer_only")
