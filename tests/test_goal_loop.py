@@ -14,7 +14,7 @@ from ritsuko.magi.goal_loop import (
     start_goal_dialogue, continue_goal_observations, goal_task_projection,
     _run_goal_turn,
 )
-from ritsuko.core.observation_loop import run_observation_loop
+from ritsuko.core.task_execution import run_observation_loop
 from ritsuko.application.task_runtime import StateDrivenTaskApplication, TaskRuntimePorts
 
 
