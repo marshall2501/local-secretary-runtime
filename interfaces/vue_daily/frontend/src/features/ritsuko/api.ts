@@ -49,8 +49,19 @@ export async function saveJudgmentPreferences(
 ): Promise<JudgmentPreferences> {
   return await postJson<JudgmentPreferences>(base + '/preferences', preferences)
 }
+/** APIプロセス内の一時的なMAGI席状態。DBの確定結果ではない。 */
+export interface MemberOperationProgress {
+  member: string
+  provider: string
+  model: string
+  state: string
+  turn: number
+  elapsed_seconds?: number
+}
 export interface TaskOperation {
   task_id: string
+  member_progress?: Record<string, MemberOperationProgress>
+  live_turn?: number
   status: string
   kind?: string | null
   task_status?: string
