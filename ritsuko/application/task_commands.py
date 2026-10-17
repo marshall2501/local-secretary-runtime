@@ -228,7 +228,9 @@ class TaskCommands:
         """保存済み受付Taskを既存Applicationへつなぎ、Runnerは一種類に保つ。"""
         starter_options = {}
         if self._dialogue_starter_factory is not None:
-            if self._reserve_start is not None:
+            if self._reserve_start is not None or self._requeue_paused is not None:
+                # Explicit resume carries the original persisted Policy
+                # snapshot; today's settings must not override it.
                 starter_options["dialogue_starter"] = self._dialogue_starter_factory(
                     decision_strategy, deepcopy(policy_snapshot),
                 )
