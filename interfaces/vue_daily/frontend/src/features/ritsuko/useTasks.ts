@@ -270,6 +270,7 @@ export function useTasks() {
   let version = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let queuedRefresh = false
+  let queuedForceTrace = false
   let mounted = false
 
   /**
@@ -308,6 +309,7 @@ export function useTasks() {
   async function refresh(forceTrace = false): Promise<void> {
     if (refreshing.value) {
       queuedRefresh = true
+      queuedForceTrace = queuedForceTrace || forceTrace
       ++version
       return
     }
@@ -357,7 +359,9 @@ export function useTasks() {
       refreshing.value = false
       if (queuedRefresh && mounted) {
         queuedRefresh = false
-        void refresh()
+        const fullReload = queuedForceTrace
+        queuedForceTrace = false
+        void refresh(fullReload)
       } else {
         schedulePoll()
       }
