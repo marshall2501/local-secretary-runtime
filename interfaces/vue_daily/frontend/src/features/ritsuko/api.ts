@@ -83,11 +83,14 @@ export async function answerTask(id: string, reply: string): Promise<TaskOperati
     base + '/tasks/' + encodeURIComponent(id) + '/answer', { reply },
   )
 }
-export async function reviewTask(id: string): Promise<TaskOperation> {
-  // remember は別のMemory Intake処理なので、この画面では公開しない。
+export type ReviewDecision = 'answer_only' | 'remember'
+/** Explicit owner choice. Both decisions use the same RITSUKO review Port. */
+export async function reviewTask(
+  id: string, decision: ReviewDecision = 'answer_only',
+): Promise<TaskOperation> {
   return await postJson<TaskOperation>(
     base + '/tasks/' + encodeURIComponent(id) + '/review',
-    { decision: 'answer_only' },
+    { decision },
   )
 }
 export async function stopTask(id: string): Promise<TaskOperation> {
