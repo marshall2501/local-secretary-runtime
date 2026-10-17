@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import logging
-import re
+import logging.config
+import tempfile
 import unittest
+from pathlib import Path
 
 from uvicorn.config import LOGGING_CONFIG
 
@@ -59,6 +61,44 @@ class VueServerLoggingTests(unittest.TestCase):
         self.assertIn(".567", formatted_access)
         self.assertIn('"GET /api/v1/pkb/memory/search?limit=1 HTTP/1.1"', formatted_access)
         self.assertTrue(formatted_access.endswith("200 OK"))
+
+    def test_local_file_contains_both_server_and_http_logs(self):
+        """Persist Uvicorn error + HTTP requests while retaining console handlers."""
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            config = build_vue_log_config(
+                server_name="vue-task-8099", log_dir=folder,
+            )
+            handler = config["handlers"]["local_file"]
+            self.assertEqual(handler["maxBytes"], 10 * 1024 * 1024)
+            self.assertEqual(handler["backupCount"], 5)
+            self.assertIn("default", config["loggers"]["uvicorn"]["handlers"])
+            self.assertIn("access", config["loggers"]["uvicorn.access"]["handlers"])
+
+            try:
+                logging.config.dictConfig(config)
+                logging.getLogger("uvicorn.error").info("Task server started")
+                logging.getLogger("uvicorn.access").info(
+                    '%s - "%s %s HTTP/%s" %d',
+                    "127.0.0.1:5555", "GET", "/api/v1/ritsuko/health",
+                    "1.1", 200,
+                )
+            finally:
+                logging.config.dictConfig(LOGGING_CONFIG)
+
+            log_path = folder / "vue-task-8099.log"
+            self.assertTrue(log_path.exists())
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertRegex(lines[0], rf"^{TIMESTAMP} \\[vue-task-8099\\]")
+            self.assertIn("Task server started", lines[0])
+            self.assertIn('GET /api/v1/ritsuko/health HTTP/1.1', lines[1])
+
+    def test_server_name_is_bounded_to_known_local_processes(self):
+        """Never create unexpected filenames from arbitrary server labels."""
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaises(ValueError):
+                build_vue_log_config(server_name="../secret", log_dir=Path(temp))
 
     def test_uvicorn_defaults_and_http_handlers_are_unchanged(self):
         original_default = LOGGING_CONFIG["formatters"]["default"]["fmt"]
