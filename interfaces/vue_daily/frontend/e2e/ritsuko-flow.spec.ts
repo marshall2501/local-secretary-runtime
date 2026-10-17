@@ -41,7 +41,7 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
     )
     expect(response.status()).toBe(200)
     const persisted = await response.json()
-    expect(persisted.task.magi_session.decision_strategy).toBe(item.value)
+    expect(persisted.trace.task.magi_session.decision_strategy).toBe(item.value)
   }
 })
 
