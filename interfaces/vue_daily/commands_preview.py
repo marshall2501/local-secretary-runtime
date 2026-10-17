@@ -27,13 +27,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     configure_daily_environment(ROOT)
     from bootstrap.magi_task_runtime import build_daily_magi_task_commands
-    from bootstrap.web_runtime import build_core_task_queries
+    from bootstrap.web_runtime import (
+        build_core_task_queries, build_daily_memory_read_service,
+    )
     from interfaces.vue_daily.app import create_app
     import uvicorn
 
     commands = build_daily_magi_task_commands()
     app = create_app(
         queries=build_core_task_queries(), commands=commands,
+        read_service=build_daily_memory_read_service(),
         recover_pending_at_startup=False,
     )
     print("Vue Task command preview: http://127.0.0.1:8099/ui/")
