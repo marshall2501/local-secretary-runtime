@@ -1,5 +1,8 @@
 # SOURCE_MAP — ソース構成と機能対応
 
+2026-10-17 Vue MAGI席の一時ライブ進捗（`main@a55f19d`）: 既存MAGIの`on_member_progress`をTaskCommands→StateDrivenTaskApplication→RITSUKO Observation/Answer/Review→MAGIの両判断方式へ渡し、`TaskCommands.operation`に名前・Provider・Model・Turn・状態・経過秒だけをプロセス内一時保持（本文/Secretは保持しない）。Vueの`MagiProgress.vue`は`operations/{task_id}`の一時進捗とDB永続Turnを明示的に区別。APIプロセス再起動で一時進捗が失われる点は不変、DB Taskの確定状態は変更しない。fake API＋Chromium表示試験を追加。**本人サブPCの実LLM通信・全NiceGUI同等は未実証。**
+
+
 2026-10-17 統合RITSUKO判断実行構造・第二段階（`main@8c3b801`、隔離CI）: `ritsuko/core/task_projection.py`が単一Task状態投影の正本になり、`magi_bridge.py`からGoal専用の状態Writer/分岐を削除。MAGI判断Strategyは引き続き既存`async_execution.py::_advance_by_strategy`で切替え、RITSUKOの`observation_loop.py`はどのStrategyでも記録済みAction/Result IDをObservationへ付与して同じPortへ保存する（ID不在では失敗、偽の根拠で完了しない）。`task_commands.py`は回答候補Review可能性を共通Core helperへ委譲。VueはMAGI候補を状態の正本とせず、DBのTask `phase`で本人回答・Reviewを表示/送信。`test_shared_judgment_task_pipeline.py`は両方式の同一Source/Result/Task縦断を完全fakeで検査する。**これらは実MAGI・本人実機での完走ではない。**
 
 
