@@ -16,7 +16,7 @@ const {
   problem, selectTask, selectView, loadMore,
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
   draftRequest, strategy, defaultStrategy, showStrategySelector,
-  preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
+  activeDefaultStrategy, activeShowStrategySelector, preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
   reply, sendStart, sendAnswer, sendReview, sendStop,
 } = useTasks()
 </script>
@@ -36,6 +36,8 @@ const {
         v-model:request="draftRequest" v-model:strategy="strategy"
         v-model:default-strategy="defaultStrategy"
         v-model:show-strategy-selector="showStrategySelector" v-model:reply="reply"
+        :active-default-strategy="activeDefaultStrategy"
+        :active-show-strategy-selector="activeShowStrategySelector"
         :preferences-loaded="preferencesLoaded" :preferences-busy="preferencesBusy"
         :preferences-message="preferencesMessage"
         :commands-enabled="commandsEnabled" :busy="commandBusy"
