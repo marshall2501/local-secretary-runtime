@@ -297,6 +297,7 @@ async def resume_user_answer(
     fail_task_record: Callable | None = None,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
     user_continuation=continue_with_user_clarification_async,
 ) -> dict:
     """Resume one persisted waiting_user MAGI Task with the same Task ID."""
@@ -313,12 +314,15 @@ async def resume_user_answer(
             sha256(text.encode("utf-8")).hexdigest(),
         )
         claimed = True
+        continuation_args = {
+            "timeout": timeout,
+            "stop_requested": stop_requested,
+            "on_turn_start": on_turn_start,
+        }
+        if on_member_progress is not None:
+            continuation_args["on_member_progress"] = on_member_progress
         updated = await user_continuation(
-            session,
-            text,
-            timeout=timeout,
-            stop_requested=stop_requested,
-            on_turn_start=on_turn_start,
+            session, text, **continuation_args,
         )
         if (
             updated.get("status") == "stopped"
@@ -357,6 +361,7 @@ async def review_proposal(
     memory_result: dict | None = None,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
     review_continuation=continue_with_proposal_review_async,
 ) -> dict:
     """Re-evaluate one explicit proposal-review choice, then let RITSUKO finalize."""
@@ -371,12 +376,15 @@ async def review_proposal(
             )
         )
         claimed = True
+        continuation_args = {
+            "timeout": timeout,
+            "stop_requested": stop_requested,
+            "on_turn_start": on_turn_start,
+        }
+        if on_member_progress is not None:
+            continuation_args["on_member_progress"] = on_member_progress
         updated = await review_continuation(
-            session,
-            observation,
-            timeout=timeout,
-            stop_requested=stop_requested,
-            on_turn_start=on_turn_start,
+            session, observation, **continuation_args,
         )
         if updated.get("status") != "review_evaluated":
             raise ValueError("proposal_review_re_evaluation_failed")
