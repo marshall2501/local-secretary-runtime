@@ -71,7 +71,8 @@ class StateDrivenTaskApplication:
 
     async def answer(self, task_id: UUID, reply: str, *,
                      timeout: float, stop_requested=None,
-                     on_turn_start=None, user_continuation=None) -> dict:
+                     on_turn_start=None, on_member_progress=None,
+                     user_continuation=None) -> dict:
         options = {
             "timeout": timeout,
             "claim_user_resume_record": self._ports.claim_user_resume_record,
@@ -81,6 +82,8 @@ class StateDrivenTaskApplication:
             "stop_requested": stop_requested,
             "on_turn_start": on_turn_start,
         }
+        if on_member_progress is not None:
+            options["on_member_progress"] = on_member_progress
         if user_continuation is not None:
             options["user_continuation"] = user_continuation
         return await self._resume_runner(task_id, reply, **options)
@@ -88,7 +91,7 @@ class StateDrivenTaskApplication:
     async def review(self, task_id: UUID, decision: str, *,
                      timeout: float, memory_result: dict | None = None,
                      stop_requested=None, on_turn_start=None,
-                     review_continuation=None) -> dict:
+                     on_member_progress=None, review_continuation=None) -> dict:
         options = {
             "timeout": timeout,
             "claim_proposal_review_record": self._ports.claim_proposal_review_record,
@@ -98,6 +101,8 @@ class StateDrivenTaskApplication:
             "stop_requested": stop_requested,
             "on_turn_start": on_turn_start,
         }
+        if on_member_progress is not None:
+            options["on_member_progress"] = on_member_progress
         if review_continuation is not None:
             options["review_continuation"] = review_continuation
         return await self._review_runner(task_id, decision, **options)
