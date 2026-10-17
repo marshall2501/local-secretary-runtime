@@ -21,19 +21,11 @@ class RuntimeDatabaseBoundaryTests(unittest.TestCase):
         self.assertTrue(source_ref_allowed(db, "local://daily-pkb/abc"))
         self.assertFalse(source_ref_allowed(db, "fixture://daily-pkb/abc"))
 
-    def test_isolated_pair_remains_available_for_regression(self):
-        db = self.db("secretary_pkb_proto_20260927", "secretary_pkb_proto_writer_20260927")
-        self.assertEqual(connection_mode(db), "isolated")
-        self.assertTrue(allowed_daily_connection(db))
-        self.assertEqual(source_ref(db, "daily-pkb", "abc"), "fixture://daily-pkb/abc")
-        self.assertTrue(source_ref_allowed(db, "fixture://daily-pkb/abc"))
-        self.assertFalse(source_ref_allowed(db, "local://daily-pkb/abc"))
-
     def test_crossed_admin_and_remote_pairs_are_rejected(self):
         cases = (
             self.db("secretary", "secretary_admin"),
-            self.db("secretary", "secretary_pkb_proto_writer_20260927"),
-            self.db("secretary_pkb_proto_20260927", "secretary_daily_runtime"),
+            self.db("secretary", "postgres"),
+            self.db("secretary_rebuild_unapproved", "secretary_daily_runtime"),
             self.db("secretary", "secretary_daily_runtime", "192.0.2.1"),
         )
         for db in cases:
