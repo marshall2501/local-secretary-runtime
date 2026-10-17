@@ -38,6 +38,11 @@ export function useTasks() {
   const commandFeedback = ref('')
   const commandError = ref('')
   const operation = ref<TaskOperation | null>(null)
+  /** 受付中のOperationはDB Taskが確認待ちでも裏でMAGIを実行し得る。 */
+  function hasActiveOperation(id: string): boolean {
+    return operation.value?.task_id === id &&
+      ['accepted', 'running'].includes(operation.value.status)
+  }
   const pendingKey = 'ritsuko.pending-start.v1'
 
   type PendingStart = { id: string; request: string; strategy: DecisionStrategy }
@@ -188,7 +193,7 @@ export function useTasks() {
     selectedId.value = result.task_id
     view.value = 'recent'
     reply.value = ''
-    operation.value = null
+    operation.value = result
     trace.value = null
     window.history.replaceState(null, '', '#task=' + result.task_id)
     await refresh()
@@ -204,6 +209,7 @@ export function useTasks() {
       '本人回答を受付けました。Taskの確定状態を再照会します。',
     )
     if (result) {
+      operation.value = result
       reply.value = ''
       await refresh()
     }
@@ -219,7 +225,10 @@ export function useTasks() {
       () => reviewTask(task.id),
       '回答のみのReviewを受付けました。完了の確定ではありません。',
     )
-    if (result) await refresh()
+    if (result) {
+      operation.value = result
+      await refresh()
+    }
   }
 
   async function sendStop(): Promise<void> {
@@ -229,7 +238,10 @@ export function useTasks() {
       () => stopTask(task.id),
       '停止要求を記録しました。Workerの停止完了とは別です。',
     )
-    if (result) await refresh()
+    if (result) {
+      operation.value = result
+      await refresh()
+    }
   }
   // 同時に走った照会のうち最新の呼び出しだけを採用するための世代番号。
   let version = 0
@@ -246,7 +258,8 @@ export function useTasks() {
     timer = undefined
     if (!mounted || document.visibilityState === 'hidden') return
     const running = commandBusy.value ||
-      ['pending', 'running'].includes(selected.value?.status ?? '')
+      ['pending', 'running'].includes(selected.value?.status ?? '') ||
+      hasActiveOperation(selectedId.value)
     timer = setTimeout(() => { void refresh() }, running ? 3000 : 45000)
   }
 
@@ -283,8 +296,14 @@ export function useTasks() {
       const unchanged = Boolean(summary && trace.value?.task.id === id &&
         trace.value?.task.revision === summary.revision)
       const nextTrace = id ? (unchanged ? trace.value : await getTaskTrace(id)) : null
-      const active = ['pending', 'running'].includes(nextTrace?.task.status ?? '')
-      const nextOperation = id && enabled && active
+      const activeTask = ['pending', 'running'].includes(nextTrace?.task.status ?? '')
+      // While Answer/Review runs, the last persisted Task phase may still be
+      // awaiting input. Poll the in-process operation until it ends, then idle.
+      // When selecting a waiting Task, check once to find an existing worker.
+      const newlySelected = trace.value?.task.id !== id
+      const checkOperation = activeTask || hasActiveOperation(id) ||
+        (newlySelected && nextTrace?.task.status === 'waiting_external')
+      const nextOperation = id && enabled && checkOperation
         ? await getTaskOperation(id).catch(() => null) : null
       if (seq !== version || (selectedId.value && selectedId.value !== id)) return
       hasMore.value = list.length > visibleLimit.value
