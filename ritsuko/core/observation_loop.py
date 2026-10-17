@@ -38,6 +38,7 @@ async def run_observation_loop(
     fail_task_record: Callable,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
     task_id: UUID | None = None,
     dialogue_starter=start_dialogue_async,
     observation_continuation=continue_with_verified_observations_async,
@@ -68,14 +69,14 @@ async def run_observation_loop(
         active_attempt_id = claimed if isinstance(claimed, UUID) else None
         task_created = True
 
-        session = await dialogue_starter(
-            request,
-            member_specs=member_specs,
-            timeout=timeout,
-            stop_requested=stop_requested,
-            on_turn_start=on_turn_start,
-            task_id=str(task_uuid),
-        )
+        start_args = {
+            "member_specs": member_specs, "timeout": timeout,
+            "stop_requested": stop_requested, "on_turn_start": on_turn_start,
+            "task_id": str(task_uuid),
+        }
+        if on_member_progress is not None:
+            start_args["on_member_progress"] = on_member_progress
+        session = await dialogue_starter(request, **start_args)
 
         catalog = resource_catalog or default_resource_catalog()
         cycles = 0
@@ -184,12 +185,15 @@ async def run_observation_loop(
             if not observations:
                 break
 
+            continuation_args = {
+                "timeout": timeout,
+                "stop_requested": stop_requested,
+                "on_turn_start": on_turn_start,
+            }
+            if on_member_progress is not None:
+                continuation_args["on_member_progress"] = on_member_progress
             session = await observation_continuation(
-                session,
-                observations,
-                timeout=timeout,
-                stop_requested=stop_requested,
-                on_turn_start=on_turn_start,
+                session, observations, **continuation_args,
             )
             cycles += 1
 
