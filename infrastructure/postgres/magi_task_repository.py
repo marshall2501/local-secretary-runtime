@@ -1449,7 +1449,7 @@ class PostgresMagiTaskRepository:
 
     def requeue_paused(self, *, task_id: UUID) -> dict:
         """未実行で停止したTaskだけを元の固定Intentで再キューする。"""
-        with self._connect() as db:
+        with self._connection_factory() as db:
             return requeue_paused(db, task_id=task_id)
 
     def request_stop(self, *, task_id: UUID) -> str:
