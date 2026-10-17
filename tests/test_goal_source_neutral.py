@@ -16,9 +16,8 @@ from ritsuko.magi.session_workflow import (
     start_dialogue_async,
 )
 from ritsuko.magi.goal_contract import GOAL_SCHEMA, validate_goal_turn
-from ritsuko.magi.goal_loop import (
-    goal_task_projection, start_goal_dialogue,
-)
+from ritsuko.core.task_projection import task_projection
+from ritsuko.core.judgment_application import apply_judgment
 
 
 SPEC = [{
@@ -83,14 +82,15 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
             return {"status": "ok", "response": judgment(
                 "request_read", source="finance",
             )}
-        session = await start_goal_dialogue(
+        session = await start_dialogue_async(
             "私の家計を調べて", member_specs=SPEC, timeout=5,
-            policy_snapshot=POLICY, caller=fake_member,
+            decision_strategy="llm", policy_snapshot=POLICY,
+            goal_caller=fake_member,
         )
         self.assertEqual(session["status"], "waiting_information")
         self.assertEqual(session["pending_requests"][0]["source"], "finance")
         self.assertFalse(session["tool_read_executed"])
-        self.assertNotEqual(goal_task_projection(session)["task_status"], "completed")
+        self.assertNotEqual(task_projection(session)["task_status"], "completed")
 
     async def test_pkb_and_finance_use_same_task_recording_and_evidence(self) -> None:
         """DB保存を模擬し、両Sourceで同一TaskのResultを参照して完了する。"""
@@ -135,7 +135,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(task, task_id)
                     self.assertEqual(session["decision_strategy"], "llm")
                     self.assertEqual(
-                        goal_task_projection(session)["task_status"], "completed",
+                        task_projection(session)["task_status"], "completed",
                         msg=(session.get("status"), session.get("next_step"),
                              session.get("cloud_context_gate", {}).get("status"),
                              session.get("goal_judgment", {}).get("next")),
@@ -159,7 +159,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
                         goal_caller=fake_member,
                     ),
                 )
-                self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+                self.assertEqual(task_projection(session)["task_status"], "completed")
                 self.assertEqual(calls, [
                     ("create", source), ("read", source),
                     ("record", source), ("persist", source),
@@ -169,7 +169,6 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_forged_and_failed_private_results_cannot_complete(self) -> None:
         """失敗した読取や別Task由来のIDを根拠として完了扱いにしない。"""
-        from ritsuko.magi.goal_loop import _apply_judgment
         session = {
             "status": "running", "next_step": "evaluate_goal",
             "observations": [{
@@ -179,11 +178,11 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
             "goal_judgment": None, "pending_requests": [],
             "user_question": None,
         }
-        await _apply_judgment(session, judgment(
+        await apply_judgment(session, judgment(
             "respond", refs=["recorded-failure"],
             basis="result_refs", answer="未確認の家計額",
-        ), timeout=5)
-        self.assertNotEqual(goal_task_projection(session)["task_status"], "completed")
+        ), strategy="llm", purpose="evaluate_goal")
+        self.assertNotEqual(task_projection(session)["task_status"], "completed")
 
         session["status"] = "running"
         await _apply_judgment(session, judgment(
