@@ -321,8 +321,10 @@ class TaskCommands:
         if decision == "remember":
             eligible = reviewable_user_knowledge_proposal(session) is not None
         else:
+            # The same guarded candidates as the DB claim. An arbitrary
+            # proposal_ready session cannot initiate a supposedly valid review.
             eligible = (
-                session.get("status") == "proposal_ready"
+                reviewable_user_knowledge_proposal(session) is not None
                 or reviewable_answer_candidate(session) is not None
             )
         if (
