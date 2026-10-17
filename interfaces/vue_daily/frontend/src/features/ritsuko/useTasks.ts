@@ -198,7 +198,7 @@ export function useTasks() {
     const task = selected.value
     const text = reply.value.trim()
     if (!task || task.status !== 'waiting_external' ||
-        task.magi_session?.status !== 'waiting_user' || !text) return
+        task.phase !== 'awaiting_clarification' || !text) return
     const result = await sendCommand(
       () => answerTask(task.id, text),
       '本人回答を受付けました。Taskの確定状態を再照会します。',
@@ -211,13 +211,10 @@ export function useTasks() {
 
   async function sendReview(): Promise<void> {
     const task = selected.value
-    const session = task?.magi_session
-    const answerReady = session?.status === 'candidate_ready' &&
-      session.detail?.state === 'READY' &&
-      Boolean(session.detail?.answer_candidate?.trim()) &&
-      !(session.pending_requests?.length)
+    // RITSUKO's persisted Task phase is authoritative. Do not independently
+    // reconstruct review eligibility from MAGI's provisional session shape.
     if (!task || task.status !== 'waiting_external' ||
-        (session?.status !== 'proposal_ready' && !answerReady)) return
+        task.phase !== 'awaiting_review') return
     const result = await sendCommand(
       () => reviewTask(task.id),
       '回答のみのReviewを受付けました。完了の確定ではありません。',
