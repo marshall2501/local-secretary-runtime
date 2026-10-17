@@ -155,7 +155,7 @@ def main() -> None:
     uvicorn.run(create_app(
         queries=build_core_task_queries(),
         read_service=build_daily_memory_read_service(),
-    ), host="127.0.0.1", port=port, log_config=build_vue_log_config())
+    ), host="127.0.0.1", port=port, log_config=build_vue_log_config(server_name="vue-readonly-8097"))
 
 
 if __name__ == "__main__":
