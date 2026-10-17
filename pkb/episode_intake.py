@@ -1,8 +1,8 @@
-"""Lossless, fictional-only episode intake. This does NOT turn prose into Claims.
+"""Validate and load the Workbench-only fictional episode corpus.
 
 An episode is source evidence, not an asserted fact. Independent claim
 extraction and the eight-answer gold evaluator are separate later stages.
-Never read expected.json while importing: it contains test answers.
+Never read expected.json while loading: it contains test answers.
 """
 from __future__ import annotations
 
@@ -11,10 +11,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from psycopg.types.json import Jsonb
-
-DBNAME = "secretary_pkb_proto_20260927"
-WRITER = "secretary_pkb_proto_writer_20260927"
 SOURCE_KINDS = {"user_statement", "file", "web", "tool", "service"}
 
 
@@ -70,61 +66,3 @@ def load_fixture(path: Path) -> tuple[dict, ...]:
         raise ValueError("Only bundled fictional episodes.json is accepted")
     return validate_corpus(json.loads(path.read_text(encoding="utf-8")))
 
-
-def ingest(db, episodes: tuple[dict, ...]) -> tuple[int, int]:
-    info = db.info
-    if (info.dbname != DBNAME or info.host not in ("127.0.0.1", "localhost", "::1")
-            or info.user != WRITER):
-        raise ValueError("Refusing non-isolated DB or non-dedicated writer")
-    if len(episodes) != 10:
-        raise ValueError("Incomplete episode corpus")
-    # Revalidate all records before opening the DB transaction.
-    validate_corpus({"fictional_only": True, "dataset_id": "pkb-p0-fictional-20260927",
-                     "schema_version": 1, "episodes": list(episodes)})
-    inserted = 0
-    replayed = 0
-    with db.transaction(), db.cursor() as cur:
-        for ep in episodes:
-            ep_id = ep["id"]
-            checksum = digest(ep)
-            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",
-                        ("pkb-fixture:" + ep_id,))
-            cur.execute(
-                """SELECT payload_sha256 FROM secretary.pkb_episode_receipts
-                   WHERE episode_id=%s""", (ep_id,),
-            )
-            existing = cur.fetchone()
-            if existing:
-                if existing[0] != checksum:
-                    raise ValueError("Changed content for a previously imported episode")
-                replayed += 1
-                continue
-            recorded = datetime.fromisoformat(ep["recorded_at"])
-            cur.execute(
-                """INSERT INTO secretary.sources
-                   (source_type, uri, citation, retrieved_at, recorded_at,
-                    confidentiality, metadata)
-                   VALUES (%s,%s,%s,%s,%s,'private',%s)
-                   RETURNING id""",
-                (
-                    ep["source_kind"], ep["source_ref"], ep_id, recorded, recorded,
-                    Jsonb({
-                        "fictional_only": True,
-                        "dataset_id": "pkb-p0-fictional-20260927",
-                        "episode_id": ep_id,
-                        "domain": ep["domain"],
-                        "original_text": ep["text"],
-                        "occurred_at": ep["occurred_at"],
-                        "interpretation_state": "uninterpreted",
-                    }),
-                ),
-            )
-            source_id = cur.fetchone()[0]
-            cur.execute(
-                """INSERT INTO secretary.pkb_episode_receipts
-                   (episode_id,source_id,payload_sha256,domain,interpretation_state)
-                   VALUES (%s,%s,%s,%s,'uninterpreted')""",
-                (ep_id, source_id, checksum, ep["domain"]),
-            )
-            inserted += 1
-    return inserted, replayed
