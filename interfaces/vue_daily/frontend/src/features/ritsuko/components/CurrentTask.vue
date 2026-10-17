@@ -67,17 +67,17 @@ async function copyText(text: string, label: string): Promise<void> {
         <span class="field-name">停止</span>
         <p>停止要求を受付済み。Workerの停止完了は未確認です。</p>
       </div>
-      <div v-if="task.status === 'waiting_external' && task.magi_session?.status === 'waiting_user'"
+      <div v-if="task.status === 'waiting_external' && task.phase === 'awaiting_clarification'"
         class="question">
         <strong>次の操作：本人回答</strong>
         <p>{{ task.question || task.magi_session.user_question || '回答入力欄から追加情報を送信してください。' }}</p>
       </div>
-      <div v-else-if="task.status === 'waiting_external' && task.magi_session?.status === 'proposal_ready'"
+      <div v-else-if="task.status === 'waiting_external' && task.phase === 'awaiting_review' && task.can_answer_only"
         class="question">
         <strong>次の操作：回答候補の確認</strong>
         <p>このTaskの回答候補を確認し、上のReview操作から完了判断を依頼してください。</p>
       </div>
-      <div v-if="task.question && !(task.status === 'waiting_external' && task.magi_session?.status === 'waiting_user')" class="question">
+      <div v-if="task.question && !(task.status === 'waiting_external' && task.phase === 'awaiting_clarification')" class="question">
         <strong>本人への質問（保存済み）</strong><p>{{ task.question }}</p>
       </div>
       <div v-if="task.status === 'waiting_external' &&
