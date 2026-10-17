@@ -15,7 +15,9 @@ const {
   items, view, hasMore, selectedId, trace, selected, connected, refreshing,
   problem, selectTask, selectView, loadMore,
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
-  draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
+  draftRequest, strategy, defaultStrategy, showStrategySelector,
+  preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
+  reply, sendStart, sendAnswer, sendReview, sendStop,
 } = useTasks()
 </script>
 
@@ -31,11 +33,16 @@ const {
   <div class="workspace">
     <main class="ritsuko-main">
       <TaskCommandPanel
-        v-model:request="draftRequest" v-model:strategy="strategy" v-model:reply="reply"
+        v-model:request="draftRequest" v-model:strategy="strategy"
+        v-model:default-strategy="defaultStrategy"
+        v-model:show-strategy-selector="showStrategySelector" v-model:reply="reply"
+        :preferences-loaded="preferencesLoaded" :preferences-busy="preferencesBusy"
+        :preferences-message="preferencesMessage"
         :commands-enabled="commandsEnabled" :busy="commandBusy"
         :task="selected" :feedback="commandFeedback" :error="commandError"
         :operation="operation"
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @stop="sendStop"
+        @save-preferences="savePreferences"
       />
       <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
       <MagiProgress :task="selected" />
