@@ -434,6 +434,189 @@ async def resume_task(connect, *, strategy: str) -> None:
                     (task_id,))
         assert cur.fetchone()[0] == 0, "clarification_is_not_a_source_read"
 
+
+async def verify_safe_paused_restart(connect) -> None:
+    """Verify real DB→Commands→normal runner restart, plus unsafe refusal."""
+    from infrastructure.postgres.core_task_query_repository import (
+        PostgresCoreTaskQueryRepository,
+    )
+    from ritsuko.application.task_commands import (
+        TaskCommandConflict, TaskCommands,
+    )
+
+    repo = PostgresMagiTaskRepository(connect)
+    queries = PostgresCoreTaskQueryRepository(connect)
+    specs = [{
+        "name": "CASPER", "provider": "ollama", "model": "ci-fake-only",
+        "enabled": True, "weight": 1.0, "timeout_seconds": 5,
+        "endpoint": "http://127.0.0.1:11434",
+    }]
+    task_id = uuid4()
+    request = "Pythonの辞書について簡単に説明してください"
+    assert repo.reserve_start(
+        task_id=task_id, request=request, member_specs=specs,
+        decision_strategy="llm", policy_snapshot=POLICY,
+    )
+    assert repo.request_stop(task_id=task_id) == "paused"
+    assert queries.trace(task_id)["task"]["can_resume"] is True
+
+    async def fake_goal(_spec, _envelope, **_kwargs):
+        """Produce a valid source-free judgment without calling a real LLM."""
+        return {"status": "ok", "response": goal_decision("respond"), "errors": []}
+
+    def never_source(*_args):
+        """Raise if a source-free Task unexpectedly tries executing a Source."""
+        raise AssertionError("source_free_resume_must_not_read")
+
+    class CommonRunner:
+        """Resume through the real shared Task lifecycle, not a fake writer."""
+
+        async def start(self, text, *, task_id, member_specs, timeout,
+                        dialogue_starter, stop_requested=None,
+                        on_member_progress=None, **_kwargs):
+            """Run the normal MAGI Core with the existing fenced DB ports."""
+            return await run_observation_loop(
+                text, task_id=task_id, member_specs=member_specs,
+                timeout=timeout, stop_requested=stop_requested,
+                on_member_progress=on_member_progress,
+                create_task_record=lambda uid, raw, members:
+                    repo.claim_start(
+                        task_id=uid, request=raw, member_specs=members,
+                    ),
+                execute_source_request=never_source,
+                record_source_read_record=never_source,
+                persist_session_record=lambda uid, session, cap, attempt:
+                    repo.persist_session(
+                        task_id=uid, session=session,
+                        selected_capability=cap, expected_attempt_id=attempt,
+                    ),
+                fail_task_record=lambda uid, error, attempt:
+                    repo.fail_task(
+                        task_id=uid, error=error,
+                        expected_attempt_id=attempt,
+                    ),
+                dialogue_starter=dialogue_starter,
+            )
+
+    def commands() -> TaskCommands:
+        """Use the real paused requeue Port without loading today's model seats."""
+        return TaskCommands(
+            CommonRunner(), queries,
+            lambda: (_ for _ in ()).throw(
+                AssertionError("resume_must_use_original_member_specs")
+            ),
+            dialogue_starter_factory=lambda strategy, policy: partial(
+                start_dialogue_async, decision_strategy=strategy,
+                policy_snapshot=policy, goal_caller=fake_goal,
+            ),
+            requeue_paused=repo.requeue_paused,
+        )
+
+    current = commands()
+    receipt = await current.resume(task_id)
+    assert receipt["task_id"] == str(task_id)
+    assert receipt["status"] in {"accepted", "running"}
+    # Concurrent or duplicate restart must not schedule another Worker.
+    try:
+        await commands().resume(task_id)
+    except TaskCommandConflict as exc:
+        assert str(exc) == "paused_task_not_requeueable"
+    else:
+        raise AssertionError("duplicate_restart_was_accepted")
+    for _ in range(200):
+        if current.operation(task_id)["status"] in {
+            "execution_finished", "execution_failed",
+        }:
+            break
+        await asyncio.sleep(0.01)
+    assert current.operation(task_id)["status"] == "execution_finished"
+    trace = queries.trace(task_id)
+    assert trace["task"]["status"] == "completed"
+    assert trace["task"]["can_resume"] is False
+    assert trace["task"]["magi_session"]["member_specs"] == specs
+    assert trace["task"]["magi_session"]["decision_strategy"] == "llm"
+    assert trace["actions"] == [], "source-free_requeue_must_not_write_action"
+    with connect() as db, db.cursor() as cur:
+        cur.execute(
+            """SELECT checkpoint FROM secretary.tasks WHERE id=%s""",
+            (task_id,),
+        )
+        checkpoint = cur.fetchone()[0]
+        assert checkpoint["start_intent"]["policy_snapshot"] == POLICY
+        assert checkpoint["start_intent"]["state"] == "claimed"
+        cur.execute(
+            """SELECT count(*) FROM secretary.audit_events
+               WHERE task_id=%s AND event_type='core.magi.task_requeued'""",
+            (task_id,),
+        )
+        assert cur.fetchone()[0] == 1, "duplicate_requeue_audit"
+
+    # A stopped claimed Task with no persisted Action and no stored session
+    # can restart. Once a Source/Action has run, blind replay is denied.
+    for with_action in (False, True):
+        uid = uuid4()
+        assert repo.reserve_start(
+            task_id=uid, request=request, member_specs=specs,
+            decision_strategy="llm", policy_snapshot=POLICY,
+        )
+        old_attempt = repo.claim_start(
+            task_id=uid, request=request, member_specs=specs,
+        )
+        if with_action:
+            action, result = repo.record_source_read(
+                task_id=uid,
+                execution={
+                    "status": "ok", "source": "pkb", "tool": "pkb",
+                    "operation": "read", "total": 1,
+                    "answer": "合成の参照結果",
+                    "verified_by": "ci_bounded_read_fixture",
+                    "result": {"result_kind": "ci_fixture"},
+                },
+                pending_request={
+                    "source": "pkb", "capability": "pkb_search",
+                    "what": "合成", "request_ids": ["old-attempt"],
+                },
+                expected_attempt_id=old_attempt,
+            )
+            assert action and result
+        assert repo.request_stop(task_id=uid) == "running"
+        stopped = repo.persist_session(
+            task_id=uid, session={
+                "task_id": str(uid), "status": "stopped",
+                "next_step": "user_requested_stop", "turns": [],
+            },
+            expected_attempt_id=old_attempt,
+        )
+        assert stopped["task_status"] == "paused"
+        assert queries.trace(uid)["task"]["can_resume"] is (not with_action)
+        if with_action:
+            try:
+                await commands().resume(uid)
+            except TaskCommandConflict as exc:
+                assert str(exc) == "paused_task_not_requeueable"
+            else:
+                raise AssertionError("source_already_executed_task_restarted")
+            assert queries.trace(uid)["task"]["status"] == "paused"
+        else:
+            intent = repo.requeue_paused(task_id=uid)
+            assert intent["task_id"] == uid
+            assert intent["policy_snapshot"] == POLICY
+            new_attempt = repo.claim_start(
+                task_id=uid, request=request, member_specs=specs,
+            )
+            assert new_attempt != old_attempt
+            try:
+                repo.record_source_read(
+                    task_id=uid,
+                    execution={"status": "ok", "source": "pkb"},
+                    pending_request={"source": "pkb", "request_ids": ["stale"]},
+                    expected_attempt_id=old_attempt,
+                )
+            except ValueError as exc:
+                assert str(exc) == "task_attempt_mismatch"
+            else:
+                raise AssertionError("stale_attempt_wrote_source_after_restart")
+
 def main(project: str, container: str) -> None:
     """Verify isolated Docker identity, then run real PostgreSQL Task cases."""
     port = DISPOSABLE_PORT(project, container)
@@ -467,6 +650,8 @@ def main(project: str, container: str) -> None:
         asyncio.run(resume_task(connect, strategy=strategy))
         print(f"PASS: disposable Task {strategy}/user-clarification"
               + ("/answer-only-review" if strategy == "standard" else "/completed"))
+    asyncio.run(verify_safe_paused_restart(connect))
+    print("PASS: paused Task requeues same ID/intent with no Action; old attempts fenced; executed read restart denied")
     print("PASS: real Task/Action/Source/Result/Goal/Audit persistence in disposable PG.")
 
 
