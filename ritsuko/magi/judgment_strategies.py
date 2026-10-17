@@ -141,15 +141,13 @@ class GoalJudgment:
 
     def initialize(self, session: dict) -> None:
         """Initialize bounded Goal context without rewriting member settings."""
-        from .goal_loop import MAX_GOAL_TURNS, goal_requires_source, goal_requires_web
+        from .goal_loop import MAX_GOAL_TURNS
 
         enabled = [s for s in session["member_specs"] if s.get("enabled")]
         if not enabled:
             raise ValueError("no_enabled_magi_member")
         session.update(
             control_mode="goal_loop_v1", next_step="evaluate_goal",
-            requires_source=goal_requires_source(session["user_raw"]),
-            requires_web=goal_requires_web(session["user_raw"]),
             goal=None, goal_judgment=None, user_replies=[],
             previous_queries=[], status_message=None,
             turn_limit=MAX_GOAL_TURNS,
