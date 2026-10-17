@@ -176,7 +176,30 @@ export function useTasks() {
   }
   // 同時に走った照会のうち最新の呼び出しだけを採用するための世代番号。
   let version = 0
-  let timer: ReturnType<typeof setInterval> | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let queuedRefresh = false
+  let mounted = false
+
+  /**
+   * 処理中だけ頻度を上げ、待機中はDB照会とログを減らす。
+   * setTimeoutで前回応答完了後に次を予約し、重複pollingを防ぐ。
+   */
+  function schedulePoll(): void {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = undefined
+    if (!mounted || document.visibilityState === 'hidden') return
+    const running = commandBusy.value ||
+      ['pending', 'running'].includes(selected.value?.status ?? '')
+    timer = setTimeout(() => { void refresh() }, running ? 3000 : 45000)
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === 'visible') void refresh()
+    else if (timer !== undefined) {
+      clearTimeout(timer)
+      timer = undefined
+    }
+  }
 
   /**
    * 現在の表示条件で一覧を取得し、選択IDのTraceを続けて取得する。
@@ -184,6 +207,11 @@ export function useTasks() {
    * Taskを選び直した直後の詳細は未取得のままになることがある。
    */
   async function refresh(): Promise<void> {
+    if (refreshing.value) {
+      queuedRefresh = true
+      ++version
+      return
+    }
     const seq = ++version
     const filter = view.value
     refreshing.value = true
@@ -194,8 +222,12 @@ export function useTasks() {
       if (seq !== version) return
       commandsEnabled.value = enabled
       const id = selectedId.value || list[0]?.id || ''
-      const nextTrace = id ? await getTaskTrace(id) : null
-      const nextOperation = id && enabled
+      const summary = list.find(item => item.id === id)
+      const unchanged = Boolean(summary && trace.value?.task.id === id &&
+        trace.value?.task.revision === summary.revision)
+      const nextTrace = id ? (unchanged ? trace.value : await getTaskTrace(id)) : null
+      const active = ['pending', 'running'].includes(nextTrace?.task.status ?? '')
+      const nextOperation = id && enabled && active
         ? await getTaskOperation(id).catch(() => null) : null
       if (seq !== version || (selectedId.value && selectedId.value !== id)) return
       hasMore.value = list.length > visibleLimit.value
@@ -217,7 +249,13 @@ export function useTasks() {
         '選択中の詳細は未取得の場合があります。（' +
         String(error) + '）'
     } finally {
-      if (seq === version) refreshing.value = false
+      refreshing.value = false
+      if (queuedRefresh && mounted) {
+        queuedRefresh = false
+        void refresh()
+      } else {
+        schedulePoll()
+      }
     }
   }
 
@@ -270,17 +308,19 @@ export function useTasks() {
     }
   }
 
-  // 他の画面からTaskが進む可能性があるため、表示中は3秒ごとに再照会する。
-  // 画面を閉じる際はTimerとイベント購読だけを解除する。Task停止要求は送らない。
+  // 進行中は3秒、待機中は45秒。非表示タブでは定期照会しない。
   onMounted(() => {
+    mounted = true
     window.addEventListener('hashchange', onHashChange)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     void refresh()
-    timer = setInterval(() => { void refresh() }, 3000)
   })
   onUnmounted(() => {
+    mounted = false
     ++version
     window.removeEventListener('hashchange', onHashChange)
-    if (timer !== undefined) clearInterval(timer)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    if (timer !== undefined) clearTimeout(timer)
   })
   return {
     items, view, visibleLimit, hasMore, selectedId, trace, selected, connected, refreshing,
