@@ -296,6 +296,51 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed["status"], "waiting_information")
         self.assertNotEqual(goal_task_projection(failed)["task_status"], "completed")
 
+    async def test_explicitly_unneeded_sources_allow_real_goal_answer(self):
+        """実機事象: 『外部検索と個人PKBは不要』をSource必須と誤認しない。"""
+        from ritsuko.magi.goal_loop import (
+            goal_requires_source, goal_requires_web,
+        )
+
+        request = (
+            "Pythonの辞書（dict）とは何か、簡単なコード例を1つ添えて日本語で"
+            "説明してください。外部検索や個人PKBの参照は不要です。"
+        )
+        self.assertFalse(goal_requires_source(request))
+        self.assertFalse(goal_requires_web(request))
+        self.assertTrue(goal_requires_source("Python公式資料でdict.getを調べて"))
+        self.assertTrue(goal_requires_web("公式サイトで調べて"))
+        self.assertFalse(goal_requires_source("Web検索は不要です。辞書の説明だけをしてください。"))
+
+        async def respond(_spec, _envelope, **_kwargs):
+            return {"status": "ok", "response": judgment(
+                "respond", goal="Pythonの辞書をコード例付きで説明する",
+                answer="辞書はキーと値の対応です。person = {'name': '田中'}",
+                fulfillment="met", basis="not_required",
+            )}
+
+        # Both legacy compatibility entry and the one canonical daily Task
+        # session must accept the same Source-free response.
+        for start in ("compatibility", "shared"):
+            with self.subTest(start=start):
+                if start == "compatibility":
+                    session = await start_goal_dialogue(
+                        request, member_specs=SPEC, timeout=5, caller=respond,
+                    )
+                else:
+                    session = await start_dialogue_async(
+                        request, member_specs=SPEC, timeout=5,
+                        decision_strategy="llm", goal_caller=respond,
+                    )
+                self.assertFalse(session["requires_source"])
+                self.assertFalse(session["requires_web"])
+                self.assertEqual(session["status"], "candidate_ready")
+                self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+                self.assertEqual(
+                    goal_task_projection(session)["reason"], "goal_evaluated_source_free",
+                )
+                self.assertEqual(session["observations"], [])
+
     async def test_source_free_can_complete_without_fake_read(self):
         async def responder(_spec, envelope, **_kw):
             self.assertEqual(envelope["stage"], "goal")
