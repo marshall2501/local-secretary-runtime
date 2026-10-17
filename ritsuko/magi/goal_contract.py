@@ -8,6 +8,7 @@ from __future__ import annotations
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES
 
 VERSION = "goal_loop_v1"
+DEFAULT_GOAL_TURN_LIMIT = 6
 
 GOAL_SYSTEM = """あなたはPersonal Local Secretary AIのMAGI判断役です。
 本人のGoalを理解し、出典不要の回答、または利用可能なSourceのreadを提案してください。
