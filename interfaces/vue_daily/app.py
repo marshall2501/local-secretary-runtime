@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from ritsuko.application.task_commands import TaskCommands
 from interfaces.api.ritsuko_tasks import create_ritsuko_task_router
+from interfaces.api.pkb_read import create_pkb_read_router
 from interfaces.vue_daily.preferences import (
     read_judgment_preferences, save_judgment_preferences,
 )
@@ -32,6 +33,7 @@ class JudgmentPreferencesBody(BaseModel):
 
 
 def create_app(*, queries, commands: TaskCommands | None = None,
+               read_service=None,
                recover_pending_at_startup: bool = True) -> FastAPI:
     """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
 
@@ -41,6 +43,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         queries: 保存済みTask一覧と履歴を読み取る共有Query Service。
         commands: 実DB・権限・Sourceを正しく組み立てた場合だけ渡すコマンド受付サービス。
             省略時は従来どおり読取専用（POSTは503）とする。
+        read_service: 共通ReadService。省略時はPKB検索を503で拒否。
         recover_pending_at_startup: Commands注入時の未着手Task自動再開。
             実Taskの手動プレビューではFalseにして過去のJobを起動しない。
 
@@ -121,6 +124,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
 
     # UIと無関係のTask APIを注入する。通信境界はこのhostで一律に保護。
     app.include_router(create_ritsuko_task_router(queries=queries, commands=commands))
+    app.include_router(create_pkb_read_router(read_service=read_service))
 
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
     dist = Path(__file__).parent / "frontend" / "dist"
@@ -139,13 +143,18 @@ def create_app(*, queries, commands: TaskCommands | None = None,
 
 def main() -> None:
     """既存GUIやAPIを停止せず、明示起動時だけ別localhost portで受け付ける。"""
-    from bootstrap.web_runtime import build_core_task_queries
+    from bootstrap.web_runtime import (
+        build_core_task_queries, build_daily_memory_read_service,
+    )
     import uvicorn
 
     port = int(os.getenv("LSA_VUE_DAILY_PORT", "8097"))
     if port in {8010, 8015, 8092, 8093, 8098} or not 1024 <= port <= 65535:
         raise RuntimeError("Use an isolated Vue Daily port (default 8097).")
-    uvicorn.run(create_app(queries=build_core_task_queries()), host="127.0.0.1", port=port)
+    uvicorn.run(create_app(
+        queries=build_core_task_queries(),
+        read_service=build_daily_memory_read_service(),
+    ), host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":
