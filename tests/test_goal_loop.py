@@ -381,6 +381,46 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s["next_step"], "required_source_not_observed")
         self.assertNotEqual(goal_task_projection(s)["task_status"], "completed")
 
+    async def test_shared_ritsuko_loop_three_llm_goal_seats_source_free(self):
+        """MAGIの席数が3でも共通Task/Observationに1回だけ保存する。"""
+        calls = []
+        specs = [{**SPEC[0], "name": name}
+                 for name in ("MELCHIOR", "CASPER", "BALTHASAR")]
+        async def responder(spec, envelope, **_kwargs):
+            calls.append(("llm", spec["name"], envelope["turn"]))
+            return {"status": "ok", "response": judgment(
+                "respond", goal="辞書の説明をする", fulfillment="met",
+                basis="not_required", answer="辞書はキーと値の組です。",
+            )}
+        def create(*_args):
+            calls.append(("create",))
+        def persist(_id, session, _cap):
+            calls.append(("persist",))
+            self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+        session = await run_observation_loop(
+            "Pythonの辞書を簡潔に説明して",
+            member_specs=specs, timeout=5,
+            create_task_record=create,
+            execute_source_request=lambda *_args: self.fail("Source-free should not read"),
+            record_source_read_record=lambda *_args: self.fail("No Result required"),
+            persist_session_record=persist,
+            fail_task_record=lambda *_args: self.fail("No fail"),
+            dialogue_starter=partial(
+                start_dialogue_async, decision_strategy="llm",
+                goal_caller=responder,
+            ),
+            observation_continuation=partial(
+                continue_with_verified_observations_async,
+                goal_caller=responder,
+            ),
+        )
+        self.assertEqual(session["status"], "candidate_ready")
+        self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+        self.assertEqual(len(session["turns"][0]["member_results"]), 3)
+        self.assertEqual(calls.count(("create",)), 1)
+        self.assertEqual(calls.count(("persist",)), 1)
+        self.assertEqual(len([x for x in calls if x[0] == "llm"]), 3)
+
     async def test_web_result_id_roundtrip_and_projection(self):
         calls = []
         result_id = str(uuid4())
