@@ -214,6 +214,11 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def start_dialogue(user_raw, *, policy_snapshot, **kwargs):
             """開始時の権限とTask IDがMAGIへ渡ることを観測する。"""
             seen.append(("start", policy_snapshot, kwargs["task_id"], kwargs["decision_strategy"]))
+            kwargs["on_member_progress"]({
+                "task_id": kwargs["task_id"], "member": "MELCHIOR",
+                "provider": "ollama", "model": "fake", "turn": 1,
+                "state": "running",
+            })
             return {
                 "task_id": kwargs["task_id"], "status": "waiting_user",
                 "member_specs": kwargs["member_specs"], "user_raw": user_raw,
@@ -223,11 +228,21 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def resume_dialogue(session, reply, **kwargs):
             """保存済みTaskの本人回答後にMAGIへ同じ対話を渡す。"""
             seen.append(("answer", reply, session["task_id"]))
+            kwargs["on_member_progress"]({
+                "task_id": session["task_id"], "member": "MELCHIOR",
+                "provider": "ollama", "model": "fake", "turn": 2,
+                "state": "completed",
+            })
             return {**session, "status": "proposal_ready"}
 
         async def evaluate_review(session, observation, **kwargs):
             """回答のみReviewの観測をMAGIへ渡して再評価済みを模倣する。"""
             seen.append(("review", observation["source"], session["task_id"]))
+            kwargs["on_member_progress"]({
+                "task_id": session["task_id"], "member": "MELCHIOR",
+                "provider": "ollama", "model": "fake", "turn": 3,
+                "state": "completed",
+            })
             return {**session, "status": "review_evaluated"}
 
         bindings = MagiTaskBindings(
@@ -248,6 +263,10 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         uid = UUID(started["task_id"])
         await self._wait_for(commands, uid)
         self.assertEqual(repo.tasks[uid]["status"], "waiting_external")
+        self.assertEqual(
+            commands.operation(uid)["member_progress"]["MELCHIOR"]["state"],
+            "running",
+        )
         self.assertEqual(repo.calls[:3], ["reserve", "claim_start", "persist"])
         self.assertEqual(seen[0][1]["profile_id"], "fixture-policy")
         self.assertEqual(seen[0][2], str(uid))
@@ -260,6 +279,9 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answered["kind"], "answer")
         await self._wait_for(commands, uid)
         self.assertEqual(repo.tasks[uid]["magi_session"]["status"], "proposal_ready")
+        self.assertEqual(
+            commands.operation(uid)["member_progress"]["MELCHIOR"]["turn"], 2,
+        )
         self.assertEqual(seen[1], ("answer", "本人の回答", str(uid)))
         self.assertEqual(policies, ["loaded"])
         self.assertEqual(repo.tasks[uid]["magi_session"]["decision_strategy"], "llm")
@@ -269,6 +291,9 @@ class SharedMagiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted["status"], "accepted")
         await self._wait_for(commands, uid)
         self.assertEqual(seen[2], ("review", "proposal_review", str(uid)))
+        self.assertEqual(
+            commands.operation(uid)["member_progress"]["MELCHIOR"]["turn"], 3,
+        )
         self.assertIn("claim_review", repo.calls)
         self.assertIn("finalize_review", repo.calls)
         self.assertEqual(policies, ["loaded"])
