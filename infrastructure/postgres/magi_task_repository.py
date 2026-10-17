@@ -12,7 +12,7 @@ from ritsuko.core.magi_bridge import (
     reviewable_user_knowledge_proposal,
     reviewable_answer_candidate,
 )
-from ritsuko.core.task_projection import task_projection
+from ritsuko.core.task_projection import can_requeue_paused_task, task_projection
 from pkb.memory_contracts import MemoryIntake
 
 
@@ -276,6 +276,76 @@ def request_stop(db, *, task_id: UUID) -> str:
             })),
         )
     return next_status
+
+
+
+def requeue_paused(db, *, task_id: UUID) -> dict:
+    """本人が停止した未実行Taskだけを同じIDのpendingへ戻す。
+
+    Task/Action/Resultを重複させず、元のMAGI席設定・判断方式・権限
+    Snapshotをそのまま再利用する。Source取得・回答/Review・Action後は
+    強制再実行せず、将来のチェックポイント復元機構を待つ。
+
+    Args:
+        db: 既存Secretary PostgreSQLのtransaction接続。
+        task_id: 本人が停止したTaskのID。
+
+    Returns:
+        dict: 保存済みの実行Intent。後続は通常claim_startを使う。
+    """
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT request, status, checkpoint
+               FROM secretary.tasks WHERE id=%s FOR UPDATE""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError("task_not_found")
+        request, status, checkpoint = row
+        checkpoint = checkpoint or {}
+        cur.execute(
+            "SELECT count(*) FROM secretary.actions WHERE task_id=%s",
+            (task_id,),
+        )
+        action_count = int(cur.fetchone()[0])
+        if not can_requeue_paused_task(status, checkpoint, action_count):
+            raise ValueError("paused_task_not_requeueable")
+
+        intent = dict(checkpoint["start_intent"])
+        # A paused Task cannot be silently changed to the caller's present
+        # default MAGI members, strategy or Policy snapshot.
+        members = deepcopy(checkpoint["member_specs"])
+        intent["state"] = "pending"
+        checkpoint.update({
+            "phase": "accepted", "stop_requested": False,
+            "reason": "user_requested_same_task_restart",
+            "question": None, "message": None,
+            "start_intent": intent,
+            "final_core_decision": None,
+        })
+        cur.execute(
+            """UPDATE secretary.tasks
+               SET status='pending', checkpoint=%s, completed_at=NULL
+               WHERE id=%s""",
+            (Jsonb(checkpoint), task_id),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor, event_type, task_id, object_type, object_id, details)
+               VALUES ('ritsuko_core', 'core.magi.task_requeued',
+                       %s, 'task', %s, %s)""",
+            (task_id, task_id, Jsonb({
+                "reason": "owner_resume_without_recorded_action",
+                "strategy": intent["decision_strategy"],
+            })),
+        )
+    return {
+        "task_id": task_id, "request": request,
+        "member_specs": members,
+        "decision_strategy": intent["decision_strategy"],
+        "policy_snapshot": deepcopy(intent.get("policy_snapshot")),
+    }
 
 
 def list_pending_starts(db, *, limit: int = 20) -> list[dict]:
@@ -1376,6 +1446,11 @@ class PostgresMagiTaskRepository:
         """再起動後に永続化済みの未着手Taskだけを列挙する。"""
         with self._connection_factory() as db:
             return list_pending_starts(db, limit=limit)
+
+    def requeue_paused(self, *, task_id: UUID) -> dict:
+        """未実行で停止したTaskだけを元の固定Intentで再キューする。"""
+        with self._connect() as db:
+            return requeue_paused(db, task_id=task_id)
 
     def request_stop(self, *, task_id: UUID) -> str:
         """保存済みTaskへStop要求を残し、未着手の場合はpausedにする。"""
