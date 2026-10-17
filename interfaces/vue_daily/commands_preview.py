@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> None:
     print("Vue Task command preview: http://127.0.0.1:8099/ui/")
     print("New Task write is enabled; existing pending Tasks are NOT resumed automatically.")
     uvicorn.run(app, host="127.0.0.1", port=8099,
-                log_config=build_vue_log_config())
+                log_config=build_vue_log_config(server_name="vue-task-8099"))
 
 
 if __name__ == "__main__":
