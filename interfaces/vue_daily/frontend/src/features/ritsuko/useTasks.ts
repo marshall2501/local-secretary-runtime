@@ -6,8 +6,8 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
-  answerTask, getTaskApiMode, getTaskOperation, getTaskTrace,
-  listTasks, reviewTask, startTask, stopTask,
+  answerTask, getJudgmentPreferences, getTaskApiMode, getTaskOperation,
+  getTaskTrace, listTasks, reviewTask, saveJudgmentPreferences, startTask, stopTask,
 } from './api'
 import type { DecisionStrategy, TaskOperation } from './api'
 import type { TaskListView, TaskSummary, TaskTrace } from './types'
@@ -57,7 +57,49 @@ export function useTasks() {
   let pendingStart: PendingStart | null = loadPending()
   const draftRequest = ref(pendingStart?.request ?? '')
   const strategy = ref<DecisionStrategy>(pendingStart?.strategy ?? 'standard')
+  const defaultStrategy = ref<DecisionStrategy>('standard')
+  const showStrategySelector = ref(true)
+  const preferencesLoaded = ref(false)
+  const preferencesBusy = ref(false)
+  const preferencesMessage = ref('')
   const reply = ref('')
+
+  /** 通常操作時は既存NiceGUIの永続設定を正本とし、方式をTask開始時に固定する。 */
+  async function loadPreferences(): Promise<void> {
+    try {
+      const saved = await getJudgmentPreferences()
+      defaultStrategy.value = saved.default_strategy
+      showStrategySelector.value = saved.show_strategy_selector
+      if (!pendingStart) strategy.value = saved.default_strategy
+      preferencesLoaded.value = true
+      preferencesMessage.value = ''
+    } catch (error) {
+      preferencesLoaded.value = false
+      preferencesMessage.value = '保存済み判断設定を取得できません。（' + String(error) + '）'
+    }
+  }
+
+  /** 判断方式の既定値と選択欄表示は別設定。MAGI席数には触れない。 */
+  async function savePreferences(): Promise<void> {
+    if (!commandsEnabled.value || preferencesBusy.value) return
+    preferencesBusy.value = true
+    preferencesMessage.value = ''
+    try {
+      const saved = await saveJudgmentPreferences({
+        default_strategy: defaultStrategy.value,
+        show_strategy_selector: showStrategySelector.value,
+      })
+      defaultStrategy.value = saved.default_strategy
+      showStrategySelector.value = saved.show_strategy_selector
+      if (!pendingStart) strategy.value = saved.default_strategy
+      preferencesLoaded.value = true
+      preferencesMessage.value = '保存しました。これから開始するTaskに適用します。'
+    } catch (error) {
+      preferencesMessage.value = '設定を保存できません。（' + String(error) + '）'
+    } finally {
+      preferencesBusy.value = false
+    }
+  }
   function storePending(value: PendingStart | null): void {
     pendingStart = value
     try {
@@ -119,11 +161,15 @@ export function useTasks() {
       commandError.value = '依頼は1〜4000文字で入力してください。'
       return
     }
-    // 送信時の方式をTaskごとに固定し、同一UUID再送では方式も一致させる。
-    const intent = pendingStart && pendingStart.request === request &&
-      pendingStart.strategy === strategy.value ? pendingStart : {
-        id: crypto.randomUUID(), request, strategy: strategy.value,
-      }
+    if (!preferencesLoaded.value) {
+      commandError.value = '判断方式の保存済み設定を取得できていません。'
+      return
+    }
+    // 書込結果不明の再送は、設定が変わっても同じTask IDと方式を維持する。
+    const chosen = showStrategySelector.value ? strategy.value : defaultStrategy.value
+    const intent = pendingStart && pendingStart.request === request ? pendingStart : {
+      id: crypto.randomUUID(), request, strategy: chosen,
+    }
     storePending(intent)
     const result = await sendCommand(
       () => startTask(intent.request, intent.strategy, intent.id),
@@ -321,6 +367,7 @@ export function useTasks() {
     window.addEventListener('hashchange', onHashChange)
     document.addEventListener('visibilitychange', onVisibilityChange)
     void refresh()
+    void loadPreferences()
   })
   onUnmounted(() => {
     mounted = false
@@ -333,6 +380,8 @@ export function useTasks() {
     items, view, visibleLimit, hasMore, selectedId, trace, selected, connected, refreshing,
     problem, refresh, selectTask, selectView, loadMore,
     commandsEnabled, commandBusy, commandFeedback, commandError, operation,
-    draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
+    draftRequest, strategy, defaultStrategy, showStrategySelector,
+    preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
+    reply, sendStart, sendAnswer, sendReview, sendStop,
   }
 }
