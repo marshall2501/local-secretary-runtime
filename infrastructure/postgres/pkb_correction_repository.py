@@ -31,8 +31,7 @@ def find_correction_targets(
                  AND c.value=%s::jsonb AND c.origin='user_explicit'
                  AND c.verification_status='unverified'
                  AND c.retracted_at IS NULL
-                 AND (s.uri LIKE 'fixture://daily-pkb/%%'
-                      OR s.uri LIKE 'local://daily-pkb/%%')
+                 AND s.uri LIKE 'local://daily-pkb/%%'
                ORDER BY c.recorded_at DESC""",
             (UUID(old_entity_id), predicate, '"' + value + '"'),
         )
@@ -41,9 +40,9 @@ def find_correction_targets(
 
 def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionResult:
     if not allowed_daily_connection(db):
-        raise ValueError("Refusing non-isolated DB or non-dedicated writer")
+        raise ValueError("Refusing unauthorized or non-local daily PostgreSQL connection")
     if not source_ref_allowed(db, record.source_ref):
-        return CorrectionResult("rejected", "fictional_fixture_only")
+        return CorrectionResult("rejected", "unsupported_source_ref")
     if claim.intent != "correction" or not claim.corrects_claim_id:
         return CorrectionResult(
             "rejected", "explicit_correction_and_old_claim_required"
@@ -94,7 +93,7 @@ def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionR
             old_recorded, verification, retracted, old_uri, old_source_type,
         ) = old
         if (
-            not old_uri.startswith("fixture://")
+            not old_uri.startswith("local://")
             or old_source_type != "user_statement"
             or retracted is not None
             or verification != "unverified"
@@ -163,7 +162,6 @@ def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionR
                 record.source_ref, record.input_id, record.recorded_at,
                 record.recorded_at, record.confidentiality,
                 Jsonb({
-                    "fictional_only": True,
                     "input_id": record.input_id,
                     "original_text": record.text,
                     "corrects_claim_id": str(old_id),
@@ -195,6 +193,6 @@ def correct_entity(db, record: InputRecord, claim: ProposedClaim) -> CorrectionR
             ),
         )
         return CorrectionResult(
-            "corrected", "explicit_fixture_entity_reassigned",
+            "corrected", "explicit_entity_reassigned",
             str(old_id), str(new_claim_id),
         )
