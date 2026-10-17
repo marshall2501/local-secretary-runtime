@@ -11,7 +11,7 @@ import unittest
 from uuid import uuid4
 
 from ritsuko.core.task_execution import run_observation_loop
-from ritsuko.magi.async_execution import (
+from ritsuko.magi.session_workflow import (
     continue_with_verified_observations_async,
     start_dialogue_async,
 )
