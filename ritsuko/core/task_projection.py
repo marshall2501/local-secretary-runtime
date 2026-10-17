@@ -90,6 +90,46 @@ def _completion_from_standard_candidate(session: dict) -> dict:
     }
 
 
+
+def can_requeue_paused_task(status: str, checkpoint: dict, action_count: int) -> bool:
+    """停止済みTaskを同じIDで「未実行から再開」できる条件を統一する。
+
+    前回のSource/Action、本人回答、記憶Reviewが残るTaskを新規のように
+    再実行してはいけない。この入口は実行済みStepの復旧機構ではない。
+    Repositoryは同じ条件をFOR UPDATEの中で再検査する。
+
+    Args:
+        status: DBに確定したTask状態。
+        checkpoint: Task内の固定された判断方式・設定・停止履歴。
+        action_count: 同じTaskに永続化済みのAction件数。
+
+    Returns:
+        bool: 原文・設定を保持したまま未実行Taskを再キュー可能ならTrue。
+    """
+    if status != "paused" or not isinstance(checkpoint, dict):
+        return False
+    intent = checkpoint.get("start_intent")
+    if (
+        checkpoint.get("core_slice") != "ritsuko_magi_observation_v1"
+        or not isinstance(intent, dict)
+        or intent.get("state") not in {"pending", "claimed"}
+        or intent.get("decision_strategy") not in {"standard", "llm"}
+        or checkpoint.get("stop_requested") is not True
+        or checkpoint.get("active_attempt_id") is not None
+        or checkpoint.get("magi_session") is not None
+        or checkpoint.get("user_resume") is not None
+        or checkpoint.get("proposal_review") is not None
+        or checkpoint.get("proposal_memory_intake") is not None
+        or action_count != 0
+    ):
+        return False
+    members = checkpoint.get("member_specs")
+    return isinstance(members, list) and any(
+        isinstance(item, dict) and item.get("enabled") is True
+        for item in members
+    )
+
+
 def task_projection(session: dict) -> dict:
     """Map all MAGI session outcomes through one RITSUKO Task state machine.
 
