@@ -15,7 +15,9 @@ from typing import Callable
 from uuid import UUID, uuid4
 
 from ritsuko.application.task_runtime import StateDrivenTaskApplication
-from ritsuko.core.magi_bridge import reviewable_answer_candidate
+from ritsuko.core.magi_bridge import (
+    reviewable_answer_candidate, reviewable_user_knowledge_proposal,
+)
 
 
 class TaskCommandConflict(ValueError):
@@ -39,6 +41,8 @@ class TaskCommands:
         dialogue_starter_factory: 判断方式に対応した共通MAGI入口を生成する関数。
             Noneでは従来standardのみを受付け、llmへ暗黙に切り替えない。
         max_retained: 完了した操作の受付状況を保持する最大件数。
+        memory_review_writer: 本人の明示remember選択時のみ呼び出す
+            既存Memory Intakeのprepare/write Port。未接続ならrememberを拒否。
     """
 
     def __init__(
@@ -53,6 +57,7 @@ class TaskCommands:
         pending_starts_loader: Callable | None = None,
         policy_snapshot_loader: Callable | None = None,
         request_stop: Callable | None = None,
+        memory_review_writer: Callable | None = None,
     ) -> None:
         self._application = application
         self._queries = queries
@@ -62,6 +67,7 @@ class TaskCommands:
         self._pending_starts_loader = pending_starts_loader
         self._policy_snapshot_loader = policy_snapshot_loader
         self._request_stop = request_stop
+        self._memory_review_writer = memory_review_writer
         self._max_retained = max(1, int(max_retained))
         # 実行中Jobと停止EventはAPIプロセス内だけの一時情報。
         self._jobs: dict[UUID, asyncio.Task] = {}
@@ -301,20 +307,29 @@ class TaskCommands:
         return self._schedule(task_id, "answer", run)
 
     async def review(self, task_id: UUID, decision: str) -> dict:
-        """記憶登録を伴わない回答のみReviewを受付する。
+        """本人の回答のみ／明示記憶反映を同一RITSUKO Task経路で受付ける。
 
-        記憶反映には独立したMemory Intakeが必要なので、この段階では
-        未対応として拒否し、偽のPKB成功を返さない。
+        remember選択時だけ既存のPKB Memory Intakeを先に実行し、その
+        receiptをTask Reviewへ渡す。PKB登録成功をLLM提案だけで宣言しない。
         """
-        if decision != "answer_only":
+        if decision not in {"answer_only", "remember"}:
+            raise ValueError("review_decision_not_enabled")
+        if decision == "remember" and self._memory_review_writer is None:
             raise ValueError("review_decision_not_enabled")
         task = await self._task_for_command(task_id)
         session = task.get("magi_session") or {}
-        # The same reviewability guard is used by the persisted Task store;
-        # the GUI must not become a second authority for READY candidates.
-        answer_ready = reviewable_answer_candidate(session) is not None
-        if (task.get("status") != "waiting_external"
-                or (session.get("status") != "proposal_ready" and not answer_ready)):
+        if decision == "remember":
+            eligible = reviewable_user_knowledge_proposal(session) is not None
+        else:
+            eligible = (
+                session.get("status") == "proposal_ready"
+                or reviewable_answer_candidate(session) is not None
+            )
+        if (
+            task.get("status") != "waiting_external"
+            or task.get("phase") not in {None, "awaiting_review"}
+            or not eligible
+        ):
             raise TaskCommandConflict("task_not_waiting_for_review")
         timeout = max(
             (float(item.get("timeout_seconds") or 120)
@@ -323,9 +338,20 @@ class TaskCommands:
         )
 
         async def run(stop: Event) -> None:
-            """提案を再評価し、既存Task Storeへ確定判断を委譲する。"""
+            """Explicit Memory Intake receipt feeds the existing review executor."""
+            memory_result = None
+            if decision == "remember":
+                memory_result = await asyncio.to_thread(
+                    self._memory_review_writer, task_id,
+                )
+                if not isinstance(memory_result, dict) or memory_result.get(
+                    "status"
+                ) not in {"committed", "replayed"}:
+                    raise ValueError("memory_intake_not_committed")
             await self._application.review(
-                task_id, "answer_only", timeout=timeout, stop_requested=stop.is_set,
+                task_id, decision, timeout=timeout,
+                memory_result=memory_result,
+                stop_requested=stop.is_set,
                 on_member_progress=lambda event: self._report_member_progress(
                     task_id, event,
                 ),
