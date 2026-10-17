@@ -347,7 +347,8 @@ class MagiTaskStoreTests(unittest.TestCase):
                 "next_step": "review_answer_candidate",
                 "tool_read_executed": True,
                 "observations": [
-                    {"source": "pkb", "verified": True, "text": "verified"}
+                    {"source": "pkb", "verified": True, "text": "verified",
+                     "result_id": "result-1", "action_id": "action-1"}
                 ],
                 "detail": {
                     "answer_candidate": "メインPCのGPUは Radeon RX 9070 XT です."
