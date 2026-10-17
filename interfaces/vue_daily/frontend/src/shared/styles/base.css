@@ -96,3 +96,13 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
   .task-field { grid-template-columns:85px minmax(0,1fr); }
   .magi-members { grid-template-columns:1fr; }
 }
+
+/* PKB参照: 独立ReadServiceの結果を省略せず安全に表示する。 */
+.pkb-search { margin-top:12px; }
+.pkb-search-fields { display:grid; grid-template-columns:2fr 1fr minmax(150px,.7fr); gap:12px; margin:12px 0; }
+.pkb-search-fields label { display:flex; flex-direction:column; gap:6px; font-weight:650; font-size:13px; }
+.pkb-search-fields input,.pkb-search-fields select { width:100%; padding:9px; border-radius:6px; border:1px solid #adbfce; background:#fff; color:inherit; }
+.pkb-record { padding:14px 0; border-top:1px solid #dbe4eb; overflow-wrap:anywhere; }
+.pkb-record-heading { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.pkb-record p { white-space:pre-wrap; margin:7px 0; }
+@media(max-width:680px) { .pkb-search-fields { grid-template-columns:1fr; } }
