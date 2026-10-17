@@ -20,7 +20,7 @@ from ritsuko.application.task_commands import TaskCommands
 from ritsuko.application.pkb_observation import execute_magi_pkb_request
 from ritsuko.application.read_dispatch import execute_core_read
 from ritsuko.application.source_execution import execute_magi_source_request
-from ritsuko.core.observation_loop import (
+from ritsuko.core.task_execution import (
     review_proposal, run_observation_loop, resume_user_answer,
 )
 from ritsuko.magi.async_execution import (
