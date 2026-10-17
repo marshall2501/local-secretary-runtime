@@ -1,8 +1,7 @@
 """Async RITSUKO <-> MAGI execution path.
 
-This is the active provider path for the current Core experiment.  The older
-synchronous implementation in magi_dialogue remains temporarily for regression
-tests and legacy callers, but new network execution must use this module.
+This module owns the active asynchronous MAGI Provider transport. MAGI Task
+Session lifecycle is owned by session_workflow.py, not by Provider transport.
 
 Properties:
 - provider calls are cancellable async HTTP;
@@ -745,62 +744,3 @@ async def _send_async(
         return None
     session["magi_disagreement"] = None
     return response
-
-
-# Compatibility entrypoints for callers that have not yet switched to the
-# transport-independent MAGI Task Session workflow. No state application or
-# Task execution logic remains in this provider transport module.
-
-
-async def _advance_by_strategy(*args, **kwargs):
-    """Use the canonical MAGI session workflow for judgment continuation."""
-    from .session_workflow import _advance_by_strategy as run
-    return await run(*args, **kwargs)
-
-
-async def start_dialogue_async(*args, **kwargs):
-    """Historical MAGI entry; all session lifecycle logic is elsewhere."""
-    from .session_workflow import start_dialogue_async as run
-    return await run(*args, **kwargs)
-
-
-async def continue_with_observation_async(*args, **kwargs):
-    """Historical unverified-observation testing entry."""
-    from .session_workflow import continue_with_observation_async as run
-    return await run(*args, **kwargs)
-
-
-def _private_observation_local_scope(*args, **kwargs):
-    """Historical policy scope API, now owned by session workflow."""
-    from .session_workflow import _private_observation_local_scope as run
-    return run(*args, **kwargs)
-
-
-def _private_pkb_local_scope(*args, **kwargs):
-    """Historical PKB policy-scope helper."""
-    from .session_workflow import _private_pkb_local_scope as run
-    return run(*args, **kwargs)
-
-
-async def continue_with_verified_observations_async(*args, **kwargs):
-    """Historical Observation resume API, now owned by session workflow."""
-    from .session_workflow import continue_with_verified_observations_async as run
-    return await run(*args, **kwargs)
-
-
-async def continue_with_verified_observation_async(*args, **kwargs):
-    """Historical single Observation entry."""
-    from .session_workflow import continue_with_verified_observation_async as run
-    return await run(*args, **kwargs)
-
-
-async def continue_with_proposal_review_async(*args, **kwargs):
-    """Historical review entry, now owned by MAGI session workflow."""
-    from .session_workflow import continue_with_proposal_review_async as run
-    return await run(*args, **kwargs)
-
-
-async def continue_with_user_clarification_async(*args, **kwargs):
-    """Historical user answer entry, now owned by MAGI session workflow."""
-    from .session_workflow import continue_with_user_clarification_async as run
-    return await run(*args, **kwargs)
