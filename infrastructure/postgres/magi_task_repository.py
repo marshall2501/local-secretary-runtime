@@ -344,6 +344,7 @@ def save_source_resume(db, *, task_id: UUID, session: dict,
             "session": deepcopy(session),
             "observations": deepcopy(observations),
             "cycles": cycles,
+            "selected_capability": checkpoint.get("selected_capability"),
             "result_ids": sorted(result_id for _, result_id in persisted),
         }
         cur.execute(
