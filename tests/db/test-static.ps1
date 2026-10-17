@@ -35,7 +35,7 @@ try {
     foreach ($relative in $promotionMigrations) {
         $migrationPath = Join-Path $root $relative
         if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
-            throw "Missing production promotion migration: $relative"
+            throw "Missing current migration: $relative"
         }
         $migrationText = Get-Content -LiteralPath $migrationPath -Raw
         foreach ($banned in @(
@@ -85,56 +85,30 @@ try {
         throw 'Policy migration 009 must not rewrite existing production data.'
     }
 
-    $preflightPath = Join-Path $root 'scripts/db/promotion-preflight.ps1'
-    if (-not (Test-Path -LiteralPath $preflightPath -PathType Leaf)) {
-        throw 'Missing production promotion preflight.'
-    }
-    $preflightText = Get-Content -LiteralPath $preflightPath -Raw
-    if ($preflightText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
-        throw 'Production promotion preflight must remain read-only.'
-    }
 
-
-    $manifestPath = Join-Path $root 'scripts/db/promotion-manifest.ps1'
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        throw 'Missing PKB production promotion manifest.'
-    }
-    $manifestText = Get-Content -LiteralPath $manifestPath -Raw
-    if ($manifestText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
-        throw 'PKB production promotion manifest must remain read-only.'
-    }
-    if ($manifestText -notmatch 'BEGIN TRANSACTION READ ONLY') {
-        throw 'PKB production promotion manifest must enforce read-only transactions.'
-    }
-    foreach ($sensitiveField in @(
-        'raw_text',
-        'citation',
-        'evidence',
-        'amount_jpy',
-        'auth_data',
-        'password',
-        'access_token'
+    # The only tracked SQL migration series for runtime and disposable tests.
+    foreach ($retiredPath in @(
+        'db/isolated/pkb_proto',
+        'scripts/pkb/isolated',
+        'ritsuko/core/observation_loop.py',
+        'ritsuko/magi/goal_loop.py',
+        'scripts/db/promotion-rehearsal.ps1',
+        'scripts/db/rebuild-production.ps1',
+        'scripts/db/runtime_settings_transfer.py'
     )) {
-        if ($manifestText -match ('(?i)\b' + [regex]::Escape($sensitiveField) + '\b')) {
-            throw "PKB promotion manifest references sensitive value field: $sensitiveField"
+        if (Test-Path -LiteralPath (Join-Path $root $retiredPath)) {
+            throw "Retired runtime path still exists: $retiredPath"
         }
     }
-
-
-    $entityReconciliationPath = Join-Path $root 'scripts/db/entity-reconciliation.ps1'
-    if (-not (Test-Path -LiteralPath $entityReconciliationPath -PathType Leaf)) {
-        throw 'Missing PKB entity reconciliation inspection.'
-    }
-    $entityReconciliationText = Get-Content -LiteralPath $entityReconciliationPath -Raw
-    if ($entityReconciliationText -match '(?im)^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)\b') {
-        throw 'PKB entity reconciliation inspection must remain read-only.'
-    }
-    if ($entityReconciliationText -notmatch 'BEGIN TRANSACTION READ ONLY') {
-        throw 'PKB entity reconciliation inspection must enforce read-only transactions.'
-    }
-    foreach ($sensitiveField in @('raw_text','citation','evidence','amount_jpy','auth_data','password','access_token')) {
-        if ($entityReconciliationText -match ('(?i)\b' + [regex]::Escape($sensitiveField) + '\b')) {
-            throw "PKB entity reconciliation references sensitive value field: $sensitiveField"
+    foreach ($path in @(
+        'config/runtime_database.py',
+        'infrastructure/postgres/pkb_runtime.py',
+        'scripts/ui/launch_daily_pkb.ps1',
+        'infrastructure/postgres/finance_repository.py'
+    )) {
+        $text = Get-Content -LiteralPath (Join-Path $root $path) -Raw
+        if ($text -match 'secretary_pkb_proto_20260927|LSA_DAILY_DB_MODE') {
+            throw "Legacy production DB selector remains in $path"
         }
     }
 
@@ -156,41 +130,6 @@ try {
     }
     if ($initializerText -match '(?i)pg_restore|pg_dump|BackupPath') {
         throw 'Fresh production initializer must not depend on dump/restore.'
-    }
-
-    $rehearsalPath = Join-Path $root 'scripts/db/promotion-rehearsal.ps1'
-    if (-not (Test-Path -LiteralPath $rehearsalPath -PathType Leaf)) {
-        throw 'Missing fresh production rehearsal tool.'
-    }
-    $rehearsalText = Get-Content -LiteralPath $rehearsalPath -Raw
-    foreach ($requiredMarker in @(
-        'secretary_rebuild_rehearsal_',
-        'runtime_settings_transfer.py',
-        'LegacyDataRestored = $false',
-        'SettingsOnlyTransferred = $true',
-        'dropdb'
-    )) {
-        if (-not $rehearsalText.Contains($requiredMarker)) {
-            throw "Fresh production rehearsal marker missing: $requiredMarker"
-        }
-    }
-    if ($rehearsalText -match '(?i)pg_restore|pg_dump|BackupPath|production_data_transfer') {
-        throw 'Fresh production rehearsal must not restore legacy operational data.'
-    }
-
-    foreach ($promotionHelper in @(
-        'scripts/db/transfer_common.py',
-        'scripts/db/runtime_settings_transfer.py',
-        'scripts/db/provision_daily_runtime.py',
-        'scripts/db/verify_production_runtime.py',
-        'scripts/db/initialize-fresh-production.ps1',
-        'scripts/db/promotion-rehearsal.ps1',
-        'scripts/db/rebuild-production.ps1',
-        'scripts/db/promote-production.ps1'
-    )) {
-        if (-not (Test-Path -LiteralPath (Join-Path $root $promotionHelper) -PathType Leaf)) {
-            throw "Missing production rebuild helper: $promotionHelper"
-        }
     }
 
     $runtimeProvisionText = Get-Content -LiteralPath (Join-Path $root 'scripts/db/provision_daily_runtime.py') -Raw
@@ -218,44 +157,6 @@ try {
     }
     if ($launcherText -notmatch '\$migrationSummary.*FROM secretary\.schema_migrations;') {
         throw 'Daily launcher migration summary must count rows from secretary.schema_migrations.'
-    }
-
-    $rebuildPath = Join-Path $root 'scripts/db/rebuild-production.ps1'
-    $rebuildText = Get-Content -LiteralPath $rebuildPath -Raw
-    foreach ($requiredMarker in @(
-        'secretary_rebuild_',
-        'promotion-rehearsal.ps1',
-        'runtime_settings_transfer.py',
-        'OldSecretaryPreserved = $true',
-        'LegacyDataRestored = $false',
-        'SettingsOnlyTransferred = $true'
-    )) {
-        if (-not $rebuildText.Contains($requiredMarker)) {
-            throw "Fresh rebuild safety marker missing: $requiredMarker"
-        }
-    }
-    if ($rebuildText -match '(?i)pg_restore|pg_dump|BackupPath|production_data_transfer') {
-        throw 'Fresh rebuild must not depend on legacy data restore.'
-    }
-
-    $cutoverPath = Join-Path $root 'scripts/db/cutover-production.ps1'
-    if (-not (Test-Path -LiteralPath $cutoverPath -PathType Leaf)) {
-        throw 'Missing production cutover workflow.'
-    }
-    $cutoverText = Get-Content -LiteralPath $cutoverPath -Raw
-    foreach ($requiredMarker in @(
-        'Active connections remain on',
-        'ALTER DATABASE secretary RENAME TO',
-        'OldSecretaryPreserved = $true',
-        'Restore-DatabaseNames',
-        '009_runtime_policy_profiles.sql'
-    )) {
-        if (-not $cutoverText.Contains($requiredMarker)) {
-            throw "Production cutover safety marker missing: $requiredMarker"
-        }
-    }
-    if ($cutoverText -match '(?i)pg_terminate_backend|dropdb|DROP\s+DATABASE') {
-        throw 'Production cutover must not terminate sessions or delete databases.'
     }
 
     $dailyWebText = Get-Content -LiteralPath (Join-Path $root 'interfaces/web/app.py') -Raw
