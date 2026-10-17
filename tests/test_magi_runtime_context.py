@@ -153,7 +153,7 @@ class AsyncTaskClockContractTests(unittest.IsolatedAsyncioTestCase):
         from uuid import UUID
         from unittest.mock import patch
 
-        from ritsuko.core.observation_loop import resume_user_answer
+        from ritsuko.core.task_execution import resume_user_answer
         from ritsuko.magi.async_execution import continue_with_user_clarification_async
 
         task_id = UUID("11111111-1111-4111-8111-111111111111")
