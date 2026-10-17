@@ -44,7 +44,7 @@ const {
         :task="selected" :feedback="commandFeedback" :error="commandError"
         :operation="operation"
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @stop="sendStop" @resume="sendResume"
-        @save-preferences="savePreferences" @refresh="refresh"
+        @save-preferences="savePreferences" @refresh="() => refresh(true)"
       />
       <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
       <MagiProgress :task="selected" :operation="operation" />
