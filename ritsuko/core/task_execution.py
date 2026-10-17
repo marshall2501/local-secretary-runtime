@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 import anyio
 
-from ritsuko.magi.async_execution import (
+from ritsuko.magi.session_workflow import (
     continue_with_proposal_review_async,
     continue_with_user_clarification_async,
     continue_with_verified_observations_async,
