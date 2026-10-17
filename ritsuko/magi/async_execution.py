@@ -1097,7 +1097,7 @@ async def start_dialogue_async(
     task_timezone: str = "Asia/Tokyo",
     task_locale: str = "ja-JP",
     policy_snapshot: dict | None = None,
-    decision_strategy: str = "standard",
+    decision_strategy: str = "llm",
     on_member_progress=None,
     goal_caller=None,
 ) -> dict:
@@ -1106,8 +1106,8 @@ async def start_dialogue_async(
     specs = _normalized_member_specs(member_specs, model)
     if decision_strategy == "llm":
         specs = [spec for spec in specs if spec["enabled"]]
-        if len(specs) != 1:
-            raise ValueError("goal_mode_requires_one_enabled_member")
+        if not specs:
+            raise ValueError("no_enabled_magi_member")
     from uuid import uuid4
 
     session = {
