@@ -138,6 +138,90 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertEqual(commands.operation(task_id)["status"], "execution_finished")
 
+    async def test_remember_review_reuses_checked_memory_receipt(self):
+        """明示的な記憶反映だけMemory Intakeを経由し、共通TaskへReceiptを渡す。"""
+        queries = FakeQueries()
+        queries.task["phase"] = "awaiting_review"
+        queries.task["magi_session"] = {
+            "status": "proposal_ready", "tool_read_executed": True,
+            "member_specs": [
+                {"name": "MELCHIOR", "enabled": True, "timeout_seconds": 5},
+            ],
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "answer_candidate": "使用OSはFedoraです。",
+                "knowledge_candidate": "使用OSはFedora",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True},
+                {"source": "user_clarification", "text": "Fedora",
+                 "responds_to": ["REQ-1"]},
+            ],
+        }
+        receipt = {"status": "committed", "input_id": "input-1", "receipts": []}
+        calls = []
+        def writer(task_id):
+            calls.append(task_id)
+            return receipt
+
+        app = FakeApplication()
+        commands = TaskCommands(
+            app, queries, lambda: [], memory_review_writer=writer,
+        )
+        accepted = await commands.review(queries.uid, "remember")
+        self.assertEqual(accepted["status"], "accepted")
+        for _ in range(30):
+            await asyncio.sleep(0)
+            if commands.operation(queries.uid)["status"] == "execution_finished":
+                break
+        self.assertEqual(commands.operation(queries.uid)["status"], "execution_finished")
+        self.assertEqual(calls, [queries.uid])
+        self.assertEqual(app.called[0][0:3], ("review", queries.uid, "remember"))
+        self.assertEqual(app.called[0][3]["memory_result"], receipt)
+
+        # A different Task with no configured memory writer cannot write.
+        no_writer = TaskCommands(FakeApplication(), queries, lambda: [])
+        with self.assertRaisesRegex(ValueError, "review_decision_not_enabled"):
+            await no_writer.review(queries.uid, "remember")
+
+    async def test_remember_never_finishes_without_committed_receipt(self):
+        """Memory Intake失敗や未確認提案はMAGI再評価・Task確定へ進まない。"""
+        queries = FakeQueries()
+        queries.task["phase"] = "awaiting_review"
+        session = {
+            "status": "proposal_ready", "tool_read_executed": True,
+            "member_specs": [],
+            "detail": {
+                "state": "KNOWLEDGE_CANDIDATE",
+                "knowledge_candidate": "Fedoraの利用",
+                "answer_candidate": "Fedoraの利用",
+            },
+            "observations": [
+                {"source": "pkb", "verified": True},
+                {"source": "user_clarification", "text": "Fedora",
+                 "responds_to": ["REQ-1"]},
+            ],
+        }
+        queries.task["magi_session"] = session
+        app = FakeApplication()
+        commands = TaskCommands(
+            app, queries, lambda: [],
+            memory_review_writer=lambda _uid: {"status": "pending"},
+        )
+        await commands.review(queries.uid, "remember")
+        for _ in range(30):
+            await asyncio.sleep(0.01)
+            if commands.operation(queries.uid)["status"] == "execution_failed":
+                break
+        self.assertEqual(commands.operation(queries.uid)["status"], "execution_failed")
+        self.assertEqual(app.called, [])
+
+        # MAGI-only knowledge candidate lacking a verified user assertion
+        # must not make the Memory Intake port run at all.
+        session["observations"] = [{"source": "pkb", "verified": True}]
+        with self.assertRaisesRegex(TaskCommandConflict, "task_not_waiting_for_review"):
+            await commands.review(queries.uid, "remember")
+
     async def test_both_judgment_methods_share_task_runner_with_multiple_magi_seats(self):
         """判断方式とMAGI席数は独立し、共通Task Applicationへ同じ形で渡る。"""
         for count in (1, 2, 3):
