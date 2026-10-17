@@ -18,8 +18,8 @@ from infrastructure.postgres.pkb_correction_repository import correct_entity
 from pkb.query_service import ClaimQuery
 from infrastructure.postgres.pkb_query_repository import query_claims
 
-DBNAME='secretary_pkb_proto_20260927'
-WRITER='secretary_pkb_proto_writer_20260927'
+DBNAME='secretary'
+WRITER='secretary_daily_runtime'
 ROOT=Path(__file__).resolve().parents[1]
 ENABLED=os.environ.get('PKB_MEMORY_INTEGRATION')=='1' and os.environ.get('GITHUB_ACTIONS')=='true'
 
@@ -32,19 +32,27 @@ class MemoryPostgresTests(unittest.TestCase):
                                 password=os.environ['PKB_TEST_PASSWORD'],autocommit=True)
         if cls.admin.execute("SELECT to_regnamespace('secretary')").fetchone()[0] is not None:
             raise RuntimeError('Refusing non-empty database; this suite never resets existing installations')
+        # This GitHub Actions service database is disposable and starts empty.
+        # Apply exactly the same tracked DDL series as daily PostgreSQL.
         cls.admin.execute('CREATE SCHEMA secretary')
-        cls.admin.execute('CREATE TABLE secretary.schema_migrations(version text PRIMARY KEY,sha256 text NOT NULL)')
-        cls.admin.execute('CREATE ROLE secretary_memory_writer NOLOGIN')
-        cls.admin.execute(sql.SQL('CREATE ROLE {} LOGIN PASSWORD {}').format(sql.Identifier(WRITER),sql.Literal(os.environ['PKB_TEST_PASSWORD'])))
-        cls.admin.execute(next((ROOT/'db/migrations').glob('001*')).read_text(encoding='utf-8'))
-        cls.admin.execute("INSERT INTO secretary.entities(name,entity_type,domain) VALUES ('メインPC','computer','pc'),('サブPC','computer','pc'),('NIKKE','software','game'),('SERVO1','rc_servo','rc')")
-        for number in (5,6,8,9,10,11,12,13,14,15,19):
-            path=next((ROOT/'db/isolated/pkb_proto').glob(f'{number:03d}_*'))
+        for path in sorted((ROOT / 'db/migrations').glob('[0-9][0-9][0-9]_*.sql')):
             cls.admin.execute(path.read_text(encoding='utf-8'))
-        cls.admin.execute(sql.SQL('GRANT USAGE ON SCHEMA secretary TO {}').format(sql.Identifier(WRITER)))
-        cls.admin.execute(sql.SQL('GRANT SELECT ON secretary.entities,secretary.sources,secretary.claims,secretary.pending_claims TO {}').format(sql.Identifier(WRITER)))
-        cls.admin.execute(sql.SQL('GRANT INSERT ON secretary.sources,secretary.claims TO {}').format(sql.Identifier(WRITER)))
-        cls.admin.execute(sql.SQL('GRANT SELECT,INSERT ON secretary.pkb_input_receipts TO {}').format(sql.Identifier(WRITER)))
+        cls.admin.execute(sql.SQL('CREATE ROLE {} LOGIN PASSWORD {}').format(
+            sql.Identifier(WRITER), sql.Literal(os.environ['PKB_TEST_PASSWORD'])
+        ))
+        cls.admin.execute(sql.SQL('GRANT USAGE ON SCHEMA secretary TO {}').format(
+            sql.Identifier(WRITER)
+        ))
+        cls.admin.execute(sql.SQL('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA secretary TO {}').format(
+            sql.Identifier(WRITER)
+        ))
+        cls.admin.execute(sql.SQL('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA secretary TO {}').format(
+            sql.Identifier(WRITER)
+        ))
+        cls.admin.execute("INSERT INTO secretary.entities(name,entity_type,domain) VALUES "
+                          "('メインPC','computer','pc'),('サブPC','computer','pc'),"
+                          "('NIKKE','software','game'),('SERVO1','rc_servo','rc'),"
+                          "('GPU1','gpu','pc')")
 
     @classmethod
     def tearDownClass(cls):
@@ -178,7 +186,7 @@ class MemoryPostgresTests(unittest.TestCase):
         for name,predicate,value in [('GPU1','driver_updated','DRV-G3'),('SERVO1','servo_updated','SERVO-X3')]:
             entity=str(self.db.execute('SELECT id FROM secretary.entities WHERE name=%s',(name,)).fetchone()[0])
             text=f'{name}を{value}へ' + ('更新した。' if predicate=='driver_updated' else '交換した。')
-            record=InputRecord(str(uuid4()),'user_statement','fixture://legacy',text,now,now)
+            record=InputRecord(str(uuid4()),'user_statement','local://memory-test/legacy',text,now,now)
             claim=ProposedClaim(entity,name,predicate,value,0,len(text),text)
             result=write_one(self.db,record,claim)
             self.assertEqual(result.status,'inserted')
@@ -196,7 +204,7 @@ class MemoryPostgresTests(unittest.TestCase):
         old=write_one(self.db,InputRecord(str(uuid4()),'user_statement','fixture://legacy',text,now,now),
                       ProposedClaim(ids['サブPC'],'サブPC','driver_updated','DRV-A1',0,len(text),text))
         correction='訂正：サブPCではなくメインPCのDRV-A1'
-        corrected=correct_entity(self.db,InputRecord(str(uuid4()),'user_statement','fixture://correction',correction,now,now),
+        corrected=correct_entity(self.db,InputRecord(str(uuid4()),'user_statement','local://memory-test/correction',correction,now,now),
                      ProposedClaim(ids['メインPC'],'メインPC','driver_updated','DRV-A1',0,len(correction),correction,'correction',old.claim_id))
         self.assertEqual(corrected.status,'corrected')
 
