@@ -11,9 +11,14 @@ import type { TaskRecord } from '../types'
 
 const request = defineModel<string>('request', { required: true })
 const strategy = defineModel<DecisionStrategy>('strategy', { required: true })
+const defaultStrategy = defineModel<DecisionStrategy>('defaultStrategy', { required: true })
+const showStrategySelector = defineModel<boolean>('showStrategySelector', { required: true })
 const reply = defineModel<string>('reply', { required: true })
 const props = defineProps<{
   commandsEnabled: boolean
+  preferencesLoaded: boolean
+  preferencesBusy: boolean
+  preferencesMessage: string
   busy: boolean
   task: TaskRecord | null
   feedback: string
@@ -25,6 +30,7 @@ const emit = defineEmits<{
   answer: []
   review: []
   stop: []
+  savePreferences: []
 }>()
 const answerable = computed(() =>
   props.task?.status === 'waiting_external' &&
@@ -67,17 +73,50 @@ const niceguiCore = legacyPageUrl('/core')
         :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : '8099番の実Task操作画面で入力できます'"
         :disabled="busy || !commandsEnabled" required />
       <div class="command-row">
-        <label for="task-strategy">判断方式</label>
-        <select id="task-strategy" v-model="strategy" :disabled="busy || !commandsEnabled">
-          <option value="standard">従来方式（段階判断／MAGI）</option>
-          <option value="llm">Goal方式（LLMによる次の判断／MAGI）</option>
-        </select>
+        <template v-if="showStrategySelector">
+          <label for="task-strategy">判断方式（検証用）</label>
+          <select id="task-strategy" v-model="strategy"
+            :disabled="busy || !commandsEnabled || !preferencesLoaded">
+            <option value="standard">従来方式（段階判断／MAGI）</option>
+            <option value="llm">Goal方式（LLMによる次の判断／MAGI）</option>
+          </select>
+        </template>
+        <span v-else class="muted small">
+          既定判断方式：{{ defaultStrategy === 'llm' ? 'Goal / LLM' : '従来' }}
+        </span>
         <button type="submit" class="primary-command"
-          :disabled="busy || !commandsEnabled || !request.trim()">
+          :disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()">
           {{ busy ? '受付中…' : '依頼を送信' }}
         </button>
       </div>
     </form>
+    <details class="command-preferences">
+      <summary>判断方式の設定</summary>
+      <p class="muted small">
+        既定方式は新規Taskだけに適用。MAGIの有効席数・モデル・既存Taskは変更しません。
+      </p>
+      <div class="command-row">
+        <label for="task-default-strategy">新規Taskの既定方式</label>
+        <select id="task-default-strategy" v-model="defaultStrategy"
+          :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded">
+          <option value="standard">従来方式</option>
+          <option value="llm">Goal / LLM方式</option>
+        </select>
+      </div>
+      <label class="command-row">
+        <input v-model="showStrategySelector" type="checkbox"
+          :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded" />
+        新規依頼に検証用の判断方式選択を表示
+      </label>
+      <button type="button" class="secondary"
+        :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded"
+        @click="emit('savePreferences')">
+        {{ preferencesBusy ? '保存中…' : '設定を保存' }}
+      </button>
+      <p v-if="preferencesMessage" role="status" class="muted small">
+        {{ preferencesMessage }}
+      </p>
+    </details>
     <p v-if="!commandsEnabled" class="muted small">
       8097では入力・送信を無効にしています。操作画面が使えない場合は
       <a :href="niceguiCore">既存のRITSUKO画面</a>を利用できます。
