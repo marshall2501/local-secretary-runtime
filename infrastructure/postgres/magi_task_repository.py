@@ -11,8 +11,8 @@ from ritsuko.core.magi_bridge import (
     proposal_review_observation,
     reviewable_user_knowledge_proposal,
     reviewable_answer_candidate,
-    task_projection,
 )
+from ritsuko.core.task_projection import task_projection
 from pkb.memory_contracts import MemoryIntake
 
 
