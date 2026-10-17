@@ -54,6 +54,9 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
 
         async def continue_observation(session, observation, **kwargs):
             calls.append(("continue", observation["verified"], observation["source"]))
+            self.assertEqual(observation["action_id"], "action-1")
+            self.assertEqual(observation["result_id"], "result-1")
+            self.assertEqual(observation["verification_level"], "bounded_read")
             updated = dict(session)
             updated.update({
                 "status": "candidate_ready",
@@ -149,6 +152,10 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
 
         async def continue_batch(session, observations, **kwargs):
             calls.append(("continue", sorted(x["source"] for x in observations)))
+            for observation in observations:
+                self.assertEqual(observation["result_id"], "r")
+                self.assertEqual(observation["action_id"], "a")
+                self.assertEqual(observation["verification_level"], "bounded_read")
             updated = dict(session)
             updated.update({
                 "status": "candidate_ready",
@@ -240,6 +247,44 @@ class MagiObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session["status"], "waiting_information")
         self.assertEqual(calls, [("persist", None, "waiting_information")])
 
+
+    async def test_source_read_requires_recorded_ids_in_standard_mode(self):
+        """保存しないSourceが標準方式の完了根拠に化けない。"""
+        calls = []
+        async def starter(request, **kwargs):
+            return {
+                "task_id": kwargs["task_id"],
+                "status": "waiting_information",
+                "pending_requests": [{"request_id": "REQ-1", "source": "pkb",
+                                      "what": "one fact"}],
+                "member_specs": [{"name": "MELCHIOR", "enabled": True}],
+                "observations": [], "turns": [],
+            }
+
+        async def illegal_continuation(*args, **kwargs):
+            self.fail("unrecorded read must not reach MAGI")
+
+        def execute(*args):
+            return {"status": "ok", "source": "pkb",
+                    "verified_by": "deterministic_pkb_query",
+                    "total": 1, "answer": "value",
+                    "result": {"result_kind": "search", "items": [{"value": "value"}]}}
+
+        with self.assertRaisesRegex(ValueError, "source_result_ids_required"):
+            await run_observation_loop(
+                "登録事実を調べる",
+                member_specs=[{"name": "MELCHIOR", "enabled": True}],
+                timeout=5,
+                create_task_record=lambda *_args: None,
+                execute_source_request=execute,
+                record_source_read_record=lambda *_args: None,
+                persist_session_record=lambda *_args: self.fail("must not persist"),
+                fail_task_record=lambda *_args: calls.append("fail"),
+                dialogue_starter=starter,
+                observation_continuation=illegal_continuation,
+                resource_catalog={"pkb": {"available": True}},
+            )
+        self.assertEqual(calls, ["fail"])
 
     async def test_review_proposal_claims_re_evaluates_and_finalizes(self):
         calls = []
