@@ -61,6 +61,26 @@ def build_core_task_queries() -> CoreTaskQueryService:
     return CoreTaskQueryService(PostgresCoreTaskQueryRepository(connection))
 
 
+def build_daily_memory_read_service():
+    """Bind the shared SQL-first ReadService to the approved daily DB.
+
+    The normal daily connection is autocommit for Task operations. SQL-first
+    search uses a repeatable-read, read-only transaction, so only this
+    short-lived read connection is switched to transactional dict rows.
+    """
+    from psycopg.rows import dict_row
+    from application.read_service import ReadService
+    from infrastructure.postgres.read_repository import PostgresReadRepository
+
+    def connect_readonly():
+        db = connection()
+        db.autocommit = False
+        db.row_factory = dict_row
+        return db
+
+    return ReadService(PostgresReadRepository(connect_readonly))
+
+
 def build_entity_catalog_service() -> EntityCatalogService:
     return EntityCatalogService(PostgresEntityCatalogRepository(connection))
 
