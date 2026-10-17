@@ -70,6 +70,15 @@ class FakeMagiRepository:
             task["status"] = "paused"
         return task["status"]
 
+    def save_source_resume(self, *, task_id, session, observations, cycles,
+                           expected_attempt_id):
+        """FakeのSource観測も元Taskに保存し、実行済みと未実行を区別する。"""
+        self.calls.append("save_source_resume")
+        self.tasks[task_id]["source_resume"] = {
+            "session": deepcopy(session), "observations": deepcopy(observations),
+            "cycles": cycles,
+        }
+
     def requeue_paused(self, *, task_id):
         """実DBと同じ、Action未実行の停止済みTaskだけの再受付を模倣する。"""
         task = self.tasks.get(task_id)
