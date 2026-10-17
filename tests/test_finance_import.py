@@ -83,29 +83,27 @@ class FinanceImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "row_mode"):
             _finance_filter_clause(row_mode="unknown")
 
-    def test_guard_rejects_production_database(self):
+    def test_guard_accepts_daily_runtime(self):
         db = SimpleNamespace(info=SimpleNamespace(
-            dbname="secretary",
-            user="secretary_pkb_proto_writer_20260927",
-            host="localhost",
+            dbname="secretary", user="secretary_daily_runtime", host="localhost",
         ))
-        with self.assertRaisesRegex(ValueError, "non-prototype"):
-            _guard_db(db)
+        self.assertIsNone(_guard_db(db))
 
-    def test_guard_rejects_admin_user(self):
-        db = SimpleNamespace(info=SimpleNamespace(
-            dbname="secretary_pkb_proto_20260927",
-            user="secretary_admin",
-            host="localhost",
-        ))
-        with self.assertRaisesRegex(ValueError, "non-dedicated"):
-            _guard_db(db)
+    def test_guard_rejects_wrong_login_and_database(self):
+        for database, user in (
+            ("secretary", "secretary_admin"),
+            ("secretary_old_fixture", "secretary_daily_runtime"),
+        ):
+            with self.subTest(database=database, user=user):
+                db = SimpleNamespace(info=SimpleNamespace(
+                    dbname=database, user=user, host="localhost",
+                ))
+                with self.assertRaisesRegex(ValueError, "unauthorized"):
+                    _guard_db(db)
 
     def test_guard_rejects_remote_host(self):
         db = SimpleNamespace(info=SimpleNamespace(
-            dbname="secretary_pkb_proto_20260927",
-            user="secretary_pkb_proto_writer_20260927",
-            host="example.invalid",
+            dbname="secretary", user="secretary_daily_runtime", host="example.invalid",
         ))
         with self.assertRaisesRegex(ValueError, "non-local"):
             _guard_db(db)
