@@ -658,6 +658,17 @@ def _normalized_member_specs(
 
 
 def _decision_signature(stage: str, response: dict) -> str:
+    if stage == "goal":
+        # Group meaningfully compatible proposals, not arbitrary JSON wording.
+        # The selected MAGI member still owns the actual goal/answer/query.
+        request = response.get("read_request") or {}
+        evidence = response.get("evidence") or {}
+        return (
+            "next=" + str(response.get("next"))
+            + ";fulfillment=" + str(response.get("fulfillment"))
+            + ";basis=" + str(evidence.get("basis"))
+            + ";source=" + str(request.get("source") or "")
+        )
     if stage == "classify":
         return (
             "category=" + str(response.get("category"))
