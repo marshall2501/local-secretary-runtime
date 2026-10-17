@@ -24,6 +24,8 @@ class TaskRuntimePorts:
     claim_proposal_review_record: Callable
     finalize_proposal_review_record: Callable
     abort_proposal_review_record: Callable
+    # Optional until a concrete persistent Source checkpoint Port is bound.
+    checkpoint_source_progress: Callable | None = None
 
 
 class StateDrivenTaskApplication:
@@ -48,7 +50,8 @@ class StateDrivenTaskApplication:
                     timeout: float, task_id: UUID | None = None,
                     stop_requested=None, on_turn_start=None,
                     on_member_progress=None,
-                    dialogue_starter=None, observation_continuation=None) -> dict:
+                    dialogue_starter=None, observation_continuation=None,
+                    resume_snapshot: dict | None = None) -> dict:
         options = {
             "member_specs": member_specs,
             "timeout": timeout,
@@ -63,6 +66,10 @@ class StateDrivenTaskApplication:
         }
         if on_member_progress is not None:
             options["on_member_progress"] = on_member_progress
+        if self._ports.checkpoint_source_progress is not None:
+            options["checkpoint_source_progress"] = self._ports.checkpoint_source_progress
+        if resume_snapshot is not None:
+            options["resume_snapshot"] = resume_snapshot
         if dialogue_starter is not None:
             options["dialogue_starter"] = dialogue_starter
         if observation_continuation is not None:
