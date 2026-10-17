@@ -533,7 +533,11 @@ async def verify_safe_paused_restart(connect) -> None:
     trace = queries.trace(task_id)
     assert trace["task"]["status"] == "completed"
     assert trace["task"]["can_resume"] is False
-    assert trace["task"]["magi_session"]["member_specs"] == specs
+    saved_members = trace["task"]["magi_session"]["member_specs"]
+    # The MAGI session normalizes Provider settings, but retains the same
+    # original seat identity. Exact intake snapshot stays in DB checkpoint.
+    assert len(saved_members) == len(specs)
+    assert saved_members[0]["name"] == specs[0]["name"]
     assert trace["task"]["magi_session"]["decision_strategy"] == "llm"
     assert trace["actions"] == [], "source-free_requeue_must_not_write_action"
     with connect() as db, db.cursor() as cur:
@@ -542,6 +546,7 @@ async def verify_safe_paused_restart(connect) -> None:
             (task_id,),
         )
         checkpoint = cur.fetchone()[0]
+        assert checkpoint["member_specs"] == specs
         assert checkpoint["start_intent"]["policy_snapshot"] == POLICY
         assert checkpoint["start_intent"]["state"] == "claimed"
         cur.execute(
