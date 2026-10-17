@@ -63,8 +63,8 @@ const niceguiCore = legacyPageUrl('/core')
       <div class="command-row">
         <label for="task-strategy">判断方式</label>
         <select id="task-strategy" v-model="strategy" :disabled="busy || !commandsEnabled">
-          <option value="standard">通常（MAGI）</option>
-          <option value="llm">Goal判断（LLM／MAGI 1〜3席）</option>
+          <option value="standard">従来方式（段階判断／MAGI）</option>
+          <option value="llm">Goal方式（LLMによる次の判断／MAGI）</option>
         </select>
         <button type="submit" class="primary-command"
           :disabled="busy || !commandsEnabled || !request.trim()">
