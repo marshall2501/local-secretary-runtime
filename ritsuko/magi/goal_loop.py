@@ -22,7 +22,7 @@ from ritsuko.core.goal_evidence import check_goal_response_evidence
 # 意味的な必要性はMAGIが判断し、Coreには本人による積極的な
 # 取得/引用指示だけを限定的なSource-requiredガードとして残す。
 _SOURCE_DIRECTIVE = (
-    r"[^。、．!?！？\\n]{0,48}"
+    r"[^。、．!?！？\n]{0,48}"
     r"(?:調べて|調査して|検索して|参照して|確認して|引用して|提示して|示して|明記して|使って|基づいて)"
 )
 SOURCE_REQUEST = re.compile(
