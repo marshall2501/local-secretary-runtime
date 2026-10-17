@@ -141,7 +141,7 @@ class GoalJudgment:
 
     def initialize(self, session: dict) -> None:
         """Initialize bounded Goal context without rewriting member settings."""
-        from .goal_loop import MAX_GOAL_TURNS
+        from .goal_contract import DEFAULT_GOAL_TURN_LIMIT
 
         enabled = [s for s in session["member_specs"] if s.get("enabled")]
         if not enabled:
@@ -150,15 +150,15 @@ class GoalJudgment:
             control_mode="goal_loop_v1", next_step="evaluate_goal",
             goal=None, goal_judgment=None, user_replies=[],
             previous_queries=[], status_message=None,
-            turn_limit=MAX_GOAL_TURNS,
+            turn_limit=DEFAULT_GOAL_TURN_LIMIT,
         )
 
     def prepare_resume(self, session: dict) -> None:
         """Restore only reasoning context; never change Task's chosen strategy."""
-        from .goal_loop import MAX_GOAL_TURNS
+        from .goal_contract import DEFAULT_GOAL_TURN_LIMIT
 
         session.setdefault("previous_request_signatures", [])
-        session.setdefault("turn_limit", MAX_GOAL_TURNS)
+        session.setdefault("turn_limit", DEFAULT_GOAL_TURN_LIMIT)
 
     async def start(self, session: dict, **context) -> dict:
         """Request the initial Goal evaluation."""
