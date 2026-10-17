@@ -45,6 +45,19 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
   }
 })
 
+test('待機中のVueは3秒毎の多重GETを発行しない', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/')
+  await expect(page.getByText('Task参照API接続中（読取専用）')).toBeVisible()
+  // 初期の一覧・詳細・Healthが揃った後、ネットワーク実送信を観測する。
+  await expect(page.locator('.task-item').first()).toBeVisible()
+  const requests: string[] = []
+  page.on('request', request => {
+    if (request.url().includes('/api/v1/ritsuko/')) requests.push(request.url())
+  })
+  await page.waitForTimeout(7_000)
+  expect(requests).toEqual([])
+})
+
 test('保存した既定方式で選択欄なしでも同じTask APIを利用する', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/')
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8099\/ui\//)
