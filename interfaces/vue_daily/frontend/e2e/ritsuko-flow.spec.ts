@@ -23,7 +23,7 @@ test('8097から8099へ通常リンク遷移し、フォームを実際に編集
 
 test('Vueの両判断方式は同じTask APIに保存され、方式はTask単位で固定される', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
-  const selector = page.getByLabel('判断方式')
+  const selector = page.locator('#task-strategy')
   await expect(selector).toHaveValue('standard')
   const strategies = [
     { value: 'llm', label: 'LLM判断の受付試験' },
@@ -122,7 +122,7 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
 
 test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを完了できる', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
-  await page.getByLabel('判断方式').selectOption('standard')
+  await page.locator('#task-strategy').selectOption('standard')
   const request = '回答候補試験：Pythonの辞書を説明する'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
   await page.getByRole('button', { name: '依頼を送信' }).click()
