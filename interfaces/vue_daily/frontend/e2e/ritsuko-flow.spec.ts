@@ -65,12 +65,18 @@ test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻�
   const id = list.items[0].id as string
   // The persisted Task may say running even if the API process has no
   // in-memory Operation. Only real Repository status is authoritative.
+  // Freeze a response before navigation: route.fetch() can be disposed when
+  // the browser tears down a request during reload, causing a flaky test.
+  const saved = await (
+    await page.request.get(origin + '/api/v1/ritsuko/tasks/' + id)
+  ).json()
+  saved.trace.task.status = 'running'
+  saved.trace.task.stop_requested = false
   await page.route('**/api/v1/ritsuko/tasks/' + id, async route => {
-    const response = await route.fetch()
-    const body = await response.json()
-    body.trace.task.status = 'running'
-    body.trace.task.stop_requested = false
-    await route.fulfill({ response, json: body })
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify(saved),
+    })
   })
   await page.route('**/api/v1/ritsuko/operations/' + id, async route => {
     await route.fulfill({
@@ -345,6 +351,7 @@ test('Vue PKB検索は共通ReadServiceを使い、旧画面へ戻れる', async
   await page.getByRole('button', { name: '検索', exact: true }).click()
   await expect(page.getByText('架空サブPC')).toBeVisible()
   await page.getByRole('link', { name: 'RITSUKO' }).click()
-  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/')
+  // RITSUKO automatically selects the most recent Task and sets #task=UUID.
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8097\/ui\/(?:#task=[a-f\d-]{36})?$/)
   await expect(page.getByRole('heading', { name: '新しい依頼を入力' })).toBeVisible()
 })
