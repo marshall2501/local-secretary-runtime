@@ -95,7 +95,7 @@ def _source_setting_counts(port: int, admin_secret_file: Path) -> dict[str, int]
     with psycopg.connect(
         host="127.0.0.1",
         port=port,
-        dbname="secretary_pkb_proto_20260927",
+        dbname="secretary",
         user="secretary_admin",
         password=password,
         connect_timeout=5,
@@ -103,10 +103,10 @@ def _source_setting_counts(port: int, admin_secret_file: Path) -> dict[str, int]
         with db.cursor() as cur:
             cur.execute(
                 """SELECT count(*) FROM secretary.schema_migrations
-                   WHERE version='026_service_billing.sql'"""
+                   WHERE version='009_runtime_policy_profiles.sql'"""
             )
             if cur.fetchone()[0] != 1:
-                raise RuntimeError("settings source is not at isolated migration 026")
+                raise RuntimeError("settings source is not at current migration 009")
             result = {}
             for table in SETTING_TABLES:
                 cur.execute(f"SELECT count(*) FROM secretary.{table}")
@@ -190,7 +190,6 @@ def main() -> None:
         raise RuntimeError("settings source port and admin secret must be supplied together")
     _read_secret(args.runtime_secret_file)
 
-    os.environ["LSA_DAILY_DB_MODE"] = "production"
     os.environ["LSA_DAILY_DB_NAME"] = args.target_database
     os.environ["LSA_PKB_DAILY_PORT"] = str(args.target_port)
     os.environ["LSA_PKB_DAILY_SECRET"] = str(args.runtime_secret_file)
@@ -274,7 +273,7 @@ def main() -> None:
                 ),
             }
             if actual_settings != expected_settings:
-                raise RuntimeError("runtime settings counts differ from the isolated source")
+                raise RuntimeError("runtime settings counts differ from the specified current source")
 
     suffix = uuid4().hex[:10]
     entity_name = "RehearsalPC-" + suffix
@@ -474,7 +473,7 @@ def main() -> None:
         + " pkb=write/read/pending ritsuko=task/audit "
           "finance=import/read connections=write magi=write billing=write web=ok"
     )
-    print("PASS: production daily runtime works against the disposable promoted database.")
+    print("PASS: daily runtime works against the disposable current-schema database.")
 
 
 if __name__ == "__main__":
