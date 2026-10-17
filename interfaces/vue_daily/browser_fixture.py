@@ -89,6 +89,8 @@ class BrowserFixtureCommands:
             self.store.items[uid] = {
                 "id": uid, "request": request,
                 "status": "pending" if is_stop else "waiting_external",
+                "phase": ("observe" if is_stop else "awaiting_review"
+                          if is_ready_candidate else "awaiting_clarification"),
                 "revision": 1, "question": (
                     None if is_ready_candidate else "好きな言語を教えてください。"
                 ),
@@ -131,6 +133,7 @@ class BrowserFixtureCommands:
         task = self.store.items[str(task_id)]
         task["status"] = "waiting_external"
         task["revision"] += 1
+        task["phase"] = "awaiting_review"
         task["magi_session"]["status"] = "proposal_ready"
         task["message"] = f"回答候補：{reply}"
         task["question"] = None
@@ -140,6 +143,7 @@ class BrowserFixtureCommands:
         """回答だけのReviewを模擬し、Taskを完了にする。"""
         task = self.store.items[str(task_id)]
         task["status"] = "completed"
+        task["phase"] = "completed"
         task["revision"] += 1
         task["magi_session"]["status"] = "candidate_ready"
         task["message"] = "架空Taskの回答を確定しました。"
@@ -149,6 +153,7 @@ class BrowserFixtureCommands:
         """pending Taskに停止要求を記録して一時停止する。"""
         task = self.store.items[str(task_id)]
         task["status"] = "paused"
+        task["phase"] = "paused"
         task["stop_requested"] = True
         task["revision"] += 1
         return {"task_id": str(task_id), "status": "paused", "stop_requested": True}
