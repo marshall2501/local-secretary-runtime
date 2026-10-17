@@ -1,5 +1,8 @@
 # SOURCE_MAP — ソース構成と機能対応
 
+2026-10-17 Vue Memory Review（`main@cee5d6f`、隔離検証）: `TaskCommands.review`が本人の明示的`answer_only`／`remember`を受け取る。rememberは既存RITSUKO `reviewable_user_knowledge_proposal`が認め、`build_daily_magi_task_commands`がPKB Memory Intake Portを注入した場合のみ実行する。`ritsuko.application.task_records.prepare_memory_intake_record → pkb.application.memory_intake.register_memory_intake → StateDrivenTaskApplication.review(memory_result=receipt)` の既存NiceGUIと同じ経路を使う。Receipt異常時はTaskを成功確定しない。Vue `GET /api/v1/ritsuko/tasks/{id}` にCore由来の`can_remember`を表示用に加え、画面で本人が選択してからのみPOST。通常8097は引き続きread-only、偽ブラウザテストは運用DB/PKBを書かない。実PKB反映／MAGI再評価の本人日常受入は未実施。
+
+
 2026-10-17 Vue MAGI席の一時ライブ進捗（`main@a55f19d`）: 既存MAGIの`on_member_progress`をTaskCommands→StateDrivenTaskApplication→RITSUKO Observation/Answer/Review→MAGIの両判断方式へ渡し、`TaskCommands.operation`に名前・Provider・Model・Turn・状態・経過秒だけをプロセス内一時保持（本文/Secretは保持しない）。Vueの`MagiProgress.vue`は`operations/{task_id}`の一時進捗とDB永続Turnを明示的に区別。APIプロセス再起動で一時進捗が失われる点は不変、DB Taskの確定状態は変更しない。fake API＋Chromium表示試験を追加。**本人サブPCの実LLM通信・全NiceGUI同等は未実証。**
 
 
