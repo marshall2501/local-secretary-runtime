@@ -162,9 +162,22 @@ class BrowserFixtureCommands:
         """受付Jobの代わりに架空Taskの保存状態を返す。"""
         if str(task_id) not in self.store.items:
             raise KeyError("missing")
-        return {"task_id": str(task_id), "kind": None,
-                "status": "operation_not_in_process", "source": "persisted_task",
-                "task_status": self.store.items[str(task_id)]["status"]}
+        task_status = self.store.items[str(task_id)]["status"]
+        operation = {
+            "task_id": str(task_id), "kind": None,
+            "status": "running" if task_status == "pending" else "operation_not_in_process",
+            "source": "fixture", "task_status": task_status,
+        }
+        if task_status == "pending":
+            # Explicit synthetic progress; the fixture has no real model worker.
+            operation["live_turn"] = 1
+            operation["member_progress"] = {
+                "MELCHIOR": {
+                    "member": "MELCHIOR", "provider": "ollama",
+                    "model": "fixture", "state": "running", "turn": 1,
+                },
+            }
+        return operation
 
 
 async def serve() -> None:
