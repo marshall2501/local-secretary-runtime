@@ -42,7 +42,8 @@ const answerable = computed(() =>
   props.task.phase === 'awaiting_clarification')
 const reviewable = computed(() =>
   props.task?.status === 'waiting_external' &&
-  props.task.phase === 'awaiting_review')
+  props.task.phase === 'awaiting_review' &&
+  (props.task.can_answer_only === true || props.task.can_remember === true))
 const operationBusy = computed(() =>
   ['accepted', 'running'].includes(props.operation?.status ?? ''))
 const stoppable = computed(() =>
@@ -131,18 +132,28 @@ const niceguiCore = legacyPageUrl('/core')
         <button type="submit" class="secondary"
           :disabled="busy || !reply.trim()">本人回答を送る</button>
       </form>
-      <div v-if="reviewable" class="command-row">
+      <div v-if="reviewable" class="command-form" aria-label="回答と記憶のReview">
         <span class="muted small">回答候補の確認</span>
-        <button type="button" class="secondary"
-          :disabled="busy || operationBusy"
-          @click="emit('review')">回答のみで完了を依頼</button>
-        <button v-if="task?.can_remember" type="button" class="secondary"
-          :disabled="busy || operationBusy" @click="emit('remember')">
-          記憶に反映して完了を依頼
-        </button>
-        <span v-if="task?.can_remember" class="muted small">
-          本人の選択後にMemory Intakeへ記録し、MAGI再評価とTask確定を行います。
-        </span>
+        <div v-if="task?.can_remember && task.memory_review_candidate"
+          class="task-field" aria-label="記憶反映前の登録候補">
+          <strong>記憶へ登録する文章（本人確認前）</strong>
+          <p>{{ task.memory_review_candidate.knowledge_candidate }}</p>
+          <p class="muted small">
+            この候補の根拠となった本人回答：{{ task.memory_review_candidate.user_text }}
+          </p>
+          <p class="muted small">
+            記憶反映を選択すると、上記の文章をMemory Intakeへ渡します。
+            内容によっては確認待ち候補となり、確定PKB事実とは限りません。
+          </p>
+        </div>
+        <div class="command-row">
+          <button v-if="task?.can_answer_only" type="button" class="secondary"
+            :disabled="busy || operationBusy"
+            @click="emit('review')">回答のみで完了を依頼</button>
+          <button v-if="task?.can_remember && task.memory_review_candidate"
+            type="button" class="secondary" :disabled="busy || operationBusy"
+            @click="emit('remember')">記憶に反映して完了を依頼</button>
+        </div>
       </div>
       <div v-if="stoppable" class="command-row">
         <button type="button" class="secondary" :disabled="busy"
