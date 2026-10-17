@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from uuid import UUID
 
+from ritsuko.core.task_projection import can_requeue_paused_task
+
 
 class PostgresCoreTaskQueryRepository:
     def __init__(self, connect: Callable):
@@ -201,6 +203,9 @@ class PostgresCoreTaskQueryRepository:
                 "proposal_memory_intake":checkpoint.get("proposal_memory_intake"),
                 "user_resume":checkpoint.get("user_resume"),
                 "stop_requested":checkpoint.get("stop_requested"),
+                "can_resume":can_requeue_paused_task(
+                    task[3], checkpoint, len(action_rows),
+                ),
             },
             "actions": [
                 {
