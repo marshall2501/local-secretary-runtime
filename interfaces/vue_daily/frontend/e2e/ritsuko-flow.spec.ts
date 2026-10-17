@@ -89,6 +89,20 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
 })
 
+test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを完了できる', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8099/ui/')
+  await page.getByLabel('判断方式').selectOption('standard')
+  const request = '回答候補試験：Pythonの辞書を説明する'
+  await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
+  await page.getByRole('button', { name: '依頼を送信' }).click()
+  await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
+  await expect(page.getByText('MAGI回答候補（未確定・本人確認待ち）')).toBeVisible()
+  await expect(page.getByText('辞書はキーと値の組です。')).toBeVisible()
+  await page.getByRole('button', { name: '回答のみで完了を依頼' }).click()
+  await expect(page.getByText('完了（Task確定状態）')).toBeVisible()
+  await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
+})
+
 test('停止は保存済み状態で確認し、Actionの出典と監査履歴を開ける', async ({ page }) => {
   await page.goto('http://127.0.0.1:8099/ui/')
   await page.getByRole('textbox', { name: '依頼内容' }).fill('停止試験として処理を開始する')
