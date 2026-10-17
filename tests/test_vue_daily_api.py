@@ -100,6 +100,65 @@ class VueDailyApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 503)
                 self.assertEqual(response.json()["detail"], "vue_frontend_not_built")
 
+    def test_judgment_settings_share_nicegui_file_without_changing_other_keys(self):
+        """方式既定と検証表示を別に保存し、ほかの設定・席割当を保つ。"""
+        import json
+
+        with TemporaryDirectory() as workspace:
+            target = Path(workspace) / "ui_preferences.json"
+            target.write_text(json.dumps({
+                "core_goal_mode": False,
+                "core_show_judgment_mode": True,
+                "core": {"task_recent_limit": 5},
+                "member_assignments": ["leave untouched"],
+            }), encoding="utf-8")
+            with patch("interfaces.vue_daily.preferences.preferences_path", return_value=target):
+                reader = TestClient(
+                    create_app(queries=self.queries),
+                    base_url="http://127.0.0.1:8097",
+                )
+                self.assertEqual(reader.get(
+                    "/api/v1/ritsuko/preferences"
+                ).json(), {
+                    "default_strategy": "standard",
+                    "show_strategy_selector": True,
+                })
+                self.assertEqual(reader.post(
+                    "/api/v1/ritsuko/preferences",
+                    json={"default_strategy": "llm", "show_strategy_selector": False},
+                ).status_code, 503)
+
+                commands = FakeCommands()
+                writer = TestClient(
+                    create_app(queries=self.queries, commands=commands,
+                               recover_pending_at_startup=False),
+                    base_url="http://127.0.0.1:8099",
+                )
+                response = writer.post("/api/v1/ritsuko/preferences", json={
+                    "default_strategy": "llm", "show_strategy_selector": False,
+                })
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["default_strategy"], "llm")
+                self.assertFalse(response.json()["show_strategy_selector"])
+                saved = json.loads(target.read_text(encoding="utf-8"))
+                self.assertEqual(saved["core_goal_mode"], True)
+                self.assertEqual(saved["core_show_judgment_mode"], False)
+                self.assertEqual(saved["core"], {"task_recent_limit": 5})
+                self.assertEqual(saved["member_assignments"], ["leave untouched"])
+                self.assertEqual(reader.get(
+                    "/api/v1/ritsuko/preferences"
+                ).json()["default_strategy"], "llm")
+
+                # 実際のTask既定適用はVue側から新Taskだけに送られる。
+                self.assertEqual(commands.calls, [])
+                target.write_text("{invalid", encoding="utf-8")
+                self.assertEqual(writer.post(
+                    "/api/v1/ritsuko/preferences",
+                    json={"default_strategy": "standard",
+                          "show_strategy_selector": True},
+                ).status_code, 503)
+                self.assertEqual(target.read_text(encoding="utf-8"), "{invalid")
+
     def test_task_command_preview_needs_explicit_write_flag(self):
         """コマンドプレビューはimportや通常実行では実DBを開かない。"""
         from contextlib import redirect_stderr
