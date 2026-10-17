@@ -26,6 +26,8 @@ export interface MagiSession {
   status?: string
   next_step?: string
   user_question?: string | null
+  detail?: { state?: string; answer_candidate?: string | null } | null
+  pending_requests?: unknown[]
   member_specs?: Array<{ name?: string; enabled?: boolean; provider?: string; model?: string }>
   turns?: Array<{ stage?: string; status?: string; member_results?: MagiMemberResult[] }>
 }
