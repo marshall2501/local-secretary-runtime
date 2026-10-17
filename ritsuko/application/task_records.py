@@ -87,6 +87,17 @@ def persist_session_record(repository: MagiTaskRepository, task_id: UUID,
     return repository.persist_session(**kwargs)
 
 
+def save_source_resume_record(
+    repository: MagiTaskRepository, task_id: UUID, session: dict,
+    observations: list[dict], cycles: int, expected_attempt_id: UUID,
+) -> None:
+    """同じTaskと実行試行IDの観測再開点を永続化する。"""
+    repository.save_source_resume(
+        task_id=task_id, session=session, observations=observations,
+        cycles=cycles, expected_attempt_id=expected_attempt_id,
+    )
+
+
 def record_source_read_record(repository: MagiTaskRepository, task_id: UUID,
                               execution: dict, pending_request: dict,
                               expected_attempt_id: UUID | None = None) -> tuple[str, str]:
