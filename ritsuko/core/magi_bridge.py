@@ -100,6 +100,31 @@ def reviewable_user_knowledge_proposal(session: dict) -> dict | None:
     }
 
 
+def reviewable_answer_candidate(session: dict) -> dict | None:
+    """Offer a saved standard READY answer for explicit answer-only review.
+
+    This is not a knowledge-memory proposal: no PKB write is implied.
+    Candidate readiness is not itself Task completion; the owner must accept it.
+    """
+    if session.get("status") != "candidate_ready":
+        return None
+    detail = session.get("detail") or {}
+    if detail.get("state") != "READY":
+        return None
+    if session.get("pending_requests"):
+        return None
+    answer = str(detail.get("answer_candidate") or "").strip()
+    if not answer:
+        return None
+    return {
+        "answer": answer,
+        "answer_source": "answer_candidate",
+        "knowledge_candidate": None,
+        "user_text": "",
+        "responds_to": [],
+    }
+
+
 def proposal_review_observation(
     proposal: dict,
     *,
