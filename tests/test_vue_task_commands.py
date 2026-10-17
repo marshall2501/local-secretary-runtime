@@ -101,6 +101,43 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TaskCommandConflict, "no_running_operation"):
             commands.stop(UUID(uid))
 
+    async def test_live_seat_events_are_bounded_and_not_task_completion(self):
+        """処理中の席別進捗は一時Operationだけに保持し、Task完了と混同しない。"""
+        app = FakeApplication()
+        commands = TaskCommands(app, FakeQueries(), lambda: [
+            {"name": "MELCHIOR", "enabled": True, "timeout_seconds": 5},
+        ])
+        accepted = await commands.start("席別進捗の表示")
+        task_id = UUID(accepted["task_id"])
+        await asyncio.wait_for(app.entered.wait(), timeout=1)
+        progress = app.called[-1][2]["on_member_progress"]
+        progress({
+            "task_id": str(task_id), "member": "MELCHIOR",
+            "provider": "ollama", "model": "fake", "turn": 1,
+            "state": "running", "secret": "must-not-be-exposed",
+        })
+        live = commands.operation(task_id)
+        self.assertEqual(live["status"], "running")
+        self.assertEqual(live["member_progress"]["MELCHIOR"]["state"], "running")
+        self.assertNotIn("secret", str(live))
+        # A different Task cannot poison another Task's visual progress.
+        progress({
+            "task_id": str(uuid4()), "member": "CASPER",
+            "state": "completed", "turn": 1,
+        })
+        self.assertEqual(len(commands.operation(task_id)["member_progress"]), 1)
+        progress({
+            "task_id": str(task_id), "member": "CASPER",
+            "state": "queued", "turn": 2,
+        })
+        self.assertEqual(set(commands.operation(task_id)["member_progress"]), {"CASPER"})
+        app.release.set()
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if commands.operation(task_id)["status"] == "execution_finished":
+                break
+        self.assertEqual(commands.operation(task_id)["status"], "execution_finished")
+
     async def test_both_judgment_methods_share_task_runner_with_multiple_magi_seats(self):
         """判断方式とMAGI席数は独立し、共通Task Applicationへ同じ形で渡る。"""
         for count in (1, 2, 3):
