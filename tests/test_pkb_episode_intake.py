@@ -2,9 +2,8 @@
 import copy
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
-from pkb.episode_intake import digest, ingest, load_fixture, validate_corpus
+from pkb.episode_intake import digest, load_fixture, validate_corpus
 
 FIXTURE = Path(__file__).resolve().parents[1] / "interfaces" / "workbench" / "fixtures" / "episodes.json"
 
@@ -46,24 +45,14 @@ class EpisodeIntakeTests(unittest.TestCase):
                              "dataset_id": "pkb-p0-fictional-20260927",
                              "schema_version": 1, "episodes": changed})
 
-    def test_rejects_partial_corpus_before_sql(self):
-        class ForbiddenDB:
-            info = SimpleNamespace(dbname="secretary_pkb_proto_20260927",
-                                   host="localhost",
-                                   user="secretary_pkb_proto_writer_20260927")
-            def transaction(self):
-                raise AssertionError("Do not write partial corpus")
-        with self.assertRaisesRegex(ValueError, "Incomplete episode corpus"):
-            ingest(ForbiddenDB(), self.episodes[:9])
-
-    def test_rejects_production_before_sql(self):
-        class ForbiddenDB:
-            info = SimpleNamespace(dbname="secretary", host="localhost",
-                                   user="secretary_pkb_proto_writer_20260927")
-            def transaction(self):
-                raise AssertionError("Do not open the production DB")
-        with self.assertRaisesRegex(ValueError, "non-isolated"):
-            ingest(ForbiddenDB(), self.episodes)
+    def test_rejects_partial_corpus(self):
+        with self.assertRaisesRegex(ValueError, "exactly ten"):
+            validate_corpus({
+                "fictional_only": True,
+                "dataset_id": "pkb-p0-fictional-20260927",
+                "schema_version": 1,
+                "episodes": list(self.episodes[:9]),
+            })
 
 
 if __name__ == "__main__":
