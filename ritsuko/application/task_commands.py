@@ -79,6 +79,44 @@ class TaskCommands:
             if uid not in self._jobs:
                 self._operations.pop(uid, None)
 
+    def _report_member_progress(self, task_id: UUID, event: dict) -> None:
+        """Store bounded transient seat states; never persist prompts or Secrets.
+
+        Each callback belongs to the already accepted Task. This is a live
+        display hint, not an authoritative Task completion or Provider log.
+        """
+        if not isinstance(event, dict):
+            return
+        info = self._operations.get(task_id)
+        if info is None or (
+            event.get("task_id") and str(event["task_id"]) != str(task_id)
+        ):
+            return
+        name = str(event.get("member") or "").strip()[:64]
+        if not name:
+            return
+        try:
+            turn = max(0, int(event.get("turn") or 0))
+        except (ValueError, TypeError):
+            return
+        previous_turn = int(info.get("live_turn") or 0)
+        if turn < previous_turn:
+            return
+        if turn > previous_turn:
+            info["member_progress"] = {}
+            info["live_turn"] = turn
+        progress = {
+            "member": name,
+            "provider": str(event.get("provider") or "")[:48],
+            "model": str(event.get("model") or "")[:96],
+            "state": str(event.get("state") or "unknown")[:32],
+            "turn": turn,
+        }
+        elapsed = event.get("elapsed_seconds")
+        if type(elapsed) in (int, float) and 0 <= elapsed < 86400:
+            progress["elapsed_seconds"] = float(elapsed)
+        info.setdefault("member_progress", {})[name] = progress
+
     def _schedule(self, task_id: UUID, kind: str, command) -> dict:
         """同一Taskの多重実行を防ぎ、受付とTask完了を別々に記録する。"""
         job = self._jobs.get(task_id)
@@ -89,6 +127,7 @@ class TaskCommands:
         self._operations[task_id] = {
             "task_id": str(task_id), "kind": kind, "status": "accepted",
             "stop_requested": False, "error_type": None,
+            "member_progress": {}, "live_turn": 0,
         }
 
         async def execute() -> None:
@@ -199,7 +238,11 @@ class TaskCommands:
             """DB pendingのclaim後、既存のRITSUKO/MAGI共通Taskループを起動する。"""
             await self._application.start(
                 request, task_id=task_id, member_specs=deepcopy(member_specs),
-                timeout=timeout, stop_requested=stop.is_set, **starter_options,
+                timeout=timeout, stop_requested=stop.is_set,
+                on_member_progress=lambda event: self._report_member_progress(
+                    task_id, event,
+                ),
+                **starter_options,
             )
         self._schedule(task_id, "start", run)
 
