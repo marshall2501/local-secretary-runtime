@@ -26,7 +26,7 @@ LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定
 
 ## 主な入口
 
-- `interfaces/vue_daily/` / `interfaces/api/ritsuko_tasks.py` — 共通Task APIを使うVue日常UI移行先。正式切替は本人実機受入後。
+- `interfaces/vue_daily/` / `interfaces/api/ritsuko_tasks.py` — 共通Task APIを使うVue日常UI移行先。PKBのSQL-first検索は `interfaces/api/pkb_read.py` と共通ReadService経由。記憶登録・訂正・Pendingは旧NiceGUIを継続。正式切替は本人実機受入後。
 - `interfaces/web/app.py` / `scripts/ui/launch_daily_pkb.ps1` — 受入まで存続する旧NiceGUI localhost入口。接続先は通常DB `secretary`（旧隔離DB分岐なし）。
 - `ritsuko/core/task_execution.py` — 単一のTask/Source/Result/Review実行Core。
 - `ritsuko/magi/session_workflow.py` / `judgment_strategies.py` — 共通MAGI Sessionとstandard/Goal判断方式。
