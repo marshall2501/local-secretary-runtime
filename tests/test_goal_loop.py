@@ -5,8 +5,9 @@ import unittest
 from functools import partial
 from uuid import uuid4
 
-from ritsuko.magi.async_execution import (
-    start_dialogue_async, continue_with_verified_observations_async,
+from ritsuko.magi.session_workflow import (
+    start_dialogue_async,
+    continue_with_verified_observations_async,
     continue_with_user_clarification_async,
 )
 from ritsuko.magi.goal_contract import validate_goal_turn
