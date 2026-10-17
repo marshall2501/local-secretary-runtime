@@ -16,6 +16,13 @@ MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判�
 - `TaskCommandPanel.vue` がWorker照合待ちを示し、「保存済みTaskを再取得」で既存の読取APIを手動照会できる。**Taskの再実行・Worker再起動・DB状態変更は行わない。** 停止は既存の本人指示・永続Stop経路を維持。
 - [Vue API/Chromium隔離CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39003028095) **PASS（Chromium 11件）**、[PostgreSQL foundation](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39003028033) PASS。ChromiumはAPI再起動後に似た「実行中TaskだがOperationなし」を架空応答で作り、7秒間の追加GETゼロと本人クリックによる再読取を検証。**実API process kill/restartや実Worker復旧は未検証。**
 
+## 2026-10-17 Source記録後のチェックポイント再開（後続実装）
+
+- **追加対応**: `ritsuko/core/task_execution.py` がSource実行結果を既存Action/Resultへ記録した後、`PostgresMagiTaskRepository.save_source_resume` で**MAGI再評価前のSession＋検証済み観測＋Result ID＋観測サイクル**をTask checkpointに保存する。新テーブル・別Executorは設けない。
+- 本人が停止して `paused` になったTaskは、元の判断方式・MAGI席・Policyで同じUUIDのまま再受付し、**保存済み観測をMAGIの再評価へ渡す**。Sourceを再呼出しせず、検証済みResult IDの照合で判断する。API停止で再キュー済みpendingが残れば、通常の明示されたpending復旧経路で同じsnapshotを渡す。
+- **安全に復元できないケース**: Source/Actionの記録件数とcheckpointのResult IDが一致しない、またはcheckpointが未保存なら、再開を禁止（409／ボタン非表示）。走行中のWorkerをAPI再起動だけで強制再実行する機能ではない。read-only Sourceの今回の縦断と、高影響な外部write Actionの復旧は別。
+- [使い捨て実PostgreSQL CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39005309446) **PASS**。合成PKB→停止→同Result IDでMAGI再評価→Task completed、Source取得回数1、チェックポイントなしActionは再開拒否を確認。**実MAGI／実PKB／本人サブPC／物理API再起動／実外部変更Actionの途中復旧は未受入**。
+
 ## 2026-10-17 停止済みTaskの限定再開と手動再取得
 
 - 新共通RITSUKOの `POST /api/v1/ritsuko/tasks/{task_id}/resume` をVueの「同じTaskを再開」へ接続。対象は**本人が停止し、Source/Actionの実行・本人回答/Reviewがなく、前回Session未保存のTask**だけ。既存PostgreSQLが `can_resume` を判定し、UIはその判定だけでボタン表示する。
