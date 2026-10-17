@@ -1,6 +1,6 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
-/** 本番DBへ接続せず、8097/8099 fake HTTP serversを実Chromiumで操作する。 */
+/** 本番DBへ接続せず、単一Secretary Serverのfake Task/PKBをChromiumで操作する。 */
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
