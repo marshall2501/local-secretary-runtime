@@ -56,7 +56,6 @@ export function useTasks() {
   }
   let pendingStart: PendingStart | null = loadPending()
   const draftRequest = ref(pendingStart?.request ?? '')
-  const strategy = ref<DecisionStrategy>(pendingStart?.strategy ?? 'standard')
   const reply = ref('')
   function storePending(value: PendingStart | null): void {
     pendingStart = value
@@ -119,10 +118,10 @@ export function useTasks() {
       commandError.value = '依頼は1〜4000文字で入力してください。'
       return
     }
-    const intent = pendingStart && pendingStart.request === request &&
-      pendingStart.strategy === strategy.value ? pendingStart : {
-        id: crypto.randomUUID(), request, strategy: strategy.value,
-      }
+    // PendingStartは通信失敗時の同一UUID再送を守る。新規TaskはLLM判断に統一。
+    const intent = pendingStart && pendingStart.request === request ? pendingStart : {
+      id: crypto.randomUUID(), request, strategy: 'llm' as DecisionStrategy,
+    }
     storePending(intent)
     const result = await sendCommand(
       () => startTask(intent.request, intent.strategy, intent.id),
@@ -287,6 +286,6 @@ export function useTasks() {
     items, view, visibleLimit, hasMore, selectedId, trace, selected, connected, refreshing,
     problem, refresh, selectTask, selectView, loadMore,
     commandsEnabled, commandBusy, commandFeedback, commandError, operation,
-    draftRequest, strategy, reply, sendStart, sendAnswer, sendReview, sendStop,
+    draftRequest, reply, sendStart, sendAnswer, sendReview, sendStop,
   }
 }
