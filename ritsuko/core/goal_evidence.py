@@ -49,12 +49,12 @@ def check_goal_response_evidence(
     if evidence.get("basis") == "not_required":
         if references:
             return "goal_evidence_missing", {}
-        if (
-            session.get("requires_source", session.get("requires_web", False))
-            or session.get("requires_web")
-            or session.get("tool_read_executed")
-        ):
-            return "required_source_not_observed", {}
+        # Goal意味判断はMAGIが担当。Coreは依頼文を解釈せず、
+        # 実行待ちのSourceが残ったまま「参照不要」で完了する矛盾のみ拒否。
+        # 以前のrequires_source/requires_webは旧正規表現の履歴値であり、
+        # 保存済みSessionに存在していても現在の判断には使用しない。
+        if session.get("pending_requests"):
+            return "pending_source_request_not_completed", {}
         return "source_free", {}
 
     return "goal_evidence_missing", {}
