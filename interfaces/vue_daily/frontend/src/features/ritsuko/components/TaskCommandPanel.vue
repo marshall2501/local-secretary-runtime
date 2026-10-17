@@ -29,9 +29,15 @@ const emit = defineEmits<{
 const answerable = computed(() =>
   props.task?.status === 'waiting_external' &&
   props.task.magi_session?.status === 'waiting_user')
-const reviewable = computed(() =>
-  props.task?.status === 'waiting_external' &&
-  props.task.magi_session?.status === 'proposal_ready')
+const reviewable = computed(() => {
+  if (props.task?.status !== 'waiting_external') return false
+  const session = props.task.magi_session
+  if (session?.status === 'proposal_ready') return true
+  return session?.status === 'candidate_ready' &&
+    session.detail?.state === 'READY' &&
+    Boolean(session.detail?.answer_candidate?.trim()) &&
+    !(session.pending_requests?.length)
+})
 const stoppable = computed(() =>
   props.task !== null &&
   ['pending', 'running'].includes(props.task.status) &&
