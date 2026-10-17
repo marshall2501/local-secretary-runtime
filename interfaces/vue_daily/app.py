@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field
 from ritsuko.application.task_commands import (
     TaskCommandConflict, TaskCommandNotFound, TaskCommands,
 )
+from interfaces.vue_daily.preferences import (
+    read_judgment_preferences, save_judgment_preferences,
+)
 
 
 TaskView = Literal["recent", "open", "completed"]
@@ -33,6 +36,13 @@ class TaskStartBody(BaseModel):
     # Task開始時に方式を明示し、API側の暗黙standard選択を避ける。
     decision_strategy: Literal["standard", "llm"]
     task_id: UUID | None = None  # 通信途絶後の同一依頼再送に使うUUID
+
+
+class JudgmentPreferencesBody(BaseModel):
+    """新規Taskの既定方式と検証選択欄の表示（MAGI席数とは独立）。"""
+
+    default_strategy: Literal["standard", "llm"]
+    show_strategy_selector: bool
 
 
 class TaskAnswerBody(BaseModel):
@@ -176,6 +186,25 @@ def create_app(*, queries, commands: TaskCommands | None = None,
             raise HTTPException(422, str(exc)) from None
         except (OSError, RuntimeError):
             raise HTTPException(503, "task_command_unavailable") from None
+
+    @app.get("/api/v1/ritsuko/preferences")
+    def get_judgment_preferences():
+        """既存NiceGUIと共有する判断方式設定を返す。Secretは含めない。"""
+        try:
+            return read_judgment_preferences()
+        except (OSError, ValueError):
+            raise HTTPException(503, "ui_preferences_unavailable") from None
+
+    @app.post("/api/v1/ritsuko/preferences")
+    def update_judgment_preferences(body: JudgmentPreferencesBody):
+        """明示的な操作入口だけで既定方式／検証UI表示を保存する。"""
+        require_commands()
+        try:
+            return save_judgment_preferences(
+                body.default_strategy, body.show_strategy_selector,
+            )
+        except (OSError, ValueError):
+            raise HTTPException(503, "ui_preferences_unavailable") from None
 
     @app.post("/api/v1/ritsuko/tasks", status_code=202)
     async def start_task(body: TaskStartBody):
