@@ -188,7 +188,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
         await apply_judgment(session, judgment(
             "respond", refs=["other-task-result"], basis="result_refs",
             answer="別Taskの情報",
-        ), timeout=5)
+        ), strategy="llm", purpose="evaluate_goal")
         self.assertEqual(session["next_step"], "unrecorded_task_result_reference")
 
 
