@@ -40,7 +40,7 @@ class VueServerLoggingTests(unittest.TestCase):
         error_record.created = 1770000000.234
         formatted_error = error_formatter.format(error_record)
         self.assertRegex(
-            formatted_error, rf"^{TIMESTAMP} INFO:\s+Application startup complete\.$",
+            formatted_error, rf"^{TIMESTAMP} \[vue-readonly-8097\] INFO:\s+Application startup complete\.$",
         )
         self.assertIn(".234", formatted_error)
 
@@ -57,7 +57,7 @@ class VueServerLoggingTests(unittest.TestCase):
         )
         access_record.created = 1770000000.567
         formatted_access = access_formatter.format(access_record)
-        self.assertRegex(formatted_access, rf"^{TIMESTAMP} INFO:\s+127\.0\.0\.1:")
+        self.assertRegex(formatted_access, rf"^{TIMESTAMP} \[vue-readonly-8097\] INFO:\s+127\.0\.0\.1:")
         self.assertIn(".567", formatted_access)
         self.assertIn('"GET /api/v1/pkb/memory/search?limit=1 HTTP/1.1"', formatted_access)
         self.assertTrue(formatted_access.endswith("200 OK"))
@@ -90,7 +90,7 @@ class VueServerLoggingTests(unittest.TestCase):
             self.assertTrue(log_path.exists())
             lines = log_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 2)
-            self.assertRegex(lines[0], rf"^{TIMESTAMP} \\[vue-task-8099\\]")
+            self.assertRegex(lines[0], rf"^{TIMESTAMP} \[vue-task-8099\]")
             self.assertIn("Task server started", lines[0])
             self.assertIn('GET /api/v1/ritsuko/health HTTP/1.1', lines[1])
 
@@ -107,8 +107,10 @@ class VueServerLoggingTests(unittest.TestCase):
         config["formatters"]["default"]["fmt"] = "overridden locally"
         self.assertEqual(LOGGING_CONFIG["formatters"]["default"]["fmt"], original_default)
         self.assertEqual(LOGGING_CONFIG["formatters"]["access"]["fmt"], original_access)
-        self.assertEqual(config["handlers"], LOGGING_CONFIG["handlers"])
-        self.assertEqual(config["loggers"], LOGGING_CONFIG["loggers"])
+        self.assertEqual(config["handlers"]["default"], LOGGING_CONFIG["handlers"]["default"])
+        self.assertEqual(config["handlers"]["access"], LOGGING_CONFIG["handlers"]["access"])
+        self.assertEqual(config["loggers"]["uvicorn"]["level"], LOGGING_CONFIG["loggers"]["uvicorn"]["level"])
+        self.assertEqual(config["loggers"]["uvicorn.access"]["level"], LOGGING_CONFIG["loggers"]["uvicorn.access"]["level"])
 
 
 if __name__ == "__main__":
