@@ -224,7 +224,8 @@ class TaskCommands:
 
     def _launch_start(self, task_id: UUID, request: str,
                       member_specs: list[dict], decision_strategy: str,
-                      policy_snapshot: dict | None) -> None:
+                      policy_snapshot: dict | None,
+                      resume_snapshot: dict | None = None) -> None:
         """保存済み受付Taskを既存Applicationへつなぎ、Runnerは一種類に保つ。"""
         starter_options = {}
         if self._dialogue_starter_factory is not None:
@@ -244,6 +245,8 @@ class TaskCommands:
             default=120,
         )
 
+        if resume_snapshot is not None:
+            starter_options["resume_snapshot"] = deepcopy(resume_snapshot)
         async def run(stop: Event) -> None:
             """DB pendingのclaim後、既存のRITSUKO/MAGI共通Taskループを起動する。"""
             await self._application.start(
@@ -278,6 +281,7 @@ class TaskCommands:
                 self._launch_start(
                     task_id, item["request"], specs, strategy,
                     item.get("policy_snapshot"),
+                    item.get("resume_snapshot"),
                 )
             except TaskCommandConflict:
                 # Another request in this process already started this Task.
@@ -395,6 +399,7 @@ class TaskCommands:
         self._launch_start(
             task_id, saved["request"], saved["member_specs"],
             saved["decision_strategy"], saved.get("policy_snapshot"),
+            saved.get("resume_snapshot"),
         )
         return self.operation(task_id)
 
