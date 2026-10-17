@@ -565,10 +565,54 @@ class GoalLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(goal_task_projection(t)["task_status"], "completed")
         self.assertEqual(replies, ["3.12"])
 
-    async def test_requires_explicit_single_llm(self):
-        with self.assertRaisesRegex(ValueError, "one_enabled_member"):
-            await start_goal_dialogue("Pythonの辞書は？",
-                member_specs=SPEC + [{**SPEC[0], "name": "MELCHIOR"}], timeout=5)
+    async def test_two_and_three_llm_seats_use_one_goal_task(self):
+        """Two/three independent MAGI opinions share one Goal and Task control."""
+        events = []
+        async def decide(spec, envelope, **_kwargs):
+            self.assertEqual(envelope["stage"], "goal")
+            return {"status": "ok", "response": judgment(
+                "respond", goal="Pythonの辞書の説明",
+                fulfillment="met", basis="not_required",
+                answer="辞書はキーと値の組です。", reason=spec["name"],
+            )}
+        for names in [["CASPER", "MELCHIOR"], ["CASPER", "MELCHIOR", "BALTHASAR"]]:
+            events.clear()
+            specs = [{**SPEC[0], "name": name} for name in names]
+            session = await start_goal_dialogue(
+                "Pythonの辞書を説明して", member_specs=specs, timeout=5,
+                caller=decide, on_member_progress=events.append,
+            )
+            self.assertEqual(session["status"], "candidate_ready")
+            self.assertEqual(goal_task_projection(session)["task_status"], "completed")
+            self.assertEqual(len(session["turns"]), 1)
+            turn = session["turns"][0]
+            self.assertEqual(len(turn["member_results"]), len(names))
+            self.assertEqual(set(turn["diagnostic"]["enabled_members"]), set(names))
+            self.assertEqual(
+                {event["member"] for event in events if event["state"] == "completed"},
+                set(names),
+            )
+
+    async def test_llm_member_disagreement_requests_clarification(self):
+        """Tied incompatible Goal decisions must not silently complete a Task."""
+        specs = [{**SPEC[0], "name": name}
+                 for name in ("CASPER", "MELCHIOR")]
+        async def diverge(spec, _envelope, **_kwargs):
+            if spec["name"] == "CASPER":
+                reply = judgment("respond", answer="辞書です",
+                                 fulfillment="met", basis="not_required")
+            else:
+                reply = judgment("ask_user", fulfillment="unknown",
+                                 question="何を確認しますか？")
+            return {"status": "ok", "response": reply}
+        session = await start_goal_dialogue(
+            "Pythonの辞書について", member_specs=specs, timeout=5,
+            caller=diverge,
+        )
+        self.assertEqual(session["status"], "waiting_user")
+        self.assertEqual(session["next_step"], "goal_disagreement")
+        self.assertEqual(goal_task_projection(session)["task_status"], "waiting_external")
+        self.assertEqual(len(session["turns"][0]["member_results"]), 2)
 
     async def test_task_application_selects_judgment_callbacks_without_mode_branch(self):
         from unittest.mock import Mock
