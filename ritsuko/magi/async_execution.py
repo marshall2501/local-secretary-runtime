@@ -1135,6 +1135,8 @@ async def start_dialogue_async(
         session.update(status="stopped", next_step="invalid_input")
         return session
     if not [spec for spec in specs if spec["enabled"]]:
+        if strategy.name == "llm":
+            raise ValueError("no_enabled_magi_member")
         session.update(status="stopped", next_step="no_magi_member")
         return session
 
