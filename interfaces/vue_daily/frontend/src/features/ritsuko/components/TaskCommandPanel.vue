@@ -34,18 +34,14 @@ const emit = defineEmits<{
   stop: []
   savePreferences: []
 }>()
+// MAGI's intermediate state is informational; RITSUKO's persisted phase is
+// the single authority for presenting Answer/Review controls.
 const answerable = computed(() =>
   props.task?.status === 'waiting_external' &&
-  props.task.magi_session?.status === 'waiting_user')
-const reviewable = computed(() => {
-  if (props.task?.status !== 'waiting_external') return false
-  const session = props.task.magi_session
-  if (session?.status === 'proposal_ready') return true
-  return session?.status === 'candidate_ready' &&
-    session.detail?.state === 'READY' &&
-    Boolean(session.detail?.answer_candidate?.trim()) &&
-    !(session.pending_requests?.length)
-})
+  props.task.phase === 'awaiting_clarification')
+const reviewable = computed(() =>
+  props.task?.status === 'waiting_external' &&
+  props.task.phase === 'awaiting_review')
 const stoppable = computed(() =>
   props.task !== null &&
   ['pending', 'running'].includes(props.task.status) &&
