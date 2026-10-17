@@ -31,7 +31,7 @@ class TaskStartBody(BaseModel):
 
     request: str = Field(min_length=1, max_length=4000)
     # Task開始時に方式を明示し、API側の暗黙standard選択を避ける。
-    decision_strategy: Literal["standard", "llm"] = "llm"
+    decision_strategy: Literal["standard", "llm"]
     task_id: UUID | None = None  # 通信途絶後の同一依頼再送に使うUUID
 
 
