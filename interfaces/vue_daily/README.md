@@ -6,7 +6,7 @@
 
 Web APIはVueアプリから独立した `interfaces/api/ritsuko_tasks.py` の `create_ritsuko_task_router` が正本です。Task一覧・詳細・Start・Answer・Review・Stop・OperationはどのFastAPI Hostからも同じTask Query／Commandを注入して利用できます。Vue Host `interfaces/vue_daily/app.py` はこの共通Routerを組み込み、画面配信・localhost/Origin gate・既定read-onlyを担当します。**Router単体にHost認証・通信制限はないため、直接外部公開しません**。
 
-MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判断／Goal判断Adapterに移し、`async_execution.py` の共通Runnerが保存済みTask方式を選びます。RITSUKOのTask／Source／Action／Result／状態投影は両方式で共通です。登録前に記憶候補文・本人根拠回答を表示するVue Reviewと、MAGI席別ライブ進捗も隔離コードへ反映済みです。
+MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判断／Goal判断の二つの提案Strategyとして分離し、`ritsuko/core/judgment_application.py` が提案を共通の状態判断へ適用します。新通常経路は `core/task_execution.py` → `magi/session_workflow.py` であり、旧 `async_execution.py` はProvider通信と過去の呼出元向け互換のみです。Task／Source／Action／Result／状態投影は両方式で共通です。登録前に記憶候補文・本人根拠回答を表示するVue Reviewと、MAGI席別ライブ進捗も隔離コードへ反映済みです。
 
 根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapter回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行正本はこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
 
@@ -15,6 +15,13 @@ MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判�
 - Runtime `main@f9349f4` で `useTasks.ts` が確定Task `running` と、現在のAPIプロセスに残る一時Operationを区別。DB上は実行中でも `operation_not_in_process` ＋ `execution_reconciliation_required` の場合、3秒周期のDB照会を続けず待機時と同じ45秒周期にする。HTTP切断時も同じ省力化を使う。Workerの生存・停止・完了を推測しない。
 - `TaskCommandPanel.vue` がWorker照合待ちを示し、「保存済みTaskを再取得」で既存の読取APIを手動照会できる。**Taskの再実行・Worker再起動・DB状態変更は行わない。** 停止は既存の本人指示・永続Stop経路を維持。
 - [Vue API/Chromium隔離CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39003028095) **PASS（Chromium 11件）**、[PostgreSQL foundation](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39003028033) PASS。ChromiumはAPI再起動後に似た「実行中TaskだがOperationなし」を架空応答で作り、7秒間の追加GETゼロと本人クリックによる再読取を検証。**実API process kill/restartや実Worker復旧は未検証。**
+
+## 2026-10-17 停止済みTaskの限定再開と手動再取得
+
+- 新共通RITSUKOの `POST /api/v1/ritsuko/tasks/{task_id}/resume` をVueの「同じTaskを再開」へ接続。対象は**本人が停止し、Source/Actionの実行・本人回答/Reviewがなく、前回Session未保存のTask**だけ。既存PostgreSQLが `can_resume` を判定し、UIはその判定だけでボタン表示する。
+- 再開は同じUUIDのTaskを `paused→pending→running` に遷移し、受付時のMAGI席・判断方式・Policyを再利用。重複再開と古い試行IDのSource書込みは拒否。**Action実行済みTaskを初めから再実行する機能ではない**。
+- 同Revisionで詳細を省略する通常のPollingとは別に、本人の「保存済みTaskを再取得」は詳細の取得を強制。Poll中に押した場合も再取得要求を保持。
+- [実PostgreSQL隔離CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39004381580) **PASS**、[Vue／共通API／Chromium CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39004381575) **12件PASS**。偽MAGIと使い捨てDB／ブラウザfixtureでの受入であり、実MAGI・本人サブPC・実API process kill/restart・Action後の途中復元は未受入。運用DB・既存サービスは変更なし。
 
 ## 状態・安全境界
 
