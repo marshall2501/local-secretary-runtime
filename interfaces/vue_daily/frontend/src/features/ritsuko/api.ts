@@ -33,6 +33,22 @@ export async function getTaskApiMode(): Promise<'read_only' | 'commands_enabled'
 }
 
 export type DecisionStrategy = 'standard' | 'llm'
+export interface JudgmentPreferences {
+  default_strategy: DecisionStrategy
+  show_strategy_selector: boolean
+}
+
+/** 既存NiceGUIと同じ保存済み判断設定を取得する。 */
+export async function getJudgmentPreferences(): Promise<JudgmentPreferences> {
+  return await getJson<JudgmentPreferences>(base + '/preferences')
+}
+
+/** 次回の新規Taskから適用する。保存済みTask・MAGI席割当は変更しない。 */
+export async function saveJudgmentPreferences(
+  preferences: JudgmentPreferences,
+): Promise<JudgmentPreferences> {
+  return await postJson<JudgmentPreferences>(base + '/preferences', preferences)
+}
 export interface TaskOperation {
   task_id: string
   status: string
