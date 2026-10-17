@@ -39,6 +39,8 @@ export interface TaskRecord extends TaskSummary {
   reason?: string | null
   /** MAGI sessionに保存された候補・次の処理。Task.statusとは独立。 */
   magi_session?: MagiSession | null
+  /** RITSUKOが確認した記憶反映Review可否。候補の文章では推測しない。 */
+  can_remember?: boolean
   /** DBに受理された停止要求。trueでもWorkerが止まった証明ではない。 */
   stop_requested?: boolean | null
   /** MAGI提案は本人が確定したGoalと同義ではない。 */
