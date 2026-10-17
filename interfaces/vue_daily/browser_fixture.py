@@ -86,28 +86,42 @@ class BrowserFixtureCommands:
         if uid not in self.store.items:
             is_stop = "停止試験" in request
             is_ready_candidate = "回答候補試験" in request
+            is_memory_candidate = "記憶反映試験" in request
             self.store.items[uid] = {
                 "id": uid, "request": request,
                 "status": "pending" if is_stop else "waiting_external",
                 "phase": ("observe" if is_stop else "awaiting_review"
-                          if is_ready_candidate else "awaiting_clarification"),
+                          if is_ready_candidate or is_memory_candidate
+                          else "awaiting_clarification"),
                 "revision": 1, "question": (
-                    None if is_ready_candidate else "好きな言語を教えてください。"
+                    None if is_ready_candidate or is_memory_candidate else "好きな言語を教えてください。"
                 ),
                 "magi_session": {
                     "decision_strategy": decision_strategy,
                     "status": (
                         "running" if is_stop else
+                        "proposal_ready" if is_memory_candidate else
                         "candidate_ready" if is_ready_candidate else "waiting_user"
                     ),
                     "next_step": (
+                        "review_proposal" if is_memory_candidate else
                         "review_answer_candidate" if is_ready_candidate else "ask_user"
                     ),
                     "detail": (
+                        {"state": "KNOWLEDGE_CANDIDATE",
+                         "answer_candidate": "本人が確認したOSはFedoraです。",
+                         "knowledge_candidate": "本人が確認したOSはFedoraです。"}
+                        if is_memory_candidate else
                         {"state": "READY",
                          "answer_candidate": "辞書はキーと値の組です。"}
                         if is_ready_candidate else None
                     ),
+                    "tool_read_executed": is_memory_candidate,
+                    "observations": [
+                        {"source": "pkb", "verified": True, "text": "確認が必要"},
+                        {"source": "user_clarification", "verified": False,
+                         "text": "Fedora", "responds_to": ["REQ-1"]},
+                    ] if is_memory_candidate else [],
                     "pending_requests": [],
                     "member_specs": [
                         {"name": "MELCHIOR", "enabled": True, "provider": "ollama", "model": "fixture"},
@@ -146,7 +160,10 @@ class BrowserFixtureCommands:
         task["phase"] = "completed"
         task["revision"] += 1
         task["magi_session"]["status"] = "candidate_ready"
-        task["message"] = "架空Taskの回答を確定しました。"
+        task["message"] = (
+            "架空Taskの記憶反映を確定しました。"
+            if decision == "remember" else "架空Taskの回答を確定しました。"
+        )
         return {"task_id": str(task_id), "kind": "review", "status": "accepted"}
 
     def stop(self, task_id: UUID) -> dict:
