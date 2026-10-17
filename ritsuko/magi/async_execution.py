@@ -1366,6 +1366,7 @@ async def continue_with_proposal_review_async(
     caller=call_guided_panel_async,
     stop_requested=None,
     on_turn_start=None,
+    on_member_progress=None,
 ) -> dict:
     """Re-evaluate a user-approved proposal review before RITSUKO finalizes."""
     updated = deepcopy(session)
@@ -1422,6 +1423,7 @@ async def continue_with_proposal_review_async(
         caller=caller,
         stop_requested=stop_requested,
         on_turn_start=on_turn_start,
+        on_member_progress=on_member_progress,
         member_specs_override=local_specs,
         context_policy=context_policy,
     )
