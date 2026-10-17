@@ -1,4 +1,4 @@
-"""Opt-in, single-MAGI, public read-only goal evaluation.
+"""LLM Goal evaluation for one or more configured MAGI members.
 
 The Task/Policy/Tool executor remains in RITSUKO. This module only asks MAGI
 for a bounded decision and converts its proposal to a pending read/question.
@@ -6,6 +6,7 @@ for a bounded decision and converts its proposal to a pending read/question.
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 import re
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from .async_execution import (
     _apply_detail_async, _call_panel_member_async, _emit_member_progress,
     apply_context_policy_to_envelope,
 )
+from .dialogue import select_weighted_consensus
 from .dialogue import _normalized_member_specs
 from .goal_contract import VERSION, validate_goal_turn
 from .runtime_context import create_runtime_context
@@ -153,52 +155,76 @@ async def _run_goal_turn(session: dict, *, timeout: float, caller=None,
     specs = (member_specs_override if member_specs_override is not None
              else session["member_specs"])
     enabled = [spec for spec in specs if spec.get("enabled")]
-    if len(enabled) != 1:
+    if not enabled:
         session.update(status="stopped", next_step="goal_model_not_permitted")
         return session
-    spec = enabled[0]
-    progress = {
-        "task_id": session["task_id"], "turn": number,
-        "member": spec["name"], "provider": spec["provider"],
-        "model": spec["model"],
-    }
-    _emit_member_progress(on_member_progress, {**progress, "state": "queued"})
-    _emit_member_progress(on_member_progress, {**progress, "state": "running"})
-    run = caller or _call_panel_member_async
-    try:
-        result = await run(spec, envelope, timeout=timeout)
-    except Exception as exc:
+
+    async def evaluate_one(spec: dict) -> dict:
+        """Evaluate one MAGI opinion; do not let it commit the shared Task."""
+        progress = {
+            "task_id": session["task_id"], "turn": number,
+            "member": spec["name"], "provider": spec["provider"],
+            "model": spec["model"],
+        }
+        _emit_member_progress(on_member_progress, {**progress, "state": "queued"})
+        _emit_member_progress(on_member_progress, {**progress, "state": "running"})
+        run = caller or _call_panel_member_async
+        try:
+            result = await run(spec, envelope, timeout=timeout)
+            response = result.get("response")
+            errors = list(result.get("errors") or [])
+            if result.get("status") == "ok":
+                errors += validate_goal_turn(response)
+            status = "ok" if result.get("status") == "ok" and not errors else (
+                str(result.get("status") or "invalid")
+                if result.get("status") not in (None, "ok") else "invalid"
+            )
+        except Exception as exc:
+            # One provider error must not destroy valid judgments from other seats.
+            response, errors, status = None, [type(exc).__name__], "unavailable"
+            result = {}
         _emit_member_progress(on_member_progress, {
-            **progress, "state": "unavailable",
-            "error_kind": type(exc).__name__,
+            **progress, "state": "completed" if status == "ok" else status,
+            "elapsed_seconds": result.get("elapsed_seconds"),
+            "validated_summary": str(response.get("reason") or "")
+            if status == "ok" and isinstance(response, dict) else "",
+            "error_kind": str(errors[0]) if errors else "",
         })
-        raise
-    response = result.get("response")
-    errors = list(result.get("errors") or [])
-    if result.get("status") == "ok":
-        errors += validate_goal_turn(response)
-    status = "ok" if result.get("status") == "ok" and not errors else "invalid"
-    _emit_member_progress(on_member_progress, {
-        **progress, "state": "completed" if status == "ok" else (
-            str(result.get("status") or "invalid")
-            if result.get("status") not in (None, "ok") else "invalid"
-        ),
-        "elapsed_seconds": result.get("elapsed_seconds"),
-        "validated_summary": str(response.get("reason") or "")
-        if status == "ok" and isinstance(response, dict) else "",
-        "error_kind": str(errors[0]) if errors else "",
-    })
+        return {
+            **deepcopy(result), "name": spec["name"],
+            "provider": spec["provider"], "model": spec["model"],
+            "weight": spec.get("weight", 1.0), "status": status,
+            "response": deepcopy(response), "errors": errors,
+        }
+
+    # One seat and multiple seats use the same decision path; a multiple-seat
+    # panel collects independent opinions concurrently, then selects only a
+    # proposal. It does not create multiple Task executors.
+    results = await asyncio.gather(*(evaluate_one(spec) for spec in enabled))
+    consensus = select_weighted_consensus("goal", results)
+    response = consensus.get("response")
+    status = consensus["status"]
+    errors = [] if status == "ok" else [str(consensus.get("reason") or status)]
     session["turns"].append({
         "stage": "goal", "question_purpose": "evaluate_goal",
         "request_envelope": envelope, "status": status,
         "response": deepcopy(response), "errors": errors,
-        "member_results": [deepcopy(result)], "diagnostic": deepcopy(result.get("diagnostic") or {}),
+        "member_results": results, "diagnostic": {
+            "mode": "goal_llm_panel", "enabled_members": [m["name"] for m in enabled],
+        }, "consensus": deepcopy(consensus),
     })
     if stop_requested is not None and stop_requested():
         session.update(status="stopped", next_step="user_requested_stop")
         return session
     if status != "ok":
-        session.update(status="stopped", next_step="goal_member_invalid")
+        if status == "disagreement":
+            session["magi_disagreement"] = deepcopy(consensus)
+            session["user_question"] = (
+                "MAGIの評価が分かれました。期待する結果や条件をもう少し詳しく教えてください。"
+            )
+            session.update(status="waiting_user", next_step="goal_disagreement")
+        else:
+            session.update(status="stopped", next_step="goal_member_invalid")
         return session
     session["goal"] = response["goal"]
     await _apply_judgment(session, response, timeout=timeout)
@@ -210,10 +236,10 @@ async def start_goal_dialogue(user_raw: str, *, member_specs: list[dict],
                               stop_requested=None, on_turn_start=None,
                               caller=None, policy_snapshot: dict | None = None,
                               on_member_progress=None) -> dict:
-    """Explicit goal_loop_v1 only. One enabled member avoids implicit consensus."""
+    """Compatibility entry using the same multi-MAGI judgment as new Tasks."""
     specs = [s for s in _normalized_member_specs(member_specs, "") if s["enabled"]]
-    if len(specs) != 1:
-        raise ValueError("goal_mode_requires_one_enabled_member")
+    if not specs:
+        raise ValueError("no_enabled_magi_member")
     request = str(user_raw or "").strip()
     if not request:
         raise ValueError("empty_request")
