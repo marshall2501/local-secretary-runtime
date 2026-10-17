@@ -18,6 +18,8 @@ from ritsuko.magi.async_execution import (
     _call_gemini_guided_async,
     _call_ollama_guided_async,
     call_guided_panel_async,
+)
+from ritsuko.magi.session_workflow import (
     continue_with_proposal_review_async,
     continue_with_user_clarification_async,
     continue_with_verified_observation_async,
