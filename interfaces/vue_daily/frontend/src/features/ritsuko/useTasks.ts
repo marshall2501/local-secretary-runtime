@@ -158,8 +158,13 @@ export function useTasks() {
 
   async function sendReview(): Promise<void> {
     const task = selected.value
+    const session = task?.magi_session
+    const answerReady = session?.status === 'candidate_ready' &&
+      session.detail?.state === 'READY' &&
+      Boolean(session.detail?.answer_candidate?.trim()) &&
+      !(session.pending_requests?.length)
     if (!task || task.status !== 'waiting_external' ||
-        task.magi_session?.status !== 'proposal_ready') return
+        (session?.status !== 'proposal_ready' && !answerReady)) return
     const result = await sendCommand(
       () => reviewTask(task.id),
       '回答のみのReviewを受付けました。完了の確定ではありません。',
