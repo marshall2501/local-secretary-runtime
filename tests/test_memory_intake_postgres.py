@@ -201,7 +201,7 @@ class MemoryPostgresTests(unittest.TestCase):
         # Legacy correction targets a plain PC event, not a derived component state.
         ids={name:str(identifier) for identifier,name in self.db.execute("SELECT id,name FROM secretary.entities WHERE entity_type='computer'").fetchall()}
         text='サブPCをDRV-A1へ更新した。'
-        old=write_one(self.db,InputRecord(str(uuid4()),'user_statement','fixture://legacy',text,now,now),
+        old=write_one(self.db,InputRecord(str(uuid4()),'user_statement','local://memory-test/legacy',text,now,now),
                       ProposedClaim(ids['サブPC'],'サブPC','driver_updated','DRV-A1',0,len(text),text))
         correction='訂正：サブPCではなくメインPCのDRV-A1'
         corrected=correct_entity(self.db,InputRecord(str(uuid4()),'user_statement','local://memory-test/correction',correction,now,now),
