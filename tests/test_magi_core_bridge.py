@@ -153,7 +153,7 @@ class MagiCoreBridgeTests(unittest.TestCase):
             "next_step": "review_answer_candidate",
             "tool_read_executed": True,
             "observations": [
-                {"source": "pkb", "verified": True, "text": "verified"}
+                {"source": "pkb", "verified": True, "text": "verified", "result_id": "result-pkb-1"}
             ],
             "detail": {
                 "answer_candidate": "メインPCのGPUは Radeon RX 9070 XT です。"
@@ -177,6 +177,7 @@ class MagiCoreBridgeTests(unittest.TestCase):
                             "public" if source == "web" else "private"
                         ),
                         "text": "verified",
+                        "result_id": "result-" + source + "-1",
                     }],
                     "detail": {"answer_candidate": "grounded answer"},
                 })
@@ -213,6 +214,36 @@ class MagiCoreBridgeTests(unittest.TestCase):
         })
         self.assertEqual(projection["task_status"], "waiting_external")
         self.assertEqual(projection["next_step"], "review_answer_candidate")
+
+    def test_candidate_requires_real_result_id_not_merely_verified_flag(self):
+        """標準方式でも観測文字列だけでTaskを完了しない。"""
+        result = task_projection({
+            "status": "candidate_ready",
+            "tool_read_executed": True,
+            "observations": [{"source": "web", "verified": True, "text": "not persisted"}],
+            "detail": {"answer_candidate": "検証済みと自己申告"},
+        })
+        self.assertEqual(result["task_status"], "waiting_external")
+
+    def test_goal_claim_uses_same_projector_regardless_of_strategy_label(self):
+        """保存済みGoal提案がある場合、方式ラベルではなく根拠を照合する。"""
+        session = {
+            "status": "candidate_ready",
+            "decision_strategy": "standard",
+            "goal_judgment": {
+                "next": "respond", "fulfillment": "met", "answer": "説明",
+                "evidence": {"basis": "not_required", "result_ids": []},
+            },
+            "detail": {"answer_candidate": "別回答"},
+        }
+        result = task_projection(session)
+        self.assertEqual(result["task_status"], "completed")
+        self.assertEqual(result["message"], "説明")
+        # LLMセッションからclaimが失われても、標準方式のfallbackで
+        # 存在しないGoal充足をでっち上げない。
+        session["decision_strategy"] = "llm"
+        session.pop("goal_judgment")
+        self.assertEqual(task_projection(session)["task_status"], "failed")
 
     def test_user_stop_projects_to_paused_not_failed(self):
         projection = task_projection({
