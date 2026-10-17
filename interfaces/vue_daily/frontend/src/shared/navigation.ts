@@ -1,7 +1,7 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
 /**
- * 日常画面のナビ項目と移行状態。RITSUKO以外は既存NiceGUIで利用する。
+ * 日常画面のナビ項目と移行状態。RITSUKOとPKB検索はVue、それ以外の未移行機能はNiceGUIで利用する。
  * 各機能をVueへ移行したら、その項目の遷移先だけを変更する。
  */
 export const navigationItems = [
