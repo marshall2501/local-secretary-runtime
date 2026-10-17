@@ -459,6 +459,7 @@ def list_pending_starts(db, *, limit: int = 20) -> list[dict]:
             "member_specs": deepcopy(checkpoint.get("member_specs") or []),
             "decision_strategy": intent.get("decision_strategy"),
             "policy_snapshot": deepcopy(intent.get("policy_snapshot")),
+            "resume_snapshot": deepcopy(checkpoint.get("source_resume")),
         })
     return pending
 
