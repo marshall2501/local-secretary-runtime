@@ -1,28 +1,26 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
 /**
- * ブラウザによる日常UIの本人操作を隔離再現する。
+ * 単一Secretary ServerのVue＋APIを実Chromiumで隔離再現する。
  * すべてfake Taskであり、実MAGI・PKB・運用DB・外部Actionは使わない。
  */
 import { expect, test } from '@playwright/test'
 
-test('8097から8099へ通常リンク遷移し、フォームを実際に編集できる', async ({ page }) => {
+test('単一Secretary ServerでVueからそのままTaskを送信できる', async ({ page }) => {
   await page.goto('http://127.0.0.1:8097/ui/')
   await expect(page.getByRole('heading', { name: '新しい依頼を入力' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: '依頼内容' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: '依頼を送信' })).toBeDisabled()
-  await page.getByRole('link', { name: '実Task操作画面（8099）を開く' }).click()
-  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8099\/ui\//)
   const field = page.getByRole('textbox', { name: '依頼内容' })
   await expect(field).toBeEnabled()
   await field.fill('本当に入力できる')
   await expect(field).toHaveValue('本当に入力できる')
   await expect(page.getByRole('button', { name: '依頼を送信' })).toBeEnabled()
   await expect(page.getByText('実Task操作API接続中')).toBeVisible()
+  // No cross-port navigation or second server is needed.
+  expect(page.url()).toContain('127.0.0.1:8097/ui/')
 })
 
 test('Vueの両判断方式は同じTask APIに保存され、方式はTask単位で固定される', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8099/ui/')
+  await page.goto('http://127.0.0.1:8097/ui/')
   const selector = page.locator('#task-strategy')
   await expect(selector).toHaveValue('standard')
   const strategies = [
@@ -37,7 +35,7 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
       .toBeVisible()
     const taskId = page.url().split('#task=')[1]
     const response = await page.request.get(
-      'http://127.0.0.1:8099/api/v1/ritsuko/tasks/' + taskId,
+      'http://127.0.0.1:8097/api/v1/ritsuko/tasks/' + taskId,
     )
     expect(response.status()).toBe(200)
     const persisted = await response.json()
@@ -47,7 +45,7 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
 
 test('待機中のVueは3秒毎の多重GETを発行しない', async ({ page }) => {
   await page.goto('http://127.0.0.1:8097/ui/')
-  await expect(page.getByText('Task参照API接続中（読取専用）')).toBeVisible()
+  await expect(page.getByText('実Task操作API接続中')).toBeVisible()
   // 初期の一覧・詳細・Healthが揃った後、ネットワーク実送信を観測する。
   await expect(page.locator('.task-item').first()).toBeVisible()
   const requests: string[] = []
@@ -60,7 +58,7 @@ test('待機中のVueは3秒毎の多重GETを発行しない', async ({ page })
 
 
 test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻度で再照会できる', async ({ page }) => {
-  const origin = 'http://127.0.0.1:8099'
+  const origin = 'http://127.0.0.1:8097'
   const list = await (await page.request.get(origin + '/api/v1/ritsuko/tasks?view=recent&limit=10&offset=0')).json()
   const id = list.items[0].id as string
   // The persisted Task may say running even if the API process has no
@@ -107,7 +105,7 @@ test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻�
 })
 
 test('停止済みTaskの再開ボタンはCore許可時のみ表示し同じIDへ送信する', async ({ page }) => {
-  const origin = 'http://127.0.0.1:8099'
+  const origin = 'http://127.0.0.1:8097'
   const list = await (await page.request.get(
     origin + '/api/v1/ritsuko/tasks?view=recent&limit=10&offset=0',
   )).json()
@@ -151,9 +149,9 @@ test('停止済みTaskの再開ボタンはCore許可時のみ表示し同じID�
 })
 
 test('保存した既定方式で選択欄なしでも同じTask APIを利用する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8099/')
-  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8099\/ui\//)
-  const endpoint = 'http://127.0.0.1:8099/api/v1/ritsuko/preferences'
+  await page.goto('http://127.0.0.1:8097/')
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8097\/ui\//)
+  const endpoint = 'http://127.0.0.1:8097/api/v1/ritsuko/preferences'
   const original = await (await page.request.get(endpoint)).json() as {
     default_strategy: 'standard' | 'llm'; show_strategy_selector: boolean
   }
@@ -172,7 +170,7 @@ test('保存した既定方式で選択欄なしでも同じTask APIを利用す
     await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
     const taskId = page.url().split('#task=')[1]
     const saved = await page.request.get(
-      'http://127.0.0.1:8099/api/v1/ritsuko/tasks/' + taskId,
+      'http://127.0.0.1:8097/api/v1/ritsuko/tasks/' + taskId,
     )
     expect((await saved.json()).trace.task.magi_session.decision_strategy).toBe('llm')
   } finally {
@@ -182,7 +180,7 @@ test('保存した既定方式で選択欄なしでも同じTask APIを利用す
 })
 
 test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8099/ui/')
+  await page.goto('http://127.0.0.1:8097/ui/')
   const request = '進捗を確認する回答試験'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
   await page.getByRole('button', { name: '依頼を送信' }).click()
@@ -210,8 +208,8 @@ test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
 })
 
-test('8099新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
-  await page.goto('http://127.0.0.1:8099/ui/')
+test('8097新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
+  await page.goto('http://127.0.0.1:8097/ui/')
   const previousUrl = page.url()
   await page.getByRole('textbox', { name: '依頼内容' }).fill('Pythonの辞書を簡潔に説明してください')
   await page.getByRole('button', { name: '依頼を送信' }).click()
@@ -236,7 +234,7 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
   await expect(page.getByText('完了（Task確定状態）')).toBeVisible()
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://127.0.0.1:8099',
+    origin: 'http://127.0.0.1:8097',
   })
   await page.getByRole('button', { name: '最新結果をコピー' }).click()
   await expect(page.getByText('最新結果をコピーしました。')).toBeVisible()
@@ -255,7 +253,7 @@ test('8099新規Task→本人回答→Review→確定→F5同IDで復元する',
 })
 
 test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送信する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8099/ui/')
+  await page.goto('http://127.0.0.1:8097/ui/')
   const request = '記憶反映試験：本人が回答したOSを登録する'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
   await page.getByRole('button', { name: '依頼を送信' }).click()
@@ -280,7 +278,7 @@ test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送�
 })
 
 test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを完了できる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8099/ui/')
+  await page.goto('http://127.0.0.1:8097/ui/')
   await page.locator('#task-strategy').selectOption('standard')
   const request = '回答候補試験：Pythonの辞書を説明する'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
@@ -294,7 +292,7 @@ test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを
 })
 
 test('停止は保存済み状態で確認し、Actionの出典と監査履歴を開ける', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8099/ui/')
+  await page.goto('http://127.0.0.1:8097/ui/')
   await page.getByRole('textbox', { name: '依頼内容' }).fill('停止試験として処理を開始する')
   await page.getByRole('button', { name: '依頼を送信' }).click()
   await expect(page.getByText('受付（Task確定状態）')).toBeVisible()
