@@ -169,6 +169,9 @@ test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送�
   await page.getByRole('button', { name: '依頼を送信' }).click()
   await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
+  const preview = page.getByLabel('記憶反映前の登録候補')
+  await expect(preview.getByText('本人が確認したOSはFedoraです。', { exact: true })).toBeVisible()
+  await expect(preview.getByText(/この候補の根拠となった本人回答：Fedora/)).toBeVisible()
   const remember = page.getByRole('button', { name: '記憶に反映して完了を依頼' })
   await expect(remember).toBeEnabled()
   const taskId = page.url().split('#task=')[1]
