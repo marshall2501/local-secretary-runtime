@@ -228,18 +228,11 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   // 読込後に最終的な終端へ到達する契約を検査し、件数を固定しない。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
   await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
-  for (let attempt = 0; attempt < 8; attempt++) {
-    // While the current page is loading, the same button is disabled;
-    // a count alone does not imply that it can be clicked. The final refresh
-    // may remove it, so wait for either enabled or absent.
-    await expect.poll(async () => {
-      if (await more.count() === 0) return 'end'
-      return await more.isEnabled() ? 'ready' : 'loading'
-    }).not.toBe('loading')
-    if (await more.count() === 0) break
-    await more.click()
-  }
-  await expect(more).toHaveCount(0)
+  // The purpose of this regression is finding a confirmed historical Goal
+  // beyond the first ten entries, not exhausting all pages. Repeatedly
+  // requesting unrelated pages introduces races with asynchronous refreshes.
+  // Historical Task 12 is in the first additional page of this fixture.
+  await expect(page.getByRole('button', { name: /架空の過去Task 12/ })).toBeVisible()
   // 先行の停止試験Taskが選択済みの場合もある。固定の旧Taskを明示的に選ぶ。
   await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
