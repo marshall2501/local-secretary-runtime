@@ -57,8 +57,11 @@ export function useTasks() {
   let pendingStart: PendingStart | null = loadPending()
   const draftRequest = ref(pendingStart?.request ?? '')
   const strategy = ref<DecisionStrategy>(pendingStart?.strategy ?? 'standard')
+  // 編集中の設定と保存済みの実行設定を分け、保存前のUI操作をTaskへ反映しない。
   const defaultStrategy = ref<DecisionStrategy>('standard')
   const showStrategySelector = ref(true)
+  const activeDefaultStrategy = ref<DecisionStrategy>('standard')
+  const activeShowStrategySelector = ref(true)
   const preferencesLoaded = ref(false)
   const preferencesBusy = ref(false)
   const preferencesMessage = ref('')
@@ -70,6 +73,8 @@ export function useTasks() {
       const saved = await getJudgmentPreferences()
       defaultStrategy.value = saved.default_strategy
       showStrategySelector.value = saved.show_strategy_selector
+      activeDefaultStrategy.value = saved.default_strategy
+      activeShowStrategySelector.value = saved.show_strategy_selector
       if (!pendingStart) strategy.value = saved.default_strategy
       preferencesLoaded.value = true
       preferencesMessage.value = ''
@@ -91,6 +96,8 @@ export function useTasks() {
       })
       defaultStrategy.value = saved.default_strategy
       showStrategySelector.value = saved.show_strategy_selector
+      activeDefaultStrategy.value = saved.default_strategy
+      activeShowStrategySelector.value = saved.show_strategy_selector
       if (!pendingStart) strategy.value = saved.default_strategy
       preferencesLoaded.value = true
       preferencesMessage.value = '保存しました。これから開始するTaskに適用します。'
@@ -166,7 +173,7 @@ export function useTasks() {
       return
     }
     // 書込結果不明の再送は、設定が変わっても同じTask IDと方式を維持する。
-    const chosen = showStrategySelector.value ? strategy.value : defaultStrategy.value
+    const chosen = activeShowStrategySelector.value ? strategy.value : activeDefaultStrategy.value
     const intent = pendingStart && pendingStart.request === request ? pendingStart : {
       id: crypto.randomUUID(), request, strategy: chosen,
     }
@@ -381,6 +388,7 @@ export function useTasks() {
     problem, refresh, selectTask, selectView, loadMore,
     commandsEnabled, commandBusy, commandFeedback, commandError, operation,
     draftRequest, strategy, defaultStrategy, showStrategySelector,
+    activeDefaultStrategy, activeShowStrategySelector,
     preferencesLoaded, preferencesBusy, preferencesMessage, savePreferences,
     reply, sendStart, sendAnswer, sendReview, sendStop,
   }
