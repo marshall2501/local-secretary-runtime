@@ -80,6 +80,14 @@ async function copyText(text: string, label: string): Promise<void> {
       <div v-if="task.question && !(task.status === 'waiting_external' && task.magi_session?.status === 'waiting_user')" class="question">
         <strong>本人への質問（保存済み）</strong><p>{{ task.question }}</p>
       </div>
+      <div v-if="task.status === 'waiting_external' &&
+        task.magi_session?.status === 'candidate_ready' &&
+        task.magi_session?.detail?.answer_candidate" class="result">
+        <strong>MAGI回答候補（未確定・本人確認待ち）</strong>
+        <p>{{ task.magi_session.detail.answer_candidate }}</p>
+        <p class="muted small">この内容を確認した場合だけ「回答のみで完了を依頼」を押してください。
+          根拠が必要な依頼では、候補だけを検証済みと扱わないでください。</p>
+      </div>
       <div v-if="task.message" class="result">
         <strong>最新結果（保存済み）</strong><p>{{ task.message }}</p>
       </div>
