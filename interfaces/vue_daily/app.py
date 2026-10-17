@@ -14,7 +14,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -220,6 +220,14 @@ def create_app(*, queries, commands: TaskCommands | None = None,
 
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
     dist = Path(__file__).parent / "frontend" / "dist"
+
+    @app.get("/", include_in_schema=False)
+    def daily_home():
+        """一般のlocalhost入口をVueへ案内する（Task書込は行わない）。"""
+        if not dist.is_dir():
+            raise HTTPException(503, "vue_frontend_not_built")
+        return RedirectResponse(url="/ui/", status_code=307)
+
     if dist.is_dir():
         app.mount("/ui", StaticFiles(directory=str(dist), html=True), name="vue_daily_ui")
     return app
