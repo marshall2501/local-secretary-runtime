@@ -7,7 +7,7 @@
 import { expect, test } from '@playwright/test'
 
 test('単一Secretary ServerでVueからそのままTaskを送信できる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await expect(page.getByRole('heading', { name: '新しい依頼を入力' })).toBeVisible()
   const field = page.getByRole('textbox', { name: '依頼内容' })
   await expect(field).toBeEnabled()
@@ -16,11 +16,11 @@ test('単一Secretary ServerでVueからそのままTaskを送信できる', asy
   await expect(page.getByRole('button', { name: '依頼を送信' })).toBeEnabled()
   await expect(page.getByText('実Task操作API接続中')).toBeVisible()
   // No cross-port navigation or second server is needed.
-  expect(page.url()).toContain('127.0.0.1:8097/ui/')
+  expect(page.url()).toContain('127.0.0.1:18097/ui/')
 })
 
 test('Vueの両判断方式は同じTask APIに保存され、方式はTask単位で固定される', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   const selector = page.locator('#task-strategy')
   await expect(selector).toHaveValue('standard')
   const strategies = [
@@ -35,7 +35,7 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
       .toBeVisible()
     const taskId = page.url().split('#task=')[1]
     const response = await page.request.get(
-      'http://127.0.0.1:8097/api/v1/ritsuko/tasks/' + taskId,
+      'http://127.0.0.1:18097/api/v1/ritsuko/tasks/' + taskId,
     )
     expect(response.status()).toBe(200)
     const persisted = await response.json()
@@ -44,7 +44,7 @@ test('Vueの両判断方式は同じTask APIに保存され、方式はTask単�
 })
 
 test('待機中のVueは3秒毎の多重GETを発行しない', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await expect(page.getByText('実Task操作API接続中')).toBeVisible()
   // 初期の一覧・詳細・Healthが揃った後、ネットワーク実送信を観測する。
   await expect(page.locator('.task-item').first()).toBeVisible()
@@ -58,7 +58,7 @@ test('待機中のVueは3秒毎の多重GETを発行しない', async ({ page })
 
 
 test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻度で再照会できる', async ({ page }) => {
-  const origin = 'http://127.0.0.1:8097'
+  const origin = 'http://127.0.0.1:18097'
   const list = await (await page.request.get(origin + '/api/v1/ritsuko/tasks?view=recent&limit=10&offset=0')).json()
   const id = list.items[0].id as string
   // The persisted Task may say running even if the API process has no
@@ -105,7 +105,7 @@ test('API再起動でWorker所在不明のrunning Taskを誤完了せず低頻�
 })
 
 test('停止済みTaskの再開ボタンはCore許可時のみ表示し同じIDへ送信する', async ({ page }) => {
-  const origin = 'http://127.0.0.1:8097'
+  const origin = 'http://127.0.0.1:18097'
   const list = await (await page.request.get(
     origin + '/api/v1/ritsuko/tasks?view=recent&limit=10&offset=0',
   )).json()
@@ -149,9 +149,9 @@ test('停止済みTaskの再開ボタンはCore許可時のみ表示し同じID�
 })
 
 test('保存した既定方式で選択欄なしでも同じTask APIを利用する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/')
-  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8097\/ui\//)
-  const endpoint = 'http://127.0.0.1:8097/api/v1/ritsuko/preferences'
+  await page.goto('http://127.0.0.1:18097/')
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:18097\/ui\//)
+  const endpoint = 'http://127.0.0.1:18097/api/v1/ritsuko/preferences'
   const original = await (await page.request.get(endpoint)).json() as {
     default_strategy: 'standard' | 'llm'; show_strategy_selector: boolean
   }
@@ -170,7 +170,7 @@ test('保存した既定方式で選択欄なしでも同じTask APIを利用す
     await expect(page.locator('.current-task').getByText(request, { exact: true })).toBeVisible()
     const taskId = page.url().split('#task=')[1]
     const saved = await page.request.get(
-      'http://127.0.0.1:8097/api/v1/ritsuko/tasks/' + taskId,
+      'http://127.0.0.1:18097/api/v1/ritsuko/tasks/' + taskId,
     )
     expect((await saved.json()).trace.task.magi_session.decision_strategy).toBe('llm')
   } finally {
@@ -180,7 +180,7 @@ test('保存した既定方式で選択欄なしでも同じTask APIを利用す
 })
 
 test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   const request = '進捗を確認する回答試験'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
   await page.getByRole('button', { name: '依頼を送信' }).click()
@@ -208,8 +208,8 @@ test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
 })
 
-test('8097新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+test('18097新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
+  await page.goto('http://127.0.0.1:18097/ui/')
   const previousUrl = page.url()
   await page.getByRole('textbox', { name: '依頼内容' }).fill('Pythonの辞書を簡潔に説明してください')
   await page.getByRole('button', { name: '依頼を送信' }).click()
@@ -234,7 +234,7 @@ test('8097新規Task→本人回答→Review→確定→F5同IDで復元する',
   await expect(page.getByText('完了（Task確定状態）')).toBeVisible()
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://127.0.0.1:8097',
+    origin: 'http://127.0.0.1:18097',
   })
   await page.getByRole('button', { name: '最新結果をコピー' }).click()
   await expect(page.getByText('最新結果をコピーしました。')).toBeVisible()
@@ -253,7 +253,7 @@ test('8097新規Task→本人回答→Review→確定→F5同IDで復元する',
 })
 
 test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送信する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   const request = '記憶反映試験：本人が回答したOSを登録する'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
   await page.getByRole('button', { name: '依頼を送信' }).click()
@@ -278,7 +278,7 @@ test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送�
 })
 
 test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを完了できる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await page.locator('#task-strategy').selectOption('standard')
   const request = '回答候補試験：Pythonの辞書を説明する'
   await page.getByRole('textbox', { name: '依頼内容' }).fill(request)
@@ -292,7 +292,7 @@ test('従来MAGI READY回答は候補を表示し、本人Reviewで同じTaskを
 })
 
 test('停止は保存済み状態で確認し、Actionの出典と監査履歴を開ける', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await page.getByRole('textbox', { name: '依頼内容' }).fill('停止試験として処理を開始する')
   await page.getByRole('button', { name: '依頼を送信' }).click()
   await expect(page.getByText('受付（Task確定状態）')).toBeVisible()
@@ -309,7 +309,7 @@ test('停止は保存済み状態で確認し、Actionの出典と監査履歴�
 })
 
 test('保存された5件表示からさらに読み込み、確定Goalを未確定と表示しない', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await expect(page.getByText('5件表示')).toBeVisible()
   await expect(page.getByRole('button', { name: 'さらに読み込む' })).toBeVisible()
   const more = page.getByRole('button', { name: 'さらに読み込む' })
@@ -332,9 +332,9 @@ test('保存された5件表示からさらに読み込み、確定Goalを未確
 
 
 test('Vue PKB検索は共通ReadServiceを使い、登録・訂正にも同一画面から進める', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await page.getByRole('link', { name: 'PKB' }).click()
-  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=pkb')
+  await expect(page).toHaveURL('http://127.0.0.1:18097/ui/?page=pkb')
   await expect(page.getByRole('heading', { name: 'PKB — 個人ナレッジベース' }))
     .toBeVisible()
   await expect(page.getByText('架空サブPC')).toBeVisible()
@@ -351,7 +351,7 @@ test('Vue PKB検索は共通ReadServiceを使い、登録・訂正にも同一�
   await expect(page.getByText('架空サブPC')).toBeVisible()
   await page.getByRole('link', { name: 'RITSUKO' }).click()
   // RITSUKO automatically selects the most recent Task and sets #task=UUID.
-  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8097\/ui\/(?:#task=[a-f\d-]{36})?$/)
+  await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:18097\/ui\/(?:#task=[a-f\d-]{36})?$/)
   await expect(page.getByRole('heading', { name: '新しい依頼を入力' })).toBeVisible()
 })
 
@@ -390,7 +390,7 @@ test('同一Vue PKB画面で登録・訂正・Pending判断を操作できる', 
       body: JSON.stringify({ status: 'needs_edit' }),
     })
   })
-  await page.goto('http://127.0.0.1:8097/ui/?page=pkb')
+  await page.goto('http://127.0.0.1:18097/ui/?page=pkb')
   const entry = page.getByRole('textbox', { name: '登録・訂正する文章' })
   await entry.fill('架空の登録テスト')
   await page.getByRole('button', { name: '記憶を登録' }).click()
@@ -406,9 +406,9 @@ test('同一Vue PKB画面で登録・訂正・Pending判断を操作できる', 
 
 
 test('FinanceとSettingsは単一Secretary Originで利用できる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await page.getByRole('link', { name: '家計・資産' }).click()
-  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=finance')
+  await expect(page).toHaveURL('http://127.0.0.1:18097/ui/?page=finance')
   await expect(page.getByRole('heading', { name: '家計・資産' })).toBeVisible()
   await expect(page.getByRole('region', { name: '家計集計' }).getByText('￥1,500')).toBeVisible()
   // Previously omitted from the Vue page although the Finance API provided it.
@@ -418,7 +418,7 @@ test('FinanceとSettingsは単一Secretary Originで利用できる', async ({ p
   await page.getByRole('region', { name: '家計明細' }).getByText('取引明細', { exact: true }).click()
   await expect(page.getByText('架空の買い物')).toBeVisible()
   await page.getByRole('link', { name: '設定' }).click()
-  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=settings')
+  await expect(page).toHaveURL('http://127.0.0.1:18097/ui/?page=settings')
   await expect(page.getByRole('region', { name: 'サービス接続一覧' }).getByText('架空 OpenAI', { exact: true })).toBeVisible()
   await expect(page.getByText('認証：設定済', { exact: false })).toBeVisible()
 })
@@ -446,7 +446,7 @@ test('Billingは明示的な更新操作をするまで外部usage APIを呼び�
       }),
     })
   })
-  await page.goto('http://127.0.0.1:8097/ui/?page=service-billing')
+  await page.goto('http://127.0.0.1:18097/ui/?page=service-billing')
   await expect(page.getByRole('heading', { name: '利用料金・契約' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: '対象Billing Profile' })).toHaveValue('fake-profile')
   expect(calls).toEqual([])
@@ -461,7 +461,7 @@ test('Billingは明示的な更新操作をするまで外部usage APIを呼び�
 })
 
 test('Debugも同一Originで実行中サーバー情報を参照できる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/?page=debug')
+  await page.goto('http://127.0.0.1:18097/ui/?page=debug')
   await expect(page.getByRole('heading', { name: 'システム診断' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'システム概要' })).toBeVisible()
   await expect(page.getByRole('region', { name: '環境設定状況' })).toBeVisible()
@@ -469,7 +469,7 @@ test('Debugも同一Originで実行中サーバー情報を参照できる', asy
 
 
 test('RITSUKOにも共通の3席編集画面を持ち設定画面と同じデータを使う', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await page.getByText('MAGI — 3席のLLM設定').click()
   const editor = page.getByRole('region', { name: 'MAGIメンバー設定' })
   await expect(editor.getByText('MELCHIOR')).toBeVisible()
@@ -480,7 +480,7 @@ test('RITSUKOにも共通の3席編集画面を持ち設定画面と同じデー
 })
 
 test('MAGI Profileと3席割当はSettingsから同一APIで保存できる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/?page=settings')
+  await page.goto('http://127.0.0.1:18097/ui/?page=settings')
   await expect(page.getByRole('heading', { name: 'MAGI member configuration' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'CASPER Profile' }))
     .toHaveValue('fake-llm-profile')
@@ -489,9 +489,9 @@ test('MAGI Profileと3席割当はSettingsから同一APIで保存できる', as
 })
 
 test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid参照', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/?page=debug')
+  await page.goto('http://127.0.0.1:18097/ui/?page=debug')
   await page.getByRole('link', { name: 'ER図を開く' }).click()
-  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=er')
+  await expect(page).toHaveURL('http://127.0.0.1:18097/ui/?page=er')
   await expect(page.getByRole('heading', { name: 'DB ER図' })).toBeVisible()
   await expect(page.getByRole('status')).toContainText('テーブル 2件')
   const svg = page.locator('.diagram-render svg')
@@ -546,7 +546,7 @@ test('表示・初期展開・件数を旧UIと共有の設定APIで編集でき
         body: JSON.stringify(layout) })
     }
   })
-  await page.goto('http://127.0.0.1:8097/ui/?page=settings')
+  await page.goto('http://127.0.0.1:18097/ui/?page=settings')
   const editor = page.getByRole('region', { name: '画面レイアウト設定' })
   await expect(editor).toBeVisible()
   await editor.getByText('RITSUKOの表示・件数').click()
@@ -556,7 +556,7 @@ test('表示・初期展開・件数を旧UIと共有の設定APIで編集でき
 })
 
 test('RITSUKOの全履歴を開いて保存済みTaskへ戻れる', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.goto('http://127.0.0.1:18097/ui/')
   await page.getByRole('link', { name: '全履歴' }).click()
   await expect(page.getByRole('heading', { name: 'Task履歴' })).toBeVisible()
   await expect(page.getByRole('region', { name: '保存済みTask履歴' })).toBeVisible()
@@ -567,7 +567,7 @@ test('RITSUKOの全履歴を開いて保存済みTaskへ戻れる', async ({ pag
 })
 
 test('TOPは旧入口と同様に用途別カードと読取専用状態を表示する', async ({ page }) => {
-  await page.goto('http://127.0.0.1:8097/ui/?page=home')
+  await page.goto('http://127.0.0.1:18097/ui/?page=home')
   await expect(page.getByRole('heading', { name: 'Personal Local Secretary AI' })).toBeVisible()
   await expect(page.getByRole('region', { name: '秘書AIの現在の状態' })).toBeVisible()
   await expect(page.getByRole('region', { name: '秘書AIの機能一覧' })).toContainText('Personal Knowledge Base')
@@ -595,7 +595,7 @@ test('PKB Entity一覧から現在値・履歴・関連を同じVueへ表示す�
         valid_from: '2026-10-18T00:00:00+09:00' }],
     }) })
   })
-  await page.goto('http://127.0.0.1:8097/ui/?page=entities')
+  await page.goto('http://127.0.0.1:18097/ui/?page=entities')
   await expect(page.getByRole('heading', { name: 'Entity一覧' })).toBeVisible()
   await page.getByRole('link', { name: /架空サブPC/ }).click()
   await expect(page.getByRole('heading', { name: 'Entity詳細' })).toBeVisible()
@@ -636,7 +636,7 @@ test('Googleの料金未取得は0円と誤表示せず、実際の利用量だ�
       }),
     })
   })
-  await page.goto('http://127.0.0.1:8097/ui/?page=service-billing')
+  await page.goto('http://127.0.0.1:18097/ui/?page=service-billing')
   await expect(page.getByRole('combobox', { name: '対象Billing Profile' })).toHaveValue('google-profile')
   await page.getByRole('button', { name: '最新の利用状況を取得' }).click()
   const report = page.getByRole('region', { name: '取得した利用状況' })
