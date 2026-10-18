@@ -7,7 +7,7 @@
 import { computed } from 'vue'
 import type { TaskRecord } from '../types'
 
-const props = defineProps<{ task: TaskRecord | null }>()
+const props = defineProps<{ task: TaskRecord | null; defaultOpen?: boolean }>()
 const turns = computed(() => props.task?.magi_session?.turns ?? [])
 const turn = computed(() => turns.value.length ? turns.value[turns.value.length - 1] : null)
 /** 内部next/statusと利用者向けの進み方を混同しない。Task確定は別領域。 */
@@ -44,6 +44,8 @@ const savedMembers = computed(() => {
     <div class="section-head">
       <h2>MAGI 各席の処理状況</h2>
     </div>
+    <details class="magi-history" :open="defaultOpen">
+      <summary>判断経過・各席の保存済み結果 <span class="muted small">（{{ turns.length }} Turn）</span></summary>
     <div v-if="steps.length" class="magi-timeline" aria-label="MAGI判断の経過">
       <div v-for="step in steps" :key="step.number" class="magi-step">
         <strong>Turn {{ step.number }}：{{ step.label }}</strong>
@@ -74,12 +76,17 @@ const savedMembers = computed(() => {
     <p v-else class="muted small">
       MAGIメンバー設定は、この保存済みTaskに記録されていません。
     </p>
+    </details>
   </section>
 </template>
 
 <style scoped>
+/* NiceGUIと同様、MAGI検証は任意展開。利用者向けのTask結果は常時表示。 */
+.magi-history > summary { cursor:pointer; font-weight:650; padding:9px 12px; border-radius:7px;
+  border:1px solid #dbd4ec; background:#f5f2fb; color:#51417d; }
+.magi-history[open] > summary { margin-bottom:12px; }
 .magi-timeline { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
-.magi-step { border-left: 3px solid #9dcac2; padding: 7px 12px; background: #f5faf9;
+.magi-step { border-left: 3px solid #9f90c8; padding: 7px 12px; background: #f8f6fc;
   border-radius: 5px; display: flex; flex-direction: column; gap: 2px; }
 .magi-step p { margin: 0; overflow-wrap: anywhere; }
 </style>
