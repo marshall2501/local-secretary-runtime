@@ -23,6 +23,7 @@ from interfaces.api.pkb_commands import create_pkb_command_router
 from interfaces.api.external_read import create_external_read_router
 from interfaces.api.finance import create_finance_router
 from interfaces.api.daily_overview import create_daily_overview_router
+from interfaces.api.magi_settings import create_magi_settings_router
 from interfaces.vue_daily.preferences import (
     read_judgment_preferences, save_judgment_preferences,
 )
@@ -40,6 +41,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
                external_read_token_loader: Callable[[], str | None] | None = None,
                finance_repository=None, service_connections=None,
                billing_settings=None, database_connection=None,
+               magi_settings=None,
                recover_pending_at_startup: bool = False,
                dist_dir: Path | None = None) -> FastAPI:
     """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
@@ -58,6 +60,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         service_connections: 共通Service Connection Repository。
         billing_settings: Service Billing Profile Repository。
         database_connection: Debug専用の通常DB接続Factory。
+        magi_settings: MAGI LLM Profileと論理Member割当のRepository。
         recover_pending_at_startup: Commands注入時の未着手Task自動再開。
             実Taskの手動プレビューではFalseにして過去のJobを起動しない。
 
@@ -146,6 +149,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         read_service=read_service, token_loader=external_read_token_loader,
     ))
     app.include_router(create_finance_router(repository=finance_repository))
+    app.include_router(create_magi_settings_router(repository=magi_settings))
     app.include_router(create_daily_overview_router(
         connections=service_connections, billing_settings=billing_settings,
         database_connection=database_connection,
