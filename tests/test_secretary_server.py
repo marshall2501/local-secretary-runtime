@@ -171,9 +171,9 @@ class SecretaryServerTests(unittest.TestCase):
         root = Path(self.tmp.name)
         source = root / ".env"
         source.write_text(
-            "OPENAI_BASE_URL=https://example.org/v1\\n"
-            "LSA_MAGI_CASPER_MODEL=gpt-fixture\\n"
-            "OTHER_APPLICATION_PASSWORD=not-loaded\\n",
+            "OPENAI_BASE_URL=https://example.org/v1\n"
+            "LSA_MAGI_CASPER_MODEL=gpt-fixture\n"
+            "OTHER_APPLICATION_PASSWORD=not-loaded\n",
             encoding="utf-8",
         )
         with patch.dict(os.environ, {}, clear=True):
@@ -181,7 +181,7 @@ class SecretaryServerTests(unittest.TestCase):
             self.assertEqual(os.environ["OPENAI_BASE_URL"], "https://example.org/v1")
             self.assertEqual(os.environ["LSA_MAGI_CASPER_MODEL"], "gpt-fixture")
             self.assertNotIn("OTHER_APPLICATION_PASSWORD", os.environ)
-            source.write_text("OPENAI_BASE_URL=one\\nOPENAI_BASE_URL=two\\n",
+            source.write_text("OPENAI_BASE_URL=one\nOPENAI_BASE_URL=two\n",
                               encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 configure_runtime_environment(root)
