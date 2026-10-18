@@ -41,7 +41,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
                external_read_token_loader: Callable[[], str | None] | None = None,
                finance_repository=None, service_connections=None,
                billing_settings=None, database_connection=None,
-               magi_settings=None,
+               magi_settings=None, schema_diagram_service=None,
                recover_pending_at_startup: bool = False,
                dist_dir: Path | None = None) -> FastAPI:
     """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
@@ -60,6 +60,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         service_connections: 共通Service Connection Repository。
         billing_settings: Service Billing Profile Repository。
         database_connection: Debug専用の通常DB接続Factory。
+        schema_diagram_service: 既存schema metadata用ER図Application。
         magi_settings: MAGI LLM Profileと論理Member割当のRepository。
         recover_pending_at_startup: Commands注入時の未着手Task自動再開。
             実Taskの手動プレビューではFalseにして過去のJobを起動しない。
@@ -153,6 +154,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
     app.include_router(create_daily_overview_router(
         connections=service_connections, billing_settings=billing_settings,
         database_connection=database_connection,
+        schema_diagram_service=schema_diagram_service,
     ))
 
     @app.get("/api/v1/debug/routes")
