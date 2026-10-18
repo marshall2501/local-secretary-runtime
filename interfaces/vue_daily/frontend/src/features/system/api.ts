@@ -86,6 +86,27 @@ export async function saveBillingProfile(input: BillingProfileInput): Promise<Bi
   return await postJson<BillingProfile>('/api/v1/billing/profiles', input)
 }
 
+export interface SchemaDiagramResult {
+  status: string
+  provider: string
+  database: string
+  schema: string
+  output_format: 'svg' | 'mermaid'
+  content: string
+  table_count: number
+  relation_count: number
+  duration_ms: number
+  generated_at: string
+  warnings: string[]
+}
+export async function readSchemaDiagram(
+  keysOnly = true, format: 'svg' | 'mermaid' = 'svg',
+): Promise<SchemaDiagramResult> {
+  return await getJson<SchemaDiagramResult>(
+    '/api/v1/debug/er?keys_only=' + String(keysOnly) + '&format=' + format,
+  )
+}
+
 export interface ApiRouteInfo { path: string; methods: string[]; name: string }
 export async function readApiRoutes(): Promise<ApiRouteInfo[]> {
   return await getJson<ApiRouteInfo[]>('/api/v1/debug/routes')
