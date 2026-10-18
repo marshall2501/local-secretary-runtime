@@ -252,6 +252,61 @@ test('18097新規Task→本人回答→Review→確定→F5同IDで復元する'
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
 })
 
+
+test('保存済みPKB Taskは回答を先に表示し、Markdownと2 Turnの根拠を追える', async ({ page }) => {
+  const origin = 'http://127.0.0.1:18097'
+  const list = await (await page.request.get(origin + '/api/v1/ritsuko/tasks?view=recent&limit=1&offset=0')).json()
+  const id = list.items[0].id as string
+  const original = await (await page.request.get(origin + '/api/v1/ritsuko/tasks/' + id)).json()
+  const saved = original.trace
+  saved.task.status = 'completed'
+  saved.task.phase = 'completed'
+  saved.task.message = '個人PKBでは **Windows 11 26H2** です。\n\n実機検査ではありません。'
+  saved.task.reason = 'goal_evaluated_with_recorded_evidence'
+  saved.task.magi_session = {
+    status: 'candidate_ready', next_step: 'review_answer_candidate',
+    turns: [
+      { stage: 'goal', status: 'ok', response: {
+        next: 'request_read', read_request: { source: 'pkb' },
+        reason: '答える前に本人の記憶を検索します。',
+      }},
+      { stage: 'goal', status: 'ok', response: {
+        next: 'respond', reason: 'PKBの取得記録を使いました。',
+        evidence: { basis: 'result_refs', result_ids: ['result-sample'] },
+      }},
+    ],
+    observations: [{ source: 'pkb', result_id: 'result-sample', verified: true, result_count: 2 }],
+    member_specs: [],
+  }
+  saved.actions = [{ action_id: 'action-sample', tool: 'pkb', operation: 'search',
+    action_status: 'succeeded', result_id: 'result-sample', outcome: 'success',
+    summary: 'Windows 11 26H2 の登録済み記録を検索しました。' }]
+  await page.route('**/api/v1/ritsuko/tasks/' + id, async route => {
+    await route.fulfill({ json: { ...original, trace: saved } })
+  })
+  await page.goto(origin + '/ui/#task=' + id)
+  const task = page.locator('.current-task')
+  const answer = page.getByLabel('Taskの最新回答')
+  await expect(answer.getByText('Windows 11 26H2')).toBeVisible()
+  await expect(answer.locator('strong', { hasText: 'Windows 11 26H2' })).toBeVisible()
+  await expect(answer).not.toContainText('**Windows 11 26H2**')
+  await expect(page.getByLabel('回答の根拠')).toContainText('個人PKB')
+  await expect(page.getByLabel('回答の根拠')).toContainText('取得した記録 2 件')
+  await expect(page.getByLabel('MAGI判断の経過')).toContainText('Turn 1：個人PKBの読み取りを依頼')
+  await expect(page.getByLabel('MAGI判断の経過')).toContainText('Turn 2：根拠を評価して回答を提案')
+  // 回答は新しい依頼フォームより上。ただし入力欄は常時利用できる。
+  const answerPosition = await task.boundingBox()
+  const composerPosition = await page.getByRole('textbox', { name: '依頼内容' }).boundingBox()
+  expect(answerPosition).not.toBeNull()
+  expect(composerPosition).not.toBeNull()
+  expect(answerPosition!.y).toBeLessThan(composerPosition!.y)
+  await expect(page.getByRole('textbox', { name: '依頼内容' })).toBeEnabled()
+  // 中間状態は完了ラベルの上にそのまま現れない。必要時だけ詳細を開く。
+  await expect(task.getByText('candidate_ready', { exact: false })).toBeHidden()
+  await task.getByText('依頼・Goal・MAGI中間状態・Task ID').click()
+  await expect(task.getByText('candidate_ready', { exact: false })).toBeVisible()
+})
+
 test('本人の確定した知識だけ記憶Reviewを表示し同一Taskへ送信する', async ({ page }) => {
   await page.goto('http://127.0.0.1:18097/ui/')
   const request = '記憶反映試験：本人が回答したOSを登録する'
