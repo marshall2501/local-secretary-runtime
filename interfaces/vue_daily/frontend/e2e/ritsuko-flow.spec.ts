@@ -411,6 +411,9 @@ test('FinanceとSettingsは単一Secretary Originで利用できる', async ({ p
   await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=finance')
   await expect(page.getByRole('heading', { name: '家計・資産' })).toBeVisible()
   await expect(page.getByRole('region', { name: '家計集計' }).getByText('￥1,500')).toBeVisible()
+  // Previously omitted from the Vue page although the Finance API provided it.
+  await expect(page.getByRole('region', { name: '家計月別集計' })).toContainText('2026-10')
+  await expect(page.getByRole('region', { name: '家計カテゴリ' })).toContainText('食費')
   await expect(page.getByText('架空の買い物')).toBeVisible()
   await page.getByRole('link', { name: '設定' }).click()
   await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=settings')
@@ -508,6 +511,14 @@ test('RITSUKOの全履歴を開いて保存済みTaskへ戻れる', async ({ pag
   await page.getByRole('link', { name: /架空の過去Task/ }).first().click()
   await expect(page).toHaveURL(/\/ui\/#task=/)
   await expect(page.getByRole('textbox', { name: '依頼内容' })).toBeVisible()
+})
+
+test('TOPは旧入口と同様に用途別カードと読取専用状態を表示する', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/?page=home')
+  await expect(page.getByRole('heading', { name: 'Personal Local Secretary AI' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '秘書AIの現在の状態' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '秘書AIの機能一覧' })).toContainText('Personal Knowledge Base')
+  await expect(page.getByRole('region', { name: '秘書AIの機能一覧' })).toContainText('未実装')
 })
 
 test('PKB Entity一覧から現在値・履歴・関連を同じVueへ表示する', async ({ page }) => {
