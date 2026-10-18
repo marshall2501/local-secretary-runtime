@@ -66,59 +66,7 @@ const stoppable = computed(() =>
       Task操作APIが接続されていません。システム診断で状態を確認してください。
     </p>
 
-    <!-- textarea自体は常に配置し、読取専用の場合も入力場所を隠さない。 -->
-    <form class="command-form" @submit.prevent="emit('start')">
-      <label for="task-request">依頼内容</label>
-      <textarea id="task-request" v-model="request" rows="4"
-        maxlength="4000" autocomplete="off"
-        :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : 'Task操作APIが接続されていません'"
-        :disabled="busy || !commandsEnabled" required />
-      <div class="command-row">
-        <template v-if="activeShowStrategySelector">
-          <label for="task-strategy">判断方式（検証用）</label>
-          <select id="task-strategy" v-model="strategy"
-            :disabled="busy || !commandsEnabled || !preferencesLoaded">
-            <option value="standard">従来方式（段階判断／MAGI）</option>
-            <option value="llm">Goal方式（LLMによる次の判断／MAGI）</option>
-          </select>
-        </template>
-        <span v-else class="muted small">
-          既定判断方式：{{ activeDefaultStrategy === 'llm' ? 'Goal / LLM' : '従来' }}
-        </span>
-        <button type="submit" class="primary-command"
-          :disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()">
-          {{ busy ? '受付中…' : '依頼を送信' }}
-        </button>
-      </div>
-    </form>
-    <details class="command-preferences">
-      <summary>判断方式の設定</summary>
-      <p class="muted small">
-        既定方式は新規Taskだけに適用。MAGIの有効席数・モデル・既存Taskは変更しません。
-      </p>
-      <div class="command-row">
-        <label for="task-default-strategy">新規Taskの既定方式</label>
-        <select id="task-default-strategy" v-model="defaultStrategy"
-          :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded">
-          <option value="standard">従来方式</option>
-          <option value="llm">Goal / LLM方式</option>
-        </select>
-      </div>
-      <label class="command-row">
-        <input v-model="showStrategySelector" type="checkbox"
-          :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded" />
-        新規依頼に検証用の判断方式選択を表示
-      </label>
-      <button type="button" class="secondary"
-        :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded"
-        @click="emit('savePreferences')">
-        {{ preferencesBusy ? '保存中…' : '設定を保存' }}
-      </button>
-      <p v-if="preferencesMessage" role="status" class="muted small">
-        {{ preferencesMessage }}
-      </p>
-    </details>
-
+    <!-- 本人回答・Review・停止など選択Taskの操作を新規依頼より優先表示する。 -->
     <template v-if="commandsEnabled && task">
       <form v-if="answerable" class="command-form" @submit.prevent="emit('answer')">
         <label for="task-answer">選択中のTaskへの本人回答</label>
@@ -180,15 +128,76 @@ const stoppable = computed(() =>
         操作状態: {{ operation.status }}
       </p>
     </template>
+
+    <!-- textarea自体は常に配置し、読取専用の場合も入力場所を隠さない。 -->
+    <form class="command-form" @submit.prevent="emit('start')">
+      <label for="task-request">依頼内容</label>
+      <textarea id="task-request" v-model="request" rows="2"
+        maxlength="4000" autocomplete="off"
+        :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : 'Task操作APIが接続されていません'"
+        :disabled="busy || !commandsEnabled" required />
+      <div class="command-row">
+        <template v-if="activeShowStrategySelector">
+          <label for="task-strategy">判断方式（検証用）</label>
+          <select id="task-strategy" v-model="strategy"
+            :disabled="busy || !commandsEnabled || !preferencesLoaded">
+            <option value="standard">従来方式（段階判断／MAGI）</option>
+            <option value="llm">Goal方式（LLMによる次の判断／MAGI）</option>
+          </select>
+        </template>
+        <span v-else class="muted small">
+          既定判断方式：{{ activeDefaultStrategy === 'llm' ? 'Goal / LLM' : '従来' }}
+        </span>
+        <button type="submit" class="primary-command"
+          :disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()">
+          {{ busy ? '受付中…' : '依頼を送信' }}
+        </button>
+      </div>
+    </form>
+    <details class="command-preferences">
+      <summary>判断方式の設定</summary>
+      <p class="muted small">
+        既定方式は新規Taskだけに適用。MAGIの有効席数・モデル・既存Taskは変更しません。
+      </p>
+      <div class="command-row">
+        <label for="task-default-strategy">新規Taskの既定方式</label>
+        <select id="task-default-strategy" v-model="defaultStrategy"
+          :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded">
+          <option value="standard">従来方式</option>
+          <option value="llm">Goal / LLM方式</option>
+        </select>
+      </div>
+      <label class="command-row">
+        <input v-model="showStrategySelector" type="checkbox"
+          :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded" />
+        新規依頼に検証用の判断方式選択を表示
+      </label>
+      <button type="button" class="secondary"
+        :disabled="!commandsEnabled || preferencesBusy || !preferencesLoaded"
+        @click="emit('savePreferences')">
+        {{ preferencesBusy ? '保存中…' : '設定を保存' }}
+      </button>
+      <p v-if="preferencesMessage" role="status" class="muted small">
+        {{ preferencesMessage }}
+      </p>
+    </details>
+
     <div class="command-row" v-if="task">
       <button type="button" class="secondary" :disabled="busy"
         @click="emit('refresh')">保存済みTaskを再取得</button>
       <span class="muted small">既存のTaskを再照会します。再実行やDB変更はしません。</span>
     </div>
-    <p v-if="feedback" class="command-feedback" role="status">{{ feedback }}</p>
+    <p v-if="feedback && task?.status !== 'completed' && task?.status !== 'failed'"
+      class="command-feedback" role="status">{{ feedback }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="commandsEnabled" class="muted small">
-      送信後のTask確定状態と結果は、保存済みTaskから再照会します。
-    </p>
+
   </section>
 </template>
+
+<style scoped>
+/* 長文編集可能なまま、既存回答を押し下げない入力高さにする。 */
+.request-entry #task-request { min-height: 78px; max-width: 100%; }
+.request-entry .command-preferences { margin-top: 2px; }
+.request-entry .command-preferences > summary { cursor: pointer; font-size: 13px; }
+.request-entry .command-form { margin-bottom: 7px; }
+</style>
