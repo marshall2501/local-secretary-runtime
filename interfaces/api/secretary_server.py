@@ -145,7 +145,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
     # on the deployed FastAPI version and falsely shows five endpoints.
     business_routers = (
         create_ritsuko_task_router(queries=queries, commands=commands),
-        create_pkb_read_router(read_service=read_service),
+        create_pkb_read_router(read_service=read_service, pkb_repository=pkb_repository),
         create_pkb_command_router(
             repository=pkb_repository, interpreter=pkb_interpreter,
         ),
