@@ -42,7 +42,7 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
     <section v-if="pending.length" class="task-group">
       <h3>進行中・確認待ち</h3>
       <button v-for="task in pending" :key="task.id" type="button"
-        class="task-item" :class="{ active: selectedId === task.id }"
+        class="task-item" :class="[{ active: selectedId === task.id }, 'task-item-' + task.status]"
         :aria-current="selectedId === task.id ? 'true' : undefined"
         @click="emit('select', task.id)">
         <span class="item-title">{{ task.request }}</span>
@@ -52,7 +52,7 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
     <section v-if="closed.length" class="task-group">
       <h3>完了・終了済み</h3>
       <button v-for="task in closed" :key="task.id" type="button"
-        class="task-item" :class="{ active: selectedId === task.id }"
+        class="task-item" :class="[{ active: selectedId === task.id }, 'task-item-' + task.status]"
         :aria-current="selectedId === task.id ? 'true' : undefined"
         @click="emit('select', task.id)">
         <span class="item-title">{{ task.request }}</span>
@@ -67,3 +67,15 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
     <p class="muted small task-sidebar-foot">{{ commandsEnabled ? "Taskの確定状態はDBから再照会します。" : "保存済みTaskの参照専用です。" }}</p>
   </aside>
 </template>
+
+<style scoped>
+/* 色の意味を左右同じにする。選択状態は色帯とは別に輪郭で表示する。 */
+.task-item.task-item-completed:not(.active) { border-left:4px solid #65b98a; background:#f8fdf9; }
+.task-item.task-item-waiting_external:not(.active),
+.task-item.task-item-waiting_user:not(.active) { border-left:4px solid #dbb050; background:#fffcf6; }
+.task-item.task-item-running:not(.active),
+.task-item.task-item-pending:not(.active) { border-left:4px solid #6ba6dc; background:#f7fbff; }
+.task-item.task-item-failed:not(.active),
+.task-item.task-item-cancelled:not(.active) { border-left:4px solid #d8838d; background:#fff9f9; }
+.task-item.active { outline:2px solid #227a73; outline-offset:1px; }
+</style>
