@@ -499,6 +499,17 @@ test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid�
   await expect(page.getByText('erDiagram', { exact: false })).toBeVisible()
 })
 
+test('RITSUKOの全履歴を開いて保存済みTaskへ戻れる', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.getByRole('link', { name: '全履歴' }).click()
+  await expect(page.getByRole('heading', { name: 'Task履歴' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '保存済みTask履歴' })).toBeVisible()
+  await expect(page.getByRole('link', { name: /架空の過去Task/ }).first()).toBeVisible()
+  await page.getByRole('link', { name: /架空の過去Task/ }).first().click()
+  await expect(page).toHaveURL(/\/ui\/#task=/)
+  await expect(page.getByRole('textbox', { name: '依頼内容' })).toBeVisible()
+})
+
 test('PKB Entity一覧から現在値・履歴・関連を同じVueへ表示する', async ({ page }) => {
   const id = '11111111-1111-4111-8111-111111111111'
   const related = '22222222-2222-4222-8222-222222222222'
