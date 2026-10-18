@@ -414,7 +414,7 @@ test('FinanceとSettingsは単一Secretary Originで利用できる', async ({ p
   await expect(page.getByText('架空の買い物')).toBeVisible()
   await page.getByRole('link', { name: '設定' }).click()
   await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=settings')
-  await expect(page.getByText('架空 OpenAI')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'サービス接続一覧' }).getByText('架空 OpenAI', { exact: true })).toBeVisible()
   await expect(page.getByText('認証：設定済', { exact: false })).toBeVisible()
 })
 
