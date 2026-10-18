@@ -308,16 +308,16 @@ test('停止は保存済み状態で確認し、Actionの出典と監査履歴�
   await expect(page.getByText(/synthetic_verified/)).toBeVisible()
 })
 
-test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表示しない', async ({ page }) => {
+test('保存された5件表示からさらに読み込み、確定Goalを未確定と表示しない', async ({ page }) => {
   await page.goto('http://127.0.0.1:8097/ui/')
-  await expect(page.getByText('10件表示')).toBeVisible()
+  await expect(page.getByText('5件表示')).toBeVisible()
   await expect(page.getByRole('button', { name: 'さらに読み込む' })).toBeVisible()
   const more = page.getByRole('button', { name: 'さらに読み込む' })
   await more.click()
   // 先行テストが作成するTask数によって総件数は変わる。複数回の追加
   // 読込後に最終的な終端へ到達する契約を検査し、件数を固定しない。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
-  await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('10件表示')
+  await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('5件表示')
   // The purpose of this regression is finding a confirmed historical Goal
   // beyond the first ten entries, not exhausting all pages. Repeatedly
   // requesting unrelated pages introduces races with asynchronous refreshes.
@@ -461,18 +461,29 @@ test('Billingは明示的な更新操作をするまで外部usage APIを呼び�
 test('Debugも同一Originで実行中サーバー情報を参照できる', async ({ page }) => {
   await page.goto('http://127.0.0.1:8097/ui/?page=debug')
   await expect(page.getByRole('heading', { name: 'システム診断' })).toBeVisible()
-  await expect(page.getByRole('region', { name: '実行プロセス' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'システム概要' })).toBeVisible()
   await expect(page.getByRole('region', { name: '環境設定状況' })).toBeVisible()
 })
 
 
+test('RITSUKOにも共通の3席編集画面を持ち設定画面と同じデータを使う', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.getByText('MAGI — 3席のLLM設定').click()
+  const editor = page.getByRole('region', { name: 'MAGIメンバー設定' })
+  await expect(editor.getByText('MELCHIOR')).toBeVisible()
+  await expect(editor.getByText('CASPER')).toBeVisible()
+  await expect(editor.getByText('BALTHASAR')).toBeVisible()
+  await expect(editor.getByRole('combobox', { name: 'CASPER Profile' }))
+    .toHaveValue('fake-llm-profile')
+})
+
 test('MAGI Profileと3席割当はSettingsから同一APIで保存できる', async ({ page }) => {
   await page.goto('http://127.0.0.1:8097/ui/?page=settings')
-  await expect(page.getByRole('heading', { name: 'MAGI — LLM Profile・メンバー割当' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'MAGI member configuration' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'CASPER Profile' }))
     .toHaveValue('fake-llm-profile')
-  await page.getByRole('button', { name: 'MAGI割当を保存' }).click()
-  await expect(page.getByRole('status')).toContainText('MAGIメンバー3席の割当')
+  await page.getByRole('button', { name: 'LLM設定を保存' }).click()
+  await expect(page.getByRole('status')).toContainText('MAGIの3席を保存しました')
 })
 
 test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid参照', async ({ page }) => {
@@ -500,6 +511,46 @@ test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid�
   await expect(svg).toContainText('request')
   await page.getByRole('button', { name: 'Mermaidソース' }).click()
   await expect(page.getByText('erDiagram', { exact: false })).toBeVisible()
+})
+
+test('表示・初期展開・件数を旧UIと共有の設定APIで編集できる', async ({ page }) => {
+  const layout = {
+    pkb: { write: true, correction: false, search: true,
+      entities: false, pending: true, reviewed: false, limits: false },
+    finance: { filter: true, stored: true, monthly: true,
+      categories: false, details: false, imports: false, csv: false, recent_limit: 25 },
+    core: { magi_configuration: false, magi_melchior: false, magi_casper: false,
+      magi_balthasar: false, verification: false, trace: false, legacy_protocol: false,
+      limits: false, open_limit: 5, completed_limit: 5 },
+    entity: { default_tab: 'overview' },
+    debug: { er_diagram_providers: { native_mermaid: true,
+      schemacrawler: false, tbls: false, eralchemy: false } },
+    visibility: {
+      pkb: { write: true, correction: true, search: true, entities: true,
+        pending: true, reviewed: true, limits: true },
+      entity: { overview: true, history: true, relations: true, sources: true },
+      finance: { filter: true, stored: true, monthly: true, categories: true,
+        details: true, imports: true, csv: true },
+      core: { magi_configuration: true, verification: true, trace: true,
+        legacy_protocol: false, limits: true },
+    },
+  }
+  await page.route('**/api/v1/ui/layout', async route => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(route.request().postDataJSON()) })
+    } else {
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(layout) })
+    }
+  })
+  await page.goto('http://127.0.0.1:8097/ui/?page=settings')
+  const editor = page.getByRole('region', { name: '画面レイアウト設定' })
+  await expect(editor).toBeVisible()
+  await editor.getByText('RITSUKOの表示・件数').click()
+  await editor.getByText('進行中Taskの初期表示件数').locator('select').selectOption('3')
+  await editor.getByRole('button', { name: '保存して反映' }).click()
+  await expect(editor.getByRole('status')).toContainText('保存しました')
 })
 
 test('RITSUKOの全履歴を開いて保存済みTaskへ戻れる', async ({ page }) => {
