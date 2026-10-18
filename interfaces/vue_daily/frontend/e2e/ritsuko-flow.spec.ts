@@ -448,8 +448,8 @@ test('Billingは明示的な更新操作をするまで外部usage APIを呼び�
   await page.getByRole('button', { name: '最新の利用状況を取得' }).click()
   await expect(page.getByRole('region', { name: '取得した利用状況' })).toBeVisible()
   await expect(page.getByText('$2.5837')).toBeVisible()
-  await expect(page.getByText('73,092')).toBeVisible()
-  await expect(page.getByText('104,952')).toBeVisible()
+  await expect(page.locator('.billing-metric').filter({ hasText: '入力トークン' })).toContainText('73,092')
+  await expect(page.locator('.billing-metric').filter({ hasText: '出力トークン' })).toContainText('104,952')
   await expect(page.getByRole('row', { name: /fake-model/ })).toContainText('155')
   await expect(page.getByText('取得結果の詳細（JSON・診断用）')).toBeVisible()
   expect(calls.length).toBe(1)
@@ -487,4 +487,44 @@ test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid�
   await expect(svg).toContainText('request')
   await page.getByRole('button', { name: 'Mermaidソース' }).click()
   await expect(page.getByText('erDiagram', { exact: false })).toBeVisible()
+})
+
+test('Googleの料金未取得は0円と誤表示せず、実際の利用量だけ示す', async ({ page }) => {
+  await page.route('**/api/v1/billing/profiles', async route => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify([{
+        id: 'google-profile', display_name: '架空Google',
+        connection_id: 'google-conn', connection_name: '架空Google Cloud',
+        adapter_key: 'google_cloud', enabled: true, connection_enabled: true,
+      }]),
+    })
+  })
+  await page.route('**/api/v1/billing/profiles/google-profile/snapshot', async route => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        service: 'google_cloud', connection_name: '架空Google Cloud',
+        period_start: '2026-10-01T00:00:00+00:00',
+        fetched_at: '2026-10-18T00:00:00+00:00',
+        activity: {
+          status: 'known',
+          totals: { requests: 22, input_tokens: 1500, output_tokens: 320 },
+          by_model: [{ model: 'fixture-gemini', requests: 22,
+            input_tokens: 1500, output_tokens: 320 }],
+        },
+        charges: { status: 'unknown', reason: 'google_cloud_cost_reader_not_implemented' },
+        credits: { status: 'unknown' }, subscription: { status: 'unknown' },
+        limits: { status: 'unknown' },
+      }),
+    })
+  })
+  await page.goto('http://127.0.0.1:8097/ui/?page=service-billing')
+  await expect(page.getByRole('combobox', { name: '対象Billing Profile' })).toHaveValue('google-profile')
+  await page.getByRole('button', { name: '最新の利用状況を取得' }).click()
+  const report = page.getByRole('region', { name: '取得した利用状況' })
+  await expect(report).toContainText('fixture-gemini')
+  await expect(report).toContainText('費用を取得できていません（0円ではありません）')
+  await expect(report).toContainText('Google Cloud Monitoringの利用量と実際の請求金額は別情報')
+  await expect(report.locator('.billing-cost strong')).toHaveText('—')
 })
