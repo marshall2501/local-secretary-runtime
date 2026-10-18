@@ -1,6 +1,6 @@
 # SOURCE_MAP — 現行Runtimeソース索引
 
-更新: 2026-10-18（単一Secretary Serverの実装初段に外部read契約・PKB更新/確認待ちを追加）。実機稼働状態や受入結果は設計repoの [STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を正本とし、この文書は**存在する実装の索引**とする。採用する責務境界は設計側の Runtime Source Architecture を参照。
+更新: 2026-10-18（単一Secretary ServerにTask・PKB・Finance・Billing・接続設定・MAGI・Debug API/Vueを結線、正式起動切替は未受入）。実機稼働状態や受入結果は設計repoの [STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を正本とし、この文書は**存在する実装の索引**とする。採用する責務境界は設計側の Runtime Source Architecture を参照。
 
 ## 1. 正式な目標実行経路
 
@@ -41,7 +41,9 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | MAGI/Task実行組立 | `bootstrap/magi_task_runtime.py`, `ritsuko_task_composition.py` | API・Vue・旧UIが共用 |
 | 永続Task、照会 | `infrastructure/postgres/magi_task_repository.py`, `core_task_query_repository.py`, `task_repository.py` | 本人Task原文・履歴・停止／Review状態 |
 | PKB独立機能 | `pkb/application/daily.py`, `memory_intake.py`, `infrastructure/postgres/pkb_*repository.py` | SQL-first、登録、訂正、Pending |
-| Finance | `capabilities/finance/`, `infrastructure/postgres/finance_repository.py` | 同じRuntime DB、共通read Capability |
+| Finance | `capabilities/finance/`, `infrastructure/postgres/finance_repository.py`, `interfaces/api/finance.py`, `interfaces/vue_daily/frontend/src/features/finance/` | 保存済み集計・明細・取込履歴＋MoneyForward CSV差分Preview→明示Commitを同一Hostで提供、実DB受入前 |
+| Service Billing / Connections / Debug | `interfaces/api/daily_overview.py`, `interfaces/vue_daily/frontend/src/features/system/`, `infrastructure/system_debug.py` | ProfileとConnection読書き／外部Usage明示参照／Runtime・DB・環境・API一覧を旧NiceGUIから独立 |
+| MAGI LLM Profile・Member設定 | `interfaces/api/magi_settings.py`, `ritsuko/magi/settings.py`, `infrastructure/postgres/magi_settings_repository.py`, `interfaces/vue_daily/frontend/src/features/system/` | 同じ設定Repoで3席のProfile/Weight/Timeoutを管理。別MAGI Executorを作らない |
 | Service接続・設定 | `integrations/connections/`, `infrastructure/postgres/service_connection_repository.py`, `magi_settings_repository.py` | SecretはAPI/Prompt等へ直接渡さない |
 | Policy Profile | `ritsuko/application/context_policy.py`, `infrastructure/postgres/runtime_policy_repository.py` | verification-lan/production-lanは同一DBの切替設定 |
 | Billing | `infrastructure/postgres/service_billing_settings_repository.py` | Service Connectionを参照 |
@@ -63,7 +65,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 使い捨てPostgreSQL隔離検証 | `tests/db/test-integration.ps1`, `.github/workflows/postgres.yml` |
 | PKB/Memory実PostgreSQL試験 | `tests/test_memory_intake_postgres.py`, `.github/workflows/pkb-memory-intake.yml` |
 | 共通Task/Strategy縦断 | `tests/test_shared_judgment_task_pipeline.py`, `tests/db/verify-common-task-execution.py` |
-| Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `tests/test_secretary_server.py`, `tests/test_secretary_pkb_commands.py`, `tests/test_secretary_external_read.py`, `tests/test_vue_pkb_read.py`, `.github/workflows/vue-secretary-ui-lab.yml` |
+| Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `tests/test_secretary_server.py`, `tests/test_secretary_capability_views.py`, `tests/test_secretary_pkb_commands.py`, `tests/test_secretary_external_read.py`, `tests/test_vue_pkb_read.py`, `.github/workflows/vue-secretary-ui-lab.yml` |
 | ローカルプローブ | `scripts/db/probe_magi_runtime_readonly.py`, `probe_runtime_policy_readonly.py` |
 | Source静的・整合性 | `tests/db/test-static.ps1`, `tests/test_architecture_boundaries.py` |
 
