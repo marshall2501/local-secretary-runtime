@@ -84,6 +84,15 @@ class FakeConnections:
                 "adapter_key": "openai", "enabled": True,
                 "capabilities": ["service_billing_read"]}
 
+    def upsert_service_connection(self, **data):
+        return {
+            "id": "connection-1", "display_name": data["display_name"],
+            "adapter_key": data["adapter_key"], "endpoint": data.get("endpoint"),
+            "auth_configured": bool(data.get("auth_data")),
+            "auth_fields": list((data.get("auth_data") or {}).keys()),
+            "enabled": data.get("enabled", True),
+        }
+
 
 class FakeProfiles:
     """Existing Billing repository's list-only API."""
@@ -92,6 +101,9 @@ class FakeProfiles:
         return [{"id": "profile-1", "display_name": "利用料金",
                  "connection_id": "connection-1", "enabled": True,
                  "connection_enabled": True}]
+
+    def upsert_service_billing_profile(self, **data):
+        return {"id": "profile-1", **data}
 
 
 class DailyCapabilityApiTests(unittest.TestCase):
@@ -183,6 +195,24 @@ class DailyCapabilityApiTests(unittest.TestCase):
             404,
         )
         self.assertEqual(self.client.post("/api/v1/connections").status_code, 405)
+
+    def test_settings_update_uses_existing_services_without_echoing_auth(self):
+        """Settings updates are UI actions, not a new credential repository."""
+        result = self.client.post("/api/v1/connections", json={
+            "adapter_key": "openai", "display_name": "架空API",
+            "connection_type": "api_key", "auth_data": {
+                "api_key": "fixture-test-secret",
+            },
+        })
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["auth_configured"], True)
+        self.assertNotIn("fixture-test-secret", result.text)
+        created = self.client.post("/api/v1/billing/profiles", json={
+            "display_name": "架空 Usage", "connection_id": "connection-1",
+            "enabled": True,
+        })
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["display_name"], "架空 Usage")
 
     def test_debug_runtime_and_environment_reuse_existing_diagnostics(self):
         with patch("interfaces.api.daily_overview.runtime_snapshot",
