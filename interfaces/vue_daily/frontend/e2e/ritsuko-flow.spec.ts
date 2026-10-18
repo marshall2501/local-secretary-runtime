@@ -331,7 +331,7 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
 })
 
 
-test('Vue PKB検索は共通ReadServiceを使い、旧画面へ戻れる', async ({ page }) => {
+test('Vue PKB検索は共通ReadServiceを使い、登録・訂正にも同一画面から進める', async ({ page }) => {
   await page.goto('http://127.0.0.1:8097/ui/')
   await page.getByRole('link', { name: 'PKB' }).click()
   await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=pkb')
@@ -339,8 +339,9 @@ test('Vue PKB検索は共通ReadServiceを使い、旧画面へ戻れる', async
     .toBeVisible()
   await expect(page.getByText('架空サブPC')).toBeVisible()
   await expect(page.getByText('架空の本人申告')).toBeVisible()
-  await expect(page.getByRole('link', { name: '既存PKB画面' }))
-    .toHaveAttribute('href', 'http://127.0.0.1:8093/pkb')
+  await expect(page.getByRole('button', { name: '記憶を登録' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '訂正として登録' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '確認待ち・判断履歴' })).toBeVisible()
   await page.getByRole('textbox', { name: 'PKBキーワード' }).fill('該当しない記憶')
   await page.getByRole('button', { name: '検索', exact: true }).click()
   await expect(page.getByText('該当する記録はありません。')).toBeVisible()
