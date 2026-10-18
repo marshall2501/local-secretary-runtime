@@ -50,11 +50,11 @@ const {
         :commands-enabled="commandsEnabled" :busy="commandBusy"
         :task="selected" :feedback="commandFeedback" :error="commandError"
         :operation="operation"
-        @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @stop="sendStop" @resume="sendResume"
+        @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @resume="sendResume"
         @save-preferences="savePreferences" @refresh="() => refresh(true)"
       />
       <CurrentTask v-if="!selected" :task="selected" :trace="trace" :loading="refreshing" />
-      <MagiProgress :task="selected" :operation="operation" />
+      <MagiProgress :task="selected" />
       <TaskActivity v-if="layout?.visibility.core.trace !== false"
         :trace="trace" :default-open="layout?.core.trace === true" />
       <details v-if="layout?.visibility.core.magi_configuration !== false"
