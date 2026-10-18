@@ -353,3 +353,52 @@ test('Vue PKB検索は共通ReadServiceを使い、旧画面へ戻れる', async
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:8097\/ui\/(?:#task=[a-f\d-]{36})?$/)
   await expect(page.getByRole('heading', { name: '新しい依頼を入力' })).toBeVisible()
 })
+
+
+test('同一Vue PKB画面で登録・訂正・Pending判断を操作できる', async ({ page }) => {
+  await page.route('**/api/v1/pkb/pending?*', async route => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify([{ id: 'fake-pending-1', raw_text: '架空GPUを交換した',
+        entity_name: '架空サブPC', reason: 'review' }]),
+    })
+  })
+  await page.route('**/api/v1/pkb/reviewed?*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+  })
+  const memoryWrites: string[] = []
+  await page.route('**/api/v1/pkb/register', async route => {
+    memoryWrites.push(route.request().postDataJSON().text)
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ status: 'review', reason: 'manual_check' }),
+    })
+  })
+  await page.route('**/api/v1/pkb/correct', async route => {
+    memoryWrites.push('correct:' + route.request().postDataJSON().text)
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ status: 'corrected' }),
+    })
+  })
+  const reviews: string[] = []
+  await page.route('**/api/v1/pkb/pending/fake-pending-1/review', async route => {
+    reviews.push(route.request().postDataJSON().decision)
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ status: 'needs_edit' }),
+    })
+  })
+  await page.goto('http://127.0.0.1:8097/ui/?page=pkb')
+  const entry = page.getByRole('textbox', { name: '登録・訂正する文章' })
+  await entry.fill('架空の登録テスト')
+  await page.getByRole('button', { name: '記憶を登録' }).click()
+  await expect(page.getByRole('status')).toContainText('review')
+  await entry.fill('架空の訂正テスト')
+  await page.getByRole('button', { name: '訂正として登録' }).click()
+  await expect(page.getByRole('status')).toContainText('corrected')
+  await page.getByRole('button', { name: '要修正' }).click()
+  await expect(page.getByRole('status')).toContainText('needs_edit')
+  expect(memoryWrites).toEqual(['架空の登録テスト', 'correct:架空の訂正テスト'])
+  expect(reviews).toEqual(['needs_edit'])
+})
