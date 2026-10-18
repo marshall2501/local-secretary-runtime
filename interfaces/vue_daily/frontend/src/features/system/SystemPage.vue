@@ -2,17 +2,18 @@
 <script setup lang="ts">
 /** One Secretary origin for Service Connections, Billing and Runtime diagnostics. */
 import { onMounted, ref } from 'vue'
+import BillingSnapshotView from './BillingSnapshotView.vue'
 import {
   readBillingProfiles, readBillingSnapshot, readConnections,
   readDatabase, readEnvironment, readRuntime, readApiRoutes, saveConnection, saveBillingProfile,
   readMagiProfiles, readMagiMembers, saveMagiProfile, saveMagiMembers,
 } from './api'
-import type { ConnectionSummary, BillingProfile, RuntimeInfo, EnvironmentItem, ApiRouteInfo, LlmProfile, MagiMember } from './api'
+import type { ConnectionSummary, BillingProfile, ServiceBillingSnapshot, RuntimeInfo, EnvironmentItem, ApiRouteInfo, LlmProfile, MagiMember } from './api'
 
 const props = defineProps<{ section: 'service-billing' | 'debug' | 'settings' }>()
 const connections = ref<ConnectionSummary[]>([])
 const profiles = ref<BillingProfile[]>([])
-const usage = ref<Record<string, unknown> | null>(null)
+const usage = ref<ServiceBillingSnapshot | null>(null)
 const runtime = ref<RuntimeInfo | null>(null)
 const environment = ref<EnvironmentItem[]>([])
 const database = ref<Record<string, unknown> | null>(null)
@@ -325,7 +326,8 @@ onMounted(() => { void load() })
     </section>
   </section>
   <section v-else-if="section === 'service-billing'" class="card" aria-label="サービス利用状況">
-    <h2>Service Billing Profile</h2>
+    <h2>API使用状況</h2>
+    <p class="muted small">保存済みのService Billing接続から当月の実利用量・費用を取得します。期間フィルタ・推移は未対応です。</p>
     <p v-if="!profiles.length" class="muted">有効な利用料金Profileはありません。</p>
     <form @submit.prevent="refreshUsage">
       <label>対象Profile
@@ -343,7 +345,11 @@ onMounted(() => { void load() })
         </button>
       </div>
     </form>
-    <h3>Billing Profileの登録・編集</h3>
+    <p v-if="usageProblem" role="alert" class="error">{{ usageProblem }}</p>
+    <BillingSnapshotView v-if="usage" :snapshot="usage" />
+    <details class="billing-editor">
+      <summary>Billing Profileの登録・編集</summary>
+      <p class="muted small">接続先の変更・新規登録が必要な場合だけ開いてください。</p>
     <div class="command-row">
       <button v-for="item in profiles" :key="item.id" type="button" class="secondary"
         @click="profileForm = {
@@ -371,11 +377,7 @@ onMounted(() => { void load() })
     </form>
     <p v-if="formError" role="alert" class="error">{{ formError }}</p>
     <p v-if="formMessage" role="status">{{ formMessage }}</p>
-        <p v-if="usageProblem" role="alert" class="error">{{ usageProblem }}</p>
-    <div v-if="usage" class="pkb-record">
-      <h3>取得した利用状況</h3>
-      <pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ JSON.stringify(usage, null, 2) }}</pre>
-    </div>
+    </details>
   </section>
   <template v-else-if="section === 'debug'">
     <section class="card" aria-label="実行プロセス">
