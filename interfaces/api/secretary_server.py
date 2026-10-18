@@ -158,13 +158,13 @@ def create_app(*, queries, commands: TaskCommands | None = None,
     ))
 
     @app.get("/api/v1/debug/routes")
-    def route_catalog():
+    def route_catalog(request: Request):
         """Expose this actual FastAPI Host's operations for the Debug page."""
         return [
             {"path": getattr(route, "path", ""),
              "methods": sorted(getattr(route, "methods", set()) or []),
              "name": getattr(route, "name", "")}
-            for route in app.routes if getattr(route, "methods", None)
+            for route in request.app.routes if getattr(route, "methods", None)
         ]
 
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
