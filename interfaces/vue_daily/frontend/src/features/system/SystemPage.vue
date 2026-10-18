@@ -395,6 +395,16 @@ onMounted(() => { void load() })
       </template>
       <p v-else class="muted">DB診断はまだ取得できていません。</p>
     </section>
+    <section class="card" aria-label="DB ER図">
+      <div class="section-head">
+        <div>
+          <h2>DB ER図</h2>
+          <p class="muted small">現在のPostgreSQL定義からテーブル・カラム・PK・FKを可視化します。</p>
+        </div>
+        <a class="secondary" href="/ui/?page=er">ER図を開く →</a>
+      </div>
+      <p class="muted small">読み取り専用。PK・FK中心／全カラムの切替、拡大縮小、SVG保存ができます。</p>
+    </section>
     <section class="card" aria-label="API一覧">
       <h2>API一覧（{{ routes.length }}件）</h2>
       <div v-for="item in routes" :key="item.path + item.methods.join(',')" class="pkb-record">
