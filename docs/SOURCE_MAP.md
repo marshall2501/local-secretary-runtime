@@ -30,8 +30,8 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 正式Secretary Server（実装初段） | `interfaces/api/secretary_server.py`, `bootstrap/secretary_server.py` | Vue静的配信・Task操作/PKB検索の共通Hostを一プロセスへ構成。本人実機未受入、通常ランチャー未切替 |
 | Product console/file log | `infrastructure/secretary_logging.py` | コンソール＋`logs/secretary.log`、ポート別ログ設計にしない |
 | RITSUKO Task REST | `interfaces/api/ritsuko_tasks.py` | Web画面と他API Clientから再利用するTask Router |
-| Vue日常画面 | `interfaces/vue_daily/frontend/src/`, `interfaces/api/secretary_server.py` | 同一Originの共通Task/PKB APIを呼ぶ。正式切替は本人受入待ち |
-| Vue/REST PKB（検索・登録・訂正・Pending） | `interfaces/api/pkb_read.py`, `interfaces/api/pkb_commands.py`, `interfaces/vue_daily/frontend/src/features/pkb/`, `pkb/application/daily.py`, `bootstrap/web_runtime.py` | Applicationは旧NiceGUIと共用。新Vue画面で登録/訂正/Pending判断まで実装、隔離CIと実機受入を区別 |
+| Vue日常画面 | `interfaces/vue_daily/frontend/src/`, `interfaces/api/secretary_server.py` | 同一Originの共通Task/PKB APIを呼ぶ。TOP状態カード、RITSUKO全状態履歴を追加。正式切替は本人受入待ち |
+| Vue/REST PKB（検索・登録・訂正・Pending・Entity詳細） | `interfaces/api/pkb_read.py`, `interfaces/api/pkb_commands.py`, `interfaces/vue_daily/frontend/src/features/pkb/`, `pkb/application/daily.py`, `bootstrap/web_runtime.py` | Applicationは旧NiceGUIと共用。同一HostのEntity catalog/detailを既存PKB Repositoryから参照、Vueに現在値・履歴・関連を追加。隔離CIと本人実機受入は未了 |
 | 共通Task受付・操作 | `ritsuko/application/task_commands.py`, `task_runtime.py` | start、answer、review、stop、resume |
 | 共通実行・Source | `ritsuko/core/task_execution.py`, `ritsuko/application/source_execution.py` | 記録済みAction/Result IDを使用 |
 | Task状態・Goal評価 | `ritsuko/core/task_projection.py`, `judgment_application.py`, `goal_evidence.py` | 提案だけでTool完了にしない |
@@ -41,7 +41,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | MAGI/Task実行組立 | `bootstrap/magi_task_runtime.py`, `ritsuko_task_composition.py` | API・Vue・旧UIが共用 |
 | 永続Task、照会 | `infrastructure/postgres/magi_task_repository.py`, `core_task_query_repository.py`, `task_repository.py` | 本人Task原文・履歴・停止／Review状態 |
 | PKB独立機能 | `pkb/application/daily.py`, `memory_intake.py`, `infrastructure/postgres/pkb_*repository.py` | SQL-first、登録、訂正、Pending |
-| Finance | `capabilities/finance/`, `infrastructure/postgres/finance_repository.py`, `interfaces/api/finance.py`, `interfaces/vue_daily/frontend/src/features/finance/` | 保存済み集計・明細・取込履歴＋MoneyForward CSV差分Preview→明示Commitを同一Hostで提供、実DB受入前 |
+| Finance | `capabilities/finance/`, `infrastructure/postgres/finance_repository.py`, `interfaces/api/finance.py`, `interfaces/vue_daily/frontend/src/features/finance/` | 保存済み集計・月別/カテゴリ表・明細・取込履歴＋MoneyForward CSV差分Preview→明示Commitを同一Hostで提供、実DB受入前 |
 | Service Billing / Connections / Debug | `interfaces/api/daily_overview.py`, `interfaces/vue_daily/frontend/src/features/system/`, `infrastructure/system_debug.py` | ProfileとConnection読書き／外部Usage明示参照／Runtime・DB・環境・API一覧を旧NiceGUIから独立 |
 | MAGI LLM Profile・Member設定 | `interfaces/api/magi_settings.py`, `ritsuko/magi/settings.py`, `infrastructure/postgres/magi_settings_repository.py`, `interfaces/vue_daily/frontend/src/features/system/` | 同じ設定Repoで3席のProfile/Weight/Timeoutを管理。別MAGI Executorを作らない |
 | Service接続・設定 | `integrations/connections/`, `infrastructure/postgres/service_connection_repository.py`, `magi_settings_repository.py` | SecretはAPI/Prompt等へ直接渡さない |
@@ -53,6 +53,8 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 旧8010 REST | `interfaces/api/app.py`, `api/secretary_api.py` | 旧Containerはまだ稼働経路として残る。旧Task契約は撤去対象で新Executorへ採用しない |
 | 独立開発Workbench | `interfaces/workbench/` | 架空入力の診断、旧運用DBの代替ではない |
 | MCP | `interfaces/mcp/server.py` | 独立入口、責務と公開境界を維持 |
+
+**2026-10-18 UI再棚卸**：旧NiceGUIのMermaid ER図と比較して、新固定4列SVGの視認性をFAILと判定。Vue `SchemaDiagramPage.vue` はnpm版Mermaidを遅延読み込みして既存Mermaid sourceをレンダリングする実装へ置換し、Debug/TOP/フォームとEntity/Task履歴/Finance表示もGitHubへ反映。**CIおよび本人実機受入は未確認**。このSource Mapは実装存在の索引でありPASS証跡ではない。
 
 ## 3. DB / 検証 / 復旧
 
