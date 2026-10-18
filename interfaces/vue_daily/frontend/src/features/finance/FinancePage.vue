@@ -2,13 +2,19 @@
 <script setup lang="ts">
 /** Saved Finance dashboard; shared Application remains the calculation source. */
 import { onMounted, ref } from 'vue'
-import { loadFinanceDashboard, loadFinanceOptions } from './api'
-import type { FinanceDashboard, FinanceOptions, FinanceFilters } from './api'
+import { commitFinanceImport, loadFinanceDashboard, loadFinanceOptions, prepareCsv, previewFinanceImport } from './api'
+import type { FinanceDashboard, FinanceOptions, FinanceFilters, CsvPayload, FinanceImportPlan, FinanceImportPreview } from './api'
 
 const data = ref<FinanceDashboard | null>(null)
 const options = ref<FinanceOptions>({ accounts: [], major_categories: [] })
 const loading = ref(false)
 const problem = ref('')
+const csv = ref<CsvPayload | null>(null)
+const importPlan = ref<FinanceImportPlan | null>(null)
+const importPreview = ref<FinanceImportPreview | null>(null)
+const importBusy = ref(false)
+const importError = ref('')
+const importMessage = ref('')
 const filters = ref<FinanceFilters>({
   account: '', major_category: '', start_date: '', end_date: '',
   search_text: '', row_mode: 'calculation_target',
@@ -31,6 +37,61 @@ async function refresh(page = 1): Promise<void> {
     problem.value = '保存済み家計を取得できません（' + String(error) + '）。'
   } finally {
     loading.value = false
+  }
+}
+
+/** Changing the source invalidates any previously confirmed import plan. */
+async function chooseCsv(event: Event): Promise<void> {
+  csv.value = null
+  importPlan.value = null
+  importPreview.value = null
+  importMessage.value = ''
+  importError.value = ''
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  try {
+    csv.value = await prepareCsv(file)
+  } catch (error) {
+    importError.value = String(error)
+  }
+}
+
+/** Preview never writes rows; show actual database delta before confirmation. */
+async function previewCsv(): Promise<void> {
+  if (!csv.value || importBusy.value) return
+  importBusy.value = true
+  importError.value = ''
+  importMessage.value = ''
+  try {
+    const result = await previewFinanceImport(csv.value)
+    importPlan.value = result.plan
+    importPreview.value = result.preview
+  } catch (error) {
+    importError.value = '取込プレビューに失敗しました（' + String(error) + '）。'
+  } finally {
+    importBusy.value = false
+  }
+}
+
+/** Commit the exact bytes previewed, using the existing idempotent Finance repository. */
+async function commitCsv(): Promise<void> {
+  if (!csv.value || !importPlan.value || importBusy.value) return
+  importBusy.value = true
+  importError.value = ''
+  try {
+    const result = await commitFinanceImport({
+      ...csv.value, expected_sha256: importPlan.value.source_sha256,
+    })
+    importMessage.value = '取込結果：' + result.status
+      + ' / 追加 ' + result.inserted + '件、更新 ' + result.updated + '件'
+      + (result.reason ? ' / ' + result.reason : '')
+    importPlan.value = null
+    importPreview.value = null
+    await refresh()
+  } catch (error) {
+    importError.value = '取込確定に失敗しました（' + String(error) + '）。'
+  } finally {
+    importBusy.value = false
   }
 }
 
@@ -79,6 +140,29 @@ onMounted(() => {
         </button>
       </div>
     </form>
+  </section>
+  <section class="card" aria-label="MoneyForward取込">
+    <h2>MoneyForward CSV取込</h2>
+    <p class="muted small">まず内容と既存データとの差分をプレビューし、本人が確定した場合だけ取込します。</p>
+    <input type="file" accept=".csv,text/csv" aria-label="MoneyForward CSV" @change="chooseCsv" />
+    <div class="command-row">
+      <button type="button" class="secondary" :disabled="importBusy || !csv" @click="previewCsv">
+        {{ importBusy ? '処理中…' : '差分を確認' }}
+      </button>
+    </div>
+    <div v-if="importPlan && importPreview" class="pkb-record">
+      <h3>取込プレビュー（{{ csv?.filename }}）</h3>
+      <p>対象：{{ importPreview.start_date }} 〜 {{ importPreview.end_date }}
+        ／ CSV {{ importPlan.total }}件</p>
+      <p>追加：{{ importPlan.inserted }}件 ／ 更新：{{ importPlan.updated }}件
+        ／ 変更なし：{{ importPlan.unchanged }}件 ／ 重複ID：{{ importPlan.duplicate_external_ids }}件</p>
+      <p class="muted small">確定時はプレビューしたファイルと同じ内容のみ受け付けます。</p>
+      <button type="button" class="primary-command"
+        :disabled="importBusy || importPlan.duplicate_external_ids > 0"
+        @click="commitCsv">この差分を取り込む</button>
+    </div>
+    <p v-if="importError" role="alert" class="error">{{ importError }}</p>
+    <p v-if="importMessage" role="status">{{ importMessage }}</p>
   </section>
   <p v-if="problem" role="alert" class="error">{{ problem }}</p>
   <template v-if="data">
