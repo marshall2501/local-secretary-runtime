@@ -151,6 +151,16 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         database_connection=database_connection,
     ))
 
+    @app.get("/api/v1/debug/routes")
+    def route_catalog():
+        """Expose this actual FastAPI Host's operations for the Debug page."""
+        return [
+            {"path": getattr(route, "path", ""),
+             "methods": sorted(getattr(route, "methods", set()) or []),
+             "name": getattr(route, "name", "")}
+            for route in app.routes if getattr(route, "methods", None)
+        ]
+
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
     dist = dist_dir if dist_dir is not None else (Path(__file__).parents[1] / "vue_daily" / "frontend" / "dist")
 
