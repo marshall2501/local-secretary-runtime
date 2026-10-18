@@ -160,7 +160,10 @@ onMounted(() => { void load(); void reloadPending() })
     </div>
   </section>
   <section class="card" aria-label="PKB検索">
-    <h2>記憶・Source検索</h2>
+    <div class="section-head">
+      <h2>記憶・Source検索</h2>
+      <a class="link-button" href="/ui/?page=entities">Entity一覧・履歴・関連 →</a>
+    </div>
     <form class="pkb-search" @submit.prevent="load(0)">
       <div class="pkb-search-fields">
         <label>キーワード
