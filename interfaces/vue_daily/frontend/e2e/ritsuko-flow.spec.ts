@@ -24,25 +24,28 @@ test('Taskの絞り込みは一覧だけを更新し、自動選択や選択中T
   await page.goto(origin + '/ui/')
   // NiceGUIの「開く」に相当する明示選択がない限り現在Taskは空。
   await expect(page.locator('.task-item').first()).toBeVisible()
-  await expect(page.locator('.current-task')).toContainText('右側からTaskを選択してください。')
+  await expect(page.locator('.current-task')).toHaveCount(0)
+  await expect(page.getByText('Taskは未選択です。新しい依頼を送信するか、右のTask一覧から選んでください。')).toBeVisible()
   await expect(page).not.toHaveURL(/#task=/)
 
   const filters = page.locator('.task-filters')
   await filters.getByRole('button', { name: '未完了' }).click()
   await expect(filters.getByRole('button', { name: '未完了' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.locator('.current-task')).toContainText('右側からTaskを選択してください。')
+  await expect(page.locator('.current-task')).toHaveCount(0)
+  await expect(page.getByText('Taskは未選択です。新しい依頼を送信するか、右のTask一覧から選んでください。')).toBeVisible()
   await expect(page).not.toHaveURL(/#task=/)
   await filters.getByRole('button', { name: '完了' }).click()
   await expect(filters.getByRole('button', { name: '完了' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('.task-item').first()).toBeVisible()
-  await expect(page.locator('.current-task')).toContainText('右側からTaskを選択してください。')
+  await expect(page.locator('.current-task')).toHaveCount(0)
+  await expect(page.getByText('Taskは未選択です。新しい依頼を送信するか、右のTask一覧から選んでください。')).toBeVisible()
   await expect(page).not.toHaveURL(/#task=/)
 
   // 一覧行のクリックだけが選択する。絞り込みを再変更しても中央とURLは維持。
   await page.locator('.task-item').first().click()
   await expect(page).toHaveURL(/#task=[a-f\d-]{36}$/i)
   const selected = page.url()
-  await expect(page.locator('.current-task')).not.toContainText('右側からTaskを選択してください。')
+  await expect(page.locator('.current-task')).toBeVisible()
   await filters.getByRole('button', { name: '最近' }).click()
   await expect(page).toHaveURL(selected)
   await filters.getByRole('button', { name: '未完了' }).click()
@@ -495,7 +498,7 @@ test('Vue PKB検索は共通ReadServiceを使い、登録・訂正にも同一�
   await page.getByRole('button', { name: '検索', exact: true }).click()
   await expect(page.getByText('架空サブPC')).toBeVisible()
   await page.getByRole('link', { name: 'RITSUKO' }).click()
-  // RITSUKO automatically selects the most recent Task and sets #task=UUID.
+  // 一覧取得だけでTaskを自動選択しない。選択がある場合のみURLに#taskを残す。
   await expect(page).toHaveURL(/^http:\/\/127\.0\.0\.1:18097\/ui\/(?:#task=[a-f\d-]{36})?$/)
   await expect(page.getByRole('heading', { name: '新しい依頼を入力' })).toBeVisible()
 })
