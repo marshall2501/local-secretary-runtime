@@ -60,8 +60,7 @@ class SchemaSvgTests(unittest.TestCase):
         self.assertTrue(root.tag.endswith("svg"))
         self.assertIn("tasks", xml)
         self.assertIn("task_id", xml)
-        self.assertIn("results_task_id_fkey", xml if "results_task_id_fkey" in xml else
-                      snapshot.foreign_keys[0].constraint_name)
+        self.assertIn("results_task_id_fkey", xml)
         self.assertNotIn("description", xml)
         self.assertNotIn("active_tasks", xml)
         self.assertIn("description", render_svg(snapshot, keys_only=False))
