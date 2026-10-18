@@ -294,7 +294,8 @@ export function useTasks() {
     const workerUnknown = operation.value?.task_id === selectedId.value &&
       operation.value.status === 'operation_not_in_process' &&
       operation.value.execution_reconciliation_required === true
-    const running = connected.value && (commandBusy.value ||
+    const finalized = ['completed', 'failed', 'cancelled'].includes(selected.value?.status ?? '')
+    const running = connected.value && !finalized && (commandBusy.value ||
       hasActiveOperation(selectedId.value) ||
       (['pending', 'running'].includes(selected.value?.status ?? '') && !workerUnknown))
     timer = setTimeout(() => { void refresh() }, running ? 3000 : 45000)
