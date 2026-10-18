@@ -5,8 +5,9 @@ import { onMounted, ref } from 'vue'
 import {
   readBillingProfiles, readBillingSnapshot, readConnections,
   readDatabase, readEnvironment, readRuntime, readApiRoutes, saveConnection, saveBillingProfile,
+  readMagiProfiles, readMagiMembers, saveMagiProfile, saveMagiMembers,
 } from './api'
-import type { ConnectionSummary, BillingProfile, RuntimeInfo, EnvironmentItem, ApiRouteInfo } from './api'
+import type { ConnectionSummary, BillingProfile, RuntimeInfo, EnvironmentItem, ApiRouteInfo, LlmProfile, MagiMember } from './api'
 
 const props = defineProps<{ section: 'service-billing' | 'debug' | 'settings' }>()
 const connections = ref<ConnectionSummary[]>([])
@@ -30,6 +31,14 @@ const connectionForm = ref({
   connection_role: '', capabilities: 'llm_inference',
   config_json: '{}', auth_json: '', enabled: true,
 })
+const llmProfiles = ref<LlmProfile[]>([])
+const magiMembers = ref<MagiMember[]>([])
+const newModel = ref('')
+const newProfileName = ref('')
+const newProfileConnection = ref('')
+const magiMessage = ref('')
+const magiError = ref('')
+const magiBusy = ref(false)
 const profileForm = ref({
   profile_id: '', display_name: '', connection_id: '', enabled: true,
 })
@@ -116,7 +125,18 @@ async function load(): Promise<void> {
       connections.value = nextConnections
       selected.value = profiles.value.find(p => p.enabled && p.connection_enabled)?.id || ''
     } else if (props.section === 'settings') {
-      connections.value = await readConnections()
+      const [nextConnections, nextProfiles, nextMembers] = await Promise.all([
+        readConnections(), readMagiProfiles(), readMagiMembers(),
+      ])
+      connections.value = nextConnections
+      llmProfiles.value = nextProfiles
+      const byName = new Map(nextMembers.map(m => [m.name, m]))
+      magiMembers.value = (['MELCHIOR', 'CASPER', 'BALTHASAR'] as const).map(name =>
+        byName.get(name) || {
+          name, profile_id: '', enabled: false, weight: 1,
+          timeout_seconds: 120, retry_within_turn: false,
+        },
+      )
     } else {
       const [run, env, db, api] = await Promise.allSettled([
         readRuntime(), readEnvironment(), readDatabase(), readApiRoutes(),
@@ -147,6 +167,44 @@ async function refreshUsage(): Promise<void> {
     usageProblem.value = '利用状況を取得できません（' + String(error) + '）。'
   } finally {
     reading.value = false
+  }
+}
+
+/** Persist new Profile using an already configured inference connection. */
+async function writeMagiProfile(): Promise<void> {
+  if (magiBusy.value) return
+  magiBusy.value = true
+  magiMessage.value = ''
+  magiError.value = ''
+  try {
+    const created = await saveMagiProfile({
+      connection_id: newProfileConnection.value, model: newModel.value,
+      display_name: newProfileName.value || newModel.value, enabled: true,
+    })
+    magiMessage.value = 'LLM Profile登録：' + created.display_name
+    llmProfiles.value = await readMagiProfiles()
+    newModel.value = ''
+    newProfileName.value = ''
+  } catch (error) {
+    magiError.value = 'LLM Profileを保存できません（' + String(error) + '）。'
+  } finally {
+    magiBusy.value = false
+  }
+}
+
+/** Save all three logical slots together, honoring Core's constraints. */
+async function writeMagiAssignments(): Promise<void> {
+  if (magiBusy.value) return
+  magiBusy.value = true
+  magiMessage.value = ''
+  magiError.value = ''
+  try {
+    magiMembers.value = await saveMagiMembers(magiMembers.value)
+    magiMessage.value = 'MAGIメンバー3席の割当を保存しました。'
+  } catch (error) {
+    magiError.value = 'MAGI割当を保存できません（' + String(error) + '）。'
+  } finally {
+    magiBusy.value = false
   }
 }
 
@@ -222,6 +280,49 @@ onMounted(() => { void load() })
     </form>
     <p v-if="formError" role="alert" class="error">{{ formError }}</p>
     <p v-if="formMessage" role="status">{{ formMessage }}</p>
+    <section class="pkb-record" aria-label="MAGI設定">
+      <h2>MAGI — LLM Profile・メンバー割当</h2>
+      <p class="muted small">3席は論理名です。使用モデルと有効席数は同じ設定DBで管理します。</p>
+      <div class="command-row">
+        <label>接続
+          <select v-model="newProfileConnection" aria-label="新規LLM接続">
+            <option value="">選択してください</option>
+            <option v-for="item in connections.filter(v => v.capabilities?.includes('llm_inference'))"
+              :key="item.id" :value="item.id">{{ item.display_name }}</option>
+          </select>
+        </label>
+        <label>モデル名 <input v-model="newModel" aria-label="新規LLMモデル名" /></label>
+        <label>Profile名 <input v-model="newProfileName" aria-label="新規LLM Profile名" /></label>
+        <button type="button" class="secondary"
+          :disabled="magiBusy || !newProfileConnection || !newModel.trim()"
+          @click="writeMagiProfile">LLM Profileを登録</button>
+      </div>
+      <div v-for="member in magiMembers" :key="member.name" class="pkb-record">
+        <h3>{{ member.name }}</h3>
+        <div class="command-row">
+          <label>Profile
+            <select v-model="member.profile_id" :aria-label="member.name + ' Profile'">
+              <option value="">選択してください</option>
+              <option v-for="p in llmProfiles" :key="p.id" :value="p.id">
+                {{ p.display_name }} / {{ p.model }}
+              </option>
+            </select>
+          </label>
+          <label>重み <input v-model.number="member.weight" type="number" min="0.1" max="10"
+            step="0.1" :aria-label="member.name + ' 重み'" /></label>
+          <label>Timeout（秒） <input v-model.number="member.timeout_seconds" type="number"
+            min="10" max="1800" :aria-label="member.name + ' Timeout'" /></label>
+          <label><input v-model="member.enabled" type="checkbox"
+            :aria-label="member.name + ' 有効'" /> 有効</label>
+          <label><input v-model="member.retry_within_turn" type="checkbox" /> Turn内再試行</label>
+        </div>
+      </div>
+      <button type="button" class="primary-command"
+        :disabled="magiBusy || magiMembers.some(m => !m.profile_id)"
+        @click="writeMagiAssignments">MAGI割当を保存</button>
+      <p v-if="magiError" role="alert" class="error">{{ magiError }}</p>
+      <p v-if="magiMessage" role="status">{{ magiMessage }}</p>
+    </section>
   </section>
   <section v-else-if="section === 'service-billing'" class="card" aria-label="サービス利用状況">
     <h2>Service Billing Profile</h2>
