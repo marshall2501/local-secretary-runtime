@@ -54,7 +54,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 独立開発Workbench | `interfaces/workbench/` | 架空入力の診断、旧運用DBの代替ではない |
 | MCP | `interfaces/mcp/server.py` | 独立入口、責務と公開境界を維持 |
 
-**2026-10-18 UI再棚卸**：旧NiceGUIのMermaid ER図と比較して、新固定4列SVGの視認性をFAILと判定。Vue `SchemaDiagramPage.vue` はnpm版Mermaidを遅延読み込みして既存Mermaid sourceをレンダリングする実装へ置換し、Debug/TOP/フォームとEntity/Task履歴/Finance表示もGitHubへ反映。**CIおよび本人実機受入は未確認**。このSource Mapは実装存在の索引でありPASS証跡ではない。
+**2026-10-18 UI再棚卸**：旧NiceGUIのMermaid ER図と比較して、新固定4列SVGの視認性をFAILと判定。Vue `SchemaDiagramPage.vue` はnpm版Mermaidを遅延読み込みして既存Mermaid sourceをレンダリングする実装へ置換し、Debug/TOP/フォームとEntity/Task履歴/Finance表示もGitHubへ反映。**CIおよび本人実機受入は未確認**。このSource Mapは実装存在の索引でありPASS証跡ではない。Mermaidは外部ソースをコピーせずnpm依存として導入（upstream: `mermaid-js/mermaid`, `^11.17.2`, MIT License、利用場所: `SchemaDiagramPage.vue`）。同梱npm packageのLICENSEを保持し、独自コードのライセンス表記と混同しない。
 
 ## 3. DB / 検証 / 復旧
 
