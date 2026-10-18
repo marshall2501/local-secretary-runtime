@@ -116,7 +116,7 @@ def build_daily_server():
         build_pkb_repository, build_finance_repository,
         build_service_connection_repository,
         build_service_billing_settings_repository,
-        build_magi_settings_repository, connection,
+        build_magi_settings_repository, build_schema_diagram_service, connection,
     )
     from interfaces.api.secretary_server import create_app
     from pkb.daily_interpreter import interpret as interpret_daily
@@ -133,6 +133,7 @@ def build_daily_server():
         billing_settings=build_service_billing_settings_repository(),
         database_connection=connection,
         magi_settings=build_magi_settings_repository(),
+        schema_diagram_service=build_schema_diagram_service(),
         recover_pending_at_startup=False,
     )
 
