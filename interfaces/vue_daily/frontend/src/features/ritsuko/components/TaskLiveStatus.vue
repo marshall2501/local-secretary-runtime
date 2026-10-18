@@ -90,13 +90,13 @@ const stoppable = computed(() =>
     <div class="section-head">
       <div class="live-heading">
         <span class="live-dot" :class="{ 'is-running': active && connected }" aria-hidden="true"></span>
-        <h2 role="status" aria-live="polite">{{ heading }}</h2>
+        <h2>{{ heading }}</h2>
       </div>
       <span v-if="active && operation?.live_turn" class="live-turn">
         MAGI Turn {{ operation.live_turn }}
       </span>
     </div>
-    <p class="live-explanation">{{ explanation }}</p>
+    <p class="live-explanation" role="status" aria-live="polite">{{ explanation }}</p>
     <p v-if="currentOperation?.execution_reconciliation_required"
       class="worker-warning" role="status" aria-label="Worker照合待ち">
       Workerの稼働状況を確認できません。DBの処理中表示だけでは実行中と断定できません。
