@@ -1,10 +1,9 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
-/** 既存PKBのSQL-first検索をVue日常UIから利用する読取専用画面。 */
+/** 既存PKB Applicationの検索・登録・訂正・Pending操作を同一Vue日常UIで行う。 */
 import { onMounted, ref } from 'vue'
-import { legacyPageUrl } from '../../shared/navigation'
-import { searchMemory } from './api'
-import type { MemoryKind, MemoryResult } from './api'
+import { acceptPending, correctMemory, listPending, listReviewed, registerMemory, reviewPending, searchMemory } from './api'
+import type { MemoryKind, MemoryResult, PendingClaim, PkbCommandResult } from './api'
 
 const text = ref('')
 const domain = ref('')
@@ -14,6 +13,16 @@ const pageSize = 20
 const loading = ref(false)
 const problem = ref('')
 const result = ref<MemoryResult | null>(null)
+const entryText = ref('')
+const writing = ref(false)
+const writeMessage = ref('')
+const writeError = ref('')
+const pending = ref<PendingClaim[]>([])
+const reviewed = ref<PendingClaim[]>([])
+const pendingLoading = ref(false)
+const pendingError = ref('')
+const reviewBusy = ref('')
+const reviewMessage = ref('')
 
 /** フィルタ変更時は最初のページから取り直す。失敗時は古い結果を現在値にしない。 */
 async function load(offset = 0): Promise<void> {
@@ -35,18 +44,121 @@ async function load(offset = 0): Promise<void> {
   }
 }
 
-onMounted(() => { void load() })
+/** A write returns PKB's actual outcome; a Pending candidate is not a saved claim. */
+async function submitMemory(mode: 'register' | 'correct'): Promise<void> {
+  if (writing.value || !entryText.value.trim()) return
+  writing.value = true
+  writeError.value = ''
+  writeMessage.value = ''
+  try {
+    const answer: PkbCommandResult = mode === 'register'
+      ? await registerMemory(entryText.value.trim())
+      : await correctMemory(entryText.value.trim())
+    writeMessage.value = answer.message || ('結果: ' + answer.status + (answer.reason ? ' / ' + answer.reason : ''))
+    if (answer.status === 'registered' || answer.status === 'accepted' || answer.status === 'corrected') {
+      entryText.value = ''
+    }
+    await Promise.all([load(0), reloadPending()])
+  } catch (error) {
+    writeError.value = 'PKB操作に失敗しました（' + String(error) + '）。'
+  } finally {
+    writing.value = false
+  }
+}
+
+/** Load both unreviewed and reviewed records without guessing approval. */
+async function reloadPending(): Promise<void> {
+  if (pendingLoading.value) return
+  pendingLoading.value = true
+  pendingError.value = ''
+  try {
+    const [nextPending, nextReviewed] = await Promise.all([
+      listPending(), listReviewed(),
+    ])
+    pending.value = nextPending
+    reviewed.value = nextReviewed
+  } catch (error) {
+    pending.value = []
+    reviewed.value = []
+    pendingError.value = '確認待ちを取得できません（' + String(error) + '）。'
+  } finally {
+    pendingLoading.value = false
+  }
+}
+
+/** An explicit user decision is sent for exactly one stored candidate. */
+async function decide(id: string, decision: 'accept' | 'rejected' | 'needs_edit'): Promise<void> {
+  if (reviewBusy.value) return
+  reviewBusy.value = id
+  reviewMessage.value = ''
+  pendingError.value = ''
+  try {
+    const outcome = decision === 'accept'
+      ? await acceptPending(id)
+      : await reviewPending(id, decision)
+    reviewMessage.value = '候補 ' + id + '：' + outcome.status + (outcome.reason ? ' / ' + outcome.reason : '')
+    await Promise.all([reloadPending(), load(0)])
+  } catch (error) {
+    pendingError.value = '候補の確認操作に失敗しました（' + String(error) + '）。'
+  } finally {
+    reviewBusy.value = ''
+  }
+}
+
+onMounted(() => { void load(); void reloadPending() })
 </script>
 
 <template>
   <div class="page-title">
     <h1>PKB — 個人ナレッジベース</h1>
-    <span class="muted small">SQL-first・読取専用</span>
+    <span class="muted small">SQL-first・登録・訂正・確認待ち</span>
   </div>
-  <p class="read-only-notice">
-    検索・現在値・履歴を表示します。記憶の登録、訂正、確認待ちの処理は
-    <a :href="legacyPageUrl('/pkb')">既存PKB画面</a>で行えます。
-  </p>
+  <section class="card" aria-label="PKB登録訂正">
+    <h2>記憶の登録・訂正</h2>
+    <p class="muted small">本人の文章をPKBへ登録します。不確かな内容は確認待ちとなることがあります。</p>
+    <textarea v-model="entryText" aria-label="登録・訂正する文章" maxlength="10000"
+      rows="3" placeholder="例: サブPCのOSを更新した。" class="pkb-input" />
+    <div class="command-row">
+      <button type="button" class="primary-command" :disabled="writing || !entryText.trim()"
+        @click="submitMemory('register')">{{ writing ? '処理中…' : '記憶を登録' }}</button>
+      <button type="button" class="secondary" :disabled="writing || !entryText.trim()"
+        @click="submitMemory('correct')">訂正として登録</button>
+    </div>
+    <p v-if="writeMessage" role="status">{{ writeMessage }}</p>
+    <p v-if="writeError" role="alert" class="error">{{ writeError }}</p>
+  </section>
+  <section class="card" aria-label="PKB確認待ち">
+    <div class="section-head">
+      <h2>確認待ち・判断履歴</h2>
+      <button type="button" class="secondary" :disabled="pendingLoading" @click="reloadPending">
+        {{ pendingLoading ? '取得中…' : '更新' }}
+      </button>
+    </div>
+    <p v-if="pendingError" role="alert" class="error">{{ pendingError }}</p>
+    <p v-if="reviewMessage" role="status">{{ reviewMessage }}</p>
+    <p v-if="!pendingLoading && pending.length === 0" class="muted">確認待ちの候補はありません。</p>
+    <div v-for="item in pending" :key="item.id" class="pkb-record">
+      <div class="pkb-record-heading"><strong>{{ item.entity_name || '候補' }}</strong>
+        <span class="status">{{ item.reason || 'pending' }}</span></div>
+      <p>{{ item.raw_text || item.predicate || item.id }}</p>
+      <p v-if="item.proposed_value != null" class="muted small">候補値：{{ item.proposed_value }}</p>
+      <div class="command-row">
+        <button type="button" class="primary-command" :disabled="!!reviewBusy"
+          @click="decide(item.id, 'accept')">承認して登録</button>
+        <button type="button" class="secondary" :disabled="!!reviewBusy"
+          @click="decide(item.id, 'needs_edit')">要修正</button>
+        <button type="button" class="secondary" :disabled="!!reviewBusy"
+          @click="decide(item.id, 'rejected')">却下</button>
+      </div>
+    </div>
+    <h3>判断済み：{{ reviewed.length }}件（最新20件）</h3>
+    <p v-if="reviewed.length === 0" class="muted">判断履歴はありません。</p>
+    <div v-for="item in reviewed" :key="item.id" class="pkb-record">
+      <strong>{{ item.entity_name || item.id }}</strong>
+      <span class="muted small"> {{ item.review_status || item.reason }}</span>
+      <p v-if="item.raw_text">{{ item.raw_text }}</p>
+    </div>
+  </section>
   <section class="card" aria-label="PKB検索">
     <h2>記憶・Source検索</h2>
     <form class="pkb-search" @submit.prevent="load(0)">
