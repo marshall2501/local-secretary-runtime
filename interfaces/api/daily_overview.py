@@ -8,6 +8,8 @@ Application services. This module does not create another database or server.
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import asdict
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -55,6 +57,7 @@ class BillingProfileInput(BaseModel):
 def create_daily_overview_router(
     *, connections=None, billing_settings=None,
     database_connection=None, runtime_root: Path | None = None,
+    schema_diagram_service=None,
 ) -> APIRouter:
     """Adapt existing connection/billing/debug Application functions to HTTP.
 
@@ -63,6 +66,7 @@ def create_daily_overview_router(
         billing_settings: Service Billing profile repository.
         database_connection: Optional diagnostic-only DB factory.
         runtime_root: Runtime checkout root for non-mutating process/git info.
+        schema_diagram_service: Existing SchemaDiagramService over read-only DB metadata.
 
     Returns:
         APIRouter: Views requiring no separate NiceGUI process.
@@ -166,5 +170,23 @@ def create_daily_overview_router(
                 db, expected_database="secretary",
                 expected_user="secretary_daily_runtime",
             )
+
+    @router.get("/debug/er")
+    def er_diagram(
+        keys_only: bool = True,
+        format: Literal["svg", "mermaid"] = "svg",
+    ):
+        """Create ER visualization on demand from current DB schema metadata."""
+        if schema_diagram_service is None:
+            raise HTTPException(503, "er_diagram_unavailable")
+        selected = "native_svg" if format == "svg" else "native_mermaid"
+        result = schema_diagram_service.generate(
+            selected,
+            enabled={"native_svg": True, "native_mermaid": True},
+            options={"keys_only": keys_only},
+        )
+        if result.status != "ok":
+            raise HTTPException(503, "er_diagram_" + result.status)
+        return asdict(result)
 
     return router
