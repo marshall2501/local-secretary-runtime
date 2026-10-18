@@ -398,7 +398,7 @@ test('同一Vue PKB画面で登録・訂正・Pending判断を操作できる', 
   await page.getByRole('button', { name: '訂正として登録' }).click()
   await expect(page.getByRole('status')).toContainText('corrected')
   await page.getByRole('button', { name: '要修正' }).click()
-  await expect(page.getByRole('status')).toContainText('needs_edit')
+  await expect(page.getByRole('status').last()).toContainText('needs_edit')
   expect(memoryWrites).toEqual(['架空の登録テスト', 'correct:架空の訂正テスト'])
   expect(reviews).toEqual(['needs_edit'])
 })
