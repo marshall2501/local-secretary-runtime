@@ -403,3 +403,42 @@ test('同一Vue PKB画面で登録・訂正・Pending判断を操作できる', 
   expect(memoryWrites).toEqual(['架空の登録テスト', 'correct:架空の訂正テスト'])
   expect(reviews).toEqual(['needs_edit'])
 })
+
+
+test('FinanceとSettingsは単一Secretary Originで利用できる', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/')
+  await page.getByRole('link', { name: '家計・資産' }).click()
+  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=finance')
+  await expect(page.getByRole('heading', { name: '家計・資産' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '家計集計' }).getByText('￥1,500')).toBeVisible()
+  await expect(page.getByText('架空の買い物')).toBeVisible()
+  await page.getByRole('link', { name: '設定' }).click()
+  await expect(page).toHaveURL('http://127.0.0.1:8097/ui/?page=settings')
+  await expect(page.getByText('架空 OpenAI')).toBeVisible()
+  await expect(page.getByText('認証：設定済', { exact: false })).toBeVisible()
+})
+
+test('Billingは明示的な更新操作をするまで外部usage APIを呼び出さない', async ({ page }) => {
+  const calls: string[] = []
+  await page.route('**/api/v1/billing/profiles/fake-profile/snapshot', async route => {
+    calls.push(route.request().url())
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ provider: 'fake', usage: 7 }),
+    })
+  })
+  await page.goto('http://127.0.0.1:8097/ui/?page=service-billing')
+  await expect(page.getByRole('heading', { name: '利用料金・契約' })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: '対象Billing Profile' })).toHaveValue('fake-profile')
+  expect(calls).toEqual([])
+  await page.getByRole('button', { name: '最新の利用状況を取得' }).click()
+  await expect(page.getByText(/"usage": 7/)).toBeVisible()
+  expect(calls.length).toBe(1)
+})
+
+test('Debugも同一Originで実行中サーバー情報を参照できる', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/?page=debug')
+  await expect(page.getByRole('heading', { name: 'システム診断' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '実行プロセス' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '環境設定状況' })).toBeVisible()
+})
