@@ -106,6 +106,27 @@ class FakeProfiles:
         return {"id": "profile-1", **data}
 
 
+class FakeMagiSettings:
+    """Only existing settings service methods, no model execution."""
+
+    def __init__(self):
+        self.saved = []
+
+    def list_llm_profiles(self, *, include_disabled=False):
+        return [{"id": "profile-1", "model": "fixture-9b", "enabled": True}]
+
+    def upsert_llm_profile(self, **details):
+        self.saved.append(("profile", details))
+        return {"id": "profile-2", **details}
+
+    def load_member_specs(self):
+        return [{"name": "CASPER", "profile_id": "profile-1", "enabled": True}]
+
+    def save_member_assignments(self, assignments):
+        self.saved.append(("assignments", assignments))
+        return assignments
+
+
 class DailyCapabilityApiTests(unittest.TestCase):
     """Check real router wiring with injected fake capability repositories."""
 
@@ -113,11 +134,13 @@ class DailyCapabilityApiTests(unittest.TestCase):
         self.finance = FakeFinance()
         self.connections = FakeConnections()
         self.billing = FakeProfiles()
+        self.magi = FakeMagiSettings()
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.client = TestClient(create_app(
             queries=object(), finance_repository=self.finance,
             service_connections=self.connections, billing_settings=self.billing,
+            magi_settings=self.magi,
         ), base_url="http://127.0.0.1:8097")
 
     def test_finance_uses_existing_app_filters_and_prevents_invalid_requests(self):
@@ -213,6 +236,29 @@ class DailyCapabilityApiTests(unittest.TestCase):
         })
         self.assertEqual(created.status_code, 200, created.text)
         self.assertEqual(created.json()["display_name"], "架空 Usage")
+
+    def test_magi_profiles_and_all_three_logical_slots_use_one_api(self):
+        """MAGI settings are CRUD actions only, never a second executor."""
+        self.assertEqual(self.client.get(
+            "/api/v1/magi/profiles").json()[0]["model"], "fixture-9b")
+        self.assertEqual(self.client.get(
+            "/api/v1/magi/members").json()[0]["name"], "CASPER")
+        saved = self.client.post("/api/v1/magi/profiles", json={
+            "connection_id": "fake-connection", "model": "fixture-12b",
+            "display_name": "Test Profile", "enabled": True,
+        })
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(self.magi.saved[0][0], "profile")
+        members = [{"name": name, "profile_id": "profile-1",
+                    "enabled": name == "CASPER", "weight": 1,
+                    "timeout_seconds": 120, "retry_within_turn": False}
+                   for name in ("MELCHIOR", "CASPER", "BALTHASAR")]
+        response = self.client.post("/api/v1/magi/members",
+                                    json={"assignments": members})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(self.magi.saved[1][1]), 3)
+        self.assertEqual(self.client.post("/api/v1/magi/members",
+                            json={"assignments": members[:1]}).status_code, 422)
 
     def test_debug_runtime_and_environment_reuse_existing_diagnostics(self):
         with patch("interfaces.api.daily_overview.runtime_snapshot",
