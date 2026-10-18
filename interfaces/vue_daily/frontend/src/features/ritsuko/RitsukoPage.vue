@@ -53,7 +53,9 @@ const {
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @resume="sendResume"
         @save-preferences="savePreferences" @refresh="() => refresh(true)"
       />
-      <CurrentTask v-if="!selected" :task="selected" :trace="trace" :loading="refreshing" />
+      <p v-if="!selected" class="no-task-selected" role="status">
+        Taskは未選択です。新しい依頼を送信するか、右のTask一覧から選んでください。
+      </p>
       <MagiProgress :task="selected" :default-open="layout?.core.verification === true" />
       <TaskActivity v-if="layout?.visibility.core.trace !== false"
         :trace="trace" :default-open="layout?.core.trace === true" />
@@ -71,6 +73,8 @@ const {
 </template>
 
 <style scoped>
+.no-task-selected { margin:0; padding:12px 15px; border:1px dashed #cbd9e5;
+  border-radius:8px; background:#f8fafc; color:#586b7b; font-size:13px; }
 .magi-config-accordion { padding:12px 14px; border-color:#a6d9d1; background:#f0fbf8; }
 .magi-config-accordion > summary { cursor:pointer; padding:4px 0; font-weight:700; }
 .magi-config-accordion[open] > summary { border-bottom:1px solid #c6e1dc; padding-bottom:10px; margin-bottom:11px; }
