@@ -10,17 +10,46 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from capabilities.service_billing.service import (
     ServiceBillingError, read_service_billing_snapshot,
 )
-from capabilities.service_billing.settings import list_service_billing_profiles
+from capabilities.service_billing.settings import (
+    list_service_billing_profiles, upsert_service_billing_profile,
+)
 from infrastructure.system_debug import (
     runtime_snapshot, environment_snapshot, database_snapshot,
 )
 from integrations.connections.service_connections import (
-    get_service_connection, list_service_connections,
+    get_service_connection, list_service_connections, upsert_service_connection,
 )
+
+
+class ServiceConnectionInput(BaseModel):
+    """Connection settings the user may update on the local Secretary UI."""
+
+    connection_id: str | None = None
+    adapter_key: str
+    display_name: str = Field(min_length=1, max_length=200)
+    endpoint: str | None = None
+    account_label: str | None = None
+    credential_ref: str | None = None
+    capabilities: list[str] | None = None
+    connection_type: str | None = None
+    connection_role: str | None = None
+    config_data: dict | None = None
+    auth_data: dict | None = None
+    enabled: bool | None = None
+
+
+class BillingProfileInput(BaseModel):
+    """Service Billing profile settings, independent of transport/UI."""
+
+    profile_id: str | None = None
+    display_name: str = Field(min_length=1, max_length=200)
+    connection_id: str
+    enabled: bool = True
 
 
 def create_daily_overview_router(
@@ -53,9 +82,29 @@ def create_daily_overview_router(
         fields = (
             "id", "display_name", "adapter_key", "endpoint",
             "account_label", "capabilities", "enabled", "connection_type",
-            "connection_role", "auth_configured", "auth_fields",
+            "connection_role", "auth_configured", "auth_fields", "credential_ref", "config_data",
         )
         return [{key: row.get(key) for key in fields} for row in rows]
+
+    @router.post("/connections")
+    def save_connection(body: ServiceConnectionInput):
+        """Persist an owner-selected Service Connection using its existing rules."""
+        if connections is None:
+            raise HTTPException(503, "connections_unavailable")
+        try:
+            result = upsert_service_connection(
+                connections, **body.model_dump(exclude_none=True),
+            )
+            # Return only the same view shape as GET; auth_data never leaves DB.
+            fields = (
+                "id", "display_name", "adapter_key", "endpoint",
+                "account_label", "capabilities", "enabled", "connection_type",
+                "connection_role", "auth_configured", "auth_fields",
+                "credential_ref", "config_data",
+            )
+            return {key: result.get(key) for key in fields}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @router.get("/billing/profiles")
     def billing_profiles(include_disabled: bool = True):
@@ -65,6 +114,18 @@ def create_daily_overview_router(
         return list_service_billing_profiles(
             billing_settings, include_disabled=include_disabled,
         )
+
+    @router.post("/billing/profiles")
+    def save_billing_profile(body: BillingProfileInput):
+        """Persist a profile through the existing Service Billing Application."""
+        if billing_settings is None:
+            raise HTTPException(503, "billing_unavailable")
+        try:
+            return upsert_service_billing_profile(
+                billing_settings, **body.model_dump(exclude_none=True),
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @router.get("/billing/profiles/{profile_id}/snapshot")
     def billing_snapshot(profile_id: str):
