@@ -19,6 +19,37 @@ test('単一Secretary ServerでVueからそのままTaskを送信できる', asy
   expect(page.url()).toContain('127.0.0.1:18097/ui/')
 })
 
+test('Taskの絞り込みは一覧だけを更新し、自動選択や選択中Taskの変更をしない', async ({ page }) => {
+  const origin = 'http://127.0.0.1:18097'
+  await page.goto(origin + '/ui/')
+  // NiceGUIの「開く」に相当する明示選択がない限り現在Taskは空。
+  await expect(page.locator('.task-item').first()).toBeVisible()
+  await expect(page.locator('.current-task')).toContainText('右側からTaskを選択してください。')
+  await expect(page).not.toHaveURL(/#task=/)
+
+  const filters = page.locator('.task-filters')
+  await filters.getByRole('button', { name: '未完了' }).click()
+  await expect(filters.getByRole('button', { name: '未完了' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.current-task')).toContainText('右側からTaskを選択してください。')
+  await expect(page).not.toHaveURL(/#task=/)
+  await filters.getByRole('button', { name: '完了' }).click()
+  await expect(filters.getByRole('button', { name: '完了' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.task-item').first()).toBeVisible()
+  await expect(page.locator('.current-task')).toContainText('右側からTaskを選択してください。')
+  await expect(page).not.toHaveURL(/#task=/)
+
+  // 一覧行のクリックだけが選択する。絞り込みを再変更しても中央とURLは維持。
+  await page.locator('.task-item').first().click()
+  await expect(page).toHaveURL(/#task=[a-f\d-]{36}$/i)
+  const selected = page.url()
+  await expect(page.locator('.current-task')).not.toContainText('右側からTaskを選択してください。')
+  await filters.getByRole('button', { name: '最近' }).click()
+  await expect(page).toHaveURL(selected)
+  await filters.getByRole('button', { name: '未完了' }).click()
+  await expect(page).toHaveURL(selected)
+  await expect(page.locator('.current-task')).not.toContainText('右側からTaskを選択してください。')
+})
+
 test('Vueの両判断方式は同じTask APIに保存され、方式はTask単位で固定される', async ({ page }) => {
   await page.goto('http://127.0.0.1:18097/ui/')
   const selector = page.locator('#task-strategy')
@@ -343,6 +374,10 @@ test('保存済みPKB Taskは回答を先に表示し、Markdownと2 Turnの根�
   await expect(answer).not.toContainText('**Windows 11 26H2**')
   await expect(page.getByLabel('回答の根拠')).toContainText('個人PKB')
   await expect(page.getByLabel('回答の根拠')).toContainText('取得した記録 2 件')
+  await expect(page.locator('.current-task')).toHaveClass(/task-theme-completed/)
+  // NiceGUIと同様、MAGIの検証詳細は既定で閉じる。
+  await expect(page.locator('.magi-history')).not.toHaveAttribute('open', '')
+  await page.locator('.magi-history summary').click()
   await expect(page.getByLabel('MAGI判断の経過')).toContainText('Turn 1：個人PKBの読み取りを依頼')
   await expect(page.getByLabel('MAGI判断の経過')).toContainText('Turn 2：根拠を評価して回答を提案')
   // 回答は新しい依頼フォームより上。ただし入力欄は常時利用できる。
