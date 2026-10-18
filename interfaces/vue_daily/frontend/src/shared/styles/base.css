@@ -123,3 +123,26 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
 .pkb-record-heading { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .pkb-record p { white-space:pre-wrap; margin:7px 0; }
 @media(max-width:680px) { .pkb-search-fields { grid-template-columns:1fr; } }
+
+/* UI移行の共通可読性: フォームと情報カードにNiceGUI相当の操作余白を戻す。 */
+section.card { margin-bottom:14px; }
+.site-header { background:#fff; border:1px solid #e0e9ef; border-radius:10px; padding:14px 17px; }
+.site-nav a { display:inline-block; padding:7px 9px; border-radius:7px; border-bottom:2px solid transparent; }
+.site-nav a:hover { text-decoration:none; background:#f0f7fa; }
+.site-nav a.nav-active { color:#076e64; background:#e9f8f4; border-bottom-color:#087f75; }
+.command-form > label { display:flex; flex-direction:column; align-items:stretch; gap:5px; font-weight:650; font-size:13px; }
+.command-form > label:has(input[type="checkbox"]) { flex-direction:row; align-items:center; }
+.command-form input:not([type="checkbox"]), .command-form textarea, .command-form select,
+.card form > label > input:not([type="checkbox"]), .card form > label > select {
+  display:block; width:100%; max-width:620px; padding:9px 11px;
+  border:1px solid #a9bfcd; border-radius:7px; color:inherit; background:#fff;
+}
+.command-form textarea { font-family:ui-monospace,monospace; line-height:1.5; }
+.command-form input:focus-visible, .command-form textarea:focus-visible,
+.command-form select:focus-visible { outline:2px solid #00887e; outline-offset:2px; }
+.card form > label { display:block; margin:8px 0; font-size:13px; font-weight:650; }
+@media(max-width:680px) {
+  .site-header { padding:11px; }
+  .site-nav { gap:4px; }
+  .site-nav a { font-size:13px; padding:6px; }
+}
