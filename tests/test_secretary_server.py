@@ -15,7 +15,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from uvicorn.config import LOGGING_CONFIG
 
-from bootstrap.secretary_server import configure_daily_database
+from bootstrap.secretary_server import configure_daily_database, configure_runtime_environment
 from infrastructure.secretary_logging import build_secretary_log_config
 from interfaces.api.secretary_server import create_app
 
@@ -165,6 +165,26 @@ class SecretaryServerTests(unittest.TestCase):
         (root / ".env.postgres").write_text("LSA_DB_PORT=abc\n", encoding="utf-8")
         with self.assertRaises(RuntimeError):
             configure_daily_database(root)
+
+    def test_unified_server_reads_existing_magi_env_without_legacy_launcher(self):
+        """Load only known runtime variables; duplicate settings fail cleanly."""
+        root = Path(self.tmp.name)
+        source = root / ".env"
+        source.write_text(
+            "OPENAI_BASE_URL=https://example.org/v1\\n"
+            "LSA_MAGI_CASPER_MODEL=gpt-fixture\\n"
+            "OTHER_APPLICATION_PASSWORD=not-loaded\\n",
+            encoding="utf-8",
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            configure_runtime_environment(root)
+            self.assertEqual(os.environ["OPENAI_BASE_URL"], "https://example.org/v1")
+            self.assertEqual(os.environ["LSA_MAGI_CASPER_MODEL"], "gpt-fixture")
+            self.assertNotIn("OTHER_APPLICATION_PASSWORD", os.environ)
+            source.write_text("OPENAI_BASE_URL=one\\nOPENAI_BASE_URL=two\\n",
+                              encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                configure_runtime_environment(root)
 
     def test_single_rotating_file_contains_startup_and_access(self):
         path = Path(self.tmp.name) / "logs"
