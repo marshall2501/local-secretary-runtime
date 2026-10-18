@@ -233,6 +233,59 @@ class BrowserFixtureReadService:
         }
 
 
+class BrowserFinance:
+    """Synthetic persisted Finance data; no CSV or personal DB."""
+
+    def load_finance_dashboard(self, **filters):
+        from capabilities.finance.finance_import import FinanceDashboard
+
+        return FinanceDashboard(
+            transaction_count=1, calculation_target_count=1,
+            start_date="2026-10-01", end_date="2026-10-01",
+            income_total=2000, expense_total=500, net_total=1500,
+            monthly=[{"month": "2026-10", "income": 2000, "expense": 500,
+                      "net": 1500, "count": 1}],
+            categories=[{"major": "食費", "minor": "架空", "expense": 500}],
+            recent_rows=[{"external_id": "test-finance-1",
+                          "date": "2026-10-01", "content": "架空の買い物",
+                          "amount": -500, "account": "架空銀行",
+                          "major_category": "食費", "minor_category": "架空",
+                          "memo": "", "is_transfer": False,
+                          "calculation_target": True,
+                          "last_seen_at": "2026-10-01T10:00:00"}],
+            import_batches=[], page=filters.get("page", 1), page_size=25,
+            total_pages=1, sort_by="date", sort_dir="desc",
+            row_mode=filters.get("row_mode", "calculation_target"),
+        )
+
+    def finance_filter_options(self):
+        return {"accounts": ["架空銀行"], "major_categories": ["食費"]}
+
+
+class BrowserConnections:
+    """Synthetic existing connection metadata; secret values never generated."""
+
+    def list_service_connections(self, **kwargs):
+        return [{"id": "fake-connection", "display_name": "架空 OpenAI",
+                 "adapter_key": "openai", "endpoint": "https://example.org",
+                 "enabled": True, "capabilities": ["service_billing_read"],
+                 "auth_configured": True, "auth_fields": ["api_key"]}]
+
+    def get_service_connection(self, connection_id):
+        return self.list_service_connections()[0]
+
+
+class BrowserBilling:
+    """Synthetic billing metadata; no network usage checks on page load."""
+
+    def list_service_billing_profiles(self, **kwargs):
+        return [{"id": "fake-profile", "display_name": "架空の利用料金",
+                 "connection_name": "架空 OpenAI", "connection_id": "fake-connection",
+                 "adapter_key": "openai", "enabled": True,
+                 "connection_enabled": True}]
+
+
+
 async def serve() -> None:
     """Start one fake Secretary Server with no DB/MAGI or external calls."""
     import uvicorn
@@ -241,7 +294,9 @@ async def serve() -> None:
     reader = BrowserFixtureReadService()
     app = create_app(
         queries=store, commands=BrowserFixtureCommands(store),
-        read_service=reader, recover_pending_at_startup=False,
+        read_service=reader, finance_repository=BrowserFinance(),
+        service_connections=BrowserConnections(), billing_settings=BrowserBilling(),
+        recover_pending_at_startup=False,
     )
     server = uvicorn.Server(uvicorn.Config(
         app, host="127.0.0.1", port=8097, log_level="warning",
