@@ -25,7 +25,7 @@ const {
 
 <template>
   <div class="page-title">
-    <h1>RITSUKO — Secretary Core / Orchestrator</h1>
+    <h1>RITSUKO — 秘書AI</h1>
     <div class="connection" :class="{ disconnected: !connected }">
       <span class="dot" />
       {{ connected ? (commandsEnabled ? '実Task操作API接続中' : 'Task参照API接続中（読取専用）') : 'API未接続' }}
@@ -54,7 +54,7 @@ const {
         @save-preferences="savePreferences" @refresh="() => refresh(true)"
       />
       <CurrentTask v-if="!selected" :task="selected" :trace="trace" :loading="refreshing" />
-      <MagiProgress :task="selected" />
+      <MagiProgress :task="selected" :default-open="layout?.core.verification === true" />
       <TaskActivity v-if="layout?.visibility.core.trace !== false"
         :trace="trace" :default-open="layout?.core.trace === true" />
       <details v-if="layout?.visibility.core.magi_configuration !== false"
