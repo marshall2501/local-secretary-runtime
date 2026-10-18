@@ -210,6 +210,54 @@ test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する
   await expect(page.getByText('MAGI Turn 2')).toBeVisible()
 })
 
+test('PollingでMAGI席の待機→実行→応答完了が変化しTask確定後は進捗を閉じる', async ({ page }) => {
+  const origin = 'http://127.0.0.1:18097'
+  await page.goto(origin + '/ui/')
+  await page.getByRole('textbox', { name: '依頼内容' }).fill('停止試験：状態変化を確認する')
+  await page.getByRole('button', { name: '依頼を送信' }).click()
+  await expect(page.getByText('受付（Task確定状態）')).toBeVisible()
+  const id = page.url().split('#task=')[1]
+  const original = await (await page.request.get(origin + '/api/v1/ritsuko/tasks/' + id)).json()
+  let seatState: 'queued' | 'running' | 'completed' = 'queued'
+  let turn = 1
+  await page.route('**/api/v1/ritsuko/operations/' + id, async route => {
+    await route.fulfill({ json: {
+      task_id: id, status: 'running', kind: 'start', live_turn: turn,
+      member_progress: {
+        MELCHIOR: { member: 'MELCHIOR', provider: 'ollama',
+          model: 'fixture', state: seatState, turn,
+          elapsed_seconds: seatState === 'completed' ? 3.2 : undefined },
+      },
+    } })
+  })
+  const refresh = page.getByRole('button', { name: '保存済みTaskを再取得' })
+  await refresh.click()
+  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('待機中', { exact: true }))
+    .toBeVisible()
+  seatState = 'running'
+  await refresh.click()
+  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('実行中')).toBeVisible()
+  seatState = 'completed'
+  turn = 2
+  await refresh.click()
+  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('応答完了')).toBeVisible()
+  await expect(page.getByText('MAGI Turn 2')).toBeVisible()
+  await expect(page.getByText('API報告の経過時間：3.2秒')).toBeVisible()
+
+  // Operationがrunningと主張し続けてもDBのTask completedを優先する。
+  const finished = structuredClone(original)
+  finished.trace.task.status = 'completed'
+  finished.trace.task.phase = 'completed'
+  finished.trace.task.message = '実行結果を確定しました。'
+  finished.trace.task.revision = 2
+  await page.route('**/api/v1/ritsuko/tasks/' + id, async route => {
+    await route.fulfill({ json: finished })
+  })
+  await refresh.click()
+  await expect(page.getByLabel('Taskの最新回答')).toContainText('実行結果を確定しました。')
+  await expect(page.getByRole('region', { name: 'Taskの進行状況' })).toHaveCount(0)
+})
+
 test('18097新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
   await page.goto('http://127.0.0.1:18097/ui/')
   const previousUrl = page.url()
