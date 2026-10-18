@@ -1,12 +1,11 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
 /**
- * NiceGUIの配置を踏襲した右側Task一覧。取得済みの最大20件を表示する。
+ * 右側の保存済みTask一覧。共通Task Queryから追加読込でき、旧UI不要。
  * 進行中・完了の分類は表示用で、Taskの実行可否を決定するものではない。
  */
 import { computed } from 'vue'
 import { isTaskClosed, taskStatusLabel } from '../types'
-import { legacyPageUrl } from '../../../shared/navigation'
 import type { TaskListView, TaskSummary } from '../types'
 
 const props = defineProps<{
@@ -63,7 +62,6 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
     <div class="task-list-more">
       <button v-if="hasMore" type="button" class="secondary" :disabled="loading"
         @click="emit('more')">さらに読み込む</button>
-      <a :href="legacyPageUrl('/core/history')" class="small">Task履歴（既存画面）</a>
     </div>
     <p class="muted small task-sidebar-foot">{{ commandsEnabled ? "Taskの確定状態はDBから再照会します。" : "保存済みTaskの参照専用です。" }}</p>
   </aside>
