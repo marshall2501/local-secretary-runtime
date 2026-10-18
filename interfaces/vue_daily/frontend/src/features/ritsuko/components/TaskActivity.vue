@@ -5,12 +5,12 @@
  * verified_byは検証経路の識別であり、文章の意味的正しさの証明ではない。
  */
 import type { TaskTrace } from '../types'
-defineProps<{ trace: TaskTrace | null }>()
+defineProps<{ trace: TaskTrace | null; defaultOpen?: boolean }>()
 </script>
 
 <template>
   <section v-if="trace" class="card" aria-label="実行履歴と結果">
-    <details>
+    <details :open="defaultOpen">
       <summary class="activity-summary">検証情報・実行経緯
         <span class="muted small">Action: {{ trace.actions.length }}件 /
           監査イベント: {{ trace.advisor_events?.length || 0 }}件</span>
