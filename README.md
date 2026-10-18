@@ -24,13 +24,13 @@ Personal Local Secretary AI の実装リポジトリです。PC専用Botでは�
 
 LLMの出力だけで記憶やTask完了を確定しません。RITSUKOと決定的なゲートが根拠・状態・権限・実行結果を検査します。明確な低リスク本人申告は条件を満たせばMemory Intakeから自動登録でき、曖昧さ・競合・高影響などはPendingへ送ります。外部操作の承認は記憶登録とは別です。
 
-## 新Secretary Server（単一Host・実装初段、日常切替前）
+## 新Secretary Server（単一Host、実機切替前）
 
-- **正規Web API/Vue Host**: `interfaces/api/secretary_server.py`。Task受付／本人回答／Review／Stop・Resumeと独立PKB検索を同じOriginで提供。
-- **単一起動Composition Root**: `bootstrap/secretary_server.py`。既存の運用`secretary` DB接続設定と共通Applicationを使用し、Python側から `python -m bootstrap.secretary_server` で起動できる実装。**ただし旧8097サーバーが起動中なら同じポートで二重起動できない**。起動を実施するのは受入・稼働切替時に本人と確認してから。
-- **ログ**: コンソールと `logs/secretary.log` に同時記録し、10MiB・過去5本のローテーション。ミリ秒付き。旧8097/8099のポート別ログは旧Host専用であり新構造に使用しない。
-- **隔離検証**: `tests/test_secretary_server.py`、Chromium fake serverを単一プロセス化した `interfaces/vue_daily/browser_fixture.py`。2026-10-18 [Vue/API/Chromium CI PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39080890696)。
-- **未完了**: 8010別APIと外部PVA/MCP readの統合、PKB書込やFinance/設定等のAPI/画面、旧NiceGUI・旧Preview source撤去、通常ランチャーの正式切替・本人実機受入。**現行日常CMDはまだ旧入口へ向く**。
+- **起動**: `Launch-Local-Secretary-AI-Unified.cmd` → `scripts/ui/launch_secretary_server.ps1` → `python -m bootstrap.secretary_server`。Python仮想環境を使用。既存サービスは停止しない。デフォルトは`127.0.0.1:8097`で、使用中のときは起動前に明確に失敗する。**現在起動している8097 Vue Previewを先に安全に止める必要がある**。現行`Launch-Local-Secretary-AI.cmd`は実機受入まで旧NiceGUIを指す。
+- **単一Host**: `interfaces/api/secretary_server.py`。Vue画面、Task API、PKB検索・登録・訂正・Pending、Finance表示／CSV取込、MAGI/Connection/Billing設定、Debug、外部read互換を同一Originに集約する。RITSUKO/PKB等のApplicationはUIから独立。
+- **ログ**: コンソールと`logs/secretary.log`へ実時刻・ミリ秒付きで出力し、10MiB・過去5本でローテーション。旧ポート別ログは正式Hostには使わない。
+- **検証**: [2026-10-18 Chromium/API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/39082182889)など。CIは実機・実DB・実MAGIの受入を代替しない。
+- **未受入**: 外部PVA/MCPクライアントの実接続先変更、旧8010/8093/8097/8099停止・ソース撤去、新HostでのサブPC実DB/MAGI検証、日常起動名`Launch-Local-Secretary-AI.cmd`の正式切替。これらは実機稼働状態と区別する。
 
 ## 主な入口
 
