@@ -194,7 +194,7 @@ class DailyCapabilityApiTests(unittest.TestCase):
             self.client.get("/api/v1/billing/profiles/unknown/snapshot").status_code,
             404,
         )
-        self.assertEqual(self.client.post("/api/v1/connections").status_code, 405)
+        self.assertEqual(self.client.post("/api/v1/connections").status_code, 422)
 
     def test_settings_update_uses_existing_services_without_echoing_auth(self):
         """Settings updates are UI actions, not a new credential repository."""
