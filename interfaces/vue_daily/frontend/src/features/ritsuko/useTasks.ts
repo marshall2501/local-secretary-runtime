@@ -5,6 +5,8 @@
  * Taskの完了判断と保存はRITSUKOが行う。MAGIの候補状態は別に表示する。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { readLayoutPreferences } from '../../shared/layoutPreferences'
+import type { LayoutPreferences } from '../../shared/layoutPreferences'
 import {
   answerTask, getJudgmentPreferences, getTaskApiMode, getTaskOperation,
   getTaskTrace, listTasks, reviewTask, resumeTask, saveJudgmentPreferences, startTask, stopTask,
@@ -25,7 +27,12 @@ export function useTasks() {
   const items = ref<TaskSummary[]>([])
   const view = ref<TaskListView>('recent')
   // NiceGUIの追加読み込みと同様に、右一覧で見る件数は本人が増やす。
-  const visibleLimit = ref(10)
+  const visibleLimit = ref(5)
+  const layout = ref<LayoutPreferences | null>(null)
+  function defaultListLimit(next: TaskListView): number {
+    const count = layout.value?.core[next === 'completed' ? 'completed_limit' : 'open_limit']
+    return typeof count === 'number' && count >= 1 && count <= 10 ? count : 5
+  }
   const hasMore = ref(false)
   const selectedId = ref(taskIdFromHash())
   const trace = ref<TaskTrace | null>(null)
@@ -392,7 +399,7 @@ export function useTasks() {
   function selectView(next: TaskListView): void {
     if (view.value === next) return
     view.value = next
-    visibleLimit.value = 10
+    visibleLimit.value = defaultListLimit(next)
     selectedId.value = ''
     reply.value = ''
     operation.value = null
@@ -422,7 +429,11 @@ export function useTasks() {
     mounted = true
     window.addEventListener('hashchange', onHashChange)
     document.addEventListener('visibilitychange', onVisibilityChange)
-    void refresh()
+    void readLayoutPreferences().then(saved => {
+      layout.value = saved
+      visibleLimit.value = defaultListLimit(view.value)
+    }).catch(() => { /* UI still loads Task data with safe defaults. */ })
+      .finally(() => { void refresh() })
     void loadPreferences()
   })
   onUnmounted(() => {
@@ -433,7 +444,7 @@ export function useTasks() {
     if (timer !== undefined) clearTimeout(timer)
   })
   return {
-    items, view, visibleLimit, hasMore, selectedId, trace, selected, connected, refreshing,
+    layout, items, view, visibleLimit, hasMore, selectedId, trace, selected, connected, refreshing,
     problem, refresh, selectTask, selectView, loadMore,
     commandsEnabled, commandBusy, commandFeedback, commandError, operation,
     draftRequest, strategy, defaultStrategy, showStrategySelector,
