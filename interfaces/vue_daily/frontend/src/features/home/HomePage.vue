@@ -13,7 +13,7 @@ defineProps<{ features?: boolean }>()
   <section class="card" aria-label="秘書AIの機能一覧">
     <h2>秘書AIの機能</h2>
     <div v-for="item in navigationItems" :key="item.path" class="pkb-record">
-      <a :href="item.path === '/' ? '/ui/' : '/ui/?page=' + item.path.slice(1)">
+      <a :href="'/ui/?page=' + item.path.slice(1)">
         <strong>{{ item.label }}</strong>
       </a>
     </div>
