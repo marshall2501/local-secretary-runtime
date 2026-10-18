@@ -29,7 +29,8 @@ async function copyText(text: string, label: string): Promise<void> {
 </script>
 
 <template>
-  <section class="card current-task" aria-label="現在のTask">
+  <section class="card current-task" :class="'task-theme-' + (task?.status || 'none')"
+    aria-label="現在のTask">
     <div class="section-head">
       <h2>現在のTask</h2>
       <span v-if="task" class="status" :class="'status-' + task.status">
@@ -131,6 +132,17 @@ async function copyText(text: string, label: string): Promise<void> {
 </template>
 
 <style scoped>
+/* RITSUKOの確定状態のみを色分けする。色だけに頼らず状態名も併記。 */
+.current-task.task-theme-completed { background:#f5fcf8; border-color:#9bd4b5; }
+.current-task.task-theme-running, .current-task.task-theme-pending {
+  background:#f2f8ff; border-color:#a5c9ed; }
+.current-task.task-theme-waiting_external, .current-task.task-theme-waiting_user {
+  background:#fffbf2; border-color:#e1c77f; }
+.current-task.task-theme-failed, .current-task.task-theme-cancelled {
+  background:#fff5f6; border-color:#e5a9b0; }
+.current-task.task-theme-paused, .current-task.task-theme-stopped {
+  background:#f7f8fb; border-color:#bfc8d6; }
+.current-task.task-theme-none { background:#fff; border-color:#d4e0e9; }
 .task-request-preview { font-weight: 600; line-height: 1.55; margin: 0 0 5px;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; overflow-wrap: anywhere; }
