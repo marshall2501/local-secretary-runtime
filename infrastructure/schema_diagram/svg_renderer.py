@@ -83,7 +83,7 @@ def render_svg(snapshot: SchemaSnapshot, *, keys_only: bool = True) -> str:
             f'{cx2:.0f} {y2:.0f}, {x2:.0f} {y2:.0f}" '
             f'fill="none" stroke="#94a3b8" stroke-width="2" '
             f'stroke-opacity=".85" marker-end="url(#fk-arrow)">'
-            f'<title>{escape(fk.source_table + "." + ",".join(fk.source_columns) + " → " + fk.target_table + "." + ",".join(fk.target_columns))}</title>'
+            f'<title>{escape(fk.constraint_name + " : " + fk.source_table + "." + ",".join(fk.source_columns) + " → " + fk.target_table + "." + ",".join(fk.target_columns))}</title>'
             '</path>'
         )
     for group, ty, card_height in rows:
