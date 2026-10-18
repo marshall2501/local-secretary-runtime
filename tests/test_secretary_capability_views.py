@@ -7,10 +7,14 @@ These tests never connect to the user's DB or real providers.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+from capabilities.finance.finance_import import ImportPlan, ImportResult
+from capabilities.finance.finance_preview import FinancePreview
 
 from fastapi.testclient import TestClient
 from interfaces.api.secretary_server import create_app
@@ -47,6 +51,17 @@ class FakeFinance:
 
     def finance_filter_options(self):
         return {"accounts": ["架空銀行"], "major_categories": ["食費"]}
+
+    def plan_import(self, preview, csv_bytes):
+        self.calls.append(("plan", preview.filename, csv_bytes))
+        return ImportPlan(hashlib.sha256(csv_bytes).hexdigest(), 1, 1, 0, 0, 0)
+
+    def commit_import(self, preview, csv_bytes, filename):
+        self.calls.append(("commit", filename, csv_bytes))
+        return ImportResult(
+            "committed", "fake-batch", hashlib.sha256(csv_bytes).hexdigest(),
+            1, 1, 0, 0,
+        )
 
 
 class FakeConnections:
@@ -109,6 +124,44 @@ class DailyCapabilityApiTests(unittest.TestCase):
             "/api/v1/finance/dashboard?row_mode=bad").status_code, 422)
         self.assertEqual(self.client.get(
             "/api/v1/finance/dashboard?page=0").status_code, 422)
+
+    def test_moneyforward_preview_requires_explicit_matching_commit(self):
+        """No Finance write during preview; the confirmed hash is enforced."""
+        raw = b"not-a-real-finance-csv"
+        encoded = base64.b64encode(raw).decode()
+        preview = FinancePreview(
+            filename="synthetic.csv", row_count=1,
+            start_date="2026-10-01", end_date="2026-10-01",
+            calculation_target_count=1, transfer_count=0,
+            unique_id_count=1, duplicate_id_count=0,
+            income_total=100, expense_total=0, net_total=100,
+            monthly=[], categories=[], accounts=[], recent_rows=[],
+            transactions=[{"external_id": "test-1"}],
+        )
+        body = {"filename": "synthetic.csv", "csv_base64": encoded}
+        with patch("interfaces.api.finance.analyze_moneyforward_csv",
+                   return_value=preview):
+            planned = self.client.post("/api/v1/finance/import/plan", json=body)
+            self.assertEqual(planned.status_code, 200, planned.text)
+            self.assertEqual(planned.json()["plan"]["inserted"], 1)
+            self.assertEqual(self.finance.calls[-1][0], "plan")
+            self.assertEqual(self.client.post(
+                "/api/v1/finance/import/commit", json=body,
+            ).status_code, 422)
+            self.assertEqual(self.client.post(
+                "/api/v1/finance/import/commit", json={
+                    **body, "expected_sha256": "a" * 64,
+                },
+            ).status_code, 409)
+            confirmed = self.client.post(
+                "/api/v1/finance/import/commit", json={
+                    **body,
+                    "expected_sha256": planned.json()["plan"]["source_sha256"],
+                },
+            )
+            self.assertEqual(confirmed.status_code, 200, confirmed.text)
+            self.assertEqual(confirmed.json()["status"], "committed")
+            self.assertEqual(self.finance.calls[-1][0], "commit")
 
     def test_connections_and_billing_on_demand(self):
         rows = self.client.get("/api/v1/connections")
