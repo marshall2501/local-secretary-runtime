@@ -1,7 +1,7 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
 /** Shared connection, service-billing and debug views on the Secretary API. */
-import { getJson } from '../../shared/api/http'
+import { getJson, postJson } from '../../shared/api/http'
 
 export interface ConnectionSummary {
   id: string
@@ -15,6 +15,8 @@ export interface ConnectionSummary {
   connection_role?: string | null
   auth_configured: boolean
   auth_fields?: string[]
+  credential_ref?: string | null
+  config_data?: Record<string, unknown>
 }
 export interface BillingProfile {
   id: string
@@ -56,4 +58,30 @@ export async function readEnvironment(): Promise<EnvironmentItem[]> {
 }
 export async function readDatabase(): Promise<Record<string, unknown>> {
   return await getJson<Record<string, unknown>>('/api/v1/debug/database')
+}
+
+export interface ConnectionInput {
+  connection_id?: string
+  display_name: string
+  adapter_key: string
+  endpoint?: string
+  credential_ref?: string
+  connection_type?: string
+  connection_role?: string
+  capabilities?: string[]
+  config_data?: Record<string, unknown>
+  auth_data?: Record<string, unknown>
+  enabled?: boolean
+}
+export interface BillingProfileInput {
+  profile_id?: string
+  display_name: string
+  connection_id: string
+  enabled: boolean
+}
+export async function saveConnection(input: ConnectionInput): Promise<ConnectionSummary> {
+  return await postJson<ConnectionSummary>('/api/v1/connections', input)
+}
+export async function saveBillingProfile(input: BillingProfileInput): Promise<BillingProfile> {
+  return await postJson<BillingProfile>('/api/v1/billing/profiles', input)
 }
