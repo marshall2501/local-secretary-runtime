@@ -12,10 +12,20 @@ const props = defineProps<{
   task: TaskRecord | null
   operation: TaskOperation | null
 }>()
-const turn = computed(() => {
-  const turns = props.task?.magi_session?.turns ?? []
-  return turns.length ? turns[turns.length - 1] : null
-})
+const turns = computed(() => props.task?.magi_session?.turns ?? [])
+const turn = computed(() => turns.value.length ? turns.value[turns.value.length - 1] : null)
+/** 内部next/statusと利用者向けの進み方を混同しない。Task確定は別領域。 */
+const steps = computed(() => turns.value.map((item, i) => {
+  const next = item.response?.next
+  const source = item.response?.read_request?.source
+  const sourceName = source === 'pkb' ? '個人PKB' : source === 'web' ? 'Web検索'
+    : source === 'finance' ? '家計' : '情報源'
+  const label = next === 'request_read' ? sourceName + 'の読み取りを依頼'
+    : next === 'respond' ? '根拠を評価して回答を提案'
+      : next === 'ask_user' ? '本人へ追加確認を提案' : '判断候補を作成'
+  return { number: i + 1, label, reason: item.response?.reason ?? '',
+    refs: item.response?.evidence?.result_ids?.length ?? 0 }
+}))
 const liveMembers = computed(() => {
   const running = ['accepted', 'running'].includes(props.operation?.status ?? '')
   if (!running) return []
@@ -61,6 +71,14 @@ const savedMembers = computed(() => {
         </div>
       </div>
     </template>
+    <div v-if="steps.length" class="magi-timeline" aria-label="MAGI判断の経過">
+      <div v-for="step in steps" :key="step.number" class="magi-step">
+        <strong>Turn {{ step.number }}：{{ step.label }}</strong>
+        <span v-if="step.refs" class="muted small">保存済みResult {{ step.refs }}件を参照</span>
+        <p v-if="step.reason" class="muted small">{{ step.reason }}</p>
+      </div>
+      <p class="muted small">MAGIは判断候補を提案します。Taskの完了・停止はRITSUKOの保存状態を確認してください。</p>
+    </div>
     <p class="muted small">
       保存済みの最新Turn（リアルタイム通信表示ではありません）
     </p>
@@ -85,3 +103,10 @@ const savedMembers = computed(() => {
     </p>
   </section>
 </template>
+
+<style scoped>
+.magi-timeline { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.magi-step { border-left: 3px solid #9dcac2; padding: 7px 12px; background: #f5faf9;
+  border-radius: 5px; display: flex; flex-direction: column; gap: 2px; }
+.magi-step p { margin: 0; overflow-wrap: anywhere; }
+</style>
