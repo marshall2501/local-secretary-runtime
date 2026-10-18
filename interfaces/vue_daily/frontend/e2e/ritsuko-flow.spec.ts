@@ -433,7 +433,9 @@ test('保存された5件表示からさらに読み込み、確定Goalを未確
   await expect(page.getByRole('button', { name: /架空の過去Task 12/ })).toBeVisible()
   // 先行の停止試験Taskが選択済みの場合もある。固定の旧Taskを明示的に選ぶ。
   await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
-  await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
+  await page.locator('.current-task').getByText('依頼・Goal・MAGI中間状態・Task ID').click()
+  await expect(page.locator('.current-task').getByText(/Goal確定済み/)).toBeVisible()
+  await expect(page.locator('.current-task').getByText('MAGIの解釈候補（本人未確定）')).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Task履歴（既存画面）' })).toHaveCount(0)
   await expect(page.getByRole('complementary', { name: '保存済みTask一覧' })).toBeVisible()
 })
