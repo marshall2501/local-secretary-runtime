@@ -8,6 +8,7 @@ Normal startup injects a non-None TaskCommands port from bootstrap.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -19,6 +20,7 @@ from ritsuko.application.task_commands import TaskCommands
 from interfaces.api.ritsuko_tasks import create_ritsuko_task_router
 from interfaces.api.pkb_read import create_pkb_read_router
 from interfaces.api.pkb_commands import create_pkb_command_router
+from interfaces.api.external_read import create_external_read_router
 from interfaces.vue_daily.preferences import (
     read_judgment_preferences, save_judgment_preferences,
 )
@@ -33,6 +35,7 @@ class JudgmentPreferencesBody(BaseModel):
 
 def create_app(*, queries, commands: TaskCommands | None = None,
                read_service=None, pkb_repository=None, pkb_interpreter=None,
+               external_read_token_loader: Callable[[], str | None] | None = None,
                recover_pending_at_startup: bool = False,
                dist_dir: Path | None = None) -> FastAPI:
     """保存済みTaskの参照APIとビルド済みVueを提供する入口を作る。
@@ -46,6 +49,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         read_service: 共通ReadService。省略時はPKB検索を503で拒否。
         pkb_repository: 独立PKBの書込み・Pending操作に使うRepository。
         pkb_interpreter: 判断できない記憶登録文に使う既存Interpreter。
+        external_read_token_loader: 既存MCP/PVA read用のtoken取得Port。
         recover_pending_at_startup: Commands注入時の未着手Task自動再開。
             実Taskの手動プレビューではFalseにして過去のJobを起動しない。
 
@@ -129,6 +133,9 @@ def create_app(*, queries, commands: TaskCommands | None = None,
     app.include_router(create_pkb_read_router(read_service=read_service))
     app.include_router(create_pkb_command_router(
         repository=pkb_repository, interpreter=pkb_interpreter,
+    ))
+    app.include_router(create_external_read_router(
+        read_service=read_service, token_loader=external_read_token_loader,
     ))
 
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
