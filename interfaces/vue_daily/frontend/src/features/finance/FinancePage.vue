@@ -175,12 +175,32 @@ onMounted(() => {
       </div>
       <p class="muted small">対象期間：{{ data.start_date || '—' }} 〜 {{ data.end_date || '—' }}</p>
     </section>
+    <section class="card" aria-label="家計月別集計">
+      <div class="section-head"><h2>月別集計</h2><span class="muted small">{{ data.monthly.length }}か月</span></div>
+      <p v-if="!data.monthly.length" class="muted">月別データはありません。</p>
+      <div v-else class="finance-table-scroll">
+        <table class="finance-table">
+          <thead><tr><th scope="col">月</th><th scope="col">収入</th><th scope="col">支出</th>
+            <th scope="col">差引</th><th scope="col">取引件数</th></tr></thead>
+          <tbody><tr v-for="row in data.monthly" :key="row.month">
+            <th scope="row">{{ row.month }}</th>
+            <td>{{ yen(row.income) }}</td><td>{{ yen(row.expense) }}</td>
+            <td>{{ yen(row.net) }}</td><td>{{ row.count }}</td>
+          </tr></tbody>
+        </table>
+      </div>
+    </section>
     <section class="card" aria-label="家計カテゴリ">
       <h2>支出カテゴリ</h2>
       <p v-if="!data.categories.length" class="muted">カテゴリ集計はありません。</p>
-      <div v-for="(item, index) in data.categories" :key="index" class="pkb-record">
-        <strong>{{ item.major || '未分類' }} / {{ item.minor || '—' }}</strong>
-        <span>{{ yen(item.expense) }}</span>
+      <div v-if="data.categories.length" class="finance-table-scroll">
+        <table class="finance-table">
+          <thead><tr><th scope="col">大分類</th><th scope="col">小分類</th><th scope="col">支出</th></tr></thead>
+          <tbody><tr v-for="(item, index) in data.categories" :key="index">
+            <th scope="row">{{ item.major || '未分類' }}</th><td>{{ item.minor || '—' }}</td>
+            <td>{{ yen(item.expense) }}</td>
+          </tr></tbody>
+        </table>
       </div>
     </section>
     <section class="card" aria-label="家計明細">
@@ -212,3 +232,13 @@ onMounted(() => {
     </section>
   </template>
 </template>
+
+<style scoped>
+.finance-table-scroll { overflow-x:auto; max-width:100%; margin-top:11px; }
+.finance-table { border-collapse:collapse; width:100%; min-width:520px; font-size:13px; }
+.finance-table th,.finance-table td { border-bottom:1px solid #dfe7ed; padding:9px 12px; }
+.finance-table thead { background:#edf5fa; }
+.finance-table th { text-align:left; }
+.finance-table td { text-align:right; font-variant-numeric:tabular-nums; }
+.finance-table th:last-child { text-align:right; }
+</style>
