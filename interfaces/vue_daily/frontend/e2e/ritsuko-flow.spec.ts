@@ -424,7 +424,21 @@ test('Billingは明示的な更新操作をするまで外部usage APIを呼び�
     calls.push(route.request().url())
     await route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ provider: 'fake', usage: 7 }),
+      body: JSON.stringify({
+        service: 'openai',
+        connection_name: '架空 OpenAI',
+        period_start: '2026-10-01T00:00:00+00:00',
+        fetched_at: '2026-10-18T00:00:00+00:00',
+        activity: {
+          status: 'known',
+          totals: { requests: 155, input_tokens: 73092, output_tokens: 104952 },
+          by_model: [{ model: 'fake-model', requests: 155,
+            input_tokens: 73092, output_tokens: 104952 }],
+        },
+        charges: { status: 'known', values: { usd: 2.5837 } },
+        credits: { status: 'unknown', reason: 'not_supported' },
+        limits: { status: 'unknown' }, subscription: { status: 'unknown' },
+      }),
     })
   })
   await page.goto('http://127.0.0.1:8097/ui/?page=service-billing')
@@ -432,7 +446,12 @@ test('Billingは明示的な更新操作をするまで外部usage APIを呼び�
   await expect(page.getByRole('combobox', { name: '対象Billing Profile' })).toHaveValue('fake-profile')
   expect(calls).toEqual([])
   await page.getByRole('button', { name: '最新の利用状況を取得' }).click()
-  await expect(page.getByText(/"usage": 7/)).toBeVisible()
+  await expect(page.getByRole('region', { name: '取得した利用状況' })).toBeVisible()
+  await expect(page.getByText('$2.5837')).toBeVisible()
+  await expect(page.getByText('73,092')).toBeVisible()
+  await expect(page.getByText('104,952')).toBeVisible()
+  await expect(page.getByRole('row', { name: /fake-model/ })).toContainText('155')
+  await expect(page.getByText('取得結果の詳細（JSON・診断用）')).toBeVisible()
   expect(calls.length).toBe(1)
 })
 
