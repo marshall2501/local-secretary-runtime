@@ -92,6 +92,10 @@ def _validated(raw: dict, *, strict: bool = False) -> dict:
         elif strict:
             raise ValueError(name + "_not_object")
 
+    if strict:
+        for section in ("pkb", "finance", "core"):
+            if not isinstance(raw.get(section), dict) or set(raw[section]) != set(defaults[section]):
+                raise ValueError(section + "_keys_invalid")
     if strict and set(raw) != set(defaults):
         raise ValueError("layout_keys_invalid")
 
@@ -163,6 +167,11 @@ def _validated(raw: dict, *, strict: bool = False) -> dict:
             key for key in ENTITY_TABS if visible_entity[key]
         )
     return defaults
+
+
+def default_layout_preferences() -> dict:
+    """Return factory defaults without touching the current preferences file."""
+    return _defaults()
 
 
 def read_layout_preferences(path: Path | None = None) -> dict:
