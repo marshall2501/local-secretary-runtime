@@ -9,17 +9,20 @@ Hosts must enforce their own authentication or localhost/origin boundary.
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 
 from application.read_service import ReadService
 
 
-def create_pkb_read_router(*, read_service: ReadService | None = None) -> APIRouter:
+def create_pkb_read_router(*, read_service: ReadService | None = None,
+                           pkb_repository=None) -> APIRouter:
     """Mount SQL-first PKB memory search through an injected application service.
 
     Args:
         read_service: Existing common read application, or None to fail closed.
+        pkb_repository: Existing PKB repository for legacy-equivalent Entity reads.
 
     Returns:
         APIRouter: Bounded, read-only PKB endpoints with no storage dependencies.
@@ -45,5 +48,35 @@ def create_pkb_read_router(*, read_service: ReadService | None = None) -> APIRou
             )
         except (RuntimeError, OSError):
             raise HTTPException(503, "pkb_read_unavailable") from None
+
+    @router.get("/api/v1/pkb/entities")
+    def entity_catalog(
+        limit: int = Query(default=100, ge=1, le=200),
+        offset: int = Query(default=0, ge=0, le=1000000),
+    ) -> dict:
+        """Read the existing Entity catalog for the daily owner UI."""
+        if pkb_repository is None:
+            raise HTTPException(503, "pkb_entity_not_configured")
+        try:
+            items = pkb_repository.list_entities()
+        except (ValueError, RuntimeError, OSError):
+            raise HTTPException(503, "pkb_entity_unavailable") from None
+        return {
+            "items": items[offset:offset + limit],
+            "offset": offset, "limit": limit, "total": len(items),
+        }
+
+    @router.get("/api/v1/pkb/entities/{entity_id}")
+    def entity_detail(entity_id: UUID) -> dict:
+        """Return current state, history, relations and sources from the old PKB contract."""
+        if pkb_repository is None:
+            raise HTTPException(503, "pkb_entity_not_configured")
+        try:
+            detail = pkb_repository.load_entity_detail(str(entity_id))
+        except (ValueError, RuntimeError, OSError):
+            raise HTTPException(503, "pkb_entity_unavailable") from None
+        if detail is None:
+            raise HTTPException(404, "entity_not_found")
+        return detail
 
     return router
