@@ -140,32 +140,49 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         except (OSError, ValueError):
             raise HTTPException(503, "ui_preferences_unavailable") from None
 
-    # UIと無関係のTask APIを注入する。通信境界はこのhostで一律に保護。
-    app.include_router(create_ritsuko_task_router(queries=queries, commands=commands))
-    app.include_router(create_pkb_read_router(read_service=read_service))
-    app.include_router(create_pkb_command_router(
-        repository=pkb_repository, interpreter=pkb_interpreter,
-    ))
-    app.include_router(create_external_read_router(
-        read_service=read_service, token_loader=external_read_token_loader,
-    ))
-    app.include_router(create_finance_router(repository=finance_repository))
-    app.include_router(create_magi_settings_router(repository=magi_settings))
-    app.include_router(create_daily_overview_router(
-        connections=service_connections, billing_settings=billing_settings,
-        database_connection=database_connection,
-        schema_diagram_service=schema_diagram_service,
-    ))
+    # Retain concrete router registrations for the diagnostic catalog.
+    # Listing only host-decorated operations omits included capability routes
+    # on the deployed FastAPI version and falsely shows five endpoints.
+    business_routers = (
+        create_ritsuko_task_router(queries=queries, commands=commands),
+        create_pkb_read_router(read_service=read_service),
+        create_pkb_command_router(
+            repository=pkb_repository, interpreter=pkb_interpreter,
+        ),
+        create_external_read_router(
+            read_service=read_service, token_loader=external_read_token_loader,
+        ),
+        create_finance_router(repository=finance_repository),
+        create_magi_settings_router(repository=magi_settings),
+        create_daily_overview_router(
+            connections=service_connections, billing_settings=billing_settings,
+            database_connection=database_connection,
+            schema_diagram_service=schema_diagram_service,
+        ),
+    )
+    for router in business_routers:
+        app.include_router(router)
 
     @app.get("/api/v1/debug/routes")
     def route_catalog(request: Request):
         """Expose this actual FastAPI Host's operations for the Debug page."""
-        return [
-            {"path": getattr(route, "path", ""),
-             "methods": sorted(getattr(route, "methods", set()) or []),
-             "name": getattr(route, "name", "")}
-            for route in request.app.routes if getattr(route, "methods", None)
+        # Include the actual APIRouter registrations as well as host routes;
+        # otherwise some FastAPI versions omit capability endpoints here.
+        catalog: dict[tuple[str, tuple[str, ...]], dict] = {}
+        route_sources = [
+            *request.app.routes,
+            *(route for router in business_routers for route in router.routes),
         ]
+        for route in route_sources:
+            methods = tuple(sorted(getattr(route, "methods", ()) or ()))
+            if not methods:
+                continue
+            path = getattr(route, "path", "")
+            catalog[(path, methods)] = {
+                "path": path, "methods": list(methods),
+                "name": getattr(route, "name", ""),
+            }
+        return sorted(catalog.values(), key=lambda item: (item["path"], item["methods"]))
 
     # Vue画面はビルド後のみ公開。ソースやCredentialは静的公開しない。
     dist = dist_dir if dist_dir is not None else (Path(__file__).parents[1] / "vue_daily" / "frontend" / "dist")
