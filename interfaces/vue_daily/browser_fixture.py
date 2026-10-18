@@ -286,6 +286,34 @@ class BrowserBilling:
 
 
 
+class BrowserMagiSettings:
+    """Three fake MAGI slots using the already isolated browser fixture."""
+
+    def list_llm_profiles(self, *, include_disabled=False):
+        return [{
+            "id": "fake-llm-profile", "display_name": "架空 Ollama",
+            "model": "fixture-model", "connection_id": "fake-connection",
+            "connection_display_name": "架空 Ollama",
+            "provider": "ollama", "enabled": True,
+        }]
+
+    def load_member_specs(self):
+        return [{
+            "name": name, "profile_id": "fake-llm-profile",
+            "provider": "ollama", "model": "fixture-model",
+            "enabled": name == "CASPER", "weight": 1.0,
+            "timeout_seconds": 120, "retry_within_turn": False,
+        } for name in ("MELCHIOR", "CASPER", "BALTHASAR")]
+
+    def upsert_llm_profile(self, **details):
+        return {"id": "fake-llm-new", "display_name": details.get("display_name"),
+                "model": details.get("model"), "enabled": True}
+
+    def save_member_assignments(self, assignments):
+        return assignments
+
+
+
 async def serve() -> None:
     """Start one fake Secretary Server with no DB/MAGI or external calls."""
     import uvicorn
@@ -296,6 +324,7 @@ async def serve() -> None:
         queries=store, commands=BrowserFixtureCommands(store),
         read_service=reader, finance_repository=BrowserFinance(),
         service_connections=BrowserConnections(), billing_settings=BrowserBilling(),
+        magi_settings=BrowserMagiSettings(),
         recover_pending_at_startup=False,
     )
     server = uvicorn.Server(uvicorn.Config(
