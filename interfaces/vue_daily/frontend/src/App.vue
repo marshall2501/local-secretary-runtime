@@ -7,6 +7,7 @@ import RitsukoPage from './features/ritsuko/RitsukoPage.vue'
 import PkbPage from './features/pkb/PkbPage.vue'
 import FinancePage from './features/finance/FinancePage.vue'
 import SystemPage from './features/system/SystemPage.vue'
+import SchemaDiagramPage from './features/system/SchemaDiagramPage.vue'
 
 const section = new URLSearchParams(window.location.search).get('page') || 'core'
 </script>
@@ -19,6 +20,7 @@ const section = new URLSearchParams(window.location.search).get('page') || 'core
     <SystemPage v-else-if="section === 'service-billing'" section="service-billing" />
     <SystemPage v-else-if="section === 'settings'" section="settings" />
     <SystemPage v-else-if="section === 'debug'" section="debug" />
+    <SchemaDiagramPage v-else-if="section === 'er'" />
     <RitsukoPage v-else />
   </SecretaryLayout>
 </template>
