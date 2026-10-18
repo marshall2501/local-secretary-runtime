@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from interfaces.vue_daily.layout_preferences import (
-    read_layout_preferences, save_layout_preferences,
+    default_layout_preferences, read_layout_preferences, save_layout_preferences,
 )
 
 
@@ -38,6 +38,11 @@ def create_ui_layout_router(*, allow_changes: bool) -> APIRouter:
             return read_layout_preferences()
         except (OSError, UnicodeDecodeError, ValueError):
             raise HTTPException(503, "ui_preferences_unavailable") from None
+
+    @router.get("/layout/defaults")
+    def get_layout_defaults() -> dict:
+        """Expose original defaults for a preview; GET does not reset any file."""
+        return default_layout_preferences()
 
     @router.post("/layout")
     def update_layout(body: LayoutPreferencesBody) -> dict:
