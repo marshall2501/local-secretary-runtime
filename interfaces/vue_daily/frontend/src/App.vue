@@ -5,6 +5,7 @@ import SecretaryLayout from './app/SecretaryLayout.vue'
 import HomePage from './features/home/HomePage.vue'
 import RitsukoPage from './features/ritsuko/RitsukoPage.vue'
 import PkbPage from './features/pkb/PkbPage.vue'
+import EntityCatalogPage from './features/pkb/EntityCatalogPage.vue'
 import FinancePage from './features/finance/FinancePage.vue'
 import SystemPage from './features/system/SystemPage.vue'
 import SchemaDiagramPage from './features/system/SchemaDiagramPage.vue'
@@ -16,6 +17,7 @@ const section = new URLSearchParams(window.location.search).get('page') || 'core
   <SecretaryLayout>
     <HomePage v-if="section === 'home' || section === 'features'" :features="section === 'features'" />
     <PkbPage v-else-if="section === 'pkb'" />
+    <EntityCatalogPage v-else-if="section === 'entities'" />
     <FinancePage v-else-if="section === 'finance'" />
     <SystemPage v-else-if="section === 'service-billing'" section="service-billing" />
     <SystemPage v-else-if="section === 'settings'" section="settings" />
