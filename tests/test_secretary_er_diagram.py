@@ -90,6 +90,14 @@ class SchemaSvgTests(unittest.TestCase):
             )),
         )
         client = TestClient(app, base_url="http://127.0.0.1:8097")
+        routes_response = client.get("/api/v1/debug/routes")
+        self.assertEqual(routes_response.status_code, 200)
+        visible_paths = {item["path"] for item in routes_response.json()}
+        self.assertIn("/api/v1/pkb/memory/search", visible_paths)
+        self.assertIn("/api/v1/debug/er", visible_paths)
+        self.assertIn("/api/v1/finance/dashboard", visible_paths)
+        self.assertGreater(len(visible_paths), 20)
+
         svg = client.get("/api/v1/debug/er")
         self.assertEqual(svg.status_code, 200, svg.text)
         payload = svg.json()
