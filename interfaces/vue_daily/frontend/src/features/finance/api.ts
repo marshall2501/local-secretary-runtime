@@ -1,7 +1,7 @@
 // Provenance-Origin: original
 // Provenance-AI: AI-generated
 /** Stored Finance dashboard API; SQL/reporting remains in the Finance Application. */
-import { getJson } from '../../shared/api/http'
+import { getJson, postJson } from '../../shared/api/http'
 
 export interface FinanceRow {
   external_id: string; date: string; content: string; amount: number
@@ -35,4 +35,39 @@ export async function loadFinanceDashboard(filters: FinanceFilters): Promise<Fin
 }
 export async function loadFinanceOptions(): Promise<FinanceOptions> {
   return await getJson<FinanceOptions>('/api/v1/finance/options')
+}
+
+export interface FinanceImportPlan {
+  source_sha256: string; total: number; inserted: number
+  updated: number; unchanged: number; duplicate_external_ids: number
+}
+export interface FinanceImportPreview {
+  row_count: number; start_date: string; end_date: string
+  income_total: number; expense_total: number; net_total: number
+}
+export interface FinanceImportResult {
+  status: string; batch_id: string | null; reason: string | null
+  total: number; inserted: number; updated: number; unchanged: number
+}
+export interface CsvPayload {
+  filename: string; csv_base64: string; expected_sha256?: string
+}
+
+/** Encode a user-selected local CSV without sending it until preview is requested. */
+export async function prepareCsv(file: File): Promise<CsvPayload> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  if (bytes.length > 20 * 1024 * 1024) throw new Error('CSVが20MiBを超えています')
+  let chars = ''
+  for (let offset = 0; offset < bytes.length; offset += 16_384) {
+    chars += String.fromCharCode(...bytes.subarray(offset, offset + 16_384))
+  }
+  return { filename: file.name, csv_base64: btoa(chars) }
+}
+export async function previewFinanceImport(payload: CsvPayload): Promise<{
+  plan: FinanceImportPlan; preview: FinanceImportPreview
+}> {
+  return await postJson('/api/v1/finance/import/plan', payload)
+}
+export async function commitFinanceImport(payload: CsvPayload): Promise<FinanceImportResult> {
+  return await postJson<FinanceImportResult>('/api/v1/finance/import/commit', payload)
 }
