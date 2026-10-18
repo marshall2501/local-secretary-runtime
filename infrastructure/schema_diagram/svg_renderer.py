@@ -6,9 +6,11 @@ No JS/CDN dependency, SQL row content, external binary or NiceGUI coupling.
 from __future__ import annotations
 
 from html import escape
-from math import ceil
+import time
 
-from application.schema_diagram import SchemaSnapshot
+from application.schema_diagram import (
+    SchemaSnapshot, ProviderStatus, SchemaDiagramResult,
+)
 
 
 def render_svg(snapshot: SchemaSnapshot, *, keys_only: bool = True) -> str:
@@ -121,3 +123,35 @@ def render_svg(snapshot: SchemaSnapshot, *, keys_only: bool = True) -> str:
             out.append('</g>')
     out.append('</svg>')
     return "\n".join(out)
+
+
+class NativeSvgProvider:
+    """Offline SVG implementation of the existing ER Diagram provider port."""
+
+    key = "native_svg"
+    display_name = "Native SVG"
+
+    def __init__(self, snapshot_loader):
+        self._snapshot_loader = snapshot_loader
+
+    def status(self, *, enabled: bool) -> ProviderStatus:
+        return ProviderStatus(
+            key=self.key, display_name=self.display_name,
+            enabled=enabled, available=True, version="built-in",
+            dependency_status="PostgreSQL schema metadata only",
+        )
+
+    def generate(self, *, options: dict[str, object] | None = None
+                 ) -> SchemaDiagramResult:
+        started = time.perf_counter()
+        snapshot = self._snapshot_loader()
+        requested = options or {}
+        diagram = render_svg(snapshot, keys_only=bool(requested.get("keys_only", True)))
+        return SchemaDiagramResult(
+            status="ok", provider=self.key, database=snapshot.database,
+            schema=snapshot.schema, output_format="svg", content=diagram,
+            table_count=snapshot.table_count,
+            relation_count=snapshot.relation_count,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            generated_at=snapshot.generated_at,
+        )
