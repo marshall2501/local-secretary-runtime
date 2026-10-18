@@ -51,7 +51,8 @@ const operationBusy = computed(() =>
 <template>
   <section id="task-actions" class="card request-entry" aria-label="RITSUKOへの新しい依頼">
     <div class="section-head">
-      <h2>新しい依頼を入力</h2>
+      <h2>{{ answerable || reviewable || task?.status === 'paused'
+        ? '選択中Taskへの操作' : '新しい依頼を入力' }}</h2>
       <span class="small" :class="commandsEnabled ? 'command-mode-enabled' : 'muted'">
         {{ commandsEnabled ? '入力・送信可能' : 'Task操作API未接続' }}
       </span>
@@ -105,6 +106,8 @@ const operationBusy = computed(() =>
       </div>
     </template>
 
+    <h3 v-if="answerable || reviewable || task?.status === 'paused'"
+      class="new-request-heading">新しい依頼を入力</h3>
     <!-- textarea自体は常に配置し、読取専用の場合も入力場所を隠さない。 -->
     <form class="command-form" @submit.prevent="emit('start')">
       <label for="task-request">依頼内容</label>
@@ -172,6 +175,8 @@ const operationBusy = computed(() =>
 
 <style scoped>
 /* 長文編集可能なまま、既存回答を押し下げない入力高さにする。 */
+.new-request-heading { border-top: 1px solid #dce5ec; padding-top: 12px;
+  margin-top: 15px; margin-bottom: 6px; font-size: 15px; }
 .request-entry #task-request { min-height: 78px; max-width: 100%; }
 .request-entry .command-preferences { margin-top: 2px; }
 .request-entry .command-preferences > summary { cursor: pointer; font-size: 13px; }
