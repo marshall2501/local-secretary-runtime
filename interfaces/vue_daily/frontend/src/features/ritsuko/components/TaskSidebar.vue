@@ -36,7 +36,7 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
       <button v-for="item in (['recent','open','completed'] as const)"
         :key="item" class="secondary filter-button" type="button"
         :aria-pressed="view === item" @click="emit('filter', item)">
-        {{ item === 'recent' ? '最近' : item === 'open' ? '進行中' : '完了' }}
+        {{ item === 'recent' ? '最近' : item === 'open' ? '未完了' : '完了' }}
       </button>
     </div>
     <section v-if="pending.length" class="task-group">
