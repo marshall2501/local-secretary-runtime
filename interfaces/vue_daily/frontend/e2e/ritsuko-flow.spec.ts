@@ -483,6 +483,16 @@ test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid�
   await expect(svg).toContainText('tasks')
   await expect(svg).toContainText('results')
   await expect(svg).not.toContainText('request')
+  // A successful API response alone is not acceptable: the relationship
+  // diagram must be rendered by Mermaid and remain legible at 100% scale.
+  await expect(page.getByRole('status')).toContainText('100%')
+  await expect(page.getByRole('button', { name: '全画面' })).toBeEnabled()
+  await page.getByRole('button', { name: '＋' }).click()
+  await expect(page.getByRole('status')).toContainText('125%')
+  await page.getByRole('button', { name: '全体', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('全体表示')
+  await page.getByRole('button', { name: '100%' }).click()
+  await expect(page.getByRole('status')).toContainText('100%')
   await page.getByRole('combobox', { name: 'ER図の表示密度' }).selectOption('false')
   await expect(svg).toContainText('request')
   await page.getByRole('button', { name: 'Mermaidソース' }).click()
