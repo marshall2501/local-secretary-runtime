@@ -174,6 +174,9 @@ const operationBusy = computed(() =>
 </template>
 
 <style scoped>
+/* 新規依頼は入力領域であることを青いアクセントで示す。 */
+.request-entry { border-color:#bbd2ea; background:#fcfdff; }
+.request-entry .new-request-heading { color:#285a85; }
 /* 長文編集可能なまま、既存回答を押し下げない入力高さにする。 */
 .new-request-heading { border-top: 1px solid #dce5ec; padding-top: 12px;
   margin-top: 15px; margin-bottom: 6px; font-size: 15px; }
