@@ -39,6 +39,7 @@ from infrastructure.postgres.entity_catalog_repository import PostgresEntityCata
 from infrastructure.postgres.pkb_repository import PostgresPkbRepository
 from infrastructure.postgres.pkb_debug import debug_database_summary
 from infrastructure.postgres.schema_introspection import load_schema_snapshot
+from infrastructure.schema_diagram.svg_renderer import NativeSvgProvider
 from infrastructure.schema_diagram.providers import (
     NativeMermaidProvider,
     OptionalToolProvider,
@@ -117,6 +118,7 @@ def build_schema_diagram_service() -> SchemaDiagramService:
     snapshot_loader = lambda: load_schema_snapshot(connection, schema="secretary")
     return SchemaDiagramService(
         (
+            NativeSvgProvider(snapshot_loader),
             NativeMermaidProvider(snapshot_loader),
             OptionalToolProvider(
                 key="schemacrawler",
