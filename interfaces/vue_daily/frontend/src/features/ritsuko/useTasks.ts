@@ -330,7 +330,8 @@ export function useTasks() {
       ])
       if (seq !== version) return
       commandsEnabled.value = enabled
-      const id = selectedId.value || list[0]?.id || ''
+      // 一覧は表示のために取得するだけ。Taskは本人の明示選択・新規送信・URL指定でのみ選ぶ。
+      const id = selectedId.value
       const summary = list.find(item => item.id === id)
       const unchanged = !forceTrace && Boolean(summary && trace.value?.task.id === id &&
         trace.value?.task.revision === summary.revision)
@@ -347,10 +348,6 @@ export function useTasks() {
       if (seq !== version || (selectedId.value && selectedId.value !== id)) return
       hasMore.value = list.length > visibleLimit.value
       items.value = list.slice(0, visibleLimit.value)
-      if (!selectedId.value && id) {
-        selectedId.value = id
-        window.history.replaceState(null, '', '#task=' + id)
-      }
       trace.value = nextTrace
       operation.value = nextOperation
       connected.value = true
@@ -396,18 +393,11 @@ export function useTasks() {
     void refresh()
   }
 
-  /** 最近・進行中・完了の表示条件を切り替え、前の選択を解除する。 */
+  /** 絞り込みは右側一覧の表示範囲だけ。選択Task・URL・下書き・進行中Operationは変更しない。 */
   function selectView(next: TaskListView): void {
     if (view.value === next) return
     view.value = next
     visibleLimit.value = defaultListLimit(next)
-    selectedId.value = ''
-    reply.value = ''
-    operation.value = null
-    commandFeedback.value = ''
-    commandError.value = ''
-    trace.value = null
-    window.history.replaceState(null, '', window.location.pathname + window.location.search)
     void refresh()
   }
 
