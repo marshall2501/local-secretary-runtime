@@ -90,3 +90,37 @@ export interface ApiRouteInfo { path: string; methods: string[]; name: string }
 export async function readApiRoutes(): Promise<ApiRouteInfo[]> {
   return await getJson<ApiRouteInfo[]>('/api/v1/debug/routes')
 }
+
+export interface LlmProfile {
+  id: string; display_name: string; model: string
+  provider: string; connection_id: string; connection_display_name: string
+  context_window_tokens?: number | null
+  ollama_num_predict?: number | null
+  enabled: boolean
+}
+export interface MagiMember {
+  name: string; profile_id: string; profile_label?: string
+  provider?: string; model?: string; enabled: boolean
+  weight: number; timeout_seconds: number; retry_within_turn: boolean
+}
+export interface LlmProfileInput {
+  profile_id?: string; model: string; connection_id: string
+  display_name?: string; context_window_tokens?: number
+  ollama_num_predict?: number; enabled: boolean
+}
+export async function readMagiProfiles(): Promise<LlmProfile[]> {
+  return await getJson<LlmProfile[]>('/api/v1/magi/profiles')
+}
+export async function readMagiMembers(): Promise<MagiMember[]> {
+  return await getJson<MagiMember[]>('/api/v1/magi/members')
+}
+export async function saveMagiProfile(profile: LlmProfileInput): Promise<LlmProfile> {
+  return await postJson<LlmProfile>('/api/v1/magi/profiles', profile)
+}
+export async function saveMagiMembers(members: MagiMember[]): Promise<MagiMember[]> {
+  return await postJson<MagiMember[]>('/api/v1/magi/members', { assignments: members.map(m => ({
+    name: m.name, profile_id: m.profile_id, enabled: m.enabled,
+    weight: m.weight, timeout_seconds: m.timeout_seconds,
+    retry_within_turn: m.retry_within_turn,
+  })) })
+}
