@@ -97,6 +97,10 @@ const stoppable = computed(() =>
       </span>
     </div>
     <p class="live-explanation">{{ explanation }}</p>
+    <p v-if="currentOperation?.execution_reconciliation_required"
+      class="worker-warning" role="status" aria-label="Worker照合待ち">
+      Workerの稼働状況を確認できません。DBの処理中表示だけでは実行中と断定できません。
+    </p>
     <p v-if="task?.stop_requested || currentOperation?.stop_requested" class="muted small">
       停止を要求済みです。実際に停止したかどうかは保存済みTaskを確認してください。
     </p>
@@ -131,6 +135,8 @@ const stoppable = computed(() =>
 .live-dot.is-running { background: #187cbb; }
 .live-turn { font-size: 13px; font-weight: 650; color: #286a91; }
 .live-explanation { margin: 2px 0 8px; font-size: 13px; }
+.worker-warning { margin: 8px 0; padding: 8px 10px; border-left: 3px solid #b08240;
+  background: #fff6e8; font-size: 13px; }
 .live-actions { display: flex; align-items: center; gap: 12px; margin-top: 9px; flex-wrap: wrap; }
 .seat-state { font-weight: 650; margin-top: 5px; }
 .seat-running { color: #146995; }
