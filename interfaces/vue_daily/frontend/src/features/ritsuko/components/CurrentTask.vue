@@ -37,7 +37,8 @@ async function copyText(text: string, label: string): Promise<void> {
       </span>
     </div>
     <template v-if="task">
-      <p class="task-request-preview">{{ task.request }}</p>
+      <p class="task-request-preview">{{ task.request.length > 140
+        ? task.request.slice(0, 137) + '…' : task.request }}</p>
       <p class="muted small">{{ taskStatusLabel(task.status) }}（Task確定状態）</p>
 
       <div v-if="task.status === 'waiting_external' && task.phase === 'awaiting_clarification'"
@@ -91,7 +92,9 @@ async function copyText(text: string, label: string): Promise<void> {
 
       <details class="task-details">
         <summary>依頼・Goal・MAGI中間状態・Task ID</summary>
-        <div class="task-field"><span class="field-name">元の依頼</span><p>{{ task.request }}</p></div>
+        <div v-if="task.request.length > 140" class="task-field">
+          <span class="field-name">元の依頼（全文）</span><p>{{ task.request }}</p>
+        </div>
         <div v-if="task.goal_definition" class="task-field">
           <span class="field-name">Goal</span>
           <div>
