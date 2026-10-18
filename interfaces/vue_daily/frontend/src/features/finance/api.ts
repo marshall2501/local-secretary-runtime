@@ -12,7 +12,7 @@ export interface FinanceDashboard {
   transaction_count: number; calculation_target_count: number
   start_date: string | null; end_date: string | null
   income_total: number; expense_total: number; net_total: number
-  monthly: Array<Record<string, unknown>>
+  monthly: Array<{ month: string; income: number; expense: number; net: number; count: number }>
   categories: Array<{ major: string; minor: string; expense: number }>
   recent_rows: FinanceRow[]
   import_batches: Array<{ id: string; source_filename: string; row_count: number; imported_at: string; status: string }>
