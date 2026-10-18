@@ -13,6 +13,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def external_read_token() -> str | None:
+    """Read the existing local MCP read credential, if configured.
+
+    The missing credential leaves compatibility routes unavailable until
+    an actual caller is migrated. This never changes external clients.
+    """
+    raw = os.environ.get("LSA_EXTERNAL_READ_TOKEN_FILE", "").strip()
+    file = Path(raw) if raw else ROOT / "secrets" / "secretary-external-read-token.txt"
+    if not file.is_file():
+        return None
+    return file.read_text(encoding="utf-8").strip() or None
+
+
 
 def configure_daily_database(root: Path = ROOT) -> None:
     """Load the existing daily DB location without reading or printing secrets.
@@ -67,6 +80,7 @@ def build_daily_server():
         read_service=build_daily_memory_read_service(),
         pkb_repository=build_pkb_repository(),
         pkb_interpreter=interpret_daily,
+        external_read_token_loader=external_read_token,
         recover_pending_at_startup=False,
     )
 
