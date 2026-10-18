@@ -1,0 +1,38 @@
+// Provenance-Origin: original
+// Provenance-AI: AI-generated
+/** Stored Finance dashboard API; SQL/reporting remains in the Finance Application. */
+import { getJson } from '../../shared/api/http'
+
+export interface FinanceRow {
+  external_id: string; date: string; content: string; amount: number
+  account: string; major_category: string; minor_category: string
+  memo?: string; calculation_target: boolean; is_transfer: boolean
+}
+export interface FinanceDashboard {
+  transaction_count: number; calculation_target_count: number
+  start_date: string | null; end_date: string | null
+  income_total: number; expense_total: number; net_total: number
+  monthly: Array<Record<string, unknown>>
+  categories: Array<{ major: string; minor: string; expense: number }>
+  recent_rows: FinanceRow[]
+  import_batches: Array<{ id: string; source_filename: string; row_count: number; imported_at: string; status: string }>
+  page: number; page_size: number; total_pages: number
+}
+export interface FinanceFilters {
+  account: string; major_category: string; start_date: string; end_date: string
+  search_text: string; row_mode: 'calculation_target' | 'transfer' | 'all'
+  page: number; recent_limit: number; sort_by: 'date' | 'amount'
+  sort_dir: 'asc' | 'desc'
+}
+export interface FinanceOptions { accounts: string[]; major_categories: string[] }
+
+export async function loadFinanceDashboard(filters: FinanceFilters): Promise<FinanceDashboard> {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== '') query.set(key, String(value))
+  }
+  return await getJson<FinanceDashboard>('/api/v1/finance/dashboard?' + query.toString())
+}
+export async function loadFinanceOptions(): Promise<FinanceOptions> {
+  return await getJson<FinanceOptions>('/api/v1/finance/options')
+}
