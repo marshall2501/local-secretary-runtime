@@ -42,7 +42,7 @@ const savedMembers = computed(() => {
   <section v-if="task?.magi_session" class="card"
     aria-label="MAGI各席の処理状況">
     <div class="section-head">
-      <h2>MAGI 各席の処理状況</h2>
+      <h2>MAGI — 保存済みの判断履歴</h2>
     </div>
     <details class="magi-history" :open="defaultOpen">
       <summary>判断経過・各席の保存済み結果 <span class="muted small">（{{ turns.length }} Turn）</span></summary>
