@@ -307,7 +307,7 @@ test('18097新規Task→本人回答→Review→確定→F5同IDで復元する'
   const taskUrl = page.url()
   await expect(page.getByRole('textbox', { name: '依頼内容' })).toHaveValue('')
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'MAGI 各席の処理状況' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'MAGI — 保存済みの判断履歴' })).toBeVisible()
   for (const member of ['MELCHIOR', 'CASPER', 'BALTHASAR']) {
     await expect(page.locator('.magi-member', { hasText: member })).toBeVisible()
   }
