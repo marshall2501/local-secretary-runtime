@@ -29,7 +29,27 @@ export interface MagiSession {
   detail?: { state?: string; answer_candidate?: string | null } | null
   pending_requests?: unknown[]
   member_specs?: Array<{ name?: string; enabled?: boolean; provider?: string; model?: string }>
-  turns?: Array<{ stage?: string; status?: string; member_results?: MagiMemberResult[] }>
+  /** Task確定前の各TurnのMAGI判断。Sourceを要求→再回答の推移を表示する。 */
+  turns?: Array<{
+    stage?: string
+    status?: string
+    member_results?: MagiMemberResult[]
+    response?: {
+      next?: string
+      fulfillment?: string
+      reason?: string
+      evidence?: { basis?: string; result_ids?: string[] }
+      read_request?: { source?: string; query?: string } | null
+    } | null
+  }>
+  observations?: Array<{
+    source?: string
+    verified?: boolean
+    result_count?: number
+    result_id?: string
+    result_kind?: string
+    verification_level?: string
+  }>
 }
 /** 選択Taskの詳細。MAGI情報が存在してもTaskの完了を意味しない。 */
 export interface TaskRecord extends TaskSummary {
