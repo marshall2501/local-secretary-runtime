@@ -326,8 +326,8 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   // 先行の停止試験Taskが選択済みの場合もある。固定の旧Taskを明示的に選ぶ。
   await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Task履歴（既存画面）' }))
-    .toHaveAttribute('href', 'http://127.0.0.1:8093/core/history')
+  await expect(page.getByRole('link', { name: 'Task履歴（既存画面）' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'さらに読み込む' })).toHaveCount(1)
 })
 
 
