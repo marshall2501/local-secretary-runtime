@@ -204,8 +204,10 @@ test('本人回答中はTaskが確認待ちでもMAGI実行進捗を表示する
   })
   await page.getByRole('textbox', { name: '選択中のTaskへの本人回答' }).fill('Python')
   await page.getByRole('button', { name: '本人回答を送る' }).click()
-  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('running')).toBeVisible()
+  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('実行中')).toBeVisible()
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'RITSUKOが処理中' })).toBeVisible()
+  await expect(page.getByText('MAGI Turn 2')).toBeVisible()
 })
 
 test('18097新規Task→本人回答→Review→確定→F5同IDで復元する', async ({ page, context }) => {
@@ -233,6 +235,7 @@ test('18097新規Task→本人回答→Review→確定→F5同IDで復元する'
   await page.getByRole('button', { name: '回答のみで完了を依頼' }).click()
   await expect(page.getByText('完了（Task確定状態）')).toBeVisible()
   await expect(page.getByText('架空Taskの回答を確定しました。')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Taskの進行状況' })).toHaveCount(0)
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
     origin: 'http://127.0.0.1:18097',
   })
@@ -351,11 +354,13 @@ test('停止は保存済み状態で確認し、Actionの出典と監査履歴�
   await page.getByRole('textbox', { name: '依頼内容' }).fill('停止試験として処理を開始する')
   await page.getByRole('button', { name: '依頼を送信' }).click()
   await expect(page.getByText('受付（Task確定状態）')).toBeVisible()
-  await expect(page.getByText(/このAPIプロセスでの進捗/)).toBeVisible()
-  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('running')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Taskの進行状況' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'RITSUKOが処理中' })).toBeVisible()
+  await expect(page.getByLabel('MAGI席別の一時進捗').getByText('実行中')).toBeVisible()
   await page.getByRole('button', { name: '停止を要求' }).click()
   await expect(page.getByLabel('MAGI席別の一時進捗')).toHaveCount(0)
   await expect(page.getByText('停止（Task確定状態）')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Taskの進行状況' })).toHaveCount(0)
   await page.getByText('検証情報・実行経緯').click()
   await expect(page.getByText('参照元: https://example.org/reference')).toBeVisible()
   await expect(page.getByText('確認経路: fixture')).toBeVisible()
