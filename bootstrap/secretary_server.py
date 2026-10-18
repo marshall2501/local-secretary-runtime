@@ -69,7 +69,9 @@ def build_daily_server():
     from bootstrap.magi_task_runtime import build_daily_magi_task_commands
     from bootstrap.web_runtime import (
         build_core_task_queries, build_daily_memory_read_service,
-        build_pkb_repository,
+        build_pkb_repository, build_finance_repository,
+        build_service_connection_repository,
+        build_service_billing_settings_repository, connection,
     )
     from interfaces.api.secretary_server import create_app
     from pkb.daily_interpreter import interpret as interpret_daily
@@ -81,6 +83,10 @@ def build_daily_server():
         pkb_repository=build_pkb_repository(),
         pkb_interpreter=interpret_daily,
         external_read_token_loader=external_read_token,
+        finance_repository=build_finance_repository(),
+        service_connections=build_service_connection_repository(),
+        billing_settings=build_service_billing_settings_repository(),
+        database_connection=connection,
         recover_pending_at_startup=False,
     )
 
