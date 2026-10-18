@@ -442,3 +442,13 @@ test('Debugも同一Originで実行中サーバー情報を参照できる', asy
   await expect(page.getByRole('region', { name: '実行プロセス' })).toBeVisible()
   await expect(page.getByRole('region', { name: '環境設定状況' })).toBeVisible()
 })
+
+
+test('MAGI Profileと3席割当はSettingsから同一APIで保存できる', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8097/ui/?page=settings')
+  await expect(page.getByRole('heading', { name: 'MAGI — LLM Profile・メンバー割当' })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'CASPER Profile' }))
+    .toHaveValue('fake-llm-profile')
+  await page.getByRole('button', { name: 'MAGI割当を保存' }).click()
+  await expect(page.getByRole('status')).toContainText('MAGIメンバー3席の割当')
+})
