@@ -10,9 +10,10 @@ import TaskCommandPanel from './components/TaskCommandPanel.vue'
 import MagiProgress from './components/MagiProgress.vue'
 import TaskActivity from './components/TaskActivity.vue'
 import TaskSidebar from './components/TaskSidebar.vue'
+import MagiSettingsPanel from '../system/MagiSettingsPanel.vue'
 
 const {
-  items, view, hasMore, selectedId, trace, selected, connected, refreshing,
+  layout, items, view, hasMore, selectedId, trace, selected, connected, refreshing,
   problem, refresh, selectTask, selectView, loadMore,
   commandsEnabled, commandBusy, commandFeedback, commandError, operation,
   draftRequest, strategy, defaultStrategy, showStrategySelector,
@@ -46,9 +47,15 @@ const {
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @stop="sendStop" @resume="sendResume"
         @save-preferences="savePreferences" @refresh="() => refresh(true)"
       />
+      <details v-if="layout?.visibility.core.magi_configuration !== false"
+        class="card magi-config-accordion" :open="layout?.core.magi_configuration === true">
+        <summary>MAGI — 3席のLLM設定</summary>
+        <MagiSettingsPanel />
+      </details>
       <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
       <MagiProgress :task="selected" :operation="operation" />
-      <TaskActivity :trace="trace" />
+      <TaskActivity v-if="layout?.visibility.core.trace !== false"
+        :trace="trace" :default-open="layout?.core.trace === true" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
       :commands-enabled="commandsEnabled" :has-more="hasMore" :loading="refreshing"
@@ -56,3 +63,10 @@ const {
     />
   </div>
 </template>
+
+<style scoped>
+.magi-config-accordion { padding:12px 14px; border-color:#a6d9d1; background:#f0fbf8; }
+.magi-config-accordion > summary { cursor:pointer; padding:4px 0; font-weight:700; }
+.magi-config-accordion[open] > summary { border-bottom:1px solid #c6e1dc; padding-bottom:10px; margin-bottom:11px; }
+.magi-config-accordion :deep(.magi-settings) { margin:0; box-shadow:none; }
+</style>
