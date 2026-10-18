@@ -327,7 +327,7 @@ test('旧Taskを10件からさらに読み込み、確定Goalを未確定と表�
   await page.getByRole('button', { name: /架空の過去Task 12/ }).click()
   await expect(page.getByText('Goal確定済み / v2。Task完了とは別です。')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Task履歴（既存画面）' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'さらに読み込む' })).toHaveCount(1)
+  await expect(page.getByRole('complementary', { name: '保存済みTask一覧' })).toBeVisible()
 })
 
 
