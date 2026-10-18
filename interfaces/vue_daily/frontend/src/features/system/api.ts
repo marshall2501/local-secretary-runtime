@@ -45,8 +45,26 @@ export async function readConnections(): Promise<ConnectionSummary[]> {
 export async function readBillingProfiles(): Promise<BillingProfile[]> {
   return await getJson<BillingProfile[]>('/api/v1/billing/profiles')
 }
-export async function readBillingSnapshot(id: string): Promise<Record<string, unknown>> {
-  return await getJson<Record<string, unknown>>(
+/** Current product-level monthly snapshot, not the richer Review Lab history API. */
+export interface ServiceBillingSnapshot {
+  service?: string
+  connection_name?: string
+  period_start?: string
+  fetched_at?: string
+  activity?: {
+    status?: string
+    totals?: { requests?: number; input_tokens?: number; output_tokens?: number }
+    by_model?: Array<{ model: string; requests?: number; input_tokens?: number; output_tokens?: number }>
+    breakdown?: Record<string, number>
+  }
+  charges?: { status?: string; values?: Record<string, number>; reason?: string }
+  credits?: { status?: string; reason?: string }
+  subscription?: { status?: string; reason?: string }
+  limits?: { status?: string; values?: unknown; reason?: string }
+  [key: string]: unknown
+}
+export async function readBillingSnapshot(id: string): Promise<ServiceBillingSnapshot> {
+  return await getJson<ServiceBillingSnapshot>(
     '/api/v1/billing/profiles/' + encodeURIComponent(id) + '/snapshot',
   )
 }
