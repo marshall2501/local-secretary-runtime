@@ -104,6 +104,42 @@ class SecretaryServerTests(unittest.TestCase):
             base_url="http://127.0.0.1:8097",
         )
 
+    def test_one_origin_restores_entity_read_views_without_new_database(self):
+        """Existing PKB Repository supplies current/history/relations to Vue."""
+        uid = uuid4()
+        entity = {"id": str(uid), "name": "架空PC", "domain": "pc", "entity_type": "device"}
+
+        class EntityRepo:
+            def list_entities(self):
+                return [entity]
+
+            def load_entity_detail(self, identifier):
+                if identifier != str(uid):
+                    return None
+                return {
+                    "entity": entity,
+                    "current": [{"id": str(uid), "predicate": "os", "value": "Windows",
+                                 "valid_from": "2026-10-18T00:00:00+09:00"}],
+                    "history": [], "events": [], "relations": [],
+                }
+
+        client = TestClient(create_app(
+            queries=self.query, commands=self.commands, read_service=self.reader,
+            pkb_repository=EntityRepo(), dist_dir=self.dist,
+        ), base_url="http://127.0.0.1:8097")
+        index = client.get("/api/v1/pkb/entities?limit=10&offset=0")
+        self.assertEqual(index.status_code, 200, index.text)
+        self.assertEqual(index.json()["total"], 1)
+        detail = client.get("/api/v1/pkb/entities/" + str(uid))
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["entity"]["name"], "架空PC")
+        self.assertEqual(detail.json()["current"][0]["value"], "Windows")
+        self.assertEqual(client.get(
+            "/api/v1/pkb/entities/" + str(uuid4())).status_code, 404)
+        self.assertEqual(client.get(
+            "/api/v1/pkb/entities/not-a-uuid").status_code, 422)
+        self.assertEqual(self.client.get("/api/v1/pkb/entities").status_code, 503)
+
     def test_one_origin_serves_vue_tasks_and_independent_pkb(self):
         uid = str(self.query.uid)
         self.assertEqual(self.client.get("/").status_code, 200)
