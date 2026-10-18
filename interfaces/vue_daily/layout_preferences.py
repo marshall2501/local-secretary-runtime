@@ -36,7 +36,7 @@ def _defaults() -> dict:
         "finance": {**FINANCE_DEFAULT_OPEN, "recent_limit": 25},
         "core": {**CORE_UI_DEFAULT_OPEN, "open_limit": 5, "completed_limit": 5},
         "debug": {"er_diagram_providers": {
-            name: name == "native_mermaid" for name in ER_PROVIDERS,
+            name: name == "native_mermaid" for name in ER_PROVIDERS
         }},
         "visibility": {
             "pkb": {name: True for name in PKB_DEFAULT_OPEN},
