@@ -6,6 +6,7 @@
  */
 import { useTasks } from './useTasks'
 import CurrentTask from './components/CurrentTask.vue'
+import TaskLiveStatus from './components/TaskLiveStatus.vue'
 import TaskCommandPanel from './components/TaskCommandPanel.vue'
 import MagiProgress from './components/MagiProgress.vue'
 import TaskActivity from './components/TaskActivity.vue'
@@ -33,6 +34,9 @@ const {
   <p v-if="problem" class="error" role="alert">{{ problem }}</p>
   <div class="workspace">
     <main class="ritsuko-main">
+      <TaskLiveStatus :task="selected" :task-id="selectedId" :operation="operation"
+        :connected="connected" :commands-enabled="commandsEnabled"
+        :busy="commandBusy" @stop="sendStop" />
       <!-- 保存済みTaskを開いた場合は回答を先に。新規入力は直後で常時編集可能。 -->
       <CurrentTask v-if="selected" :task="selected" :trace="trace" :loading="refreshing" />
       <TaskCommandPanel
