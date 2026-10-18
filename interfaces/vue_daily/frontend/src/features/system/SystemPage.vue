@@ -108,7 +108,11 @@ async function load(): Promise<void> {
   problem.value = ''
   try {
     if (props.section === 'service-billing') {
-      profiles.value = await readBillingProfiles()
+      const [nextProfiles, nextConnections] = await Promise.all([
+        readBillingProfiles(), readConnections(),
+      ])
+      profiles.value = nextProfiles
+      connections.value = nextConnections
       selected.value = profiles.value.find(p => p.enabled && p.connection_enabled)?.id || ''
     } else if (props.section === 'settings') {
       connections.value = await readConnections()
@@ -237,9 +241,26 @@ onMounted(() => { void load() })
       </div>
     </form>
     <h3>Billing Profileの登録・編集</h3>
+    <div class="command-row">
+      <button v-for="item in profiles" :key="item.id" type="button" class="secondary"
+        @click="profileForm = {
+          profile_id: item.id, display_name: item.display_name,
+          connection_id: item.connection_id, enabled: item.enabled,
+        }">編集：{{ item.display_name }}</button>
+      <button type="button" class="secondary"
+        @click="profileForm = { profile_id: '', display_name: '', connection_id: '', enabled: true }">新規Profile</button>
+    </div>
     <form class="command-form" @submit.prevent="writeBillingProfile">
       <label>Profile名 <input v-model="profileForm.display_name" aria-label="Billing Profile名" required /></label>
-      <label>接続ID <input v-model="profileForm.connection_id" aria-label="Billing接続ID" required /></label>
+      <label>接続
+        <select v-model="profileForm.connection_id" aria-label="Billing接続ID" required>
+          <option value="">選択してください</option>
+          <option v-for="item in connections.filter(c => c.capabilities?.includes('service_billing_read'))"
+            :key="item.id" :value="item.id">
+            {{ item.display_name }} / {{ item.adapter_key }}
+          </option>
+        </select>
+      </label>
       <label><input v-model="profileForm.enabled" type="checkbox" /> 有効</label>
       <button type="submit" class="secondary" :disabled="formBusy || !profileForm.display_name.trim() || !profileForm.connection_id.trim()">
         Profileを保存
