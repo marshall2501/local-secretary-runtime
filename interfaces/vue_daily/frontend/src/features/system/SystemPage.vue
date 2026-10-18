@@ -4,9 +4,9 @@
 import { onMounted, ref } from 'vue'
 import {
   readBillingProfiles, readBillingSnapshot, readConnections,
-  readDatabase, readEnvironment, readRuntime, saveConnection, saveBillingProfile,
+  readDatabase, readEnvironment, readRuntime, readApiRoutes, saveConnection, saveBillingProfile,
 } from './api'
-import type { ConnectionSummary, BillingProfile, RuntimeInfo, EnvironmentItem } from './api'
+import type { ConnectionSummary, BillingProfile, RuntimeInfo, EnvironmentItem, ApiRouteInfo } from './api'
 
 const props = defineProps<{ section: 'service-billing' | 'debug' | 'settings' }>()
 const connections = ref<ConnectionSummary[]>([])
@@ -15,6 +15,7 @@ const usage = ref<Record<string, unknown> | null>(null)
 const runtime = ref<RuntimeInfo | null>(null)
 const environment = ref<EnvironmentItem[]>([])
 const database = ref<Record<string, unknown> | null>(null)
+const routes = ref<ApiRouteInfo[]>([])
 const selected = ref('')
 const loading = ref(false)
 const reading = ref(false)
@@ -117,11 +118,12 @@ async function load(): Promise<void> {
     } else if (props.section === 'settings') {
       connections.value = await readConnections()
     } else {
-      const [run, env, db] = await Promise.allSettled([
-        readRuntime(), readEnvironment(), readDatabase(),
+      const [run, env, db, api] = await Promise.allSettled([
+        readRuntime(), readEnvironment(), readDatabase(), readApiRoutes(),
       ])
       if (run.status === 'fulfilled') runtime.value = run.value
       if (env.status === 'fulfilled') environment.value = env.value
+      if (api.status === 'fulfilled') routes.value = api.value
       if (db.status === 'fulfilled') database.value = db.value
       if (run.status === 'rejected') throw run.reason
       if (db.status === 'rejected') problem.value = 'DB診断は取得できません（' + String(db.reason) + '）。'
@@ -291,6 +293,14 @@ onMounted(() => { void load() })
         <pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ JSON.stringify(database.migration || {}, null, 2) }}</pre>
       </template>
       <p v-else class="muted">DB診断はまだ取得できていません。</p>
+    </section>
+    <section class="card" aria-label="API一覧">
+      <h2>API一覧（{{ routes.length }}件）</h2>
+      <div v-for="item in routes" :key="item.path + item.methods.join(',')" class="pkb-record">
+        <strong>{{ item.methods.join(', ') }}</strong>
+        <span> {{ item.path }} </span>
+        <span class="muted small">{{ item.name }}</span>
+      </div>
     </section>
     <section class="card" aria-label="環境設定状況">
       <h2>環境設定</h2>
