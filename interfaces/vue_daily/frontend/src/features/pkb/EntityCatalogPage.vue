@@ -1,18 +1,42 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
 /** Read-only Entity catalog and detailed State/History/Relations from the common PKB API. */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { readLayoutPreferences } from '../../shared/layoutPreferences'
+import type { LayoutPreferences } from '../../shared/layoutPreferences'
 import { listEntities, readEntity } from './api'
 import type { EntityCatalog, EntityDetail, EntityFact } from './api'
 
-type Section = 'current' | 'history' | 'relations'
+type Section = 'overview' | 'history' | 'relations' | 'sources'
 const params = new URLSearchParams(window.location.search)
 const entityId = params.get('id') || ''
 const loading = ref(false)
 const problem = ref('')
 const catalog = ref<EntityCatalog | null>(null)
 const detail = ref<EntityDetail | null>(null)
-const selected = ref<Section>('current')
+const selected = ref<Section>('overview')
+const layout = ref<LayoutPreferences | null>(null)
+const tabs = computed(() => (['overview', 'history', 'relations', 'sources'] as Section[])
+  .filter(key => layout.value?.visibility.entity[key] !== false))
+const sources = computed(() => {
+  const found = new Map<string, Set<string>>()
+  const data = detail.value
+  if (!data) return []
+  for (const [section, rows] of [
+    ['現在値', data.current], ['履歴', data.history],
+    ['Event', data.events], ['関連', data.relations],
+  ] as const) {
+    for (const row of rows) {
+      const uri = row.source_uri?.trim()
+      if (!uri) continue
+      if (!found.has(uri)) found.set(uri, new Set())
+      found.get(uri)?.add(section)
+    }
+  }
+  return [...found.entries()].map(([uri, sections]) => ({
+    uri, sections: [...sections].join(' / '),
+  }))
+})
 const search = ref('')
 
 function entityLink(id: string): string {
@@ -44,7 +68,14 @@ async function load(offset = 0): Promise<void> {
     loading.value = false
   }
 }
-onMounted(() => { void load() })
+onMounted(() => {
+  void readLayoutPreferences().then(value => {
+    layout.value = value
+    const requested = value.entity.default_tab as Section
+    selected.value = tabs.value.includes(requested) ? requested : tabs.value[0] || 'overview'
+  }).catch(() => { /* The data viewer remains usable with legacy defaults. */ })
+  void load()
+})
 </script>
 
 <template>
@@ -102,12 +133,13 @@ onMounted(() => { void load() })
     </section>
     <section class="card" aria-label="Entityの記録">
       <div class="entity-tabs" role="tablist" aria-label="Entityの表示">
-        <button v-for="tab in (['current', 'history', 'relations'] as const)" :key="tab"
+        <button v-for="tab in tabs" :key="tab"
           type="button" role="tab" :aria-selected="selected === tab" @click="selected = tab">
-          {{ tab === 'current' ? '現在値' : tab === 'history' ? '変更履歴・Event' : '関連Entity' }}
+          {{ tab === 'overview' ? '現在値' : tab === 'history' ? '変更履歴・Event' :
+            tab === 'relations' ? '関連Entity' : '出典' }}
         </button>
       </div>
-      <template v-if="selected === 'current'">
+      <template v-if="selected === 'overview'">
         <p v-if="!detail.current.length" class="muted">現在値として表示できるState・Attributeはありません。</p>
         <div v-for="fact in detail.current" :key="fact.id" class="entity-fact">
           <div><strong>{{ fact.predicate }}</strong><span class="status">{{ fact.semantic_kind || '現在値' }}</span></div>
@@ -139,6 +171,15 @@ onMounted(() => { void load() })
             <span class="muted small"> / {{ relation.other_entity_type }}</span></p>
           <small>{{ relation.relation_role || '—' }} / {{ relation.valid_from }}</small>
           <p v-if="relation.source_uri" class="muted small">出典：{{ relation.source_uri }}</p>
+        </div>
+      </template>
+      <template v-if="selected === 'sources'">
+        <p v-if="!sources.length" class="muted">参照できる出典はありません。</p>
+        <div v-for="item in sources" :key="item.uri" class="entity-fact">
+          <strong>{{ item.sections }}</strong>
+          <p v-if="sourceLink(item.uri)"><a :href="sourceLink(item.uri)"
+            target="_blank" rel="noopener noreferrer">{{ item.uri }}</a></p>
+          <p v-else class="muted">{{ item.uri }}</p>
         </div>
       </template>
     </section>
