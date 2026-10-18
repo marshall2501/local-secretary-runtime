@@ -85,3 +85,8 @@ export async function saveConnection(input: ConnectionInput): Promise<Connection
 export async function saveBillingProfile(input: BillingProfileInput): Promise<BillingProfile> {
   return await postJson<BillingProfile>('/api/v1/billing/profiles', input)
 }
+
+export interface ApiRouteInfo { path: string; methods: string[]; name: string }
+export async function readApiRoutes(): Promise<ApiRouteInfo[]> {
+  return await getJson<ApiRouteInfo[]>('/api/v1/debug/routes')
+}
