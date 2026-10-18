@@ -5,7 +5,6 @@
  * Taskの完了判断、実行、権限処理、DBへの保存は行わない。
  */
 import { computed } from 'vue'
-import { legacyPageUrl } from '../../../shared/navigation'
 import type { DecisionStrategy, TaskOperation } from '../api'
 import type { TaskRecord } from '../types'
 
@@ -52,7 +51,6 @@ const stoppable = computed(() =>
   props.task !== null &&
   ['pending', 'running'].includes(props.task.status) &&
   props.task.stop_requested !== true)
-const niceguiCore = legacyPageUrl('/core')
 </script>
 
 <template>
@@ -60,13 +58,12 @@ const niceguiCore = legacyPageUrl('/core')
     <div class="section-head">
       <h2>新しい依頼を入力</h2>
       <span class="small" :class="commandsEnabled ? 'command-mode-enabled' : 'muted'">
-        {{ commandsEnabled ? '入力・送信可能（8099）' : '読取専用' }}
+        {{ commandsEnabled ? '入力・送信可能' : 'Task操作API未接続' }}
       </span>
     </div>
 
     <p v-if="!commandsEnabled" class="read-only-notice" role="status">
-      この画面ではTaskを送信できません。
-      <a class="link-button" href="http://127.0.0.1:8099/ui/">実Task操作画面（8099）を開く</a>
+      Task操作APIが接続されていません。システム診断で状態を確認してください。
     </p>
 
     <!-- textarea自体は常に配置し、読取専用の場合も入力場所を隠さない。 -->
@@ -74,7 +71,7 @@ const niceguiCore = legacyPageUrl('/core')
       <label for="task-request">依頼内容</label>
       <textarea id="task-request" v-model="request" rows="4"
         maxlength="4000" autocomplete="off"
-        :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : '8099番の実Task操作画面で入力できます'"
+        :placeholder="commandsEnabled ? '秘書AIに依頼したいことを入力してください' : 'Task操作APIが接続されていません'"
         :disabled="busy || !commandsEnabled" required />
       <div class="command-row">
         <template v-if="activeShowStrategySelector">
@@ -121,10 +118,6 @@ const niceguiCore = legacyPageUrl('/core')
         {{ preferencesMessage }}
       </p>
     </details>
-    <p v-if="!commandsEnabled" class="muted small">
-      8097では入力・送信を無効にしています。操作画面が使えない場合は
-      <a :href="niceguiCore">既存のRITSUKO画面</a>を利用できます。
-    </p>
 
     <template v-if="commandsEnabled && task">
       <form v-if="answerable" class="command-form" @submit.prevent="emit('answer')">
