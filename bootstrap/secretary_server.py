@@ -13,6 +13,50 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Keep the settings consumed by the existing MAGI/Provider composition, while
+# allowing the old NiceGUI launcher and its process to be deleted.
+_RUNTIME_ENV_NAMES = {
+    "OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "OPENAI_BASE_URL",
+    "GEMINI_API_KEY", "GEMINI_BASE_URL", "OLLAMA_HOST",
+    "LSA_OLLAMA_CONTEXT_TOKENS", "LSA_MAGI_OLLAMA_NUM_PREDICT",
+    "LSA_MAGI_CLOUD_ENABLED",
+}
+for _member in ("MELCHIOR", "CASPER", "BALTHASAR"):
+    for _field in (
+        "PROVIDER", "MODEL", "ENDPOINT", "CREDENTIAL_ENV", "ENABLED",
+        "WEIGHT", "TIMEOUT_SECONDS", "CONTEXT_TOKENS",
+    ):
+        _RUNTIME_ENV_NAMES.add(f"LSA_MAGI_{_member}_{_field}")
+
+
+def configure_runtime_environment(root: Path = ROOT) -> None:
+    """Load the existing owner's optional .env before composing MAGI.
+
+    Args:
+        root: Runtime source root containing the existing .env file.
+
+    The function reads only recognized runtime entries, keeps the original
+    file untouched and does not print credential values.
+    """
+    file = root / ".env"
+    if not file.is_file():
+        return
+    seen: set[str] = set()
+    for raw in file.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if name not in _RUNTIME_ENV_NAMES:
+            continue
+        if name in seen:
+            raise RuntimeError("duplicate runtime setting: " + name)
+        seen.add(name)
+        os.environ[name] = value.strip()
+
+
+
 def external_read_token() -> str | None:
     """Read the existing local MCP read credential, if configured.
 
@@ -97,6 +141,7 @@ def main() -> None:
     from infrastructure.secretary_logging import build_secretary_log_config
 
     configure_daily_database()
+    configure_runtime_environment()
     port = int(os.environ.get("LSA_SECRETARY_PORT", "8097"))
     if not 1024 <= port <= 65535:
         raise RuntimeError("invalid LSA_SECRETARY_PORT")
