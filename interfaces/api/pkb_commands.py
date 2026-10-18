@@ -25,7 +25,7 @@ class PkbTextCommand(BaseModel):
 class PendingDecision(BaseModel):
     """User-confirmed outcome for an existing PKB Pending claim."""
 
-    decision: Literal["rejected", "needs_revision"]
+    decision: Literal["rejected", "needs_edit"]
 
 
 def create_pkb_command_router(*, repository=None, interpreter=None) -> APIRouter:
@@ -76,7 +76,7 @@ def create_pkb_command_router(*, repository=None, interpreter=None) -> APIRouter
 
     @router.post("/pending/{pending_id}/review")
     async def review(pending_id: str, body: PendingDecision):
-        """Record a rejected/needs_revision decision for a Pending claim."""
+        """Record a rejected/needs_edit decision for a Pending claim."""
         return await asyncio.to_thread(
             repo().review_pending, pending_id, body.decision,
         )
