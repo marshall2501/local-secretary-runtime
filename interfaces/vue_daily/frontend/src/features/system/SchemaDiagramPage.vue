@@ -2,7 +2,6 @@
 <script setup lang="ts">
 /** Read-only ER viewer. Mermaid is the same graph layout engine used by the former NiceGUI view. */
 import { onMounted, ref } from 'vue'
-import mermaid from 'mermaid'
 import { readSchemaDiagram } from './api'
 import type { SchemaDiagramResult } from './api'
 
@@ -19,14 +18,6 @@ const intrinsicWidth = ref(1600)
 const viewport = ref<HTMLElement | null>(null)
 let renderNumber = 0
 
-// The graph is rendered locally in the browser: no second server or CDN.
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: 'strict',
-  theme: 'default',
-  er: { useMaxWidth: false },
-})
-
 /** Refresh only from real schema metadata, retaining a legible graph scale by default. */
 async function refresh(): Promise<void> {
   if (loading.value) return
@@ -39,6 +30,12 @@ async function refresh(): Promise<void> {
     if (next.status !== 'ok' || !next.content.trim()) {
       throw new Error('Mermaid ERソースを取得できませんでした')
     }
+    // Lazy-load Mermaid only on the ER page; other Secretary screens remain light.
+    const { default: mermaid } = await import('mermaid')
+    mermaid.initialize({
+      startOnLoad: false, securityLevel: 'strict',
+      theme: 'default', er: { useMaxWidth: false },
+    })
     // The former NiceGUI drew this same Mermaid source, rather than an
     // alphabetically sorted four-column approximation of the relationship graph.
     const rendered = await mermaid.render('secretary-db-er-' + (++renderNumber), next.content)
