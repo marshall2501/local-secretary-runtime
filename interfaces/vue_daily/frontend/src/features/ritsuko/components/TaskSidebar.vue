@@ -29,6 +29,7 @@ const closed = computed(() => props.items.filter(task => isTaskClosed(task.statu
   <aside class="task-sidebar card" aria-label="保存済みTask一覧">
     <div class="section-head">
       <h2>既存Task</h2>
+      <a class="small" href="/ui/?page=history">全履歴 →</a>
       <span class="muted small">{{ items.length }}件表示</span>
     </div>
     <div class="task-filters" aria-label="Task表示範囲">
