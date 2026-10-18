@@ -4,6 +4,7 @@
 import SecretaryLayout from './app/SecretaryLayout.vue'
 import HomePage from './features/home/HomePage.vue'
 import RitsukoPage from './features/ritsuko/RitsukoPage.vue'
+import TaskHistoryPage from './features/ritsuko/TaskHistoryPage.vue'
 import PkbPage from './features/pkb/PkbPage.vue'
 import EntityCatalogPage from './features/pkb/EntityCatalogPage.vue'
 import FinancePage from './features/finance/FinancePage.vue'
@@ -23,6 +24,7 @@ const section = new URLSearchParams(window.location.search).get('page') || 'core
     <SystemPage v-else-if="section === 'settings'" section="settings" />
     <SystemPage v-else-if="section === 'debug'" section="debug" />
     <SchemaDiagramPage v-else-if="section === 'er'" />
+    <TaskHistoryPage v-else-if="section === 'history'" />
     <RitsukoPage v-else />
   </SecretaryLayout>
 </template>
