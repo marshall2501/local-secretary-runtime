@@ -13,6 +13,13 @@ from copy import deepcopy
 from uuid import UUID, uuid5, NAMESPACE_DNS
 
 from interfaces.api.secretary_server import create_app
+from application.schema_diagram import (
+    SchemaColumn, SchemaDiagramService, SchemaForeignKey,
+    SchemaSnapshot, SchemaTable,
+)
+from infrastructure.schema_diagram.svg_renderer import NativeSvgProvider
+from infrastructure.schema_diagram.providers import NativeMermaidProvider
+
 
 
 class BrowserFixtureStore:
@@ -320,11 +327,34 @@ async def serve() -> None:
 
     store = BrowserFixtureStore()
     reader = BrowserFixtureReadService()
+    schema = SchemaSnapshot(
+        database="secretary", schema="secretary",
+        tables=(
+            SchemaTable(name="tasks", kind="BASE TABLE", columns=(
+                SchemaColumn("id", "uuid", False, primary_key=True),
+                SchemaColumn("request", "text", False),
+            )),
+            SchemaTable(name="results", kind="BASE TABLE", columns=(
+                SchemaColumn("id", "uuid", False, primary_key=True),
+                SchemaColumn("task_id", "uuid", False, foreign_key=True),
+            )),
+        ),
+        foreign_keys=(
+            SchemaForeignKey("results_task_fk", "results", ("task_id",),
+                             "tasks", ("id",), "NO ACTION", "CASCADE"),
+        ),
+        views=(),
+    )
+    schema_diagrams = SchemaDiagramService((
+        NativeSvgProvider(lambda: schema),
+        NativeMermaidProvider(lambda: schema),
+    ))
     app = create_app(
         queries=store, commands=BrowserFixtureCommands(store),
         read_service=reader, finance_repository=BrowserFinance(),
         service_connections=BrowserConnections(), billing_settings=BrowserBilling(),
         magi_settings=BrowserMagiSettings(),
+        schema_diagram_service=schema_diagrams,
         recover_pending_at_startup=False,
     )
     server = uvicorn.Server(uvicorn.Config(
