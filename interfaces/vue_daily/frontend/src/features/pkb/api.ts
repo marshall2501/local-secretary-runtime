@@ -88,3 +88,36 @@ export async function reviewPending(
     '/api/v1/pkb/pending/' + encodeURIComponent(id) + '/review', { decision },
   )
 }
+
+/** Read the existing Entity/State/Relation history; no PKB writes. */
+export interface EntityRecord {
+  id: string; name: string; domain: string; entity_type: string
+}
+export interface EntityFact {
+  id: string; predicate: string; value: unknown; semantic_kind?: string
+  valid_from: string; valid_to?: string | null; source_uri?: string | null
+  verification_status?: string | null
+}
+export interface EntityRelation {
+  id: string; direction: string; predicate: string; relation_role?: string | null
+  other_entity_id: string; other_entity_name: string; other_entity_type: string
+  valid_from: string; valid_to?: string | null; source_uri?: string | null
+}
+export interface EntityDetail {
+  entity: EntityRecord
+  current: EntityFact[]
+  history: EntityFact[]
+  events: EntityFact[]
+  relations: EntityRelation[]
+}
+export interface EntityCatalog {
+  items: EntityRecord[]; total: number; offset: number; limit: number
+}
+export async function listEntities(limit = 100, offset = 0): Promise<EntityCatalog> {
+  return await getJson<EntityCatalog>(
+    '/api/v1/pkb/entities?limit=' + limit + '&offset=' + offset,
+  )
+}
+export async function readEntity(id: string): Promise<EntityDetail> {
+  return await getJson<EntityDetail>('/api/v1/pkb/entities/' + encodeURIComponent(id))
+}
