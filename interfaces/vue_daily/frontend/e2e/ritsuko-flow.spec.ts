@@ -499,6 +499,38 @@ test('Debugから旧NiceGUIなしでDB ER図を表示・密度変更・Mermaid�
   await expect(page.getByText('erDiagram', { exact: false })).toBeVisible()
 })
 
+test('PKB Entity一覧から現在値・履歴・関連を同じVueへ表示する', async ({ page }) => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  const related = '22222222-2222-4222-8222-222222222222'
+  await page.route('**/api/v1/pkb/entities?*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      total: 1, limit: 100, offset: 0,
+      items: [{ id, name: '架空サブPC', domain: 'pc', entity_type: 'device' }],
+    }) })
+  })
+  await page.route('**/api/v1/pkb/entities/' + id, async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      entity: { id, name: '架空サブPC', domain: 'pc', entity_type: 'device' },
+      current: [{ id: 'fact-1', predicate: 'OS', value: '架空Windows',
+        valid_from: '2026-10-18T00:00:00+09:00', source_uri: 'https://example.com' }],
+      history: [{ id: 'fact-2', semantic_kind: 'state', predicate: 'OS', value: '架空旧OS',
+        valid_from: '2026-01-01T00:00:00+09:00', valid_to: '2026-10-17T00:00:00+09:00' }],
+      events: [], relations: [{ id: 'rel-1', direction: 'outgoing', predicate: 'has_component',
+        other_entity_id: related, other_entity_name: '架空GPU', other_entity_type: 'hardware',
+        valid_from: '2026-10-18T00:00:00+09:00' }],
+    }) })
+  })
+  await page.goto('http://127.0.0.1:8097/ui/?page=entities')
+  await expect(page.getByRole('heading', { name: 'Entity一覧' })).toBeVisible()
+  await page.getByRole('link', { name: /架空サブPC/ }).click()
+  await expect(page.getByRole('heading', { name: 'Entity詳細' })).toBeVisible()
+  await expect(page.getByText('架空Windows')).toBeVisible()
+  await page.getByRole('tab', { name: '変更履歴・Event' }).click()
+  await expect(page.getByText('架空旧OS')).toBeVisible()
+  await page.getByRole('tab', { name: '関連Entity' }).click()
+  await expect(page.getByRole('link', { name: '架空GPU' })).toBeVisible()
+})
+
 test('Googleの料金未取得は0円と誤表示せず、実際の利用量だけ示す', async ({ page }) => {
   await page.route('**/api/v1/billing/profiles', async route => {
     await route.fulfill({
