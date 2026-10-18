@@ -2,7 +2,7 @@
 # Provenance-AI: AI-generated
 """Composition root and executable entry for the unified local Secretary Server.
 
-This process serves Vue and all owner Task and PKB routes through a single
+This process serves Vue and owner Task and PKB read/write routes through a single
 FastAPI application. Importing this module does not connect to a real DB.
 """
 from __future__ import annotations
@@ -56,13 +56,17 @@ def build_daily_server():
     from bootstrap.magi_task_runtime import build_daily_magi_task_commands
     from bootstrap.web_runtime import (
         build_core_task_queries, build_daily_memory_read_service,
+        build_pkb_repository,
     )
     from interfaces.api.secretary_server import create_app
+    from pkb.daily_interpreter import interpret as interpret_daily
 
     return create_app(
         queries=build_core_task_queries(),
         commands=build_daily_magi_task_commands(),
         read_service=build_daily_memory_read_service(),
+        pkb_repository=build_pkb_repository(),
+        pkb_interpreter=interpret_daily,
         recover_pending_at_startup=False,
     )
 
