@@ -24,6 +24,7 @@ from interfaces.api.external_read import create_external_read_router
 from interfaces.api.finance import create_finance_router
 from interfaces.api.daily_overview import create_daily_overview_router
 from interfaces.api.magi_settings import create_magi_settings_router
+from interfaces.api.ui_layout import create_ui_layout_router
 from interfaces.vue_daily.preferences import (
     read_judgment_preferences, save_judgment_preferences,
 )
@@ -154,6 +155,7 @@ def create_app(*, queries, commands: TaskCommands | None = None,
         ),
         create_finance_router(repository=finance_repository),
         create_magi_settings_router(repository=magi_settings),
+        create_ui_layout_router(allow_changes=commands is not None),
         create_daily_overview_router(
             connections=service_connections, billing_settings=billing_settings,
             database_connection=database_connection,
