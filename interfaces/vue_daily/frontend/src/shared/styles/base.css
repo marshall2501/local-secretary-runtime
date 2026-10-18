@@ -97,6 +97,23 @@ button.secondary { border:1px solid #adbfce; background:#fff; color:#35516c; bor
   .magi-members { grid-template-columns:1fr; }
 }
 
+/* PKB登録欄はTask入力と同じく、長文を編集できる大きさにする。 */
+.pkb-input {
+  display:block;
+  width:100%;
+  max-width:100%;
+  min-height:120px;
+  padding:11px 13px;
+  border:1px solid #8da9bd;
+  border-radius:8px;
+  color:inherit;
+  background:#fff;
+  resize:vertical;
+  line-height:1.6;
+  box-sizing:border-box;
+}
+.pkb-input:focus { outline:2px solid #00887e; outline-offset:2px; }
+
 /* PKB参照: 独立ReadServiceの結果を省略せず安全に表示する。 */
 .pkb-search { margin-top:12px; }
 .pkb-search-fields { display:grid; grid-template-columns:2fr 1fr minmax(150px,.7fr); gap:12px; margin:12px 0; }
