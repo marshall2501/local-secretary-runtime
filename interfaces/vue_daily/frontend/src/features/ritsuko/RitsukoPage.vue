@@ -33,6 +33,8 @@ const {
   <p v-if="problem" class="error" role="alert">{{ problem }}</p>
   <div class="workspace">
     <main class="ritsuko-main">
+      <!-- 保存済みTaskを開いた場合は回答を先に。新規入力は直後で常時編集可能。 -->
+      <CurrentTask v-if="selected" :task="selected" :trace="trace" :loading="refreshing" />
       <TaskCommandPanel
         v-model:request="draftRequest" v-model:strategy="strategy"
         v-model:default-strategy="defaultStrategy"
@@ -47,15 +49,15 @@ const {
         @start="sendStart" @answer="sendAnswer" @review="sendReview" @remember="sendRemember" @stop="sendStop" @resume="sendResume"
         @save-preferences="savePreferences" @refresh="() => refresh(true)"
       />
+      <CurrentTask v-if="!selected" :task="selected" :trace="trace" :loading="refreshing" />
+      <MagiProgress :task="selected" :operation="operation" />
+      <TaskActivity v-if="layout?.visibility.core.trace !== false"
+        :trace="trace" :default-open="layout?.core.trace === true" />
       <details v-if="layout?.visibility.core.magi_configuration !== false"
         class="card magi-config-accordion" :open="layout?.core.magi_configuration === true">
         <summary>MAGI — 3席のLLM設定</summary>
         <MagiSettingsPanel />
       </details>
-      <CurrentTask :task="selected" :trace="trace" :loading="refreshing" />
-      <MagiProgress :task="selected" :operation="operation" />
-      <TaskActivity v-if="layout?.visibility.core.trace !== false"
-        :trace="trace" :default-open="layout?.core.trace === true" />
     </main>
     <TaskSidebar :items="items" :selected-id="selectedId" :view="view"
       :commands-enabled="commandsEnabled" :has-more="hasMore" :loading="refreshing"
