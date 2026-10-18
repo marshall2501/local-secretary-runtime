@@ -5,13 +5,9 @@
  * 進行中の席状態は同一APIプロセスの一時情報であり、確定DB状態ではない。
  */
 import { computed } from 'vue'
-import type { TaskOperation } from '../api'
 import type { TaskRecord } from '../types'
 
-const props = defineProps<{
-  task: TaskRecord | null
-  operation: TaskOperation | null
-}>()
+const props = defineProps<{ task: TaskRecord | null }>()
 const turns = computed(() => props.task?.magi_session?.turns ?? [])
 const turn = computed(() => turns.value.length ? turns.value[turns.value.length - 1] : null)
 /** 内部next/statusと利用者向けの進み方を混同しない。Task確定は別領域。 */
@@ -26,11 +22,6 @@ const steps = computed(() => turns.value.map((item, i) => {
   return { number: i + 1, label, reason: item.response?.reason ?? '',
     refs: item.response?.evidence?.result_ids?.length ?? 0 }
 }))
-const liveMembers = computed(() => {
-  const running = ['accepted', 'running'].includes(props.operation?.status ?? '')
-  if (!running) return []
-  return Object.values(props.operation?.member_progress ?? {})
-})
 const savedMembers = computed(() => {
   const configured = (props.task?.magi_session?.member_specs ?? []).filter(item => item.enabled)
   const results = turn.value?.member_results ?? []
@@ -48,29 +39,11 @@ const savedMembers = computed(() => {
 </script>
 
 <template>
-  <section v-if="task?.magi_session || liveMembers.length" class="card"
+  <section v-if="task?.magi_session" class="card"
     aria-label="MAGI各席の処理状況">
     <div class="section-head">
       <h2>MAGI 各席の処理状況</h2>
     </div>
-    <template v-if="liveMembers.length">
-      <p class="muted small">
-        このAPIプロセスでの進捗（Turn {{ operation?.live_turn ?? '-' }}）。
-        途中表示であり、Task完了の証拠ではありません。
-      </p>
-      <div class="magi-members" aria-label="MAGI席別の一時進捗">
-        <div v-for="member in liveMembers" :key="member.member" class="magi-member">
-          <strong>{{ member.member }}</strong>
-          <p class="muted small">
-            {{ member.provider || 'Provider不明' }} / {{ member.model || 'Model不明' }}
-          </p>
-          <p>{{ member.state }}</p>
-          <p v-if="member.elapsed_seconds != null" class="muted small">
-            {{ member.elapsed_seconds }}秒
-          </p>
-        </div>
-      </div>
-    </template>
     <div v-if="steps.length" class="magi-timeline" aria-label="MAGI判断の経過">
       <div v-for="step in steps" :key="step.number" class="magi-step">
         <strong>Turn {{ step.number }}：{{ step.label }}</strong>
