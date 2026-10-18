@@ -317,7 +317,7 @@ test('保存された5件表示からさらに読み込み、確定Goalを未確
   // 先行テストが作成するTask数によって総件数は変わる。複数回の追加
   // 読込後に最終的な終端へ到達する契約を検査し、件数を固定しない。
   await expect.poll(async () => page.locator('.task-item').count()).toBeGreaterThan(10)
-  await expect(page.locator('.task-sidebar .section-head .small')).not.toHaveText('5件表示')
+  await expect(page.locator('.task-sidebar .section-head span.muted.small')).not.toHaveText('5件表示')
   // The purpose of this regression is finding a confirmed historical Goal
   // beyond the first ten entries, not exhausting all pages. Repeatedly
   // requesting unrelated pages introduces races with asynchronous refreshes.
