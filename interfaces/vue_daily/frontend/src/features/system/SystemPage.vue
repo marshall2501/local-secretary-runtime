@@ -1,7 +1,7 @@
 <!-- Provenance-Origin: original; Provenance-AI: AI-generated -->
 <script setup lang="ts">
 /** One Secretary origin for Service Connections, Billing and Runtime diagnostics. */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import BillingSnapshotView from './BillingSnapshotView.vue'
 import {
   readBillingProfiles, readBillingSnapshot, readConnections,
@@ -18,6 +18,15 @@ const runtime = ref<RuntimeInfo | null>(null)
 const environment = ref<EnvironmentItem[]>([])
 const database = ref<Record<string, unknown> | null>(null)
 const routes = ref<ApiRouteInfo[]>([])
+/** Present diagnostic metadata as named values, never as opaque JSON. */
+const dbIdentity = computed(() => (database.value?.identity || {}) as Record<string, string | number>)
+const dbMigration = computed(() => (database.value?.migration || {}) as Record<string, string | number>)
+const dbCounts = computed(() => (Array.isArray(database.value?.counts) ? database.value.counts : []) as Array<{
+  label: string; relation: string; status: string; count: number | null
+}>)
+const dbRelations = computed(() => (Array.isArray(database.value?.relations) ? database.value.relations : []) as Array<{
+  name: string; type: string
+}>)
 const selected = ref('')
 const loading = ref(false)
 const reading = ref(false)
@@ -380,46 +389,131 @@ onMounted(() => { void load() })
     </details>
   </section>
   <template v-else-if="section === 'debug'">
-    <section class="card" aria-label="実行プロセス">
+    <section class="card" aria-label="システム概要">
       <div class="section-head">
-        <h2>実行プロセス</h2>
-        <button type="button" class="secondary" :disabled="loading" @click="load">更新</button>
+        <h2>稼働状況</h2>
+        <button type="button" class="secondary" :disabled="loading" @click="load">最新の状態を取得</button>
       </div>
-      <p v-if="runtime">PID：{{ runtime.pid }} ／ Python：{{ runtime.python }}
-        ／ Git：{{ runtime.branch }} / {{ runtime.commit }}</p>
-      <p v-if="runtime" class="muted small">起動：{{ runtime.process_started_at }}</p>
+      <div class="system-summary-grid">
+        <article class="system-metric">
+          <span>Secretary Server</span>
+          <strong>{{ runtime ? runtime.branch + ' / ' + runtime.commit.slice(0, 12) : '未取得' }}</strong>
+          <small>PID {{ runtime?.pid ?? '—' }} / Python {{ runtime?.python ?? '—' }}</small>
+        </article>
+        <article class="system-metric" :class="{ 'metric-warning': database?.status !== 'ok' || !database?.boundary_ok }">
+          <span>PostgreSQL</span>
+          <strong>{{ database?.status === 'ok' && database?.boundary_ok ? '接続OK' : '要確認' }}</strong>
+          <small>{{ dbIdentity.database || '未取得' }} / {{ dbIdentity.database_size || '—' }}</small>
+        </article>
+        <article class="system-metric">
+          <span>Migration</span>
+          <strong>{{ dbMigration.latest || '未取得' }}</strong>
+          <small>{{ dbMigration.count ?? '—' }}件 / {{ dbMigration.source || '—' }}</small>
+        </article>
+      </div>
+      <p v-if="runtime" class="muted small">プロセス開始：{{ runtime.process_started_at }}</p>
     </section>
     <section class="card" aria-label="データベース状態">
-      <h2>データベース</h2>
-      <template v-if="database">
-        <p>状態：{{ database.status }} ／ Identity：{{ JSON.stringify(database.identity || {}) }}</p>
-        <pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ JSON.stringify(database.migration || {}, null, 2) }}</pre>
-      </template>
+      <h2>データベース詳細</h2>
+      <p class="muted small">接続中のDBの状態だけを確認します。データ・Secretの変更は行いません。</p>
+      <div v-if="database" class="diagnostic-kv">
+        <div><dt>データベース</dt><dd>{{ dbIdentity.database || '—' }}</dd></div>
+        <div><dt>接続ユーザー</dt><dd>{{ dbIdentity.user || '—' }}</dd></div>
+        <div><dt>接続先</dt><dd>{{ dbIdentity.host || '—' }}:{{ dbIdentity.port || '—' }}</dd></div>
+        <div><dt>PostgreSQL</dt><dd>{{ dbIdentity.server_version || '—' }}</dd></div>
+        <div><dt>DB容量</dt><dd>{{ dbIdentity.database_size || '—' }}</dd></div>
+        <div><dt>接続数</dt><dd>{{ dbIdentity.database_connections ?? '—' }}</dd></div>
+      </div>
       <p v-else class="muted">DB診断はまだ取得できていません。</p>
+      <details class="diagnostic-details" v-if="dbCounts.length">
+        <summary>主要データの件数（{{ dbCounts.length }}項目）</summary>
+        <div class="table-scroll">
+          <table class="diagnostic-table">
+            <thead><tr><th scope="col">対象</th><th scope="col">テーブル</th><th scope="col">件数</th><th scope="col">状態</th></tr></thead>
+            <tbody>
+              <tr v-for="item in dbCounts" :key="item.relation">
+                <th scope="row">{{ item.label }}</th><td><code>{{ item.relation }}</code></td>
+                <td class="numeric">{{ item.count ?? '—' }}</td><td>{{ item.status }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <details class="diagnostic-details" v-if="dbRelations.length">
+        <summary>DB Relation一覧（{{ dbRelations.length }}件）</summary>
+        <div class="relation-grid">
+          <span v-for="item in dbRelations" :key="item.name"><code>{{ item.name }}</code><small>{{ item.type }}</small></span>
+        </div>
+      </details>
     </section>
     <section class="card" aria-label="DB ER図">
       <div class="section-head">
         <div>
           <h2>DB ER図</h2>
-          <p class="muted small">現在のPostgreSQL定義からテーブル・カラム・PK・FKを可視化します。</p>
+          <p class="muted small">Mermaidの関係性に沿った配置でテーブル・PK・FKを表示します。</p>
         </div>
-        <a class="secondary" href="/ui/?page=er">ER図を開く →</a>
+        <a class="link-button" href="/ui/?page=er">ER図を開く →</a>
       </div>
-      <p class="muted small">読み取り専用。PK・FK中心／全カラムの切替、拡大縮小、SVG保存ができます。</p>
+      <p class="muted small">読み取り専用。100%表示・全画面・全カラム切替・SVG保存に対応。</p>
     </section>
     <section class="card" aria-label="API一覧">
-      <h2>API一覧（{{ routes.length }}件）</h2>
-      <div v-for="item in routes" :key="item.path + item.methods.join(',')" class="pkb-record">
-        <strong>{{ item.methods.join(', ') }}</strong>
-        <span> {{ item.path }} </span>
-        <span class="muted small">{{ item.name }}</span>
-      </div>
+      <details class="diagnostic-details">
+        <summary>API一覧（{{ routes.length }}件）</summary>
+        <p class="muted small">現在のSecretary Serverが提供する機能別Routerを含む一覧です。</p>
+        <div class="table-scroll">
+          <table class="diagnostic-table">
+            <thead><tr><th scope="col">Method</th><th scope="col">パス</th><th scope="col">処理名</th></tr></thead>
+            <tbody>
+              <tr v-for="item in routes" :key="item.path + item.methods.join(',')">
+                <td><span class="method-chip" :class="{ 'method-write': item.methods.includes('POST') }">{{ item.methods.join(', ') }}</span></td>
+                <td><code>{{ item.path }}</code></td><td>{{ item.name }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
     </section>
     <section class="card" aria-label="環境設定状況">
-      <h2>環境設定</h2>
-      <div v-for="item in environment" :key="item.name" class="pkb-record">
-        <strong>{{ item.name }}</strong><span> — {{ item.value }}</span>
-      </div>
+      <details class="diagnostic-details">
+        <summary>環境設定（{{ environment.length }}項目）</summary>
+        <div class="table-scroll">
+          <table class="diagnostic-table">
+            <thead><tr><th scope="col">設定項目</th><th scope="col">状態</th></tr></thead>
+            <tbody>
+              <tr v-for="item in environment" :key="item.name">
+                <th scope="row">{{ item.name }}</th><td>{{ item.value }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
     </section>
   </template>
 </template>
+
+<style scoped>
+.system-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-top:12px; }
+.system-metric { padding:16px; border:1px solid #c4ddd8; border-radius:9px; background:#f1faf7; display:flex; flex-direction:column; gap:5px; min-width:0; }
+.system-metric span { font-size:12px; color:#587067; font-weight:650; }
+.system-metric strong { font-size:19px; color:#146052; overflow-wrap:anywhere; }
+.system-metric small { color:#536c73; overflow-wrap:anywhere; }
+.system-metric.metric-warning { background:#fff8eb; border-color:#ead3aa; }
+.system-metric.metric-warning strong { color:#95561b; }
+.diagnostic-kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:15px 0; }
+.diagnostic-kv div { padding:10px 12px; background:#f7f9fb; border:1px solid #e2eaf0; border-radius:7px; min-width:0; }
+.diagnostic-kv dt { font-size:12px; color:#607287; }
+.diagnostic-kv dd { margin:3px 0 0; font-weight:600; overflow-wrap:anywhere; }
+.diagnostic-details { margin-top:14px; border-top:1px solid #dfe8ed; padding:12px 0 0; }
+.diagnostic-details summary { cursor:pointer; font-size:14px; font-weight:700; color:#204c65; }
+.table-scroll { overflow-x:auto; max-width:100%; margin-top:12px; }
+.diagnostic-table { border-collapse:collapse; width:100%; font-size:13px; }
+.diagnostic-table th,.diagnostic-table td { padding:10px 12px; text-align:left; border-bottom:1px solid #e2eaf0; vertical-align:top; }
+.diagnostic-table thead { background:#f0f6fa; }
+.diagnostic-table code { font-size:12px; overflow-wrap:anywhere; }
+.diagnostic-table td.numeric { text-align:right; font-variant-numeric:tabular-nums; }
+.relation-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; margin-top:12px; }
+.relation-grid span { border:1px solid #e2e8f0; border-radius:6px; padding:7px 10px; min-width:0; display:flex; flex-direction:column; }
+.relation-grid small { color:#64748b; }
+.method-chip { border-radius:5px; background:#e2f0fa; color:#155783; font-size:12px; font-weight:700; padding:4px 7px; }
+.method-chip.method-write { background:#fff1d8; color:#92521a; }
+</style>
