@@ -308,6 +308,8 @@ test('18097新規Task→本人回答→Review→確定→F5同IDで復元する'
   await expect(page.getByRole('textbox', { name: '依頼内容' })).toHaveValue('')
   await expect(page.getByText('本人への確認待ち（Task確定状態）')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'MAGI — 保存済みの判断履歴' })).toBeVisible()
+  // 保存済み席別詳細はNiceGUIと同様に必要時だけ展開する。
+  await page.locator('.magi-history summary').click()
   for (const member of ['MELCHIOR', 'CASPER', 'BALTHASAR']) {
     await expect(page.locator('.magi-member', { hasText: member })).toBeVisible()
   }
