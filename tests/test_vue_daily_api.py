@@ -528,7 +528,7 @@ class VueTaskInputLayoutTests(unittest.TestCase):
     """入力欄の消失と長い既存回答の下への埋没を防ぐ静的UI回帰。"""
 
     def test_new_task_form_is_visible_before_saved_answer(self):
-        """実Task入力の位置・条件・8097→8099案内をソースで確認する。"""
+        """実Task入力が単一Web APIへ配送され旧8099へ遷移しないことを確認する。"""
         frontend = (
             Path(__file__).resolve().parents[1]
             / "interfaces/vue_daily/frontend/src/features/ritsuko"
@@ -542,7 +542,8 @@ class VueTaskInputLayoutTests(unittest.TestCase):
         self.assertIn('<textarea id="task-request"', panel)
         self.assertIn('v-model="request"', panel)
         self.assertIn(':disabled="busy || !commandsEnabled"', panel)
-        self.assertIn('href="http://127.0.0.1:8099/ui/"', panel)
+        self.assertNotIn('http://127.0.0.1:8099/ui/', panel)
+        self.assertNotIn('既存のRITSUKO画面', panel)
         self.assertIn('@submit.prevent="emit(\'start\')"', panel)
         # ユーザーが確認するまで「実Task API有効」の場合以外は送信不可。
         self.assertIn(':disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()"', panel)
