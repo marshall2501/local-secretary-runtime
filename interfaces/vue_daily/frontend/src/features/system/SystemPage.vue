@@ -3,6 +3,7 @@
 /** One Secretary origin for Service Connections, Billing and Runtime diagnostics. */
 import { computed, onMounted, ref } from 'vue'
 import BillingSnapshotView from './BillingSnapshotView.vue'
+import LayoutSettings from './LayoutSettings.vue'
 import {
   readBillingProfiles, readBillingSnapshot, readConnections,
   readDatabase, readEnvironment, readRuntime, readApiRoutes, saveConnection, saveBillingProfile,
@@ -118,7 +119,7 @@ async function writeBillingProfile(): Promise<void> {
 const title = {
   'service-billing': '利用料金・契約',
   debug: 'システム診断',
-  settings: '接続設定',
+  settings: '設定',
 }[props.section]
 
 /** Fetch existing state without any automatic provider calls or DB mutation. */
@@ -489,6 +490,7 @@ onMounted(() => { void load() })
       </details>
     </section>
   </template>
+  <LayoutSettings v-if="section === 'settings'" />
 </template>
 
 <style scoped>
