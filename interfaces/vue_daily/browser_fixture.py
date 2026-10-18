@@ -9,6 +9,9 @@ HTML/JS実ロードからTask受付・回答・Review・停止・F5まで検証�
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from copy import deepcopy
 from uuid import UUID, uuid5, NAMESPACE_DNS
 
@@ -325,6 +328,13 @@ async def serve() -> None:
     """Start one fake Secretary Server with no DB/MAGI or external calls."""
     import uvicorn
 
+    # E2E modifies UI defaults. Keep them in a disposable directory, never
+    # in the user's existing data/ui_preferences.json.
+    fixture_preferences = TemporaryDirectory(prefix="secretary-ui-browser-")
+    os.environ["LSA_UI_PREFERENCES_PATH"] = str(
+        Path(fixture_preferences.name) / "ui_preferences.json"
+    )
+
     store = BrowserFixtureStore()
     reader = BrowserFixtureReadService()
     schema = SchemaSnapshot(
@@ -360,7 +370,10 @@ async def serve() -> None:
     server = uvicorn.Server(uvicorn.Config(
         app, host="127.0.0.1", port=8097, log_level="warning",
     ))
-    await server.serve()
+    try:
+        await server.serve()
+    finally:
+        fixture_preferences.cleanup()
 
 
 if __name__ == "__main__":
