@@ -525,10 +525,10 @@ class VueDailyCommandApiTests(unittest.TestCase):
 
 
 class VueTaskInputLayoutTests(unittest.TestCase):
-    """入力欄の消失と長い既存回答の下への埋没を防ぐ静的UI回帰。"""
+    """回答・処理状況優先と、新規入力欄の常時利用を守るUI静的回帰。"""
 
-    def test_new_task_form_is_visible_before_saved_answer(self):
-        """実Task入力が単一Web APIへ配送され旧8099へ遷移しないことを確認する。"""
+    def test_saved_answer_and_progress_precede_always_available_input(self):
+        """保存済み回答と進捗を先に示し、入力はどのTaskでも隠さない。"""
         frontend = (
             Path(__file__).resolve().parents[1]
             / "interfaces/vue_daily/frontend/src/features/ritsuko"
@@ -538,7 +538,10 @@ class VueTaskInputLayoutTests(unittest.TestCase):
             frontend / "components/TaskCommandPanel.vue"
         ).read_text(encoding="utf-8")
 
-        self.assertLess(page.index("<TaskCommandPanel"), page.index("<CurrentTask"))
+        # Task選択時は確定回答と進捗を先に。未選択なら入力欄を表示する。
+        self.assertLess(page.index("<TaskLiveStatus"), page.index('<CurrentTask v-if="selected"'))
+        self.assertLess(page.index('<CurrentTask v-if="selected"'), page.index("<TaskCommandPanel"))
+        self.assertLess(page.index("<TaskCommandPanel"), page.index('<CurrentTask v-if="!selected"'))
         self.assertIn('<textarea id="task-request"', panel)
         self.assertIn('v-model="request"', panel)
         self.assertIn(':disabled="busy || !commandsEnabled"', panel)
@@ -548,7 +551,7 @@ class VueTaskInputLayoutTests(unittest.TestCase):
         # ユーザーが確認するまで「実Task API有効」の場合以外は送信不可。
         self.assertIn(':disabled="busy || !commandsEnabled || !preferencesLoaded || !request.trim()"', panel)
         # かつ入力フォーム自体を commandsEnabled の v-if で隠さない。
-        form_start = panel.index('<form class="command-form"')
+        form_start = panel.index('<form class="command-form" @submit.prevent="emit(\'start\')">')
         form_end = panel.index("</form>", form_start)
         self.assertNotIn('<template v-if="commandsEnabled">', panel[:form_start])
         self.assertIn('<textarea id="task-request"', panel[form_start:form_end])
