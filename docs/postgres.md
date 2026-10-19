@@ -34,7 +34,7 @@ cd D:\AI\projects\local-secretary-runtime
 
 ## Migration / disposable tests / recovery
 
-構造化データの通常運用DBは `secretary` 一つです。Gitの現行schemaは `db/migrations/` を正本とし、使い捨てPostgreSQLの隔離テストも同一のMigration列から構築します。旧 `db/isolated/pkb_proto/` と旧DB専用スクリプトはGit追跡ファイルから撤去済みで、必要ならGit履歴から確認できます。
+構造化データの通常運用DBは `secretary` 一つです。Gitの現行schemaは `db/migrations/` をマスタとし、使い捨てPostgreSQLの隔離テストも同一のMigration列から構築します。旧 `db/isolated/pkb_proto/` と旧DB専用スクリプトはGit追跡ファイルから撤去済みで、必要ならGit履歴から確認できます。
 
 運用DBのMigration履歴は本変更で変更しません。新Migrationを実機へ適用する場合や新DBへ切り替える場合は個別の高影響操作承認を分けて扱います。復旧能力は以下の `Backup` / `Restore drill` と既存の管理手順で保ちます。過去のPKB隔離DBを通常運用へ再昇格する処理は使用しません。
 
