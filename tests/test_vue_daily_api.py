@@ -525,7 +525,7 @@ class VueDailyCommandApiTests(unittest.TestCase):
 
 
 class VueTaskInputLayoutTests(unittest.TestCase):
-    """回答・処理状況優先と、新規入力欄の常時利用を守るUI静的回帰。"""
+    """回答・処理状況優先と、新規入力欄の常時利用を守るUI静的ノンデグレテスト。"""
 
     def test_saved_answer_and_progress_precede_always_available_input(self):
         """保存済み回答と進捗を先に示し、入力はどのTaskでも隠さない。"""
