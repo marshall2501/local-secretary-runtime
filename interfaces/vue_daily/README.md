@@ -4,11 +4,11 @@
 
 ## 2026-10-17 時点の現在のソース構造
 
-Web APIはVueアプリから独立した `interfaces/api/ritsuko_tasks.py` の `create_ritsuko_task_router` が正本です。Task一覧・詳細・Start・Answer・Review・Stop・OperationはどのFastAPI Hostからも同じTask Query／Commandを注入して利用できます。Vue Host `interfaces/vue_daily/app.py` はこの共通Routerを組み込み、画面配信・localhost/Origin gate・既定read-onlyを担当します。**Router単体にHost認証・通信制限はないため、直接外部公開しません**。
+Web APIはVueアプリから独立した `interfaces/api/ritsuko_tasks.py` の `create_ritsuko_task_router` がマスタです。Task一覧・詳細・Start・Answer・Review・Stop・OperationはどのFastAPI Hostからも同じTask Query／Commandを注入して利用できます。Vue Host `interfaces/vue_daily/app.py` はこの共通Routerを組み込み、画面配信・localhost/Origin gate・既定read-onlyを担当します。**Router単体にHost認証・通信制限はないため、直接外部公開しません**。
 
 MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判断／Goal判断の二つの提案Strategyとして分離し、`ritsuko/core/judgment_application.py` が提案を共通の状態判断へ適用します。新通常経路は `core/task_execution.py` → `magi/session_workflow.py` であり、旧 `async_execution.py` はProvider通信と過去の呼出元向け互換のみです。Task／Source／Action／Result／状態投影は両方式で共通です。登録前に記憶候補文・本人根拠回答を表示するVue Reviewと、MAGI席別ライブ進捗も隔離コードへ反映済みです。
 
-根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapter回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行正本はこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
+根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapter回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行マスタはこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
 
 ## 2026-10-17 Worker所在不明時のVueの操作と照会
 
@@ -32,7 +32,7 @@ MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判�
 
 ## 状態・安全境界
 
-- 実際のTaskを**既存の`CoreTaskQueryService`とPostgreSQLの正本**から取得します。架空Task専用 `interfaces/vue_lab`（8098）とは別です。
+- 実際のTaskを**既存の`CoreTaskQueryService`とPostgreSQLのマスタ**から取得します。架空Task専用 `interfaces/vue_lab`（8098）とは別です。
 - **通常8097は読取専用**（POSTは503）。**実Task用8099は本人が明示起動した場合のみ**日常MAGI/Source/DBへ接続し、Task受付・本人回答・Stop・回答のみReviewが可能です。NiceGUIの全機能は未移行なので既存画面も利用できます。
 - 8097／8099ともに `127.0.0.1` bind。通常の画面GETは別サイトからリンクしても表示できます。Task変更POSTだけ別サイトOrigin/Sec-Fetch-Siteを拒否します。Host・Forwarded制限/no-storeは継続。インターネット・LANへ公開しません。
 - Production DBに接続するときは既存の `bootstrap.web_runtime` → `PostgresCoreTaskQueryRepository` → daily runtime Secretを**Python側だけ**で使います。Browser/TypeScript/生成JSにDB資格情報は入りません。Secretの値をログへ表示しません。
@@ -114,7 +114,7 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 
 - `ritsuko/magi/goal_contract.py` が `AUTO_READ_SOURCES` と同じ `pkb/web/finance` をGoal判断の `request_read` で受け、`goal_loop.py` は選択されたSourceをRITSUKOへ渡す。Taskの取得可否は従来Resource Catalog/権限のもとで判定し、任意Tool・外部Actionを開放しない。
 - `goal_requires_source` と `goal_requires_web` を区別し、「私の家計」等をWeb検索必須とみなさない。明示根拠を要するGoalを未読の `not_required` で即時完了させない。表層語句による暫定Gateであり、**意味的Goal評価や情報源選択をPythonで完全解決したという主張ではない**。
-- `goal_loop.py::goal_task_projection` は保存済み旧Task用の互換関数とし、確定状態の正本は `ritsuko/core/magi_bridge.py::task_projection` に統合。根拠IDはRITSUKO Task内の検証済み `pkb/web/finance` 観測のみ認める。未実行・読取失敗・他TaskのID申告だけで完了としない。Web検索Providerの引用報告と本文確認も区別する。
+- `goal_loop.py::goal_task_projection` は保存済み旧Task用の互換関数とし、確定状態のマスタは `ritsuko/core/magi_bridge.py::task_projection` に統合。根拠IDはRITSUKO Task内の検証済み `pkb/web/finance` 観測のみ認める。未実行・読取失敗・他TaskのID申告だけで完了としない。Web検索Providerの引用報告と本文確認も区別する。
 - `tests/test_goal_source_neutral.py` はfake Task/LLM/Policy/Sourceで、Source選択、同じTask IDのread→記録→評価→完了、未取得・偽Resultでの拒否を検証。既存 `test_goal_loop.py` および `test_magi_core_bridge.py` とともにCIへ追加。
 - **未受入**: 実モデルでのPKB/Finance Goal達成、1〜3席のLLM判断実装、操作/Operationの永続化と再起動復旧、本人用Vue Task操作、複数Sourceや外部Actionによる実際のGoal完走。通常8097はread-only/POST503。
 
