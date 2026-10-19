@@ -11,7 +11,7 @@ import asyncio
 from copy import deepcopy
 
 from ritsuko.magi.dialogue import select_weighted_consensus
-from ritsuko.magi.goal_contract import VERSION, validate_goal_turn
+from ritsuko.magi.goal_contract import VERSION, READ_OPERATIONS, validate_goal_turn
 from ritsuko.magi.protocol import default_resource_catalog
 
 
@@ -59,6 +59,13 @@ async def evaluate_goal(
                 "capability": "provider_search_with_citations",
                 "direct_page_content_fetch": False,
             },
+        },
+        # Advertise only operations actually handled by the common Source runner.
+        # PKB writes will be added only after the structured write port exists.
+        "operation_catalog": {
+            operation_id: {"kind": "read", "source": source, "arguments": ["query"]}
+            for operation_id, source in READ_OPERATIONS.items()
+            if catalog.get(source, {}).get("available")
         },
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
     }
