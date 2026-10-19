@@ -51,7 +51,7 @@ class FakePkbRepository:
 def write(repository, **overrides):
     arguments = {
         "task_id": TASK_ID,
-        "operation_id": OPERATION_ID,
+        "invocation_id": OPERATION_ID,
         "user_text": ORIGINAL,
         "entity_id": ENTITY_ID,
         "entity_mention": "架空GPU",
@@ -84,7 +84,7 @@ class StructuredClaimTests(unittest.TestCase):
         self.assertEqual(len(repo.payloads), 1)
         for override, error in (
             ({"task_id": "model-provided-id"}, "invalid_structured_claim_identity"),
-            ({"operation_id": "arbitrary"}, "invalid_structured_claim_identity"),
+            ({"invocation_id": "arbitrary"}, "invalid_structured_claim_identity"),
             ({"predicate": "has_component"}, "unsupported_structured_claim"),
             ({"entity_mention": "架空GPU以外"}, "structured_claim_not_grounded_in_user_text"),
             ({"evidence_start": -1}, "invalid_structured_claim_evidence"),
@@ -102,10 +102,10 @@ class StructuredClaimTests(unittest.TestCase):
         self.assertEqual(result["status"], "review")
         self.assertEqual(repo.payloads, {})
 
-    def test_new_task_operation_identity_is_independent(self):
+    def test_new_task_invocation_identity_is_independent(self):
         repo = FakePkbRepository()
         first = write(repo)
-        second = write(repo, operation_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        second = write(repo, invocation_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd")
         self.assertEqual(first["status"], "inserted")
         self.assertEqual(second["status"], "inserted")
         self.assertEqual(len(repo.payloads), 2)
