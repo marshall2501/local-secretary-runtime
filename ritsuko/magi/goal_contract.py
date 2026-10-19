@@ -5,15 +5,7 @@ executes Tools, or vouches for the existence of a Source/Result record.
 """
 from __future__ import annotations
 
-from ritsuko.application.observation_sources import AUTO_READ_SOURCES
-
-# The Operation registry starts with existing, tested read Capabilities.
-# Write operations must never be advertised until their Policy/Result port is bound.
-READ_OPERATIONS = {
-    "pkb.search": "pkb",
-    "web.search": "web",
-    "finance.read": "finance",
-}
+from ritsuko.application.observation_sources import AUTO_READ_SOURCES, READ_OPERATIONS
 
 VERSION = "goal_loop_v1"
 DEFAULT_GOAL_TURN_LIMIT = 6
