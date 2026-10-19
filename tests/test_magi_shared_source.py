@@ -24,7 +24,7 @@ class SharedSourceTests(unittest.TestCase):
             """未解決時には個別Entity読取が呼ばれないことを調べるための代役。"""
 
             def resolve_component_reference(self, *_args):
-                """正本に部品関係がない状況を模擬する。"""
+                """マスタに部品関係がない状況を模擬する。"""
                 called.append("resolve")
                 return None
 
