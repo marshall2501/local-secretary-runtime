@@ -11,6 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from ritsuko.core.goal_evidence import check_goal_response_evidence
+from ritsuko.magi.goal_contract import READ_OPERATIONS
 from ritsuko.magi.dialogue import (
     _grounded_empty_finance_answer,
     _latest_verified_pkb_observation,
@@ -46,8 +47,26 @@ def _goal_as_detail(session: dict, decision: dict) -> dict | None:
     if next_step == "respond" and status not in {"verified_results", "source_free"}:
         session.update(status="stopped", next_step=status)
         return None
-    if next_step == "request_read":
-        request = decision["read_request"]
+    if next_step in {"invoke", "request_read"}:
+        # `invoke` is the single future Operation dispatch case. Initially
+        # only existing read operations are registered, so the proven Source
+        # executor and its persisted Result/Source IDs remain authoritative.
+        if next_step == "invoke":
+            proposal = decision["operation_request"]
+            if not isinstance(proposal, dict):
+                session.update(status="stopped", next_step="invalid_operation_request")
+                return None
+            source = READ_OPERATIONS.get(proposal.get("operation_id"))
+            if source is None or not isinstance(proposal.get("arguments"), dict):
+                session.update(status="stopped", next_step="operation_not_registered")
+                return None
+            request = {
+                "source": source,
+                "query": proposal["arguments"].get("query"),
+                "reason": proposal.get("reason"),
+            }
+        else:
+            request = decision["read_request"]
         state = "NEED_INFORMATION"
         requests = [{
             "source": request["source"],
