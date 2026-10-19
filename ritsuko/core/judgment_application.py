@@ -72,6 +72,8 @@ def _goal_as_detail(session: dict, decision: dict) -> dict | None:
             "source": request["source"],
             "what": request["query"].strip(),
             "reason": request["reason"],
+            **({"operation_id": proposal["operation_id"]}
+               if next_step == "invoke" else {}),
         }]
     elif next_step == "ask_user":
         state, requests = "NEED_CLARIFICATION", []
