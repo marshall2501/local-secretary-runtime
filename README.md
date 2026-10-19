@@ -81,7 +81,7 @@ cd D:\AI\projects\local-secretary-runtime
 
 - `.env`、APIキー、Secret、個人原本、DBダンプ、個人ログをGitへ登録しない。
 - PostgreSQL管理者資格情報をLLMや通常アプリへ渡さない。
-- `db/migrations/` を現行schemaの唯一のMigration正本とし、実DBへの適用は別の高影響操作承認で扱う。
+- `db/migrations/` を現行schemaの唯一のMigrationマスタとし、実DBへの適用は別の高影響操作承認で扱う。
 - 実データ・運用DB・高影響操作では、設計repoのD-08に従いバックアップ、復元可能性、権限、承認を確認する。
 - 同じPC上の独立プロジェクト `yt-topic-search` のCompose、container、network、volumeを変更・停止しない。
 - GitHub反映、オフラインテスト、隔離DB試験、サブPC実機、統合動作、日常利用を区別し、未実証を完成と報告しない。
