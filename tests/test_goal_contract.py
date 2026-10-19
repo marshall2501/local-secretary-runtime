@@ -34,6 +34,34 @@ class GoalContractTests(unittest.TestCase):
         self.assertEqual(validate_goal_turn(direct), [])
         self.assertEqual(validate_goal_turn(read), [])
 
+    def test_invoke_registered_read_and_reject_unregistered_operation(self):
+        # New MAGI judgments use one typed Operation request, not domain IFs.
+        read = judgment("invoke")
+        read["operation_request"] = {
+            "operation_id": "pkb.search",
+            "arguments": {"query": "架空PCのGPU"},
+            "reason": "既存記憶を照会する",
+        }
+        self.assertEqual(validate_goal_turn(read), [])
+        read["operation_request"]["operation_id"] = "pkb.register"
+        self.assertIn("operation_request:invalid", validate_goal_turn(read))
+        read["operation_request"]["operation_id"] = "pkb.search"
+        read["operation_request"]["arguments"] = {"query": ""}
+        self.assertIn("operation_request:invalid", validate_goal_turn(read))
+        read["next"] = "respond"
+        self.assertIn("operation_request:state_mismatch", validate_goal_turn(read))
+
+    def test_new_goal_reply_does_not_allow_write_or_extra_arguments(self):
+        reply = judgment("invoke")
+        reply["operation_request"] = {
+            "operation_id": "finance.read",
+            "arguments": {"query": "架空の収支", "write": "YES"},
+            "reason": "調べるため",
+        }
+        self.assertIn("operation_request:invalid", validate_goal_turn(reply))
+        reply["operation_request"] = None
+        self.assertIn("operation_request:state_mismatch", validate_goal_turn(reply))
+
     def test_rejects_model_claim_of_missing_evidence(self):
         x = judgment("respond", answer="確認済みです", fulfillment="met",
                      basis="result_refs", refs=[])
