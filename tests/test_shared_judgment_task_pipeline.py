@@ -1,6 +1,6 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-generated
-"""両判断方式が同じTask・Source・Action/Result契約を使う隔離縦断回帰。"""
+"""両判断方式が同じTask・Source・Action/Result契約を使う隔離縦断ノンデグレテスト。"""
 from __future__ import annotations
 
 import unittest
