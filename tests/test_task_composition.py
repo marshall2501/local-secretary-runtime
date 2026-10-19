@@ -1,6 +1,6 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-generated
-"""NiceGUIとVueから再利用するRITSUKO Task Compositionの隔離回帰。"""
+"""NiceGUIとVueから再利用するRITSUKO Task Compositionの隔離ノンデグレテスト。"""
 from __future__ import annotations
 
 import unittest
