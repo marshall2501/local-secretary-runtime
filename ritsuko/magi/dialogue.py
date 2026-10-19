@@ -658,6 +658,15 @@ def _normalized_member_specs(
 
 
 def _decision_signature(stage: str, response: dict) -> str:
+    if stage == "goal" and response.get("next") == "invoke":
+        # Different operation targets/arguments are not interchangeable votes.
+        # In particular a future write must never borrow another seat's vote.
+        operation = response.get("operation_request") or {}
+        return ("next=invoke;operation=" + str(operation.get("operation_id"))
+                + ";arguments=" + json.dumps(
+                    operation.get("arguments"), ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"),
+                ))
     if stage == "goal":
         # Group meaningfully compatible proposals, not arbitrary JSON wording.
         # The selected MAGI member still owns the actual goal/answer/query.
