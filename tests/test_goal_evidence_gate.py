@@ -1,6 +1,6 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-generated
-"""Goalの回答候補とTask確定が同じRITSUKO根拠検査を使う回帰試験。"""
+"""Goalの回答候補とTask確定が同じRITSUKO根拠検査を使うノンデグレテスト。"""
 from __future__ import annotations
 
 import unittest
