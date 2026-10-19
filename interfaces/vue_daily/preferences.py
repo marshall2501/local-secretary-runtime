@@ -2,7 +2,7 @@
 # Provenance-AI: AI-generated
 """VueとNiceGUIが共有する既存ローカルUI設定の判断方式部分。
 
-設定ファイルは既存NiceGUIのui_preferences.jsonが正本。ここでは二つの
+設定ファイルは既存NiceGUIのui_preferences.jsonがマスタ。ここでは二つの
 キーだけを読み書きし、他の表示設定・モデル設定・Secretを変更しない。
 """
 from __future__ import annotations
