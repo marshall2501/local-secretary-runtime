@@ -425,7 +425,7 @@ class TaskCommandsTests(unittest.IsolatedAsyncioTestCase):
             commands.operation(uuid4())
 
     async def test_saved_standard_ready_answer_can_be_reviewed(self):
-        """従来方式の候補が確認待ちで止まり、APIから完了できない回帰を防ぐ。"""
+        """従来方式の候補が確認待ちで止まり、APIから完了できないデグレを防ぐ。"""
         queries = FakeQueries()
         queries.task["magi_session"] = {
             "status": "candidate_ready",
