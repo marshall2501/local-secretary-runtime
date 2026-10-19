@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES, READ_OPERATIONS
 
-VERSION = "goal_loop_v1"
+VERSION = "goal_loop_v2"  # Wire format; persisted control_mode remains v1 during migration.
 DEFAULT_GOAL_TURN_LIMIT = 6
 
 GOAL_SYSTEM = """あなたはPersonal Local Secretary AIのMAGI判断役です。
