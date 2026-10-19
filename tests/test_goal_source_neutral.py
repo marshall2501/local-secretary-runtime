@@ -97,7 +97,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
 
         def execute(_request, pending, _session):
             self.assertEqual(pending["source"], "pkb")
-            self.assertEqual(pending["requests"][0]["what"], "架空PCの構成")
+            self.assertEqual(pending["what"], "架空PCの構成")
             calls.append("executed")
             return {
                 "status": "ok", "source": "pkb",
