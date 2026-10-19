@@ -66,18 +66,22 @@ def pending_source_requests(
         request_id = str(raw.get("request_id") or "").strip()
         what = str(raw.get("what") or "").strip()
         reason = str(raw.get("reason") or "").strip()
+        operation_id = str(raw.get("operation_id") or "").strip()
 
         catalog_item = resource_catalog.get(source) or {}
         executable = (
             source in AUTO_READ_SOURCES
             and bool(catalog_item.get("available"))
             and source_capability(source) is not None
+            # An invoke must name an Operation bound to this exact Source.
+            and (not operation_id or READ_OPERATIONS.get(operation_id) == source)
         )
         normalized = {
             "request_id": request_id,
             "source": source,
             "what": what[:4000],
             "reason": reason[:1000],
+            **({"operation_id": operation_id} if operation_id else {}),
         }
         if not executable:
             unavailable.append(normalized)
@@ -90,6 +94,7 @@ def pending_source_requests(
                 "request_ids": [],
                 "what_parts": [],
                 "reasons": [],
+                "operation_ids": [],
             },
         )
         if request_id:
@@ -98,6 +103,8 @@ def pending_source_requests(
             group["what_parts"].append(what)
         if reason:
             group["reasons"].append(reason)
+        if operation_id:
+            group["operation_ids"].append(operation_id)
 
     executable_groups = []
     for source in AUTO_READ_SOURCES:
@@ -111,6 +118,8 @@ def pending_source_requests(
             "reasons": list(dict.fromkeys(group["reasons"]))[:20],
             "capability": source_capability(source),
             "confidentiality": SOURCE_CONFIDENTIALITY[source],
+            **({"operation_ids": list(dict.fromkeys(group["operation_ids"]))}
+               if group["operation_ids"] else {}),
         })
     return executable_groups, unavailable
 
@@ -161,6 +170,8 @@ def verified_source_observation(
             or ""
         ),
         "result_kind": result.get("result_kind"),
+        **({"operation_ids": list(pending_request["operation_ids"])}
+           if pending_request.get("operation_ids") else {}),
         "result_count": int(execution.get("total") or 0),
         "evidence_preview": _bounded_preview(result),
     }
