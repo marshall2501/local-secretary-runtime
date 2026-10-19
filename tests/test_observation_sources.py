@@ -35,6 +35,25 @@ class ObservationSourceTests(unittest.TestCase):
         self.assertEqual([x["source"] for x in groups], ["pkb", "web", "finance"])
         self.assertEqual([x["source"] for x in unavailable], ["files"])
 
+    def test_operation_source_mismatch_cannot_be_executed(self):
+        """The Task must not accept a forged source for a registered Operation."""
+        session = {
+            "status": "waiting_information",
+            "pending_requests": [{
+                "request_id": "REQ-mismatch",
+                "source": "pkb",
+                "operation_id": "web.search",
+                "what": "架空PC",
+                "reason": "MAGIからの指示",
+            }],
+        }
+        groups, unavailable = pending_source_requests(
+            session, resource_catalog={"pkb": {"available": True}},
+        )
+        self.assertEqual(groups, [])
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0]["operation_id"], "web.search")
+
     def test_verified_observation_preserves_privacy_and_links(self):
         observation = verified_source_observation(
             {
