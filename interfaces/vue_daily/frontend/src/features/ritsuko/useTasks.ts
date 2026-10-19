@@ -79,7 +79,7 @@ export function useTasks() {
   const preferencesMessage = ref('')
   const reply = ref('')
 
-  /** 通常操作時は既存NiceGUIの永続設定を正本とし、方式をTask開始時に固定する。 */
+  /** 通常操作時は既存NiceGUIの永続設定をマスタとし、方式をTask開始時に固定する。 */
   async function loadPreferences(): Promise<void> {
     try {
       const saved = await getJudgmentPreferences()
