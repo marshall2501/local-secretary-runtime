@@ -81,4 +81,4 @@ DB基盤の静的・隔離統合テスト入口:
 .\tests\db\test-integration.ps1
 ```
 
-隔離統合テストは専用projectと架空データを使い、所有権、migration、権限、再起動、backup/restore等の回帰を検査します。テスト成功は運用DBやサブPC統合の成功と同義ではありません。実機検証の現在地は設計repo `STATUS` に記録します。
+隔離統合テストは専用projectと架空データを使い、所有権、migration、権限、再起動、backup/restore等の既存機能の劣化がないか確認します。テスト成功は運用DBやサブPC統合の成功と同義ではありません。実機検証の現在地は設計repo `STATUS` に記録します。
