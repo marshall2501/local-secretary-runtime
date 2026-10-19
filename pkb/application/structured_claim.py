@@ -21,7 +21,7 @@ def register_structured_claim(
     repository,
     *,
     task_id: str,
-    operation_id: str,
+    invocation_id: str,
     user_text: str,
     entity_id: str,
     entity_mention: str,
@@ -44,7 +44,7 @@ def register_structured_claim(
     """
     try:
         task_uuid = UUID(task_id)
-        operation_uuid = UUID(operation_id)
+        invocation_uuid = UUID(invocation_id)
         entity_uuid = UUID(entity_id)
     except (ValueError, TypeError, AttributeError) as exc:
         raise ValueError("invalid_structured_claim_identity") from exc
@@ -73,7 +73,7 @@ def register_structured_claim(
     # transactional payload-hash check rather than committed twice.
     input_id = str(uuid5(
         NAMESPACE_URL,
-        f"local-secretary:pkb-claim:{task_uuid}:{operation_uuid}",
+        f"local-secretary:pkb-claim:{task_uuid}:{invocation_uuid}",
     ))
     record = InputRecord(
         input_id=input_id,
