@@ -74,6 +74,69 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
             "request_read", source="external_service",
         )))
 
+    async def test_invoke_read_uses_same_persisted_task_and_result(self) -> None:
+        """MAGI invoke dispatches through the existing Source runner and loops."""
+        task_id = uuid4()
+        calls = []
+
+        async def fake_member(_spec, envelope, **_kwargs):
+            self.assertIn("pkb.search", envelope["operation_catalog"])
+            if envelope["turn"] == 1:
+                result = judgment("invoke")
+                result["operation_request"] = {
+                    "operation_id": "pkb.search",
+                    "arguments": {"query": "架空PCの構成"},
+                    "reason": "既存記憶を確認",
+                }
+                return {"status": "ok", "response": result}
+            self.assertEqual(envelope["observations"][0]["result_id"], "result-invoke")
+            return {"status": "ok", "response": judgment(
+                "respond", basis="result_refs", refs=["result-invoke"],
+                answer="架空PCの保存構成",
+            )}
+
+        def execute(_request, pending, _session):
+            self.assertEqual(pending["source"], "pkb")
+            self.assertEqual(pending["requests"][0]["what"], "架空PCの構成")
+            calls.append("executed")
+            return {
+                "status": "ok", "source": "pkb",
+                "verified_by": "deterministic_pkb_query",
+                "capability": "pkb_search", "total": 1,
+                "answer": "架空PCの保存構成",
+                "result": {"result_kind": "search", "items": [{"name": "架空PC"}]},
+            }
+
+        def record(_task, _execution, _pending):
+            self.assertEqual(_task, task_id)
+            calls.append("recorded")
+            return ("action-invoke", "result-invoke")
+
+        def persist(_task, session, _capability):
+            self.assertEqual(_task, task_id)
+            self.assertEqual(task_projection(session)["task_status"], "completed")
+            calls.append("persisted")
+
+        session = await run_observation_loop(
+            "架空PCを調べて", member_specs=SPEC, timeout=5, task_id=task_id,
+            create_task_record=lambda *_a: calls.append("created"),
+            execute_source_request=execute,
+            record_source_read_record=record,
+            persist_session_record=persist,
+            fail_task_record=lambda *_a: self.fail("unexpected failure"),
+            dialogue_starter=partial(
+                start_dialogue_async, decision_strategy="llm",
+                goal_caller=fake_member, policy_snapshot=POLICY,
+            ),
+            observation_continuation=partial(
+                continue_with_verified_observations_async,
+                goal_caller=fake_member,
+            ),
+            resource_catalog={"pkb": {"available": True}},
+        )
+        self.assertEqual(len(session["turns"]), 2)
+        self.assertEqual(calls, ["created", "executed", "recorded", "persisted"])
+
     async def test_private_source_is_chosen_by_magi_not_python(self) -> None:
         """私的Sourceの判断と選択はMAGI、実行はRITSUKOが行う。"""
         async def fake_member(_member, envelope, **_kwargs):
