@@ -11,7 +11,8 @@ import asyncio
 from copy import deepcopy
 
 from ritsuko.magi.dialogue import select_weighted_consensus
-from ritsuko.magi.goal_contract import VERSION, READ_OPERATIONS, validate_goal_turn
+from ritsuko.magi.goal_contract import VERSION, validate_goal_turn
+from ritsuko.application.observation_sources import READ_OPERATIONS
 from ritsuko.magi.protocol import default_resource_catalog
 
 
