@@ -8,7 +8,7 @@ Web APIはVueアプリから独立した `interfaces/api/ritsuko_tasks.py` の `
 
 MAGIの判断方式は `ritsuko/magi/judgment_strategies.py` の従来段階判断／Goal判断の二つの提案Strategyとして分離し、`ritsuko/core/judgment_application.py` が提案を共通の状態判断へ適用します。新通常経路は `core/task_execution.py` → `magi/session_workflow.py` であり、旧 `async_execution.py` はProvider通信と過去の呼出元向け互換のみです。Task／Source／Action／Result／状態投影は両方式で共通です。登録前に記憶候補文・本人根拠回答を表示するVue Reviewと、MAGI席別ライブ進捗も隔離コードへ反映済みです。
 
-根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapter回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行マスタはこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
+根拠は[共通Router＋実Chromium＋API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997849390)と[MAGI判断Adapterノンデグレテスト](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38997635970)のPASS。**実MAGI・実PGの同一Task完遂、Vueの全機能同等、本人サブPC受入は未確認**。以下に残るB-1～B-3等の節は変更当時の検証履歴であり、現行マスタはこの節と`docs/SOURCE_MAP.md`・設計側統合計画を参照してください。
 
 ## 2026-10-17 Worker所在不明時のVueの操作と照会
 
@@ -86,7 +86,7 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 
 - `ritsuko/application/pkb_observation.py` は旧NiceGUIの対象PC/部品解決と公開可能な技術識別子抽出を共通化し、`ritsuko/application/source_execution.py` は権限付きWeb調査／家計読取を共通化する。旧NiceGUIの `_execute_magi_pkb_request`／`_execute_magi_source_request` はこの共通処理へ委譲する。
 - `bootstrap/magi_task_runtime.py` の `MagiTaskBindings`／`build_magi_task_commands` は、既存 `StateDrivenTaskApplication` と Task/Action/Result Repository、MAGI席設定、Task開始時のPolicy Snapshot、PKB/Web/家計のSourceを画面と独立して結合する。`build_daily_magi_task_commands()` は日常Runtimeの既存DB・Service Connection経路を使うが、**通常8097では呼び出していない**。
-- `tests/test_magi_task_runtime_composition.py` はfake DBとfake MAGIを使い、Task開始→本人回答→回答のみReviewとPolicy Snapshotの再利用を検査。`tests/test_magi_shared_source.py` は曖昧なPKB対象で広い検索に拡張しないこと、権限のないWeb検索を実行しないこと、Web fallback時にも同じ公開検索文を使うことを確認。既存NiceGUIのPKB/Web回帰も維持する。
+- `tests/test_magi_task_runtime_composition.py` はfake DBとfake MAGIを使い、Task開始→本人回答→回答のみReviewとPolicy Snapshotの再利用を検査。`tests/test_magi_shared_source.py` は曖昧なPKB対象で広い検索に拡張しないこと、権限のないWeb検索を実行しないこと、Web fallback時にも同じ公開検索文を使うことを確認。既存NiceGUIのPKB/Webノンデグレテストも維持する。
 - **未受入**: 本人のサブPC実DBと実MAGI/Source接続での受付・回答・停止・Review、MAGI設定/権限Snapshotの実機照合、Goal判断方式の画面選択同等性、JobのAPI process再起動後復旧。これらを確認するまで通常8097から実Taskのwriteを有効化しない。Vue画面の操作UIも未接続。
 
 ## Stage B-2 日常DB設定の読取プローブ
@@ -133,7 +133,7 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - `TaskCommands.recover_pending()` は保存済みで**未着手のpending Taskだけ**を列挙し、同じTask ID、当時の判断方式／member設定／Policyを使って再開。API `create_app(..., commands=...)` は起動時に最大20件のpending復旧を要求する。**通常8097の`create_app(queries=...)`はcommands未注入のread-onlyなので、起動時復旧やTask writeは実行しない**。DB上で既にrunningのTaskを自動再実行しない。
 - StopはRepositoryの `request_stop` で永続化。pendingは`paused`へ確定してclaim不許可。runningはまず `stop_requested=true` を記録し、Workerによる停止完了は別。API再起動後は保存済みStopの有無をTaskの照会から確認でき、`running`をWorker生存と見なさない。
 - HTTP `POST /api/v1/ritsuko/tasks` に省略可能な `task_id: UUID` を追加。通信途絶後に**同一UUID・依頼原文・判断方式**で再送した場合はDB `ON CONFLICT DO NOTHING`と読取照合を使い、Jobを二重作成せず `already_accepted` を返す。異なるIntentを同じUUIDに送った場合は409。UUIDなしの新規リクエストは従来どおりServerが採番するため、クライアントの完全な再送冪等性にはUI側でTask IDを再利用する対応が必要。
-- **隔離検証**: fake Repositoryの受付→MAGI→回答→Review、DBコミット失敗時のJob未実行、同じUUIDの再送、API再構築後のpending復旧、pending停止後の復旧拒否、API明示bind時だけの起動処理、SQL unit回帰を追加。[Vue/API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926295720) PASS。使い捨てDocker PostgreSQLで実際に2 Worker同時claim／同じUUID再送／pending Stopを[PostgreSQL CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653819) PASS（`PASS: disposable PG durable intake, replay, 2-worker claim, stop-before-start`）。既存[NiceGUI/PKB回帰](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653778)・[改行](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653795) PASS。
+- **隔離検証**: fake Repositoryの受付→MAGI→回答→Review、DBコミット失敗時のJob未実行、同じUUIDの再送、API再構築後のpending復旧、pending停止後の復旧拒否、API明示bind時だけの起動処理、SQL unitノンデグレテストを追加。[Vue/API CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926295720) PASS。使い捨てDocker PostgreSQLで実際に2 Worker同時claim／同じUUID再送／pending Stopを[PostgreSQL CI](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653819) PASS（`PASS: disposable PG durable intake, replay, 2-worker claim, stop-before-start`）。既存[NiceGUI/PKBノンデグレテスト](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653778)・[改行](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38926653795) PASS。
 - **未実証／残課題**: 本人サブPCでの新コード反映・通常実DBのMAGI/Source Task、PC/APIを実際にKill→Restartした場合のジョブ復旧と中断中runningの照合、ユーザー回答・Reviewの202以前永続化、複数pendingの継続drain、Vue操作画面がUUIDを保持して再送する導線、実MAGIの1〜3席Goal判断。現時点で新Runtimeの通常8097 write接続・既存8093起動構成・MAGI席設定／権限は変更していない。
 
 
@@ -156,7 +156,7 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 
 **変更**: GET/HEADのOriginとSec-Fetch-Siteによる画面遷移拒否を廃止。POSTの別Origin書込拒否は維持。Task Application、永続DB、MAGI、既存サービス設定は変更しない。
 
-**再現／検証**: 新しいVueNavigationBrowserHeaderTestsで他サイトからのリンク、8097→8099遷移、URL直接入力、F5、JS取得、health、同一Origin POST202、他Origin POST403をfake Commandsで通す。修正前 [RED（403再現）](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980440793) → 修正後 [GREEN](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980549429)。型チェックとその他API回帰もPASS。**本人Windows実ブラウザはまだ修正後未受入**。
+**再現／検証**: 新しいVueNavigationBrowserHeaderTestsで他サイトからのリンク、8097→8099遷移、URL直接入力、F5、JS取得、health、同一Origin POST202、他Origin POST403をfake Commandsで通す。修正前 [RED（403再現）](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980440793) → 修正後 [GREEN](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38980549429)。型チェックとその他APIノンデグレテストもPASS。**本人Windows実ブラウザはまだ修正後未受入**。
 
 **既存NiceGUIとの機能差分**: VueのTask受付・追加回答・回答のみReview・Stop・保存済みTask表示は既存Applicationに接続したが、MAGI各席の設定・進捗、記憶反映Review、詳細Sourceカード、セッション表示等は現時点で未同等。全面作り直しより、まず入口から実MAGIまで1件を実証し、不足を埋める。最低限の実機受入は画面GET→Vue入力→Task受付/DB ID→MAGI結果→回答/Review→停止/F5復元。CI PASSと実機完了は混同しない。
 
@@ -169,7 +169,7 @@ CIはテスト用の注入Queryを使うため、実DB/LLM/外部Actionに接続
 - `TaskActivity.vue` はAction/ResultとSource URL・検証経路/時刻・監査イベントを展開。`CurrentTask.vue` は本人の操作で最新結果および全Task Traceをクリップボードにコピーできる。根拠の存在だけで回答の正しさを断定しない。
 - `TaskSidebar.vue` は10件から追加読み込み（次ページの有無を1件先読みして末尾では非表示）と既存 `/core/history` への導線を追加。`useTasks.ts` はTask APIの50件上限を守るoffset query、3秒ごとのモード再照会、切断時の誤った送信可能表示の解除。
 - 8097→8099の普通のGETナビゲーションを妨げた `cross_site_denied` は、GET/HEADに対する不適切なOrigin/Sec-Fetch-Siteチェックを取り除いた。Task変更POSTのみ別Origin拒否を継続。
-- **Chromiumの本物のブラウザ操作**: `interfaces/vue_daily/browser_fixture.py` の架空Task APIを8097/8099で起動し、`frontend/e2e/ritsuko-flow.spec.ts` で『8097 read-only→リンクで8099を開く→実際の入力欄を編集→送信』『Task本人回答→Review→完了→F5同ID復元』『停止→Source/監査を確認』『一覧10件→追加読み込み→Goal確定表示』を自動実行。CIの[Vue/API/Chromiumブラウザ4ケース PASS（Taskコピー・追加読み込み終端も含む）](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983961468)、[PostgreSQL回帰PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983961527)、[行末PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983961490)。
+- **Chromiumの本物のブラウザ操作**: `interfaces/vue_daily/browser_fixture.py` の架空Task APIを8097/8099で起動し、`frontend/e2e/ritsuko-flow.spec.ts` で『8097 read-only→リンクで8099を開く→実際の入力欄を編集→送信』『Task本人回答→Review→完了→F5同ID復元』『停止→Source/監査を確認』『一覧10件→追加読み込み→Goal確定表示』を自動実行。CIの[Vue/API/Chromiumブラウザ4ケース PASS（Taskコピー・追加読み込み終端も含む）](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983961468)、[PostgreSQLノンデグレテストPASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983961527)、[行末PASS](https://github.com/marshall2501/local-secretary-runtime/actions/runs/38983961490)。
 
 開発環境で同じテストを再実行するには、サブPC既存8097/8099と**ポート競合しない完全隔離環境**で以下を使います（GitHub CIが正規受入環境）。
 
