@@ -7,12 +7,20 @@ from __future__ import annotations
 
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES
 
+# The Operation registry starts with existing, tested read Capabilities.
+# Write operations must never be advertised until their Policy/Result port is bound.
+READ_OPERATIONS = {
+    "pkb.search": "pkb",
+    "web.search": "web",
+    "finance.read": "finance",
+}
+
 VERSION = "goal_loop_v1"
 DEFAULT_GOAL_TURN_LIMIT = 6
 
 GOAL_SYSTEM = """あなたはPersonal Local Secretary AIのMAGI判断役です。
-本人のGoalを理解し、出典不要の回答、または利用可能なSourceのreadを提案してください。
-JSON schemaの形式で、respond / request_read / ask_user / wait / unable のいずれかを提案してください。
+本人のGoalを理解し、利用可能な操作から次の一手を提案してください。
+JSON schemaの形式で、invoke / respond / ask_user / wait / unable のいずれかを提案してください。request_readは旧Task互換のみです。
 新規Sourceの取得、Task状態確定、権限変更、Tool実行はあなたにはできません。
 取得したResultのIDと検証範囲を必ず区別します。
 provider_citedはProviderがURLを報告したことに過ぎず、本文確認済みでも主張の真偽保証でもありません。
@@ -21,7 +29,7 @@ WebはProviderの引用検索のみで、URL指定によるページ本文の独
 evidence.basis=insufficientは既存Result IDを含められます（何を得て何が足りないかを示すため）。
 evidence.basis=not_requiredではResult IDを含めず、respondにはinsufficientを使わないでください。
 本人が資料・本人情報・最新情報など根拠を求めた場合、必要なSourceを読まずnot_requiredとしてはいけません。
-必要なSourceはresource_catalogから選び、request_readでpkb/web/financeの一つを指定してください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
+読み取りはoperation_catalogから登録済みの操作IDを選び、invokeとoperation_requestで指定してください。登録されていない操作・書込みは提案せず、実行済みとも扱わないでください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
 十分でない場合は答えを捏造せず、理由と具体的な次の行動を示してください。
 出典なしで答えられる一般説明はnot_requiredとし、検索を無理に行わないでください。
 返答は指定されたJSONだけにしてください。"""
@@ -44,14 +52,28 @@ READ_REQUEST = {
         "reason": {"type": "string"},
     },
 }
+OPERATION_REQUEST = {
+    "type": "object", "additionalProperties": False,
+    "required": ["operation_id", "arguments", "reason"],
+    "properties": {
+        "operation_id": {"type": "string", "enum": list(READ_OPERATIONS)},
+        "arguments": {
+            "type": "object", "additionalProperties": False,
+            "required": ["query"],
+            "properties": {"query": {"type": "string"}},
+        },
+        "reason": {"type": "string"},
+    },
+}
+
 GOAL_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["goal", "next", "fulfillment", "answer", "evidence",
-                 "read_request", "question", "reason"],
+                 "read_request", "operation_request", "question", "reason"],
     "properties": {
         "goal": {"type": "string"},
         "next": {"type": "string", "enum": [
-            "respond", "request_read", "ask_user", "wait", "unable",
+            "respond", "invoke", "request_read", "ask_user", "wait", "unable",
         ]},
         "fulfillment": {"type": "string", "enum": [
             "met", "partial", "unmet", "unknown",
@@ -59,6 +81,7 @@ GOAL_SCHEMA = {
         "answer": {"type": ["string", "null"]},
         "evidence": EVIDENCE,
         "read_request": {"anyOf": [READ_REQUEST, {"type": "null"}]},
+        "operation_request": {"anyOf": [OPERATION_REQUEST, {"type": "null"}]},
         "question": {"type": ["string", "null"]},
         "reason": {"type": "string"},
     },
@@ -70,7 +93,10 @@ def validate_goal_turn(value: object) -> list[str]:
     if not isinstance(value, dict):
         return ["goal:not_object"]
     errors: list[str] = []
-    if set(value) != set(GOAL_SCHEMA["required"]):
+    # Old persisted Goal turns do not have operation_request.
+    legacy = "operation_request" not in value
+    required = set(GOAL_SCHEMA["required"]) - ({"operation_request"} if legacy else set())
+    if set(value) != required:
         errors.append("goal:field_mismatch")
     for key in ("goal", "reason"):
         if not isinstance(value.get(key), str) or not value[key].strip():
@@ -114,6 +140,20 @@ def validate_goal_turn(value: object) -> list[str]:
             errors.append("read_request:invalid")
     if (next_step == "request_read") != (req is not None):
         errors.append("read_request:state_mismatch")
+    operation = value.get("operation_request")
+    if operation is not None:
+        if (not isinstance(operation, dict)
+                or set(operation) != set(OPERATION_REQUEST["required"])
+                or operation.get("operation_id") not in READ_OPERATIONS
+                or not isinstance(operation.get("arguments"), dict)
+                or set(operation["arguments"]) != {"query"}
+                or not isinstance(operation["arguments"]["query"], str)
+                or not operation["arguments"]["query"].strip()
+                or not isinstance(operation.get("reason"), str)
+                or not operation["reason"].strip()):
+            errors.append("operation_request:invalid")
+    if (next_step == "invoke") != (operation is not None):
+        errors.append("operation_request:state_mismatch")
     if next_step == "respond":
         if fulfillment != "met" or not isinstance(value.get("answer"), str) or not value["answer"].strip():
             errors.append("respond:answer_or_goal_missing")
