@@ -1,6 +1,6 @@
 # SOURCE_MAP — 現行Runtimeソース索引
 
-更新: 2026-10-18（単一Secretary ServerにTask・PKB・Finance・Billing・接続設定・MAGI・Debug API/Vueを結線、正式起動切替は未受入）。実機稼働状態や受入結果は設計repoの [STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) を正本とし、この文書は**存在する実装の索引**とする。採用する責務境界は設計側の Runtime Source Architecture を参照。
+更新: 2026-10-18（単一Secretary ServerにTask・PKB・Finance・Billing・接続設定・MAGI・Debug API/Vueを結線、正式起動切替は未受入）。実機稼働状態や受入結果は設計repoの [STATUS](https://github.com/marshall2501/local-secretary-ai/blob/main/docs/STATUS.md) をマスタとし、この文書は**存在する実装の索引**とする。採用する責務境界は設計側の Runtime Source Architecture を参照。
 
 ## 1. 正式な目標実行経路
 
