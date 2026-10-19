@@ -224,7 +224,7 @@ onUnmounted(() => {
             <div class="form-actions">
               <button v-if="canStop" type="button" class="secondary" :disabled="busy"
                       @click="stopTask">停止を要求</button>
-              <span class="muted small">状態はAPIのTask正本から取得します。</span>
+              <span class="muted small">状態はAPIのTaskマスタから取得します。</span>
             </div>
           </template>
           <p v-else class="muted">Taskを作成するか、一覧から選択してください。</p>
