@@ -47,7 +47,7 @@ def member_states(specs: list[dict], names: tuple[str, ...]) -> list[tuple[str, 
 
     Args:
         specs: DBから読み込んだMAGI席の設定。
-        names: 画面上のMAGI席名の正本。
+        names: 画面上のMAGI席名のマスタ。
 
     Returns:
         list[tuple[str, str]]: 各席の名前と状態。
