@@ -90,6 +90,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
                 }
                 return {"status": "ok", "response": result}
             self.assertEqual(envelope["observations"][0]["result_id"], "result-invoke")
+            self.assertEqual(envelope["observations"][0]["operation_ids"], ["pkb.search"])
             return {"status": "ok", "response": judgment(
                 "respond", basis="result_refs", refs=["result-invoke"],
                 answer="架空PCの保存構成",
@@ -97,6 +98,7 @@ class GoalSourceNeutralTests(unittest.IsolatedAsyncioTestCase):
 
         def execute(_request, pending, _session):
             self.assertEqual(pending["source"], "pkb")
+            self.assertEqual(pending["operation_ids"], ["pkb.search"])
             self.assertEqual(pending["what"], "架空PCの構成")
             calls.append("executed")
             return {
