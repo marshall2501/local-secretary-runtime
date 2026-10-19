@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
-from datetime import datetime, timezone
-from uuid import UUID
+from datetime import datetime, timedelta, timezone
 
 from pkb.application.structured_claim import register_structured_claim
 from pkb.ingestion_gate import assess, Route
@@ -73,7 +71,7 @@ class StructuredClaimTests(unittest.TestCase):
         repo = FakePkbRepository()
         first = write(repo)
         again = write(repo)
-        conflict = write(repo, value="DRV-201")
+        conflict = write(repo, recorded_at=NOW + timedelta(seconds=1))
         self.assertEqual(first["status"], "inserted")
         self.assertEqual(again["status"], "replayed")
         self.assertEqual(conflict["status"], "rejected")
