@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from ritsuko.core.goal_evidence import check_goal_response_evidence
-from ritsuko.magi.goal_contract import READ_OPERATIONS
+from ritsuko.application.observation_sources import READ_OPERATIONS
 from ritsuko.magi.dialogue import (
     _grounded_empty_finance_answer,
     _latest_verified_pkb_observation,
