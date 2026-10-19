@@ -46,7 +46,7 @@ class IsolatedTaskService:
     def __init__(self) -> None:
         """架空Taskストアと共通RITSUKO Applicationを初期化する。"""
         self._lock = RLock()
-        # 架空Taskの唯一の正本。画面や実DBへ複製しない。
+        # 架空Taskの唯一のマスタ。画面や実DBへ複製しない。
         self._tasks: dict[str, _Task] = {}
         # 受付・回答HTTPが終了した後も合成処理を継続するためJob参照を保持する。
         # 停止はこの辞書のTask取消ではなく、各Taskのstop Eventで伝える。
@@ -72,7 +72,7 @@ class IsolatedTaskService:
 
     @staticmethod
     def _snapshot(task: _Task) -> dict:
-        """画面にはTask正本の状態のみ渡し、生の内部sessionは渡さない。"""
+        """画面にはTaskマスタの状態のみ渡し、生の内部sessionは渡さない。"""
         return {
             "task_id": task.id, "request": task.request, "status": task.status,
             "message": task.message, "question": task.question,
