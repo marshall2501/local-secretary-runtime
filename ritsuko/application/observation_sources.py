@@ -10,6 +10,13 @@ from typing import Iterable
 
 
 AUTO_READ_SOURCES = ("pkb", "web", "finance")
+# RITSUKO-owned read Operation registry shared by MAGI exposure and dispatch.
+# Adding an executable operation must register a real port, not just a prompt.
+READ_OPERATIONS = {
+    "pkb.search": "pkb",
+    "web.search": "web",
+    "finance.read": "finance",
+}
 SOURCE_CAPABILITIES = {
     "pkb": "pkb_search",
     "web": "web_research",
