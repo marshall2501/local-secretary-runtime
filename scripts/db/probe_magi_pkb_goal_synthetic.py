@@ -212,6 +212,43 @@ def invalid_proposal_diagnostics(session: dict) -> list[str]:
     return lines or ["diagnostic: no_member_results"]
 
 
+def synthetic_evidence_span_diagnostics(session: dict, decision: dict | None) -> list[str]:
+    """Diagnose only span boundaries of *fictional* input without printing quotes.
+
+    This is not a general-purpose MAGI output logger: it intentionally reports
+    only numerical indices and fixed boolean checks against this probe's
+    hard-coded test literals. Model-supplied strings are never emitted.
+    """
+    if not isinstance(decision, dict):
+        return []
+    request = decision.get("operation_request")
+    if not isinstance(request, dict) or request.get("operation_id") != "pkb.register_claim":
+        return []
+    args = request.get("arguments")
+    if not isinstance(args, dict):
+        return ["diagnostic: evidence_span=unavailable"]
+    raw = session.get("user_raw")
+    if not isinstance(raw, str) or raw not in {
+        TEXT, f"{ENTITY_NAME}の機種は{VALUE}かもしれない。",
+    }:
+        return []
+    start = args.get("evidence_start")
+    end = args.get("evidence_end")
+    lines = [f"diagnostic: source_char_count={len(raw)}"]
+    if not (type(start) is int and type(end) is int):
+        return lines + ["diagnostic: evidence_span=noninteger"]
+    if not 0 <= start < end <= len(raw):
+        return lines + ["diagnostic: evidence_span=out_of_bounds"]
+    quote = raw[start:end]
+    return lines + [
+        f"diagnostic: evidence_start={start}",
+        f"diagnostic: evidence_end={end}",
+        f"diagnostic: evidence_has_entity={str(ENTITY_NAME in quote).lower()}",
+        f"diagnostic: evidence_has_value={str(VALUE in quote).lower()}",
+        f"diagnostic: evidence_has_model_label={str('機種は' in quote).lower()}",
+    ]
+
+
 async def run_live(*, model: str, endpoint: str, timeout: int, case: str) -> int:
     """Send exactly one local model request, then score it without side effects."""
     state = synthetic_session(model, endpoint, timeout, case)
@@ -222,6 +259,8 @@ async def run_live(*, model: str, endpoint: str, timeout: int, case: str) -> int
     passed, reason = evaluate_proposal(case, state, judgment)
     print(("PASS: " if passed else "NOT PASS: ") + reason)
     if not passed:
+        for line in synthetic_evidence_span_diagnostics(state, judgment):
+            print(line)
         for line in invalid_proposal_diagnostics(state):
             print(line)
     return 0 if passed else 1
