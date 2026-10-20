@@ -10,6 +10,7 @@ RITSUKO persistence ports are actual PostgreSQL adapters.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 import runpy
@@ -24,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 from infrastructure.postgres.magi_task_repository import PostgresMagiTaskRepository
 from infrastructure.postgres.pkb_claim_action_repository import PostgresPkbClaimActionStore
 from infrastructure.postgres.pkb_repository import PostgresPkbRepository
+from pkb.application.structured_claim import register_structured_claim
 from ritsuko.application.pkb_claim_operation import (
     invoke_pkb_claim, reconcile_pkb_claim,
 )
@@ -115,7 +117,7 @@ def prepare(connect, *, predicate="driver_updated", value="DRV-200"):
 
 
 def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
-                   expected_predicate="driver_updated"):
+                   expected_predicate="driver_updated", expected_value="DRV-200"):
     """Database constraints, source identity, final Result and no duplicates."""
     with connect() as db, db.cursor() as cur:
         cur.execute(
@@ -134,7 +136,8 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
         }, rows
         assert str(stored_result_id) == str(result_id), rows
         cur.execute(
-            """SELECT p.claim_id,p.source_id,c.entity_id,c.predicate,s.source_type
+            """SELECT p.claim_id,p.source_id,c.entity_id,c.predicate,
+                      c.semantic_kind,c.value,s.source_type
                FROM secretary.pkb_input_receipts p
                JOIN secretary.claims c ON c.id=p.claim_id
                JOIN secretary.sources s ON s.id=p.source_id
@@ -142,11 +145,14 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
         )
         receipts = cur.fetchall()
         assert len(receipts) == 1, receipts
-        receipt_claim, receipt_source, target, predicate, kind = receipts[0]
+        (receipt_claim, receipt_source, target, predicate,
+         semantic_kind, saved_value, kind) = receipts[0]
         assert (str(receipt_claim), str(receipt_source)) == (
             claim_id, str(source_id),
         )
         assert target == entity_id and predicate == expected_predicate
+        assert semantic_kind == ("attribute" if expected_predicate == "model" else "event")
+        assert saved_value == expected_value
         assert kind == "user_statement"
         cur.execute(
             "SELECT count(*) FROM secretary.actions WHERE task_id=%s", (task_id,),
@@ -244,8 +250,28 @@ async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value=
         connect, task_id,
         action_id=records[0]["action_id"],
         result_id=records[0]["result_id"], entity_id=entity_id,
-        expected_predicate=predicate,
+        expected_predicate=predicate, expected_value=value,
     )
+    if predicate == "model":
+        # Existing attributes are not overwritten by a new model proposal.
+        name = text.split("の機種は")[0]
+        newer = f"{name}の機種はRTX-SYNTH-999。"
+        fixed_time = datetime.now(timezone.utc)
+        contested = register_structured_claim(
+            pkb, task_id=str(task_id), invocation_id=str(uuid4()),
+            user_text=newer, entity_id=str(entity_id),
+            entity_mention=name, predicate="model", value="RTX-SYNTH-999",
+            evidence_start=0, evidence_end=len(newer),
+            recorded_at=fixed_time, occurred_at=fixed_time,
+        )
+        assert contested["status"] == "review", contested
+        assert contested["reason"] == "existing_claim_requires_conflict_resolution"
+        with connect() as db, db.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM secretary.claims WHERE entity_id=%s AND predicate='model'",
+                (entity_id,),
+            )
+            assert cur.fetchone()[0] == 1, "conflicting model was written"
 
 
 def interrupted_commit(connect, pkb, store):
@@ -377,6 +403,7 @@ def main():
     interrupted_commit(connect, pkb, store)
     print("PASS: disposable real PKB Claim -> receipt -> Action/Result -> MAGI rejudgment -> completed")
     print("PASS: explicit model attribute -> actual PKB attribute Claim -> Task Result -> MAGI rejudgment")
+    print("PASS: conflicting existing model is review-only, no second model Claim")
     print("PASS: lost Result reconciliation preserves Action/Result identity, no second PKB write")
     print("PASS: missing receipt stays unresolved and does not re-dispatch")
 
