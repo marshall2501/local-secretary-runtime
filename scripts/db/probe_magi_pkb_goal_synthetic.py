@@ -168,6 +168,20 @@ def invalid_proposal_diagnostics(session: dict) -> list[str]:
         return ["diagnostic: no_magi_turn"]
     lines = []
     for item in latest[-1].get("member_results") or []:
+        # Show only known action enums and field presence, never raw model text.
+        response = item.get("response")
+        if isinstance(response, dict):
+            next_step = response.get("next")
+            allowed_steps = {"invoke", "respond", "ask_user", "wait", "unable", "request_read"}
+            safe_step = next_step if next_step in allowed_steps and isinstance(next_step, str) else "unrecognized"
+            request = response.get("operation_request")
+            operation = request.get("operation_id") if isinstance(request, dict) else None
+            from ritsuko.application.observation_sources import READ_OPERATIONS
+            safe_ops = {*READ_OPERATIONS, "pkb.register_claim"}
+            safe_op = operation if isinstance(operation, str) and operation in safe_ops else "none_or_unrecognized"
+            lines.append("diagnostic: next=" + safe_step)
+            lines.append("diagnostic: operation_id=" + safe_op)
+            lines.append("diagnostic: answer_present=" + str(response.get("answer") is not None).lower())
         status = str(item.get("status") or "unknown")
         if status not in {"ok", "invalid", "unavailable", "timeout", "error"}:
             status = "other"
