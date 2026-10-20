@@ -12,6 +12,7 @@ from copy import deepcopy
 
 from ritsuko.magi.dialogue import select_weighted_consensus
 from ritsuko.magi.goal_contract import VERSION, WRITE_OPERATION_ID, validate_goal_turn
+from pkb.write_service import KNOWN_PREDICATES
 from ritsuko.application.observation_sources import READ_OPERATIONS
 from ritsuko.magi.protocol import default_resource_catalog
 
@@ -74,7 +75,8 @@ async def evaluate_goal(
                     "entity_id", "entity_mention", "predicate", "value",
                     "evidence_start", "evidence_end",
                 ],
-                "note": "Use only a PKB-verified existing entity ID (e.g. observations.resolved_entity); search first if unknown. Never invent IDs; unknown or conflicting targets require clarification.",
+                "predicates": sorted(KNOWN_PREDICATES),
+                "note": "Use only PKB-verified existing IDs from observations; search first. For model/manufacturer, quote an explicit labeled value such as 機種は or メーカーは. Do not guess.",
             },
         } if session.get("pkb_claim_write_enabled") is True else {}),
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
