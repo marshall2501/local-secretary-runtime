@@ -9,6 +9,7 @@ from uuid import UUID
 
 from ritsuko.core.task_execution import run_observation_loop
 from ritsuko.core.task_projection import task_projection
+from ritsuko.application.pkb_observation import execute_magi_pkb_request
 from ritsuko.core.judgment_application import apply_judgment
 from ritsuko.magi.session_workflow import (
     start_dialogue_async, continue_with_verified_observations_async,
@@ -115,6 +116,114 @@ class GoalPkbWriteLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task_projection(session)["task_status"], "completed")
         self.assertEqual(events, [
             "magi_proposal", "write", "checkpoint", "magi_re_evaluation", "persist",
+        ])
+
+    async def test_existing_entity_read_then_write_uses_one_task_and_result(self):
+        """本人原文の一意Entityを読んでから同じTask内で記録・再判断する。"""
+        request = "架空機材AをDRV-200へ更新した。"
+        entity_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        events = []
+
+        async def member(_spec, envelope, **_kwargs):
+            if envelope["turn"] == 1:
+                events.append("magi_read")
+                decision = turn("invoke")
+                decision["operation_request"] = {
+                    "operation_id": "pkb.search",
+                    "arguments": {"query": "架空機材A"},
+                    "reason": "既存EntityのIDを確認する",
+                }
+                return {"status": "ok", "response": decision}
+            if envelope["turn"] == 2:
+                observed = envelope["observations"][0]
+                self.assertEqual(observed["source"], "pkb")
+                self.assertEqual(observed["result_id"], "result-read")
+                self.assertEqual(observed["resolved_entity"]["id"], entity_id)
+                events.append("magi_write")
+                decision = turn("invoke")
+                decision["operation_request"]["arguments"].update({
+                    "entity_id": observed["resolved_entity"]["id"],
+                    "entity_mention": "架空機材A",
+                    "evidence_end": len(request),
+                })
+                self.assertEqual(validate_goal_turn(decision), [])
+                return {"status": "ok", "response": decision}
+            self.assertEqual(envelope["turn"], 3)
+            self.assertEqual(envelope["observations"][1]["result_id"], "result-write")
+            events.append("magi_re_evaluation")
+            return {"status": "ok", "response": turn(
+                "respond", refs=["result-write"],
+                answer="架空機材Aの更新を登録しました",
+            )}
+
+        def read(user_raw, pending, _session):
+            events.append("pkb_read")
+            return execute_magi_pkb_request(
+                user_raw, pending, pkb_repository=None,
+                entity_map=lambda: {
+                    "架空機材A": {
+                        "id": entity_id,
+                        "name": "架空機材A", "entity_type": "equipment",
+                    },
+                },
+                execute_read=lambda capability, query: {
+                    "status": "ok", "operation": "search",
+                    "verified_by": "deterministic_pkb_query",
+                    "answer": "架空機材AにはClaimがまだありません。",
+                    "result": {
+                        "result_kind": "claims", "total": 0, "items": [],
+                    },
+                },
+            )
+
+        def record(task_id, execution, pending, attempt_id):
+            self.assertEqual((task_id, attempt_id), (TASK, ATTEMPT))
+            events.append("read_result")
+            return ("action-read", "result-read")
+
+        def write(user_raw, task_id, attempt_id, pending, session):
+            self.assertEqual((user_raw, task_id, attempt_id), (request, TASK, ATTEMPT))
+            self.assertEqual(session["observations"][0]["resolved_entity"]["id"], entity_id)
+            self.assertEqual(pending["arguments"]["entity_id"], entity_id)
+            events.append("pkb_write")
+            return {
+                "source": "pkb_write", "operation_id": "pkb.register_claim",
+                "capability": "pkb_structured_claim", "verified": True,
+                "verification_level": "pkb_repository_receipt",
+                "text": "PKB claim inserted", "responds_to": [pending["request_id"]],
+                "action_id": "action-write", "result_id": "result-write",
+            }
+
+        def checkpoint(*_args):
+            events.append("checkpoint")
+
+        def persist(task_id, session, _capability, attempt_id):
+            self.assertEqual((task_id, attempt_id), (TASK, ATTEMPT))
+            self.assertEqual(task_projection(session)["task_status"], "completed")
+            events.append("completed")
+
+        session = await run_observation_loop(
+            request, task_id=TASK, member_specs=SPEC, timeout=5,
+            create_task_record=lambda *_args: ATTEMPT,
+            execute_source_request=read,
+            record_source_read_record=record,
+            execute_write_operation=write,
+            checkpoint_source_progress=checkpoint,
+            persist_session_record=persist,
+            fail_task_record=lambda *_args: self.fail("unexpected failure"),
+            dialogue_starter=partial(
+                start_dialogue_async, decision_strategy="llm",
+                goal_caller=member, policy_snapshot=POLICY,
+            ),
+            observation_continuation=partial(
+                continue_with_verified_observations_async, goal_caller=member,
+            ),
+        )
+        self.assertEqual(task_projection(session)["task_status"], "completed")
+        self.assertEqual(events, [
+            "magi_read", "pkb_read", "read_result", "checkpoint",
+            "magi_write", "pkb_write", "checkpoint",
+            "magi_re_evaluation", "completed",
         ])
 
     async def test_write_goal_cannot_complete_without_actual_write_receipt(self):
