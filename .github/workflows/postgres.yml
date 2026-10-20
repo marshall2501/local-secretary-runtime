@@ -27,6 +27,10 @@ jobs:
       - name: Validate scripts
         shell: pwsh
         run: ./tests/db/test-static.ps1
+      - name: Verify PKB Goal write target identity and Source guard
+        run: |
+          python -m unittest discover -s tests -p test_observation_sources.py -v
+          python -m unittest discover -s tests -p test_goal_pkb_write_loop.py -v
       - name: Test isolated PostgreSQL lifecycle
         shell: pwsh
         run: ./tests/db/test-integration.ps1
