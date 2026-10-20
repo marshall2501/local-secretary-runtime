@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 
 from infrastructure.async_runtime.transport import request_json_with_retry
 from pkb.ingestion_gate import InputRecord, ProposedClaim, Route, assess
-from pkb.write_service import literal_gate
+from pkb.write_service import literal_gate, normalize_explicit_attribute_evidence
 from ritsuko.application.observation_sources import verified_source_observation
 from ritsuko.magi.goal_contract import validate_goal_turn
 from ritsuko.magi.goal_decision import evaluate_goal
@@ -131,8 +131,9 @@ def evaluate_proposal(case: str, session: dict, decision: dict | None) -> tuple[
     }.items()):
         return False, "wrong_entity_or_attribute"
     try:
-        start, end = args["evidence_start"], args["evidence_end"]
         user_raw = session["user_raw"]
+        grounded_args = normalize_explicit_attribute_evidence(user_raw, args)
+        start, end = grounded_args["evidence_start"], grounded_args["evidence_end"]
         claim = ProposedClaim(
             entity_key=ENTITY_ID, entity_mention=ENTITY_NAME,
             predicate="model", value=VALUE,
@@ -154,7 +155,10 @@ def evaluate_proposal(case: str, session: dict, decision: dict | None) -> tuple[
             return False, "pkb_literal_gate:" + issue
     except (TypeError, KeyError, ValueError, IndexError):
         return False, "invalid_evidence_span"
-    return True, "PKB_schema_and_literal_gates_passed"
+    reason = "PKB_schema_and_literal_gates_passed"
+    if grounded_args["evidence_start"] != args["evidence_start"] or grounded_args["evidence_end"] != args["evidence_end"]:
+        reason += ":normalized_evidence"
+    return True, reason
 
 
 def invalid_proposal_diagnostics(session: dict) -> list[str]:
