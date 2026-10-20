@@ -9,6 +9,7 @@ from scripts.db.probe_magi_pkb_goal_synthetic import (
     ENTITY_ID, ENTITY_NAME, TEXT, VALUE,
     check_endpoint, evaluate_proposal, synthetic_observation,
     synthetic_session, invalid_proposal_diagnostics,
+    synthetic_evidence_span_diagnostics,
 )
 from ritsuko.magi.goal_contract import validate_goal_turn
 
@@ -137,6 +138,36 @@ class PkbGoalSyntheticProbeTests(unittest.TestCase):
                     "with-entity", state, proposal(**changes),
                 )
                 self.assertFalse(passed)
+
+    def test_synthetic_evidence_diagnostics_explain_truncated_quote(self):
+        """本人情報やモデル文面を出さずに引用位置の誤りを判別する。"""
+        state = synthetic_session("fake", "http://127.0.0.1:11434", 20, "with-entity")
+        proposed = proposal(end=len(TEXT) - 2)
+        self.assertFalse(evaluate_proposal("with-entity", state, proposed)[0])
+        lines = synthetic_evidence_span_diagnostics(state, proposed)
+        self.assertIn(f"diagnostic: source_char_count={len(TEXT)}", lines)
+        self.assertIn(f"diagnostic: evidence_end={len(TEXT) - 2}", lines)
+        self.assertIn("diagnostic: evidence_has_entity=true", lines)
+        self.assertIn("diagnostic: evidence_has_value=false", lines)
+        self.assertIn("diagnostic: evidence_has_model_label=true", lines)
+        self.assertNotIn(TEXT, "\n".join(lines))
+        self.assertNotIn(VALUE, "\n".join(lines))
+        full = synthetic_evidence_span_diagnostics(state, proposal())
+        self.assertIn("diagnostic: evidence_has_value=true", full)
+
+    def test_bad_spans_and_nonfictional_input_are_not_exposed(self):
+        """不正インデックスや架空入力以外を表示しない。"""
+        state = synthetic_session("fake", "http://127.0.0.1:11434", 20, "with-entity")
+        self.assertIn("diagnostic: evidence_span=out_of_bounds",
+                      synthetic_evidence_span_diagnostics(
+                          state, proposal(start=0, end=999999),
+                      ))
+        malformed = proposal()
+        malformed["operation_request"]["arguments"]["evidence_start"] = "secret"
+        self.assertIn("diagnostic: evidence_span=noninteger",
+                      synthetic_evidence_span_diagnostics(state, malformed))
+        state["user_raw"] = "PRIVATE-DATA-NOT-FICTIONAL"
+        self.assertEqual(synthetic_evidence_span_diagnostics(state, proposal()), [])
 
     def test_without_entity_requires_read_before_write(self):
         state = synthetic_session("fake", "http://127.0.0.1:11434", 20, "without-entity")
