@@ -89,6 +89,10 @@ try {
     # through the rebuilt common Core, not an in-memory persistence mock.
     & $python (Join-Path $PSScriptRoot 'verify-common-task-execution.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated common RITSUKO Task execution PostgreSQL verification failed.' }
+    # The PKB write Operation must reserve before dispatch and record its
+    # uncertainty in the same disposable schema without touching any PKB claim.
+    & $python (Join-Path $PSScriptRoot 'verify-pkb-claim-action.py') $project $script:container
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated PKB claim Action PostgreSQL verification failed.' }
     & $python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -EnvFile $testEnvFile -BackupPath $backup
