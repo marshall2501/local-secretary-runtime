@@ -8,7 +8,7 @@ import unittest
 from scripts.db.probe_magi_pkb_goal_synthetic import (
     ENTITY_ID, ENTITY_NAME, TEXT, VALUE,
     check_endpoint, evaluate_proposal, synthetic_observation,
-    synthetic_session,
+    synthetic_session, invalid_proposal_diagnostics,
 )
 from ritsuko.magi.goal_contract import validate_goal_turn
 
@@ -42,6 +42,29 @@ def proposal(*, entity_id=ENTITY_ID, value=VALUE, predicate="model",
 
 
 class PkbGoalSyntheticProbeTests(unittest.TestCase):
+    def test_invalid_ollama_response_reports_only_bounded_codes(self):
+        """契約失敗を診断しても、LLM本文や例外の自由文を出力しない。"""
+        session = synthetic_session(
+            "fake", "http://127.0.0.1:11434", 20, "with-entity",
+        )
+        session["turns"].append({
+            "member_results": [{
+                "status": "invalid",
+                "response": {"answer": "FICTIONAL-PRIVATE-DO-NOT-PRINT"},
+                "errors": ["operation_request:invalid", "dangerous raw output / path"],
+                "diagnostic": {
+                    "done_reason": "length", "content_length": 932,
+                    "thinking_length": 0, "num_predict": 2048,
+                    "untrusted_text": "FICTIONAL-PRIVATE-DO-NOT-PRINT",
+                },
+            }],
+        })
+        lines = invalid_proposal_diagnostics(session)
+        self.assertIn("diagnostic: error_codes=operation_request:invalid,unclassified_error", lines)
+        self.assertIn("diagnostic: done_reason=length", lines)
+        self.assertIn("diagnostic: content_length=932", lines)
+        self.assertNotIn("FICTIONAL-PRIVATE-DO-NOT-PRINT", "\n".join(lines))
+
     def test_probe_rejects_nonlocal_endpoints(self):
         for endpoint in (
             "https://127.0.0.1:11434",
