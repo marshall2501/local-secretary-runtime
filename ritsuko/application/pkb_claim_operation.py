@@ -13,6 +13,7 @@ from uuid import UUID
 from pkb.application.structured_claim import (
     register_structured_claim, lookup_structured_claim_receipt,
 )
+from pkb.write_service import normalize_explicit_attribute_evidence
 
 OPERATION_ID = "pkb.register_claim"
 
@@ -26,9 +27,15 @@ def invoke_pkb_claim(
     If anything fails after reservation, persist UNKNOWN when possible.
     Never generate a second Action ID or automatically resend the write.
     """
+    # Derive final evidence offsets from the immutable user text before the
+    # durable Action reservation. Persist exactly the arguments later sent to
+    # PKB; receipt reconciliation must never regenerate a different payload.
+    grounded_arguments = normalize_explicit_attribute_evidence(
+        user_text, arguments,
+    )
     reservation = task_store.reserve(
         task_id=task_id, attempt_id=attempt_id,
-        request_id=request_id, user_text=user_text, arguments=arguments,
+        request_id=request_id, user_text=user_text, arguments=grounded_arguments,
     )
     action_id = UUID(reservation["action_id"])
     try:
@@ -38,7 +45,7 @@ def invoke_pkb_claim(
             user_text=user_text,
             recorded_at=reservation["recorded_at"],
             occurred_at=reservation["occurred_at"],
-            **arguments,
+            **grounded_arguments,
         )
         recorded_action_id, recorded_result_id = task_store.finish(
             task_id=task_id, attempt_id=attempt_id,
