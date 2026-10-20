@@ -6,6 +6,7 @@ executes Tools, or vouches for the existence of a Source/Result record.
 from __future__ import annotations
 
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES, READ_OPERATIONS
+from pkb.write_service import KNOWN_PREDICATES
 
 WRITE_OPERATION_ID = "pkb.register_claim"
 WRITE_ARGUMENT_KEYS = frozenset({
@@ -27,7 +28,7 @@ WebはProviderの引用検索のみで、URL指定によるページ本文の独
 evidence.basis=insufficientは既存Result IDを含められます（何を得て何が足りないかを示すため）。
 evidence.basis=not_requiredではResult IDを含めず、respondにはinsufficientを使わないでください。
 本人が資料・本人情報・最新情報など根拠を求めた場合、必要なSourceを読まずnot_requiredとしてはいけません。
-読み取り・登録はoperation_catalogから登録済みの操作IDを選び、invokeとoperation_requestで指定してください。登録されていない操作を提案せず、実行済みとも扱わないでください。登録候補は本人の原文内の根拠範囲、既存Entity ID、明示の属性を使ってください。PKB登録先のentity_idを推測・創作してはいけません。対象IDが未確認なら、まずpkb.searchで既存の対象・部品関係を確認し、観測のresolved_entityなどPKBが返した実在IDのみ利用してください。解決できなければask_user等で確認し、書込み完了と主張しないでください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
+読み取り・登録はoperation_catalogから登録済みの操作IDを選び、invokeとoperation_requestで指定してください。登録されていない操作を提案せず、実行済みとも扱わないでください。登録候補は本人の原文内の根拠範囲、既存Entity ID、明示の属性を使ってください。model（機種/型番/モデル）とmanufacturer（メーカー/製造元）の属性登録は、本人原文の『機種は○○』『メーカーは○○』のように属性名と値が隣接して明示されたときだけ提案してください。単なる含意・曖昧な言い回しでは登録せず確認してください。PKB登録先のentity_idを推測・創作してはいけません。対象IDが未確認なら、まずpkb.searchで既存の対象・部品関係を確認し、観測のresolved_entityなどPKBが返した実在IDのみ利用してください。解決できなければask_user等で確認し、書込み完了と主張しないでください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
 十分でない場合は答えを捏造せず、理由と具体的な次の行動を示してください。
 出典なしで答えられる一般説明はnot_requiredとし、検索を無理に行わないでください。
 返答は指定されたJSONだけにしてください。"""
@@ -75,7 +76,7 @@ WRITE_OPERATION_REQUEST = {
             "properties": {
                 "entity_id": {"type": "string"},
                 "entity_mention": {"type": "string"},
-                "predicate": {"type": "string", "enum": ["driver_updated", "servo_updated"]},
+                "predicate": {"type": "string", "enum": sorted(KNOWN_PREDICATES)},
                 "value": {"type": "string"},
                 "evidence_start": {"type": "integer"},
                 "evidence_end": {"type": "integer"},
@@ -179,7 +180,7 @@ def validate_goal_turn(value: object) -> list[str]:
             if (set(args) != WRITE_ARGUMENT_KEYS
                     or any(not isinstance(args.get(k), str) or not args[k].strip()
                            for k in ("entity_id", "entity_mention", "predicate", "value"))
-                    or args.get("predicate") not in {"driver_updated", "servo_updated"}
+                    or args.get("predicate") not in KNOWN_PREDICATES
                     or any(type(args.get(k)) is not int or args[k] < 0
                            for k in ("evidence_start", "evidence_end"))
                     or args["evidence_end"] <= args["evidence_start"]):
