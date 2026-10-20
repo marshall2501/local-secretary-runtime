@@ -357,22 +357,52 @@ def reconcile_committed(
             if row is None:
                 raise ValueError("pkb_reconciliation_succeeded_result_missing")
             return str(action_id), str(row[0])
-        cur.execute(
-            """INSERT INTO secretary.results
-               (action_id,source_id,outcome,summary,evidence,verified_by,verified_at)
-               VALUES (%s,%s,'success',%s,%s,%s,now()) RETURNING id""",
-            (
-                action_id, source_id, "PKB claim reconciled from existing receipt",
-                Jsonb({
-                    "operation_id": OPERATION_ID,
-                    "write_status": "replayed",
-                    "claim_id": str(claim_id), "source_id": str(source_id),
-                    "reconciled_from": state[0],
-                }),
-                "pkb_repository_receipt_reconciled",
-            ),
-        )
-        result_id = cur.fetchone()[0]
+        evidence = Jsonb({
+            "operation_id": OPERATION_ID,
+            "write_status": "replayed",
+            "claim_id": str(claim_id), "source_id": str(source_id),
+            "reconciled_from": state[0],
+        })
+        if state[0] == "unknown":
+            # Source checkpoint/recovery requires one Result per Action.
+            # Keep the UNKNOWN transition in audit_events; promote its
+            # inconclusive Result ID instead of creating a second Result.
+            cur.execute(
+                """SELECT id, outcome FROM secretary.results
+                   WHERE action_id=%s FOR UPDATE""", (action_id,),
+            )
+            rows = cur.fetchall()
+            if len(rows) != 1 or rows[0][1] != "inconclusive":
+                raise ValueError("pkb_unknown_result_inconsistent")
+            result_id = rows[0][0]
+            cur.execute(
+                """UPDATE secretary.results
+                   SET source_id=%s, outcome='success', summary=%s,
+                       evidence=%s, error=NULL, verified_by=%s, verified_at=now()
+                   WHERE id=%s""",
+                (
+                    source_id, "PKB claim reconciled from existing receipt",
+                    evidence, "pkb_repository_receipt_reconciled", result_id,
+                ),
+            )
+        else:
+            cur.execute(
+                """SELECT count(*) FROM secretary.results
+                   WHERE action_id=%s""", (action_id,),
+            )
+            if cur.fetchone()[0] != 0:
+                raise ValueError("pkb_running_action_unexpected_result")
+            cur.execute(
+                """INSERT INTO secretary.results
+                   (action_id,source_id,outcome,summary,evidence,verified_by,verified_at)
+                   VALUES (%s,%s,'success',%s,%s,%s,now()) RETURNING id""",
+                (
+                    action_id, source_id,
+                    "PKB claim reconciled from existing receipt",
+                    evidence, "pkb_repository_receipt_reconciled",
+                ),
+            )
+            result_id = cur.fetchone()[0]
         cur.execute(
             """UPDATE secretary.actions SET status='succeeded',finished_at=now()
                WHERE id=%s""", (action_id,),
