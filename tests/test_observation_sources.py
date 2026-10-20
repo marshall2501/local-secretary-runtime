@@ -79,6 +79,59 @@ class ObservationSourceTests(unittest.TestCase):
         self.assertTrue(observation["verified"])
         self.assertEqual(observation["responds_to"], ["F1"])
 
+    def test_pkb_resolved_component_id_is_forwarded_to_magi(self):
+        """PKBが一意解決した実Entity IDだけを次のMAGI判断へ渡す。"""
+        entity_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        execution = {
+            "status": "ok", "source": "pkb", "operation": "entity_detail",
+            "verified_by": "deterministic_pkb_query",
+            "answer": "架空PCのGPU Entityを確認しました。",
+            "result": {
+                "result_kind": "entity_detail",
+                "entity": {"id": entity_id, "name": "架空GPU"},
+                "current": [],
+            },
+            "source_metadata": {
+                "component_entity_id": entity_id,
+                "component_entity_name": "架空GPU",
+            },
+        }
+        observation = verified_source_observation(
+            execution, {"source": "pkb", "request_ids": ["REQ-1"]},
+        )
+        self.assertEqual(observation["resolved_entity"], {
+            "id": entity_id,
+            "name": "架空GPU",
+            "resolution": "pkb_component_relation",
+        })
+        self.assertEqual(observation["evidence_preview"], [])
+
+    def test_unverified_or_inconsistent_target_id_is_not_forwarded(self):
+        """Modelや不整合なSource metadataからEntity IDを捏造しない。"""
+        execution = {
+            "status": "ok", "source": "pkb", "operation": "entity_detail",
+            "verified_by": "deterministic_pkb_query",
+            "answer": "架空PCのGPU",
+            "result": {
+                "result_kind": "entity_detail",
+                "entity": {"id": "real-entity", "name": "架空GPU"},
+            },
+            "source_metadata": {
+                "component_entity_id": "other-entity",
+                "component_entity_name": "架空GPU",
+            },
+        }
+        observation = verified_source_observation(
+            execution, {"source": "pkb", "request_ids": ["REQ-1"]},
+        )
+        self.assertNotIn("resolved_entity", observation)
+        execution["source_metadata"]["component_entity_id"] = "real-entity"
+        execution["verified_by"] = "provider_reported_web_citations"
+        observation = verified_source_observation(
+            execution, {"source": "pkb", "request_ids": ["REQ-1"]},
+        )
+        self.assertNotIn("resolved_entity", observation)
+
     def test_failed_read_does_not_create_verified_observation(self):
         self.assertIsNone(verified_source_observation(
             {
