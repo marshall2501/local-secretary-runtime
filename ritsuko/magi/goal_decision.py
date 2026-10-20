@@ -74,7 +74,7 @@ async def evaluate_goal(
                     "entity_id", "entity_mention", "predicate", "value",
                     "evidence_start", "evidence_end",
                 ],
-                "note": "Explicit user-grounded claim; unknown entity or conflict may require review",
+                "note": "Use only a PKB-verified existing entity ID (e.g. observations.resolved_entity); search first if unknown. Never invent IDs; unknown or conflicting targets require clarification.",
             },
         } if session.get("pkb_claim_write_enabled") is True else {}),
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
