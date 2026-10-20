@@ -51,6 +51,15 @@ class GoalContractTests(unittest.TestCase):
         read["next"] = "respond"
         self.assertIn("operation_request:state_mismatch", validate_goal_turn(read))
 
+    def test_malformed_operation_id_fails_closed_without_exception(self):
+        case = judgment("invoke")
+        case["operation_request"] = {
+            "operation_id": ["pkb.register_claim"],
+            "arguments": {"query": "架空PC"},
+            "reason": "不正な識別子",
+        }
+        self.assertIn("operation_request:invalid", validate_goal_turn(case))
+
     def test_new_goal_reply_does_not_allow_write_or_extra_arguments(self):
         reply = judgment("invoke")
         reply["operation_request"] = {
