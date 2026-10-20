@@ -9,7 +9,7 @@ All calls require an active, claimed Task attempt and an explicit PKB permission
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, NAMESPACE_URL, uuid5
 
 from psycopg.types.json import Jsonb
 
@@ -259,6 +259,135 @@ def mark_unknown(
         return str(action_id), str(result_id)
 
 
+
+def load_reconciliation(db, *, task_id: UUID, action_id: UUID) -> dict:
+    """Load the original persisted operation, never model-provided retry args."""
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT t.request, t.requested_by, t.permission_scope, t.created_at,
+                      a.status, a.operation, a.actor, a.authorization_basis,
+                      a.parameters, a.idempotency_key
+               FROM secretary.actions a
+               JOIN secretary.tasks t ON t.id = a.task_id
+               WHERE a.id=%s AND a.task_id=%s""",
+            (action_id, task_id),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise ValueError("unknown_pkb_action")
+    (request, requester, permissions, created_at, status, operation,
+     actor, basis, parameters, key) = row
+    if (requester != "local_user" or not isinstance(permissions, dict)
+            or permissions.get("pkb_write") is not True):
+        raise ValueError("pkb_write_not_permitted")
+    if (operation != OPERATION_ID or actor != "ritsuko_core"
+            or basis != "task_scoped_user_pkb_write"
+            or status not in {"running", "unknown", "succeeded"}
+            or not isinstance(parameters, dict)):
+        raise ValueError("pkb_action_not_reconcilable")
+    request_id = parameters.get("request_id")
+    arguments = parameters.get("arguments")
+    attempt_id = parameters.get("attempt_id")
+    if (not isinstance(request_id, str)
+            or not request_id.startswith(f"REQ-{str(task_id)[:8]}-")
+            or key != f"ritsuko-pkb:{task_id}:{request_id}"
+            or not isinstance(arguments, dict)
+            or set(arguments) != ARGUMENT_KEYS
+            or not isinstance(attempt_id, str)):
+        raise ValueError("pkb_action_identity_mismatch")
+    try:
+        UUID(attempt_id)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("pkb_action_attempt_invalid") from exc
+    return {
+        "user_text": request, "arguments": arguments,
+        "recorded_at": created_at, "occurred_at": created_at,
+        "request_id": request_id, "action_status": status,
+    }
+
+
+def reconcile_committed(
+    db, *, task_id: UUID, action_id: UUID, receipt: dict,
+) -> tuple[str, str]:
+    """Record a verified PKB receipt without ever sending another write.
+
+    Keep earlier UNKNOWN evidence as an audit record; a new success Result
+    must reference the PKB's own Source. Task completion belongs to RITSUKO.
+    """
+    if (not isinstance(receipt, dict)
+            or receipt.get("status") != "replayed"
+            or not receipt.get("claim_id") or not receipt.get("source_id")):
+        raise ValueError("pkb_reconciliation_requires_committed_receipt")
+    claim_id = UUID(str(receipt["claim_id"]))
+    source_id = UUID(str(receipt["source_id"]))
+    input_id = str(uuid5(
+        NAMESPACE_URL, f"local-secretary:pkb-claim:{task_id}:{action_id}",
+    ))
+    with db.transaction(), db.cursor() as cur:
+        # Lock this Action: repeated reconciliation must return one Result.
+        cur.execute(
+            """SELECT status FROM secretary.actions
+               WHERE id=%s AND task_id=%s AND operation=%s FOR UPDATE""",
+            (action_id, task_id, OPERATION_ID),
+        )
+        state = cur.fetchone()
+        if not state or state[0] not in {"running", "unknown", "succeeded"}:
+            raise ValueError("pkb_action_not_reconcilable")
+        context = load_reconciliation(db, task_id=task_id, action_id=action_id)
+        if context["action_status"] != state[0]:
+            raise ValueError("pkb_action_changed_during_reconciliation")
+        cur.execute(
+            """SELECT 1 FROM secretary.pkb_input_receipts
+               WHERE input_id=%s AND source_id=%s AND claim_id=%s""",
+            (input_id, source_id, claim_id),
+        )
+        if cur.fetchone() is None:
+            raise ValueError("pkb_reconciliation_receipt_missing")
+        if state[0] == "succeeded":
+            cur.execute(
+                """SELECT id FROM secretary.results
+                   WHERE action_id=%s AND outcome='success'
+                     AND verified_by IN (
+                         'pkb_repository_receipt',
+                         'pkb_repository_receipt_reconciled')
+                   ORDER BY recorded_at DESC, id DESC LIMIT 1""",
+                (action_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError("pkb_reconciliation_succeeded_result_missing")
+            return str(action_id), str(row[0])
+        cur.execute(
+            """INSERT INTO secretary.results
+               (action_id,source_id,outcome,summary,evidence,verified_by,verified_at)
+               VALUES (%s,%s,'success',%s,%s,%s,now()) RETURNING id""",
+            (
+                action_id, source_id, "PKB claim reconciled from existing receipt",
+                Jsonb({
+                    "operation_id": OPERATION_ID,
+                    "write_status": "replayed",
+                    "claim_id": str(claim_id), "source_id": str(source_id),
+                    "reconciled_from": state[0],
+                }),
+                "pkb_repository_receipt_reconciled",
+            ),
+        )
+        result_id = cur.fetchone()[0]
+        cur.execute(
+            """UPDATE secretary.actions SET status='succeeded',finished_at=now()
+               WHERE id=%s""", (action_id,),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor,event_type,task_id,action_id,object_type,object_id,details)
+               VALUES ('ritsuko_core','core.magi.pkb_write_reconciled',
+                       %s,%s,'task',%s,%s)""",
+            (task_id, action_id, task_id,
+             Jsonb({"result_id": str(result_id), "claim_id": str(claim_id)})),
+        )
+        return str(action_id), str(result_id)
+
+
 class PostgresPkbClaimActionStore:
     """Connection-owning adapter sharing the existing Secretary PostgreSQL DB."""
 
@@ -276,3 +405,11 @@ class PostgresPkbClaimActionStore:
     def mark_unknown(self, **kwargs) -> tuple[str, str]:
         with self._connect() as db:
             return mark_unknown(db, **kwargs)
+
+    def load_reconciliation(self, **kwargs) -> dict:
+        with self._connect() as db:
+            return load_reconciliation(db, **kwargs)
+
+    def reconcile_committed(self, **kwargs) -> tuple[str, str]:
+        with self._connect() as db:
+            return reconcile_committed(db, **kwargs)
