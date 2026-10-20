@@ -173,7 +173,7 @@ def invalid_proposal_diagnostics(session: dict) -> list[str]:
         if isinstance(response, dict):
             next_step = response.get("next")
             allowed_steps = {"invoke", "respond", "ask_user", "wait", "unable", "request_read"}
-            safe_step = next_step if next_step in allowed_steps and isinstance(next_step, str) else "unrecognized"
+            safe_step = next_step if isinstance(next_step, str) and next_step in allowed_steps else "unrecognized"
             request = response.get("operation_request")
             operation = request.get("operation_id") if isinstance(request, dict) else None
             from ritsuko.application.observation_sources import READ_OPERATIONS
