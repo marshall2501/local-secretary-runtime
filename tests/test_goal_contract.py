@@ -51,6 +51,29 @@ class GoalContractTests(unittest.TestCase):
         read["next"] = "respond"
         self.assertIn("operation_request:state_mismatch", validate_goal_turn(read))
 
+    def test_attribute_write_predicates_are_only_existing_pkb_contract(self):
+        """MAGIは正式に許された属性のみ提案できる。"""
+        from pkb.write_service import KNOWN_PREDICATES
+        from ritsuko.magi.goal_contract import GOAL_SCHEMA
+        schema = GOAL_SCHEMA["properties"]["operation_request"]["anyOf"][1]
+        labels = schema["properties"]["arguments"]["properties"]["predicate"]["enum"]
+        self.assertEqual(labels, sorted(KNOWN_PREDICATES))
+        for predicate in ("model", "manufacturer"):
+            proposal = judgment("invoke")
+            proposal["operation_request"] = {
+                "operation_id": "pkb.register_claim",
+                "arguments": {
+                    "entity_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    "entity_mention": "架空GPU", "predicate": predicate,
+                    "value": "架空値", "evidence_start": 0,
+                    "evidence_end": 15,
+                },
+                "reason": "本人原文に明示された属性",
+            }
+            self.assertEqual(validate_goal_turn(proposal), [])
+        proposal["operation_request"]["arguments"]["predicate"] = "account_balance"
+        self.assertIn("operation_request:invalid", validate_goal_turn(proposal))
+
     def test_malformed_operation_id_fails_closed_without_exception(self):
         case = judgment("invoke")
         case["operation_request"] = {
