@@ -36,8 +36,8 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 共通実行・Source | `ritsuko/core/task_execution.py`, `ritsuko/application/source_execution.py` | 記録済みAction/Result IDを使用 |
 | Task状態・Goal評価 | `ritsuko/core/task_projection.py`, `judgment_application.py`, `goal_evidence.py` | 提案だけでTool完了にしない |
 | MAGI Session / Strategy | `ritsuko/magi/session_workflow.py`, `judgment_strategies.py` | standard/llm共通 |
-| MAGI Goal判断契約 | `ritsuko/magi/goal_decision.py`, `goal_contract.py` | 判断候補・契約検証、実行状態Writerではない |
-| PKB登録Operation（隔離結線・日常無効） | `ritsuko/application/pkb_claim_operation.py`, `pkb/application/structured_claim.py`, `infrastructure/postgres/pkb_claim_action_repository.py` | MAGIの構造化登録候補→RITSUKOの事前Action予約→既存PKB Writer→Result保存→MAGI再判断。Taskに `pkb_write` 権限が必要。隔離PGの実PKB Claim登録・正式Receipt→Result→合成MAGI再判断はGitHub Actions PASS。UNKNOWNからのReceipt再照合と二重登録防止もPASS。日常CompositionのWrite Portは未注入、本人サブPC最新差分・実MAGI/日常Writeは未受入 |
+| MAGI Goal判断契約とPKB Entity観測 | `ritsuko/magi/goal_decision.py`, `goal_contract.py`, `ritsuko/application/observation_sources.py`, `ritsuko/application/pkb_observation.py` | MAGIは候補と根拠を提案。PKBの限定部品解決でID・名前が一致した実Entityだけ `resolved_entity` として次Turnへ渡す。未確認IDの創作は禁止し、private Entity IDのWeb検索転送を拒否。今回の観測受渡しは隔離CI PASS。日常Write/実LLMの受入は別 |
+| PKB登録Operation（隔離結線・日常無効） | `ritsuko/application/pkb_claim_operation.py`, `pkb/application/structured_claim.py`, `infrastructure/postgres/pkb_claim_action_repository.py` | MAGIの構造化登録候補→RITSUKOの事前Action予約→既存PKB Writer→Result保存→MAGI再判断。Taskに `pkb_write` 権限が必要。隔離PGの実PKB Claim登録・正式Receipt→Result→合成MAGI再判断とUNKNOWN後の照合/二重登録防止はGitHub Actions・本人サブPC両方PASS。日常CompositionのWrite Portは未注入、実MAGI/日常Writeは未受入 |
 | MAGI Provider I/O | `ritsuko/magi/async_execution.py`, `client.py`, `integrations/llm/` | async、deadline/cancel、複数席 |
 | MAGI/Task実行組立 | `bootstrap/magi_task_runtime.py`, `ritsuko_task_composition.py` | API・Vue・旧UIが共用 |
 | 永続Task、照会 | `infrastructure/postgres/magi_task_repository.py`, `core_task_query_repository.py`, `task_repository.py` | 本人Task原文・履歴・停止／Review状態 |
