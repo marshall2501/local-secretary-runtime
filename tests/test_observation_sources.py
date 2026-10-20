@@ -164,6 +164,27 @@ class ObservationSourceTests(unittest.TestCase):
                 session,
             )
 
+    def test_web_query_cannot_forward_private_resolved_pkb_entity(self):
+        """MAGIが受け取った非公開Entity IDはWeb検索語へ転送しない。"""
+        entity_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        with self.assertRaisesRegex(
+            ValueError, "web_query_requires_private_context_approval",
+        ):
+            web_query_from_request(
+                {"what": entity_id + " GPU仕様"},
+                {
+                    "user_raw": "架空PCのGPU仕様を調べて",
+                    "observations": [{
+                        "source": "pkb", "verified": True,
+                        "confidentiality": "private",
+                        "resolved_entity": {
+                            "id": entity_id, "name": "架空GPU",
+                            "resolution": "pkb_component_relation",
+                        },
+                    }],
+                },
+            )
+
     def test_web_query_blocks_secret_like_value_even_if_user_wrote_it(self):
         session = {
             "user_raw": "api_key=sk-abcdefghijklmnop を検索して",
