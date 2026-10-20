@@ -3,13 +3,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 
 from .ingestion_gate import InputRecord, ProposedClaim
 
+# Event predicates describe changes. Attributes require labeled values.
+ATTRIBUTE_LABELS = {
+    "model": ("機種", "型番", "モデル"),
+    "manufacturer": ("メーカー", "製造元"),
+}
 KNOWN_PREDICATES = {
     "driver_updated": ("更新した", "更新しておいた", "アップデートした"),
     "servo_updated": ("交換した", "取り替えた"),
+    **ATTRIBUTE_LABELS,
 }
 UNCERTAIN = ("かもしれない", "未確認", "不明", "ではなく", "訂正", "らしい")
 
@@ -52,11 +59,19 @@ def literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
     if claim.predicate not in KNOWN_PREDICATES:
         return "predicate_not_supported_by_first_slice"
     quote = claim.evidence_quote
-    if claim.value not in quote or not any(
+    if claim.predicate in ATTRIBUTE_LABELS:
+        # 属性名に値が直結しているときだけ候補にする。無関係な値の流用は拒否。
+        labels = "|".join(re.escape(v) for v in ATTRIBUTE_LABELS[claim.predicate])
+        pattern = rf"(?:{labels})\s*(?:は|が|:|：)\s*{re.escape(claim.value)}(?=$|[\s。、，,;；!?！？）)」]|です)"
+        if not re.search(pattern, quote):
+            return "value_or_attribute_not_explicit_in_quote"
+        if len(re.findall(rf"(?:{labels})\s*(?:は|が|:|：)", quote)) != 1:
+            return "ambiguous_attribute_statement"
+    elif claim.value not in quote or not any(
         phrase in quote for phrase in KNOWN_PREDICATES[claim.predicate]
     ):
         return "value_or_action_not_explicit_in_quote"
-    if any(marker in quote for marker in UNCERTAIN):
+    if any(marker in record.text for marker in UNCERTAIN):
         return "uncertain_or_correction_language"
     return None
 
