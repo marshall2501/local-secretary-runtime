@@ -338,7 +338,7 @@ def main():
         raise RuntimeError("requires_disposable_project_container_and_role_secret")
     port = DISPOSABLE_PORT(sys.argv[1], sys.argv[2])
     secret_file = Path(sys.argv[3])
-    if (secret_file.parent.resolve() != ROOT.resolve()
+    if (secret_file.parent.resolve() != (ROOT / "secrets").resolve()
             or not secret_file.name.startswith(".pkb-e2e-local-secretary-test-")
             or not secret_file.is_file()):
         raise RuntimeError("not_disposable_role_secret")
