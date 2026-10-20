@@ -157,6 +157,47 @@ def evaluate_proposal(case: str, session: dict, decision: dict | None) -> tuple[
     return True, "PKB_schema_and_literal_gates_passed"
 
 
+def invalid_proposal_diagnostics(session: dict) -> list[str]:
+    """Print only bounded provider/contract error codes, never response contents.
+
+    The actual model response and request envelope may contain private facts
+    in normal Task use; this probe still never prints or persists their text.
+    """
+    latest = (session.get("turns") or [])
+    if not latest:
+        return ["diagnostic: no_magi_turn"]
+    lines = []
+    for item in latest[-1].get("member_results") or []:
+        status = str(item.get("status") or "unknown")
+        if status not in {"ok", "invalid", "unavailable", "timeout", "error"}:
+            status = "other"
+        lines.append("diagnostic: member_status=" + status)
+        errors = []
+        for value in item.get("errors") or []:
+            code = str(value)
+            if (len(code) <= 96 and code
+                    and all(ch.isascii() and
+                            (ch.isalnum() or ch in "_:-")
+                            for ch in code)):
+                errors.append(code)
+            else:
+                errors.append("unclassified_error")
+        lines.append("diagnostic: error_codes=" + (",".join(errors[:12]) or "none"))
+        diagnostics = item.get("diagnostic") or {}
+        for key in ("done_reason", "content_length", "thinking_length",
+                    "eval_count", "num_predict", "attempt_count"):
+            value = diagnostics.get(key)
+            if key == "done_reason":
+                if not isinstance(value, str) or value not in {
+                    "stop", "length", "unload", "load", "error",
+                }:
+                    continue
+            elif type(value) is not int or not 0 <= value < 10000000:
+                continue
+            lines.append(f"diagnostic: {key}={value}")
+    return lines or ["diagnostic: no_member_results"]
+
+
 async def run_live(*, model: str, endpoint: str, timeout: int, case: str) -> int:
     """Send exactly one local model request, then score it without side effects."""
     state = synthetic_session(model, endpoint, timeout, case)
@@ -166,6 +207,9 @@ async def run_live(*, model: str, endpoint: str, timeout: int, case: str) -> int
     judgment = await evaluate_goal(state, timeout=timeout)
     passed, reason = evaluate_proposal(case, state, judgment)
     print(("PASS: " if passed else "NOT PASS: ") + reason)
+    if not passed:
+        for line in invalid_proposal_diagnostics(state):
+            print(line)
     return 0 if passed else 1
 
 
