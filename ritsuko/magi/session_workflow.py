@@ -51,6 +51,7 @@ async def start_dialogue_async(
     task_timezone: str = "Asia/Tokyo",
     task_locale: str = "ja-JP",
     policy_snapshot: dict | None = None,
+    pkb_claim_write_enabled: bool = False,
     decision_strategy: str = "standard",
     on_member_progress=None,
     goal_caller=None,
@@ -85,6 +86,7 @@ async def start_dialogue_async(
         "legacy_router_used": False,
         "tool_read_executed": False,
         "policy_snapshot": deepcopy(policy_snapshot) if policy_snapshot else None,
+        "pkb_claim_write_enabled": pkb_claim_write_enabled is True,
     }
     if not session["user_raw"]:
         session.update(status="stopped", next_step="invalid_input")
@@ -188,17 +190,17 @@ async def continue_with_verified_observations_async(
     for observation in observations[:12]:
         if not isinstance(observation, dict):
             raise ValueError("invalid_observation")
-        # A failed read is a recorded failure, not a verified Source.
+        # Failed reads/writes are recorded outcomes, not verified evidence.
         # Tool失敗は検証済み根拠でなく、Goal判断だけが記録済み失敗を再評価する。
         failed_goal_read = (
             judgment.allows_recorded_read_failure
-            and observation.get("source") in {"pkb", "web", "finance"}
+            and observation.get("source") in {"pkb", "web", "finance", "pkb_write"}
             and observation.get("verified") is False
             and bool(observation.get("result_id"))
             and bool(observation.get("action_id"))
         )
         if (
-            observation.get("source") not in {"pkb", "web", "finance"}
+            observation.get("source") not in {"pkb", "web", "finance", "pkb_write"}
             or (observation.get("verified") is not True and not failed_goal_read)
         ):
             raise ValueError("verified_read_observation_required")
