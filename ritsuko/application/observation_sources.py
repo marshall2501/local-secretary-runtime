@@ -176,6 +176,29 @@ def verified_source_observation(
         "evidence_preview": _bounded_preview(result),
     }
     metadata = execution.get("source_metadata")
+    if (
+        source == "pkb"
+        and result.get("result_kind") == "entity_detail"
+        and execution.get("verified_by") == "deterministic_pkb_query"
+        and execution.get("operation") == "entity_detail"
+        and isinstance(metadata, dict)
+        and isinstance(result.get("entity"), dict)
+    ):
+        # 既存PKBが解決した対象だけ次Turnへ渡す。MAGIの推測IDは使わない。
+        entity = result["entity"]
+        entity_id = str(entity.get("id") or "")
+        entity_name = str(entity.get("name") or "")
+        if (
+            entity_id
+            and entity_name
+            and entity_id == str(metadata.get("component_entity_id") or "")
+            and entity_name == str(metadata.get("component_entity_name") or "")
+        ):
+            observation["resolved_entity"] = {
+                "id": entity_id,
+                "name": entity_name,
+                "resolution": "pkb_component_relation",
+            }
     if isinstance(metadata, dict):
         public_terms = [
             str(value).strip()
