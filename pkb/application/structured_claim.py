@@ -17,7 +17,7 @@ from pkb.ingestion_gate import InputRecord, ProposedClaim
 from pkb.write_service import KNOWN_PREDICATES
 
 
-def register_structured_claim(
+def prepare_structured_claim(
     repository,
     *,
     task_id: str,
@@ -93,4 +93,60 @@ def register_structured_claim(
         evidence_end=evidence_end,
         evidence_quote=quote,
     )
+    return record, claim
+
+def register_structured_claim(
+    repository,
+    *,
+    task_id: str,
+    invocation_id: str,
+    user_text: str,
+    entity_id: str,
+    entity_mention: str,
+    predicate: str,
+    value: str,
+    evidence_start: int,
+    evidence_end: int,
+    recorded_at: datetime,
+    occurred_at: datetime,
+) -> dict:
+    """Persist one PKB Claim after the existing RITSUKO Action reservation."""
+    record, claim = prepare_structured_claim(
+        repository, task_id=task_id, invocation_id=invocation_id,
+        user_text=user_text, entity_id=entity_id,
+        entity_mention=entity_mention, predicate=predicate, value=value,
+        evidence_start=evidence_start, evidence_end=evidence_end,
+        recorded_at=recorded_at, occurred_at=occurred_at,
+    )
     return asdict(repository.write_one(record, claim))
+
+
+def lookup_structured_claim_receipt(
+    repository,
+    *,
+    task_id: str,
+    invocation_id: str,
+    user_text: str,
+    entity_id: str,
+    entity_mention: str,
+    predicate: str,
+    value: str,
+    evidence_start: int,
+    evidence_end: int,
+    recorded_at: datetime,
+    occurred_at: datetime,
+) -> dict | None:
+    """Read an authoritative receipt without dispatching the PKB write again.
+
+    The replay key, input text, evidence, and timestamps must match the
+    persisted original Action. A missing receipt never authorizes retry.
+    """
+    record, claim = prepare_structured_claim(
+        repository, task_id=task_id, invocation_id=invocation_id,
+        user_text=user_text, entity_id=entity_id,
+        entity_mention=entity_mention, predicate=predicate, value=value,
+        evidence_start=evidence_start, evidence_end=evidence_end,
+        recorded_at=recorded_at, occurred_at=occurred_at,
+    )
+    receipt = repository.lookup_write_receipt(record, claim)
+    return asdict(receipt) if receipt is not None else None
