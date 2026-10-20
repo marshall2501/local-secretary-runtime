@@ -71,7 +71,7 @@ def literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
         phrase in quote for phrase in KNOWN_PREDICATES[claim.predicate]
     ):
         return "value_or_action_not_explicit_in_quote"
-    if any(marker in record.text for marker in UNCERTAIN):
+    if any(marker in record.text or marker in quote for marker in UNCERTAIN):
         return "uncertain_or_correction_language"
     return None
 
