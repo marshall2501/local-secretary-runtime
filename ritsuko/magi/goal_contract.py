@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from ritsuko.application.observation_sources import AUTO_READ_SOURCES, READ_OPERATIONS
 
+WRITE_OPERATION_ID = "pkb.register_claim"
+WRITE_ARGUMENT_KEYS = frozenset({
+    "entity_id", "entity_mention", "predicate", "value",
+    "evidence_start", "evidence_end",
+})
+
 VERSION = "goal_loop_v2"  # Wire format; persisted control_mode remains v1 during migration.
 DEFAULT_GOAL_TURN_LIMIT = 6
 
@@ -21,7 +27,7 @@ WebはProviderの引用検索のみで、URL指定によるページ本文の独
 evidence.basis=insufficientは既存Result IDを含められます（何を得て何が足りないかを示すため）。
 evidence.basis=not_requiredではResult IDを含めず、respondにはinsufficientを使わないでください。
 本人が資料・本人情報・最新情報など根拠を求めた場合、必要なSourceを読まずnot_requiredとしてはいけません。
-読み取りはoperation_catalogから登録済みの操作IDを選び、invokeとoperation_requestで指定してください。登録されていない操作・書込みは提案せず、実行済みとも扱わないでください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
+読み取り・登録はoperation_catalogから登録済みの操作IDを選び、invokeとoperation_requestで指定してください。登録されていない操作を提案せず、実行済みとも扱わないでください。登録候補は本人の原文内の根拠範囲、既存Entity ID、明示の属性を使ってください。利用不可のSourceを実行済みとせず、個人情報をWeb検索へ送信しないでください。
 十分でない場合は答えを捏造せず、理由と具体的な次の行動を示してください。
 出典なしで答えられる一般説明はnot_requiredとし、検索を無理に行わないでください。
 返答は指定されたJSONだけにしてください。"""
@@ -58,6 +64,27 @@ OPERATION_REQUEST = {
     },
 }
 
+WRITE_OPERATION_REQUEST = {
+    "type": "object", "additionalProperties": False,
+    "required": ["operation_id", "arguments", "reason"],
+    "properties": {
+        "operation_id": {"type": "string", "enum": [WRITE_OPERATION_ID]},
+        "arguments": {
+            "type": "object", "additionalProperties": False,
+            "required": sorted(WRITE_ARGUMENT_KEYS),
+            "properties": {
+                "entity_id": {"type": "string"},
+                "entity_mention": {"type": "string"},
+                "predicate": {"type": "string", "enum": ["driver_updated", "servo_updated"]},
+                "value": {"type": "string"},
+                "evidence_start": {"type": "integer"},
+                "evidence_end": {"type": "integer"},
+            },
+        },
+        "reason": {"type": "string"},
+    },
+}
+
 GOAL_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["goal", "next", "fulfillment", "answer", "evidence",
@@ -73,7 +100,7 @@ GOAL_SCHEMA = {
         "answer": {"type": ["string", "null"]},
         "evidence": EVIDENCE,
         "read_request": {"anyOf": [READ_REQUEST, {"type": "null"}]},
-        "operation_request": {"anyOf": [OPERATION_REQUEST, {"type": "null"}]},
+        "operation_request": {"anyOf": [OPERATION_REQUEST, WRITE_OPERATION_REQUEST, {"type": "null"}]},
         "question": {"type": ["string", "null"]},
         "reason": {"type": "string"},
     },
@@ -136,13 +163,26 @@ def validate_goal_turn(value: object) -> list[str]:
     if operation is not None:
         if (not isinstance(operation, dict)
                 or set(operation) != set(OPERATION_REQUEST["required"])
-                or operation.get("operation_id") not in READ_OPERATIONS
                 or not isinstance(operation.get("arguments"), dict)
-                or set(operation["arguments"]) != {"query"}
-                or not isinstance(operation["arguments"]["query"], str)
-                or not operation["arguments"]["query"].strip()
                 or not isinstance(operation.get("reason"), str)
                 or not operation["reason"].strip()):
+            errors.append("operation_request:invalid")
+        elif operation.get("operation_id") in READ_OPERATIONS:
+            if (set(operation["arguments"]) != {"query"}
+                    or not isinstance(operation["arguments"]["query"], str)
+                    or not operation["arguments"]["query"].strip()):
+                errors.append("operation_request:invalid")
+        elif operation.get("operation_id") == WRITE_OPERATION_ID:
+            args = operation["arguments"]
+            if (set(args) != WRITE_ARGUMENT_KEYS
+                    or any(not isinstance(args.get(k), str) or not args[k].strip()
+                           for k in ("entity_id", "entity_mention", "predicate", "value"))
+                    or args.get("predicate") not in {"driver_updated", "servo_updated"}
+                    or any(type(args.get(k)) is not int or args[k] < 0
+                           for k in ("evidence_start", "evidence_end"))
+                    or args["evidence_end"] <= args["evidence_start"]):
+                errors.append("operation_request:invalid")
+        else:
             errors.append("operation_request:invalid")
     if (next_step == "invoke") != (operation is not None):
         errors.append("operation_request:state_mismatch")
