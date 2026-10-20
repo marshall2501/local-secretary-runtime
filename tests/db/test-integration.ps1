@@ -25,7 +25,7 @@ $env:LSA_DB_PORT = [string]$testPort
 $compose = @('compose','--project-name',$project,'--project-directory',(Join-Path $root 'docker'),'--env-file',
     $testEnvFile,'-f',(Join-Path $root 'docker/compose.postgres.yml'))
 $backup = Join-Path $root "backups/$project.dump"
-$testRoleSecret = Join-Path $root ('.pkb-e2e-' + $project + '.secret.tmp')
+$testRoleSecret = Join-Path (Join-Path $root 'secrets') ('.pkb-e2e-' + $project + '.secret.tmp')
 function Invoke-TestDocker([string[]]$a) {
     & docker @a
     if ($LASTEXITCODE -ne 0) { throw "Docker failed: $($a[0])" }
