@@ -34,6 +34,7 @@ def build_task_application(
     review_runner: Callable = review_proposal,
     action_service=None,
     checkpoint_source_progress: Callable | None = None,
+    execute_write_operation: Callable | None = None,
 ) -> StateDrivenTaskApplication:
     """UIやHTTPに依存せず既存RITSUKOのTask処理を組み立てる。
 
@@ -72,6 +73,7 @@ def build_task_application(
             finalize_proposal_review_record=finalize_proposal_review_record,
             abort_proposal_review_record=abort_proposal_review_record,
             checkpoint_source_progress=checkpoint_source_progress,
+            execute_write_operation=execute_write_operation,
         ),
         start_runner=start_runner,
         resume_runner=resume_runner,
