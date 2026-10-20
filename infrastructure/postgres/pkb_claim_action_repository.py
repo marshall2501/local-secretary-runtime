@@ -199,6 +199,59 @@ def finish(
         return str(action_id), str(result_id)
 
 
+def mark_unknown(
+    db, *, task_id: UUID, action_id: UUID, error_type: str,
+) -> tuple[str, str]:
+    """Record a possibly dispatched write as UNKNOWN, never retry it blindly.
+
+    An interrupted write may have committed in the PKB before its Task Result
+    was saved. Recovery must reconcile the PKB receipt for this exact Action.
+    This deliberately does not claim the user's Goal was fulfilled.
+    """
+    with db.transaction(), db.cursor() as cur:
+        cur.execute(
+            """SELECT status, operation FROM secretary.actions
+               WHERE id=%s AND task_id=%s FOR UPDATE""",
+            (action_id, task_id),
+        )
+        state = cur.fetchone()
+        if state != ("running", OPERATION_ID):
+            raise ValueError("pkb_write_action_not_running")
+        cur.execute(
+            """INSERT INTO secretary.sources
+               (source_type,uri,citation,retrieved_at,confidentiality,metadata)
+               VALUES ('tool',%s,%s,now(),'private',%s) RETURNING id""",
+            (
+                f"tool://ritsuko-magi/pkb-write-unknown/{task_id}/{action_id}",
+                "PKB write outcome requires receipt reconciliation",
+                Jsonb({"action_id": str(action_id), "error_type": str(error_type)[:80]}),
+            ),
+        )
+        source_id = cur.fetchone()[0]
+        cur.execute(
+            """INSERT INTO secretary.results
+               (action_id,source_id,outcome,summary,evidence,error)
+               VALUES (%s,%s,'inconclusive',%s,%s,%s) RETURNING id""",
+            (action_id, source_id, "PKB write outcome unknown",
+             Jsonb({"operation_id": OPERATION_ID, "requires_reconciliation": True}),
+             str(error_type)[:80]),
+        )
+        result_id = cur.fetchone()[0]
+        cur.execute(
+            """UPDATE secretary.actions SET status='unknown',finished_at=now()
+               WHERE id=%s""", (action_id,),
+        )
+        cur.execute(
+            """INSERT INTO secretary.audit_events
+               (actor,event_type,task_id,action_id,object_type,object_id,details)
+               VALUES ('ritsuko_core','core.magi.pkb_write_unknown',
+                       %s,%s,'task',%s,%s)""",
+            (task_id, action_id, task_id,
+             Jsonb({"result_id": str(result_id), "error_type": str(error_type)[:80]})),
+        )
+        return str(action_id), str(result_id)
+
+
 class PostgresPkbClaimActionStore:
     """Connection-owning adapter sharing the existing Secretary PostgreSQL DB."""
 
@@ -212,3 +265,7 @@ class PostgresPkbClaimActionStore:
     def finish(self, **kwargs) -> tuple[str, str]:
         with self._connect() as db:
             return finish(db, **kwargs)
+
+    def mark_unknown(self, **kwargs) -> tuple[str, str]:
+        with self._connect() as db:
+            return mark_unknown(db, **kwargs)
