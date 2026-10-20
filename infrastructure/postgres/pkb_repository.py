@@ -56,6 +56,11 @@ class PostgresPkbRepository:
         with self._connection_factory() as db:
             return pkb_write_repository.write_one(db, record, claim)
 
+    def lookup_write_receipt(self, record, claim):
+        """Read a matched write receipt without invoking the PKB writer."""
+        with self._connection_factory() as db:
+            return pkb_write_repository.lookup_write_receipt(db, record, claim)
+
     def correct_entity(self, record, claim):
         with self._connection_factory() as db:
             return pkb_correction_repository.correct_entity(db, record, claim)
