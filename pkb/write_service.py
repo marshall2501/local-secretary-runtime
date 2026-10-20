@@ -76,6 +76,55 @@ def literal_gate(record: InputRecord, claim: ProposedClaim) -> str | None:
     return None
 
 
+def normalize_explicit_attribute_evidence(text: str, arguments: dict) -> dict:
+    """Ground an LLM's imprecise attribute quote in one exact original phrase.
+
+    This is positional reconciliation, NOT a new interpretation of the text.
+    Leave proposals unchanged unless their original span is in bounds, names
+    the entity and attribute, and the complete entity-label-value phrase occurs
+    exactly once in the author's original statement. The PKB repository still
+    independently checks the result and all conflicts/permissions.
+    """
+    result = dict(arguments)
+    predicate = result.get("predicate")
+    if not isinstance(text, str) or predicate not in ATTRIBUTE_LABELS:
+        return result
+    mention, value = result.get("entity_mention"), result.get("value")
+    start, end = result.get("evidence_start"), result.get("evidence_end")
+    if (not isinstance(mention, str) or not mention.strip()
+            or not isinstance(value, str) or not value.strip()
+            or type(start) is not int or type(end) is not int
+            or not 0 <= start < end <= len(text)):
+        return result
+    original_quote = text[start:end]
+    if mention not in original_quote:
+        return result
+    labels = "|".join(re.escape(label) for label in ATTRIBUTE_LABELS[predicate])
+    label_pattern = rf"(?:{labels})\s*(?:は|が|:|：)"
+    if not re.search(label_pattern, original_quote):
+        return result
+    # Multiple declarations of the same attribute are not a safe auto-fix.
+    if len(re.findall(label_pattern, text)) != 1:
+        return result
+    if any(marker in text for marker in UNCERTAIN):
+        return result
+    # The narrow grammar intentionally refuses distant cross-sentence pairing.
+    exact_phrase = (
+        rf"{re.escape(mention)}(?:\s*の)?\s*(?:{labels})"
+        rf"\s*(?:は|が|:|：)\s*{re.escape(value)}"
+        rf"(?=$|[\s。、，,;；!?！？）)」]|です)"
+    )
+    matches = list(re.finditer(exact_phrase, text))
+    if len(matches) != 1:
+        return result
+    match = matches[0]
+    if (match.start(), match.end()) == (start, end):
+        return result
+    result["evidence_start"] = match.start()
+    result["evidence_end"] = match.end()
+    return result
+
+
 # Backward-compatible internal name for existing tests/importers.
 _literal_gate = literal_gate
 
