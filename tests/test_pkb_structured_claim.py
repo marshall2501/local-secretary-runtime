@@ -8,7 +8,9 @@ from datetime import datetime, timedelta, timezone
 
 from pkb.application.structured_claim import register_structured_claim
 from pkb.ingestion_gate import assess, Route
-from pkb.write_service import WriteResult, literal_gate, payload_hash
+from pkb.write_service import (
+    WriteResult, literal_gate, payload_hash, normalize_explicit_attribute_evidence,
+)
 
 TASK_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 OPERATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -96,6 +98,46 @@ class StructuredClaimTests(unittest.TestCase):
                 self.assertEqual(replay["status"], "replayed")
                 self.assertEqual(result["claim_id"], replay["claim_id"])
                 self.assertEqual(len(repo.payloads), 1)
+
+    def test_unique_labeled_attribute_can_repair_only_quote_boundaries(self):
+        """LLM文字数の誤りだけを、本人原文の一意な明示文から補正する。"""
+        raw = "架空GPUの機種はRTX-SYNTH-400。"
+        args = {
+            "entity_mention": "架空GPU", "predicate": "model",
+            "value": "RTX-SYNTH-400",
+            "evidence_start": 0, "evidence_end": 15,
+        }
+        normalized = normalize_explicit_attribute_evidence(raw, args)
+        self.assertEqual((normalized["evidence_start"], normalized["evidence_end"]),
+                         (0, len(raw) - 1))
+        self.assertEqual(args["evidence_end"], 15)
+        self.assertEqual(normalize_explicit_attribute_evidence(raw, normalized), normalized)
+
+    def test_never_repair_forged_or_ambiguous_attribute(self):
+        """推測・複数値・不確実申告・別のEntityへの値混用を許さない。"""
+        args = {
+            "entity_mention": "架空GPU", "predicate": "model",
+            "value": "RTX-SYNTH-400", "evidence_start": 0,
+            "evidence_end": 15,
+        }
+        for raw, overrides in (
+            ("架空GPUの機種はRTX-OTHER。", {}),
+            ("架空GPUの機種はRTX-SYNTH-400かもしれない。", {}),
+            ("架空GPUの機種はRTX-SYNTH-400。機種はRTX-OTHER。", {}),
+            ("架空GPUの機種はRTX-SYNTH-400。架空GPUの機種はRTX-SYNTH-400。", {}),
+            ("架空GPUの機種はRTX-SYNTH-400。", {"entity_mention": "別のGPU"}),
+            ("別のGPUの機種はRTX-SYNTH-400。架空GPUです。", {}),
+            ("架空GPUの機種はRTX-SYNTH-400。", {"value": "MADE-UP"}),
+            ("架空GPUの機種はRTX-SYNTH-400。", {"predicate": "driver_updated"}),
+            ("架空GPUの機種はRTX-SYNTH-400。", {"evidence_start": -1}),
+            ("架空GPUの機種はRTX-SYNTH-400。", {"evidence_end": 999}),
+        ):
+            with self.subTest(raw=raw, overrides=overrides):
+                selected = {**args, **overrides}
+                self.assertEqual(
+                    normalize_explicit_attribute_evidence(raw, selected),
+                    selected,
+                )
 
     def test_attribute_value_must_follow_matching_label(self):
         """モデルが属性と別の値を対応付けても自動登録を拒否する。"""
