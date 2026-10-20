@@ -39,6 +39,8 @@ class GoalContractTests(unittest.TestCase):
         from ritsuko.magi.goal_contract import GOAL_SYSTEM
         self.assertIn("next=invoke", GOAL_SYSTEM)
         self.assertIn("answer=null", GOAL_SYSTEM)
+        self.assertIn("Unicode文字インデックス", GOAL_SYSTEM)
+        self.assertIn("raw[evidence_start:evidence_end]", GOAL_SYSTEM)
         proposal = judgment("invoke", answer="架空GPUの機種を登録しました")
         proposal["operation_request"] = {
             "operation_id": "pkb.search",
