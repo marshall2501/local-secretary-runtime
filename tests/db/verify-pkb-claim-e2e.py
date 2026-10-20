@@ -50,7 +50,8 @@ POLICY = {
 }
 
 
-def make_turn(next_step, text, entity_id, *, result_id=None):
+def make_turn(next_step, text, entity_id, *, result_id=None,
+              predicate="driver_updated", value="DRV-200"):
     """Synthetic MAGI: it only suggests args, never Action/Receipt identities."""
     return {
         "goal": "架空GPU更新を記録する",
@@ -67,9 +68,12 @@ def make_turn(next_step, text, entity_id, *, result_id=None):
             "operation_id": "pkb.register_claim",
             "arguments": {
                 "entity_id": str(entity_id),
-                "entity_mention": text.split("を")[0],
-                "predicate": "driver_updated",
-                "value": "DRV-200",
+                "entity_mention": (
+                    text.split("の機種は")[0] if predicate == "model"
+                    else text.split("を")[0]
+                ),
+                "predicate": predicate,
+                "value": value,
                 "evidence_start": 0, "evidence_end": len(text),
             },
             "reason": "本人の明示更新イベント",
@@ -78,10 +82,13 @@ def make_turn(next_step, text, entity_id, *, result_id=None):
     }
 
 
-def prepare(connect):
+def prepare(connect, *, predicate="driver_updated", value="DRV-200"):
     """One synthetic Entity and a Task granted Write only inside disposable DB."""
     name = "架空GPU" + uuid4().hex[:10]
-    text = f"{name}をDRV-200へ更新した。"
+    text = (
+        f"{name}の機種は{value}。" if predicate == "model"
+        else f"{name}を{value}へ更新した。"
+    )
     with connect() as db, db.transaction(), db.cursor() as cur:
         cur.execute(
             """INSERT INTO secretary.entities(name,entity_type,domain)
@@ -101,11 +108,14 @@ def prepare(connect):
                    permission_scope, '{pkb_write}', 'true'::jsonb)
                WHERE id=%s""", (task_id,),
         )
-    args = make_turn("invoke", text, entity_id)["operation_request"]["arguments"]
+    args = make_turn(
+        "invoke", text, entity_id, predicate=predicate, value=value,
+    )["operation_request"]["arguments"]
     return repo, task_id, text, args, entity_id
 
 
-def verify_receipt(connect, task_id, *, action_id, result_id, entity_id):
+def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
+                   expected_predicate="driver_updated"):
     """Database constraints, source identity, final Result and no duplicates."""
     with connect() as db, db.cursor() as cur:
         cur.execute(
@@ -136,7 +146,7 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id):
         assert (str(receipt_claim), str(receipt_source)) == (
             claim_id, str(source_id),
         )
-        assert target == entity_id and predicate == "driver_updated"
+        assert target == entity_id and predicate == expected_predicate
         assert kind == "user_statement"
         cur.execute(
             "SELECT count(*) FROM secretary.actions WHERE task_id=%s", (task_id,),
@@ -153,9 +163,11 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id):
         assert str(cur.fetchone()[0]) == str(action_id)
 
 
-async def normal_goal(connect, pkb, store):
+async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value="DRV-200"):
     """End-to-end with real RITSUKO DB and real PKB, only MAGI is synthetic."""
-    repo, task_id, text, args, entity_id = prepare(connect)
+    repo, task_id, text, args, entity_id = prepare(
+        connect, predicate=predicate, value=value,
+    )
     calls = []
     records = []
 
@@ -164,7 +176,7 @@ async def normal_goal(connect, pkb, store):
         if envelope["turn"] == 1:
             calls.append("invoke")
             return {"status": "ok", "response": make_turn(
-                "invoke", text, entity_id,
+                "invoke", text, entity_id, predicate=predicate, value=value,
             )}
         observations = envelope["observations"]
         assert len(observations) == 1 and observations[0]["verified"] is True
@@ -232,6 +244,7 @@ async def normal_goal(connect, pkb, store):
         connect, task_id,
         action_id=records[0]["action_id"],
         result_id=records[0]["result_id"], entity_id=entity_id,
+        expected_predicate=predicate,
     )
 
 
@@ -358,8 +371,12 @@ def main():
     pkb = PostgresPkbRepository(connect)
     store = PostgresPkbClaimActionStore(connect)
     asyncio.run(normal_goal(connect, pkb, store))
+    asyncio.run(normal_goal(
+        connect, pkb, store, predicate="model", value="RTX-SYNTH-400",
+    ))
     interrupted_commit(connect, pkb, store)
     print("PASS: disposable real PKB Claim -> receipt -> Action/Result -> MAGI rejudgment -> completed")
+    print("PASS: explicit model attribute -> actual PKB attribute Claim -> Task Result -> MAGI rejudgment")
     print("PASS: lost Result reconciliation preserves Action/Result identity, no second PKB write")
     print("PASS: missing receipt stays unresolved and does not re-dispatch")
 
