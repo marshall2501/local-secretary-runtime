@@ -37,6 +37,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | Task状態・Goal評価 | `ritsuko/core/task_projection.py`, `judgment_application.py`, `goal_evidence.py` | 提案だけでTool完了にしない |
 | MAGI Session / Strategy | `ritsuko/magi/session_workflow.py`, `judgment_strategies.py` | standard/llm共通 |
 | MAGI Goal判断契約 | `ritsuko/magi/goal_decision.py`, `goal_contract.py` | 判断候補・契約検証、実行状態Writerではない |
+| PKB登録Operation（隔離結線・日常無効） | `ritsuko/application/pkb_claim_operation.py`, `pkb/application/structured_claim.py`, `infrastructure/postgres/pkb_claim_action_repository.py` | MAGIの構造化登録候補→RITSUKOの事前Action予約→既存PKB Writer→Result保存→MAGI再判断。Taskに `pkb_write` 権限が必要。日常CompositionではWrite Portを未注入、隔離PG/実機未確認 |
 | MAGI Provider I/O | `ritsuko/magi/async_execution.py`, `client.py`, `integrations/llm/` | async、deadline/cancel、複数席 |
 | MAGI/Task実行組立 | `bootstrap/magi_task_runtime.py`, `ritsuko_task_composition.py` | API・Vue・旧UIが共用 |
 | 永続Task、照会 | `infrastructure/postgres/magi_task_repository.py`, `core_task_query_repository.py`, `task_repository.py` | 本人Task原文・履歴・停止／Review状態 |
