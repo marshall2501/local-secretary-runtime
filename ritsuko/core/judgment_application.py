@@ -12,6 +12,7 @@ from copy import deepcopy
 
 from ritsuko.core.goal_evidence import check_goal_response_evidence
 from ritsuko.application.observation_sources import READ_OPERATIONS
+from ritsuko.magi.goal_contract import WRITE_OPERATION_ID
 from ritsuko.magi.dialogue import (
     _grounded_empty_finance_answer,
     _latest_verified_pkb_observation,
@@ -47,6 +48,29 @@ def _goal_as_detail(session: dict, decision: dict) -> dict | None:
     if next_step == "respond" and status not in {"verified_results", "source_free"}:
         session.update(status="stopped", next_step=status)
         return None
+    if (next_step == "invoke"
+            and decision["operation_request"]["operation_id"] == WRITE_OPERATION_ID):
+        if session.get("pkb_claim_write_enabled") is not True:
+            session.update(status="stopped", next_step="operation_not_registered")
+            return None
+        arguments = deepcopy(decision["operation_request"]["arguments"])
+        session["pkb_claim_write_requested"] = True
+        return {
+            "state": "NEED_INFORMATION",
+            "understood_request": decision["goal"],
+            "reason": decision["reason"],
+            "information_requests": [{
+                "source": "pkb_write",
+                "what": "PKB構造化登録: " + arguments["predicate"],
+                "reason": decision["operation_request"]["reason"],
+                "operation_id": WRITE_OPERATION_ID,
+                "arguments": arguments,
+            }],
+            "question_for_user": None,
+            "answer_candidate": None,
+            "knowledge_candidate": None,
+            "action_candidate": None,
+        }
     if next_step in {"invoke", "request_read"}:
         # `invoke` is the single future Operation dispatch case. Initially
         # only existing read operations are registered, so the proven Source
