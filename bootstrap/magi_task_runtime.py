@@ -20,6 +20,7 @@ from ritsuko.application.task_commands import TaskCommands
 from ritsuko.application.pkb_observation import execute_magi_pkb_request
 from ritsuko.application.read_dispatch import execute_core_read
 from ritsuko.application.source_execution import execute_magi_source_request
+from ritsuko.application.pkb_claim_operation import invoke_pkb_claim
 from ritsuko.core.task_execution import (
     review_proposal, run_observation_loop, resume_user_answer,
 )
@@ -68,6 +69,7 @@ class MagiTaskBindings:
     policy_snapshot_loader: Callable[[], dict | None]
     native_web_search: Callable = search_magi_web
     memory_review_writer: Callable | None = None
+    pkb_claim_action_store: object | None = None
 
 
 def build_magi_task_commands(
@@ -124,6 +126,19 @@ def build_magi_task_commands(
             native_web_search=bindings.native_web_search,
         )
 
+    def pkb_write(user_raw: str, task_id, attempt_id, pending: dict, _session: dict) -> dict:
+        """Use RITSUKO's Task-scoped Action reservation and existing PKB writer."""
+        if bindings.pkb_claim_action_store is None:
+            raise ValueError("pkb_write_port_not_bound")
+        if pending.get("operation_id") != "pkb.register_claim":
+            raise ValueError("pkb_operation_not_registered")
+        return invoke_pkb_claim(
+            task_store=bindings.pkb_claim_action_store,
+            pkb_repository=pkb, task_id=task_id, attempt_id=attempt_id,
+            request_id=pending["request_id"], user_text=user_raw,
+            arguments=pending["arguments"],
+        )
+
     _not_captured = object()
 
     async def begin_dialogue(
@@ -170,6 +185,9 @@ def build_magi_task_commands(
         persist_session_record=partial(task_records.persist_session_record, magi),
         fail_task_record=partial(task_records.fail_task_record, magi),
         checkpoint_source_progress=partial(task_records.save_source_resume_record, magi),
+        execute_write_operation=(
+            pkb_write if bindings.pkb_claim_action_store is not None else None
+        ),
         claim_user_resume_record=partial(task_records.claim_user_resume_record, magi),
         abort_user_resume_record=partial(task_records.abort_user_resume_record, magi),
         claim_proposal_review_record=partial(task_records.claim_proposal_review_record, magi),
