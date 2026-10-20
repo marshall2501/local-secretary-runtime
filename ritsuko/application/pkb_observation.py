@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from uuid import UUID
 
 from pkb.entity_model_service import COMPONENT_ROLE_TOKENS
@@ -103,6 +104,40 @@ def _public_query_terms_from_pkb_result(result: dict, combined_request: str) -> 
                 if text:
                     terms.append(text)
     return list(dict.fromkeys(terms))[:20]
+
+
+
+def _unique_explicit_entity(user_raw: str, entities: dict) -> dict | None:
+    """本人原文で明示された一意の既存Entityだけを選び、部分一致の重複を除く。
+
+    短い別名が長いEntity名に含まれる場合は長い方を優先する。
+    異なるEntityが複数現れる場合は推測して一方を採用しない。
+    """
+    spans = []
+    for name, row in entities.items():
+        if not isinstance(name, str) or len(name.strip()) < 2:
+            continue
+        for match in re.finditer(re.escape(name), user_raw):
+            spans.append((match.start(), match.end(), name, row))
+    unique = {}
+    for start, end, name, row in spans:
+        if any(
+            other_start <= start and end <= other_end
+            and other_end - other_start > end - start
+            for other_start, other_end, _, _ in spans
+        ):
+            continue
+        entity_id = str(row.get("id") or "")
+        if not entity_id or str(row.get("name") or "") != name:
+            continue
+        try:
+            UUID(entity_id)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        unique[entity_id] = {"id": entity_id, "name": name}
+    if len(unique) != 1:
+        return None
+    return next(iter(unique.values()))
 
 
 def execute_magi_pkb_request(
@@ -234,6 +269,25 @@ def execute_magi_pkb_request(
 
     execution = execute_read("pkb_search", requested or user_raw)
     result = execution.get("result") or {}
+    # A generic PKB search may return zero Claims for an already registered
+    # Entity. Resolve only an exact, unique name in the owner's original text.
+    # The MAGI-generated query is never authority to pick the write target.
+    if (
+        not roles
+        and execution.get("operation") == "search"
+        and execution.get("verified_by") == "deterministic_pkb_query"
+        and result.get("result_kind") == "claims"
+    ):
+        matched = _unique_explicit_entity(user_raw, entities)
+        if matched is not None:
+            result = {**result, "resolved_entity": matched}
+            execution = {
+                **execution, "result": result,
+                "source_metadata": {
+                    **(execution.get("source_metadata") or {}),
+                    "resolved_entity": matched,
+                },
+            }
     public_terms = _public_query_terms_from_pkb_result(result, combined)
     if public_terms:
         metadata = dict(execution.get("source_metadata") or {})
