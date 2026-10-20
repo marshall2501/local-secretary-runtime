@@ -112,6 +112,12 @@ class StructuredClaimTests(unittest.TestCase):
                          (0, len(raw) - 1))
         self.assertEqual(args["evidence_end"], 15)
         self.assertEqual(normalize_explicit_attribute_evidence(raw, normalized), normalized)
+        # Already valid quotation (including punctuation) is not rewritten.
+        valid = {**args, "evidence_end": len(raw)}
+        self.assertEqual(
+            normalize_explicit_attribute_evidence(raw, valid),
+            valid,
+        )
 
     def test_never_repair_forged_or_ambiguous_attribute(self):
         """推測・複数値・不確実申告・別のEntityへの値混用を許さない。"""
