@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pkb.application.structured_claim import register_structured_claim
+from pkb.application.structured_claim import (
+    register_structured_claim, lookup_structured_claim_receipt,
+)
 
 OPERATION_ID = "pkb.register_claim"
 
@@ -73,4 +75,45 @@ def invoke_pkb_claim(
         "action_id": str(recorded_action_id),
         "result_id": str(recorded_result_id),
         "responds_to": [request_id],
+    }
+
+
+def reconcile_pkb_claim(
+    *, task_store, pkb_repository, task_id: UUID, action_id: UUID,
+) -> dict | None:
+    """Reconcile exactly one persisted Action; never re-dispatch a Claim write.
+
+    Return None when PKB has no authoritative matching receipt. UNKNOWN then
+    remains unresolved and must not be treated as successful or re-sent.
+    """
+    context = task_store.load_reconciliation(
+        task_id=task_id, action_id=action_id,
+    )
+    receipt = lookup_structured_claim_receipt(
+        pkb_repository, task_id=str(task_id), invocation_id=str(action_id),
+        user_text=context["user_text"],
+        recorded_at=context["recorded_at"],
+        occurred_at=context["occurred_at"],
+        **context["arguments"],
+    )
+    if receipt is None:
+        return None
+    action, result = task_store.reconcile_committed(
+        task_id=task_id, action_id=action_id, receipt=receipt,
+    )
+    return {
+        "operation_id": OPERATION_ID,
+        "source": "pkb_write",
+        "capability": "pkb_structured_claim",
+        "confidentiality": "private",
+        "verified": True,
+        "verification_level": "pkb_repository_receipt_reconciled",
+        "text": "PKB claim reconciled from existing receipt",
+        "result_kind": "pkb_claim_write",
+        "write_status": "replayed",
+        "claim_id": receipt["claim_id"],
+        "source_id": receipt["source_id"],
+        "action_id": str(action),
+        "result_id": str(result),
+        "responds_to": [context["request_id"]],
     }
