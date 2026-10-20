@@ -1,6 +1,6 @@
 # Starts only a randomly named test project; data is synthetic. Requires Docker Desktop Linux engine.
 [CmdletBinding()]
-param()
+param([switch]$PkbClaimE2EOnly)
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $dbScript = Join-Path $root 'scripts/db/postgres.ps1'
@@ -25,6 +25,7 @@ $env:LSA_DB_PORT = [string]$testPort
 $compose = @('compose','--project-name',$project,'--project-directory',(Join-Path $root 'docker'),'--env-file',
     $testEnvFile,'-f',(Join-Path $root 'docker/compose.postgres.yml'))
 $backup = Join-Path $root "backups/$project.dump"
+$testRoleSecret = Join-Path $root ('.pkb-e2e-' + $project + '.secret.tmp')
 function Invoke-TestDocker([string[]]$a) {
     & docker @a
     if ($LASTEXITCODE -ne 0) { throw "Docker failed: $($a[0])" }
@@ -44,6 +45,14 @@ function Snapshot-Others {
         }
     }
     return ($result | Sort-Object) -join "`n"
+}
+function Verify-PkbClaimE2E {
+    # Provision only in the randomized disposable DB. A unique generated
+    # login secret is never copied to the daily production secret path.
+    & $python (Join-Path $root 'scripts/db/provision_daily_runtime.py') --port $testPort --database secretary --admin-secret-file (Join-Path $root 'secrets/postgres-password.txt') --runtime-secret-file $testRoleSecret
+    if ($LASTEXITCODE -ne 0) { throw 'Disposable PKB runtime role provisioning failed.' }
+    & $python (Join-Path $PSScriptRoot 'verify-pkb-claim-e2e.py') $project $script:container $testRoleSecret
+    if ($LASTEXITCODE -ne 0) { throw 'Real PKB Claim vertical verification failed.' }
 }
 $before = Snapshot-Others
 try {
@@ -66,6 +75,12 @@ try {
     & $dbScript -Action Migrate -Project $project -EnvFile $testEnvFile
     & $dbScript -Action Migrate -Project $project -EnvFile $testEnvFile
     $script:container = (Invoke-TestDocker ($compose + @('ps','-q','secretary-postgres')) | Out-String).Trim()
+    # Fast acceptance mode avoids rerunning unrelated SQL drift/backup tests.
+    if ($PkbClaimE2EOnly) {
+        Verify-PkbClaimE2E
+        Write-Host 'PASS: isolated PKB Claim end-to-end only.'
+        return
+    }
     # Corrupt only this synthetic project's ledger; applied-file drift must fail closed.
     Run-Sql (Join-Path $PSScriptRoot 'corrupt-history.sql') 'secretary'
     $rejected = $false
@@ -93,6 +108,8 @@ try {
     # uncertainty in the same disposable schema without touching any PKB claim.
     & $python (Join-Path $PSScriptRoot 'verify-pkb-claim-action.py') $project $script:container
     if ($LASTEXITCODE -ne 0) { throw 'Isolated PKB claim Action PostgreSQL verification failed.' }
+    # Same one-off PostgreSQL, real PKB writer and recovered Action receipt.
+    Verify-PkbClaimE2E
     & $python (Join-Path $PSScriptRoot 'verify-schema-diagram.py')
     if ($LASTEXITCODE -ne 0) { throw 'Schema diagram introspection verification failed.' }
     & $dbScript -Action Backup -Project $project -EnvFile $testEnvFile -BackupPath $backup
@@ -115,6 +132,7 @@ try {
     Invoke-TestDocker ($compose + @('down','--volumes'))
     if ((Snapshot-Others) -ne $before) { throw 'Other container state changed during test; investigate.' }
     Remove-Item -LiteralPath $testEnvFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $testRoleSecret -ErrorAction SilentlyContinue
     [Environment]::SetEnvironmentVariable('LSA_TEST_DB_ENV_FILE', $previousTestEnvFile, 'Process')
     [Environment]::SetEnvironmentVariable('LSA_DB_PORT', $previousDbPort, 'Process')
     Write-Host 'PASS: other container IDs, status, start times and restart counts unchanged.'
