@@ -26,6 +26,7 @@ class TaskRuntimePorts:
     abort_proposal_review_record: Callable
     # Optional until a concrete persistent Source checkpoint Port is bound.
     checkpoint_source_progress: Callable | None = None
+    execute_write_operation: Callable | None = None
 
 
 class StateDrivenTaskApplication:
@@ -68,6 +69,8 @@ class StateDrivenTaskApplication:
             options["on_member_progress"] = on_member_progress
         if self._ports.checkpoint_source_progress is not None:
             options["checkpoint_source_progress"] = self._ports.checkpoint_source_progress
+        if self._ports.execute_write_operation is not None:
+            options["execute_write_operation"] = self._ports.execute_write_operation
         if resume_snapshot is not None:
             options["resume_snapshot"] = resume_snapshot
         if dialogue_starter is not None:
