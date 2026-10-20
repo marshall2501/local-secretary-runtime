@@ -153,7 +153,11 @@ class PkbGoalSyntheticProbeTests(unittest.TestCase):
         """本人情報やモデル文面を出さずに引用位置の誤りを判別する。"""
         state = synthetic_session("fake", "http://127.0.0.1:11434", 20, "with-entity")
         proposed = proposal(end=len(TEXT) - 2)
-        self.assertFalse(evaluate_proposal("with-entity", state, proposed)[0])
+        self.assertEqual(
+            evaluate_proposal("with-entity", state, proposed),
+            (True, "PKB_schema_and_literal_gates_passed:normalized_evidence"),
+        )
+        # Diagnostics still report the raw MAGI offsets, not fabricated text.
         lines = synthetic_evidence_span_diagnostics(state, proposed)
         self.assertIn(f"diagnostic: source_char_count={len(TEXT)}", lines)
         self.assertIn(f"diagnostic: evidence_end={len(TEXT) - 2}", lines)
