@@ -1,0 +1,134 @@
+# Provenance-Origin: original
+# Provenance-AI: AI-assisted
+"""One existing RITSUKO Task loop: MAGI propose → PKB write → Result → MAGI."""
+from __future__ import annotations
+
+from functools import partial
+import unittest
+from uuid import UUID
+
+from ritsuko.core.task_execution import run_observation_loop
+from ritsuko.core.task_projection import task_projection
+from ritsuko.magi.session_workflow import (
+    start_dialogue_async, continue_with_verified_observations_async,
+)
+from ritsuko.magi.goal_contract import validate_goal_turn
+
+TASK = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+ATTEMPT = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+TEXT = "架空GPUをDRV-200へ更新した。"
+SPEC = [{
+    "name": "MELCHIOR", "provider": "ollama", "model": "fake",
+    "endpoint": "http://127.0.0.1:11434", "enabled": True,
+    "weight": 1.0, "timeout_seconds": 5,
+}]
+POLICY = {"profile_id": "fake", "profile_name": "test", "revision": 1,
+          "grants": [{"label": "llm.send_context.private",
+                      "destination_scope": "local", "decision": "allow",
+                      "mask_rules": {"tokens": []}}]}
+
+
+def turn(next_step, *, refs=(), answer=None):
+    return {
+        "goal": "架空GPUの更新をPKBに登録する",
+        "next": next_step,
+        "fulfillment": "met" if next_step == "respond" else "partial",
+        "answer": answer,
+        "evidence": {
+            "basis": "result_refs" if refs else "not_required",
+            "result_ids": list(refs), "assessment": "保存済みResultを参照する",
+        },
+        "read_request": None,
+        "operation_request": {
+            "operation_id": "pkb.register_claim",
+            "arguments": {
+                "entity_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                "entity_mention": "架空GPU",
+                "predicate": "driver_updated",
+                "value": "DRV-200",
+                "evidence_start": 0,
+                "evidence_end": len(TEXT),
+            },
+            "reason": "本人が明示した更新を登録する",
+        } if next_step == "invoke" else None,
+        "question": None, "reason": "本人が要求した記録",
+    }
+
+
+class GoalPkbWriteLoopTests(unittest.IsolatedAsyncioTestCase):
+    async def test_claim_write_result_reenters_magi_and_completes_task(self):
+        self.assertEqual(validate_goal_turn(turn("invoke")), [])
+        events = []
+
+        async def member(_spec, envelope, **_kwargs):
+            self.assertIn("pkb.register_claim", envelope["operation_catalog"])
+            if envelope["turn"] == 1:
+                events.append("magi_proposal")
+                return {"status": "ok", "response": turn("invoke")}
+            self.assertEqual(envelope["observations"][0]["result_id"], "result-write")
+            self.assertEqual(envelope["observations"][0]["source"], "pkb_write")
+            events.append("magi_re_evaluation")
+            return {"status": "ok", "response": turn(
+                "respond", refs=["result-write"], answer="架空GPUの更新を記録しました",
+            )}
+
+        def write(user_text, task_id, attempt_id, pending, _session):
+            events.append("write")
+            self.assertEqual((user_text, task_id, attempt_id), (TEXT, TASK, ATTEMPT))
+            self.assertEqual(pending["operation_id"], "pkb.register_claim")
+            self.assertEqual(pending["arguments"]["predicate"], "driver_updated")
+            return {
+                "source": "pkb_write", "operation_id": "pkb.register_claim",
+                "capability": "pkb_structured_claim", "verified": True,
+                "verification_level": "pkb_repository_receipt",
+                "text": "PKB claim inserted",
+                "responds_to": [pending["request_id"]],
+                "action_id": "action-write", "result_id": "result-write",
+            }
+
+        def checkpoint(*_args):
+            events.append("checkpoint")
+
+        def persist(task_id, session, _capability, attempt_id):
+            self.assertEqual((task_id, attempt_id), (TASK, ATTEMPT))
+            self.assertEqual(task_projection(session)["task_status"], "completed")
+            events.append("persist")
+
+        session = await run_observation_loop(
+            TEXT, task_id=TASK, member_specs=SPEC, timeout=5,
+            create_task_record=lambda *_args: ATTEMPT,
+            execute_source_request=lambda *_args: self.fail("read should not run"),
+            record_source_read_record=lambda *_args: self.fail("write is not a read"),
+            execute_write_operation=write,
+            checkpoint_source_progress=checkpoint,
+            persist_session_record=persist,
+            fail_task_record=lambda *_args: self.fail("unexpected error"),
+            dialogue_starter=partial(
+                start_dialogue_async, decision_strategy="llm",
+                goal_caller=member, policy_snapshot=POLICY,
+            ),
+            observation_continuation=partial(
+                continue_with_verified_observations_async, goal_caller=member,
+            ),
+        )
+        self.assertEqual(task_projection(session)["task_status"], "completed")
+        self.assertEqual(events, [
+            "magi_proposal", "write", "checkpoint", "magi_re_evaluation", "persist",
+        ])
+
+    async def test_without_write_executor_magi_cannot_register(self):
+        async def member(_spec, envelope, **_kwargs):
+            self.assertNotIn("pkb.register_claim", envelope["operation_catalog"])
+            return {"status": "ok", "response": turn("invoke")}
+        session = await start_dialogue_async(
+            TEXT, member_specs=SPEC, timeout=5,
+            decision_strategy="llm", policy_snapshot=POLICY,
+            goal_caller=member,
+        )
+        self.assertEqual(session["status"], "stopped")
+        self.assertEqual(session["next_step"], "operation_not_registered")
+        self.assertNotEqual(task_projection(session)["task_status"], "completed")
+
+
+if __name__ == "__main__":
+    unittest.main()
