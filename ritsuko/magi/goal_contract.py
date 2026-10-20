@@ -167,6 +167,8 @@ def validate_goal_turn(value: object) -> list[str]:
                 or not isinstance(operation.get("reason"), str)
                 or not operation["reason"].strip()):
             errors.append("operation_request:invalid")
+        elif not isinstance(operation.get("operation_id"), str):
+            errors.append("operation_request:invalid")
         elif operation.get("operation_id") in READ_OPERATIONS:
             if (set(operation["arguments"]) != {"query"}
                     or not isinstance(operation["arguments"]["query"], str)
