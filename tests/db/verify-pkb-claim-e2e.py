@@ -169,7 +169,7 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
         assert str(cur.fetchone()[0]) == str(action_id)
 
 
-async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value="DRV-200"):
+async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value="DRV-200", truncated_evidence=False):
     """End-to-end with real RITSUKO DB and real PKB, only MAGI is synthetic."""
     repo, task_id, text, args, entity_id = prepare(
         connect, predicate=predicate, value=value,
@@ -181,9 +181,15 @@ async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value=
         assert "pkb.register_claim" in envelope["operation_catalog"]
         if envelope["turn"] == 1:
             calls.append("invoke")
-            return {"status": "ok", "response": make_turn(
+            proposal = make_turn(
                 "invoke", text, entity_id, predicate=predicate, value=value,
-            )}
+            )
+            if truncated_evidence:
+                assert predicate == "model"
+                # Reproduce the real MAGI mistake: label is present but
+                # the claimed value is cut off before the end.
+                proposal["operation_request"]["arguments"]["evidence_end"] = len(text) - 7
+            return {"status": "ok", "response": proposal}
         observations = envelope["observations"]
         assert len(observations) == 1 and observations[0]["verified"] is True
         assert observations[0]["source"] == "pkb_write"
@@ -252,6 +258,16 @@ async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value=
         result_id=records[0]["result_id"], entity_id=entity_id,
         expected_predicate=predicate, expected_value=value,
     )
+    if truncated_evidence:
+        with connect() as db, db.cursor() as cur:
+            cur.execute(
+                """SELECT parameters->'arguments'->>'evidence_end'
+                   FROM secretary.actions WHERE task_id=%s""",
+                (task_id,),
+            )
+            assert int(cur.fetchone()[0]) == len(text) - 1, (
+                "reserved Action did not preserve the normalized source span"
+            )
     if predicate == "model":
         # Existing attributes are not overwritten by a new model proposal.
         name = text.split("の機種は")[0]
@@ -400,9 +416,14 @@ def main():
     asyncio.run(normal_goal(
         connect, pkb, store, predicate="model", value="RTX-SYNTH-400",
     ))
+    asyncio.run(normal_goal(
+        connect, pkb, store, predicate="model", value="RTX-SYNTH-400",
+        truncated_evidence=True,
+    ))
     interrupted_commit(connect, pkb, store)
     print("PASS: disposable real PKB Claim -> receipt -> Action/Result -> MAGI rejudgment -> completed")
     print("PASS: explicit model attribute -> actual PKB attribute Claim -> Task Result -> MAGI rejudgment")
+    print("PASS: truncated MAGI quote -> normalized Action reservation -> real PKB receipt -> Task completed")
     print("PASS: conflicting existing model is review-only, no second model Claim")
     print("PASS: lost Result reconciliation preserves Action/Result identity, no second PKB write")
     print("PASS: missing receipt stays unresolved and does not re-dispatch")
