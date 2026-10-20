@@ -9,6 +9,7 @@ from uuid import UUID
 
 from ritsuko.core.task_execution import run_observation_loop
 from ritsuko.core.task_projection import task_projection
+from ritsuko.core.judgment_application import apply_judgment
 from ritsuko.magi.session_workflow import (
     start_dialogue_async, continue_with_verified_observations_async,
 )
@@ -115,6 +116,37 @@ class GoalPkbWriteLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [
             "magi_proposal", "write", "checkpoint", "magi_re_evaluation", "persist",
         ])
+
+    async def test_write_goal_cannot_complete_without_actual_write_receipt(self):
+        async def member(_spec, envelope, **_kwargs):
+            return {"status": "ok", "response": turn("invoke")}
+        session = await start_dialogue_async(
+            TEXT, member_specs=SPEC, timeout=5, pkb_claim_write_enabled=True,
+            decision_strategy="llm", policy_snapshot=POLICY, goal_caller=member,
+        )
+        self.assertEqual(session["status"], "waiting_information")
+        # MAGI cannot override a requested side effect with a source-free claim.
+        await apply_judgment(
+            session, turn("respond", answer="登録済みと主張"),
+            strategy="llm", purpose="evaluate_goal",
+        )
+        self.assertEqual(session["next_step"], "pkb_write_result_required")
+        self.assertNotEqual(task_projection(session)["task_status"], "completed")
+
+        # A genuine but unrelated read result also cannot substitute for a
+        # confirmed PKB write Result.
+        session["status"] = "running"
+        session["observations"] = [{
+            "source": "pkb", "verified": True,
+            "result_id": "read-result", "action_id": "read-action",
+            "text": "架空GPUを読んだだけ",
+        }]
+        await apply_judgment(
+            session, turn("respond", refs=["read-result"], answer="登録済みと主張"),
+            strategy="llm", purpose="evaluate_goal",
+        )
+        self.assertEqual(session["next_step"], "pkb_write_result_required")
+        self.assertNotEqual(task_projection(session)["task_status"], "completed")
 
     async def test_without_write_executor_magi_cannot_register(self):
         async def member(_spec, envelope, **_kwargs):
