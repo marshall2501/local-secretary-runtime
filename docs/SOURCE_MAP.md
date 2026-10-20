@@ -37,7 +37,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | Task状態・Goal評価 | `ritsuko/core/task_projection.py`, `judgment_application.py`, `goal_evidence.py` | 提案だけでTool完了にしない |
 | MAGI Session / Strategy | `ritsuko/magi/session_workflow.py`, `judgment_strategies.py` | standard/llm共通 |
 | MAGI Goal判断契約 | `ritsuko/magi/goal_decision.py`, `goal_contract.py` | 判断候補・契約検証、実行状態Writerではない |
-| PKB登録Operation（隔離結線・日常無効） | `ritsuko/application/pkb_claim_operation.py`, `pkb/application/structured_claim.py`, `infrastructure/postgres/pkb_claim_action_repository.py` | MAGIの構造化登録候補→RITSUKOの事前Action予約→既存PKB Writer→Result保存→MAGI再判断。Taskに `pkb_write` 権限が必要。日常CompositionではWrite Portを未注入、隔離PG/実機未確認 |
+| PKB登録Operation（隔離結線・日常無効） | `ritsuko/application/pkb_claim_operation.py`, `pkb/application/structured_claim.py`, `infrastructure/postgres/pkb_claim_action_repository.py` | MAGIの構造化登録候補→RITSUKOの事前Action予約→既存PKB Writer→Result保存→MAGI再判断。Taskに `pkb_write` 権限が必要。隔離PGの実PKB Claim登録・正式Receipt→Result→合成MAGI再判断はGitHub Actions PASS。UNKNOWNからのReceipt再照合と二重登録防止もPASS。日常CompositionのWrite Portは未注入、本人サブPC最新差分・実MAGI/日常Writeは未受入 |
 | MAGI Provider I/O | `ritsuko/magi/async_execution.py`, `client.py`, `integrations/llm/` | async、deadline/cancel、複数席 |
 | MAGI/Task実行組立 | `bootstrap/magi_task_runtime.py`, `ritsuko_task_composition.py` | API・Vue・旧UIが共用 |
 | 永続Task、照会 | `infrastructure/postgres/magi_task_repository.py`, `core_task_query_repository.py`, `task_repository.py` | 本人Task原文・履歴・停止／Review状態 |
@@ -65,7 +65,7 @@ RITSUKOがTask受付・Tool実行・Source/Result実在照合・永続状態・�
 | 唯一のMigration系列 | `db/migrations/001_memory.sql` ～ `009_runtime_policy_profiles.sql` |
 | 通常DB管理・バックアップ・復元 | `scripts/db/postgres.ps1`, `scripts/db/migrate.sh` |
 | 明示的なfresh schema検証 | `scripts/db/initialize-fresh-production.ps1` |
-| 使い捨てPostgreSQL隔離検証 | `tests/db/test-integration.ps1`, `.github/workflows/postgres.yml` |
+| 使い捨てPostgreSQL隔離検証 | `tests/db/test-integration.ps1`（`-PkbClaimE2EOnly`）、`tests/db/verify-pkb-claim-e2e.py`、`.github/workflows/postgres.yml` |
 | PKB/Memory実PostgreSQL試験 | `tests/test_memory_intake_postgres.py`, `.github/workflows/pkb-memory-intake.yml` |
 | 共通Task/Strategy縦断 | `tests/test_shared_judgment_task_pipeline.py`, `tests/db/verify-common-task-execution.py` |
 | Vue/API/Chromium隔離 | `interfaces/vue_daily/frontend/e2e/`, `tests/test_secretary_server.py`, `tests/test_secretary_capability_views.py`, `tests/test_secretary_pkb_commands.py`, `tests/test_secretary_external_read.py`, `tests/test_vue_pkb_read.py`, `.github/workflows/vue-secretary-ui-lab.yml` |
