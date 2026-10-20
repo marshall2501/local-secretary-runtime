@@ -199,6 +199,22 @@ def verified_source_observation(
                 "name": entity_name,
                 "resolution": "pkb_component_relation",
             }
+    if (
+        source == "pkb"
+        and result.get("result_kind") == "claims"
+        and execution.get("operation") == "search"
+        and execution.get("verified_by") == "deterministic_pkb_query"
+        and isinstance(metadata, dict)
+        and isinstance(result.get("resolved_entity"), dict)
+        and result["resolved_entity"] == metadata.get("resolved_entity")
+    ):
+        resolved = result["resolved_entity"]
+        if isinstance(resolved.get("id"), str) and isinstance(resolved.get("name"), str) and resolved["id"] and resolved["name"]:
+            observation["resolved_entity"] = {
+                "id": resolved["id"],
+                "name": resolved["name"],
+                "resolution": "pkb_unique_explicit_name",
+            }
     if isinstance(metadata, dict):
         public_terms = [
             str(value).strip()
