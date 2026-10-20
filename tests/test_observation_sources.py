@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import unittest
 
+from ritsuko.application.pkb_observation import execute_magi_pkb_request
 from ritsuko.application.observation_sources import (
     finance_query_from_request,
     pending_source_requests,
@@ -131,6 +132,84 @@ class ObservationSourceTests(unittest.TestCase):
             execution, {"source": "pkb", "request_ids": ["REQ-1"]},
         )
         self.assertNotIn("resolved_entity", observation)
+
+    def test_unique_named_pkb_entity_can_be_resolved_without_prior_claims(self):
+        """既存EntityにClaimがなくても、原文の一意名から実IDを渡せる。"""
+        entities = {
+            "架空機材": {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "架空機材", "entity_type": "equipment",
+            },
+            "架空機材A": {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "架空機材A", "entity_type": "equipment",
+            },
+            "架空機材B": {
+                "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                "name": "架空機材B", "entity_type": "equipment",
+            },
+        }
+
+        def read(capability, query):
+            self.assertEqual(capability, "pkb_search")
+            return {
+                "status": "ok", "operation": "search",
+                "verified_by": "deterministic_pkb_query",
+                "answer": "まだ登録されたClaimはありません。",
+                "result": {"result_kind": "claims", "total": 0, "items": []},
+            }
+
+        observed = execute_magi_pkb_request(
+            "架空機材Aを更新した", {"what": "登録対象を確認"},
+            pkb_repository=None, entity_map=lambda: entities,
+            execute_read=read,
+        )
+        self.assertEqual(observed["result"]["resolved_entity"]["name"], "架空機材A")
+        obs = verified_source_observation(
+            observed, {"source": "pkb", "request_ids": ["REQ-1"]},
+        )
+        self.assertEqual(obs["resolved_entity"], {
+            "id": entities["架空機材A"]["id"],
+            "name": "架空機材A",
+            "resolution": "pkb_unique_explicit_name",
+        })
+
+        # 複数の実在Entityが原文に現れたら、勝手に一方へ登録しない。
+        ambiguous = execute_magi_pkb_request(
+            "架空機材Aと架空機材Bを確認", {"what": "架空機材A"},
+            pkb_repository=None, entity_map=lambda: entities,
+            execute_read=read,
+        )
+        self.assertNotIn("resolved_entity", ambiguous["result"])
+
+        # MAGIだけが指定した対象は、本人原文による特定の根拠にならない。
+        imagined = execute_magi_pkb_request(
+            "機材を確認して", {"what": "架空機材A"},
+            pkb_repository=None, entity_map=lambda: entities,
+            execute_read=read,
+        )
+        self.assertNotIn("resolved_entity", imagined["result"])
+
+    def test_generic_search_cannot_forge_resolved_entity_from_metadata(self):
+        """実検索のEntity IDとSource metadataが不一致ならObservationに入れない。"""
+        execution = {
+            "status": "ok", "operation": "search",
+            "verified_by": "deterministic_pkb_query",
+            "answer": "検索結果",
+            "result": {
+                "result_kind": "claims",
+                "resolved_entity": {"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                                    "name": "架空機材A"},
+            },
+            "source_metadata": {"resolved_entity": {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "架空機材B",
+            }},
+        }
+        obs = verified_source_observation(
+            execution, {"source": "pkb", "request_ids": ["REQ-1"]},
+        )
+        self.assertNotIn("resolved_entity", obs)
 
     def test_failed_read_does_not_create_verified_observation(self):
         self.assertIsNone(verified_source_observation(
