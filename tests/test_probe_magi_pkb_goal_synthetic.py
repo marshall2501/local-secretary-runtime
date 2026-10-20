@@ -50,8 +50,15 @@ class PkbGoalSyntheticProbeTests(unittest.TestCase):
         session["turns"].append({
             "member_results": [{
                 "status": "invalid",
-                "response": {"answer": "FICTIONAL-PRIVATE-DO-NOT-PRINT"},
-                "errors": ["operation_request:invalid", "dangerous raw output / path"],
+                "response": {
+                    "next": "invoke",
+                    "answer": "FICTIONAL-PRIVATE-DO-NOT-PRINT",
+                    "operation_request": {
+                        "operation_id": "pkb.register_claim",
+                        "reason": "FICTIONAL-PRIVATE-DO-NOT-PRINT",
+                    },
+                },
+                "errors": ["answer:unexpected", "dangerous raw output / path"],
                 "diagnostic": {
                     "done_reason": "length", "content_length": 932,
                     "thinking_length": 0, "num_predict": 2048,
@@ -60,10 +67,36 @@ class PkbGoalSyntheticProbeTests(unittest.TestCase):
             }],
         })
         lines = invalid_proposal_diagnostics(session)
-        self.assertIn("diagnostic: error_codes=operation_request:invalid,unclassified_error", lines)
+        self.assertIn("diagnostic: next=invoke", lines)
+        self.assertIn("diagnostic: operation_id=pkb.register_claim", lines)
+        self.assertIn("diagnostic: answer_present=true", lines)
+        self.assertIn("diagnostic: error_codes=answer:unexpected,unclassified_error", lines)
         self.assertIn("diagnostic: done_reason=length", lines)
         self.assertIn("diagnostic: content_length=932", lines)
         self.assertNotIn("FICTIONAL-PRIVATE-DO-NOT-PRINT", "\n".join(lines))
+
+    def test_untrusted_operation_or_nonstring_next_does_not_leak(self):
+        """未知のモデル出力はIDや本文をそのまま表示しない。"""
+        session = synthetic_session(
+            "fake", "http://127.0.0.1:11434", 20, "with-entity",
+        )
+        session["turns"].append({
+            "member_results": [{
+                "status": "invalid",
+                "response": {
+                    "next": ["PRIVATE"],
+                    "answer": None,
+                    "operation_request": {"operation_id": "private://SECRET"},
+                },
+                "errors": ["goal:field_mismatch"],
+                "diagnostic": {},
+            }],
+        })
+        lines = "\n".join(invalid_proposal_diagnostics(session))
+        self.assertIn("diagnostic: next=unrecognized", lines)
+        self.assertIn("diagnostic: operation_id=none_or_unrecognized", lines)
+        self.assertNotIn("private://SECRET", lines)
+        self.assertNotIn("PRIVATE", lines)
 
     def test_probe_rejects_nonlocal_endpoints(self):
         for endpoint in (
