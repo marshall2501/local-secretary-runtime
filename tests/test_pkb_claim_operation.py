@@ -83,6 +83,39 @@ class PkbClaimOperationTests(unittest.TestCase):
         self.assertEqual(write.call_count, 1)
 
     @patch("ritsuko.application.pkb_claim_operation.register_structured_claim")
+    def test_grounded_offsets_are_reserved_before_pkb_dispatch(self, write):
+        """根拠の文字位置はAction予約時とPKB実行時で同じ値を使う。"""
+        text = "架空GPUの機種はRTX-SYNTH-400。"
+        args = {
+            "entity_id": ARGS["entity_id"], "entity_mention": "架空GPU",
+            "predicate": "model", "value": "RTX-SYNTH-400",
+            "evidence_start": 0, "evidence_end": 15,
+        }
+
+        class CapturingStore(FakeStore):
+            def reserve(self, **kwargs):
+                self.grounded = dict(kwargs["arguments"])
+                return super().reserve(**kwargs)
+
+        write.return_value = {
+            "status": "inserted", "reason": "single_claim_committed",
+            "claim_id": "claim-1", "source_id": "source-1",
+        }
+        store = CapturingStore()
+        result = invoke_pkb_claim(
+            task_store=store, pkb_repository=object(),
+            task_id=TASK, attempt_id=ATTEMPT,
+            request_id="REQ-1", user_text=text, arguments=args,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(args["evidence_end"], 15)  # MAGI original is immutable
+        self.assertEqual(store.grounded["evidence_start"], 0)
+        self.assertEqual(store.grounded["evidence_end"], len(text) - 1)
+        self.assertEqual(write.call_args.kwargs["evidence_end"],
+                         store.grounded["evidence_end"])
+        self.assertEqual(store.events, ["reserve", "finish"])
+
+    @patch("ritsuko.application.pkb_claim_operation.register_structured_claim")
     def test_pending_review_cannot_become_verified_claim(self, write):
         write.return_value = {"status": "review", "reason": "entity_ambiguous"}
         result = invoke(FakeStore())
