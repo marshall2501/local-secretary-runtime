@@ -123,3 +123,38 @@ def write_one(db, record: InputRecord, claim: ProposedClaim) -> WriteResult:
 "single_claim_committed",
                 str(claim_id), str(source_id),
             )
+
+
+def lookup_write_receipt(
+    db, record: InputRecord, claim: ProposedClaim,
+) -> WriteResult | None:
+    """Read a committed receipt only when its original payload matches.
+
+    Missing receipts are not evidence that a write was never dispatched.
+    This path is read-only; it must not call write_one even on a match.
+    """
+    if not allowed_daily_connection(db):
+        raise ValueError("Refusing unauthorized or non-local daily PostgreSQL connection")
+    if not source_ref_allowed(db, record.source_ref):
+        raise ValueError("unsupported_source_ref")
+    expected_hash = payload_hash(record, claim)
+    with db.cursor() as cur:
+        cur.execute(
+            """SELECT r.payload_sha256, r.source_id, r.claim_id
+               FROM secretary.pkb_input_receipts r
+               JOIN secretary.sources s ON s.id = r.source_id
+               JOIN secretary.claims c ON c.id = r.claim_id
+                    AND c.source_id = r.source_id
+               WHERE r.input_id = %s AND s.uri = %s""",
+            (record.input_id, record.source_ref),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    digest, source_id, claim_id = row
+    if digest != expected_hash:
+        raise ValueError("pkb_receipt_payload_mismatch")
+    return WriteResult(
+        "replayed", "verified_existing_receipt",
+        str(claim_id), str(source_id),
+    )
