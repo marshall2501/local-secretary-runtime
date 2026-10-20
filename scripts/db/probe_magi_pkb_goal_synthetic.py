@@ -94,6 +94,8 @@ def synthetic_session(model: str, endpoint: str, timeout: int, case: str) -> dic
             "model": model, "endpoint": endpoint,
             "enabled": True, "weight": 1.0,
             "timeout_seconds": timeout, "retry_within_turn": False,
+            # Keep a bounded test context; do not change the user’s MAGI profile.
+            "context_window_tokens": 8192, "ollama_num_predict": 2048,
         }],
         "runtime_context": create_runtime_context(
             timezone_name="Asia/Tokyo", locale="ja-JP",
