@@ -38,6 +38,7 @@ async def run_observation_loop(
     persist_session_record: Callable,
     fail_task_record: Callable,
     checkpoint_source_progress: Callable | None = None,
+    execute_write_operation: Callable | None = None,
     resume_snapshot: dict | None = None,
     stop_requested=None,
     on_turn_start=None,
@@ -79,6 +80,8 @@ async def run_observation_loop(
         }
         if on_member_progress is not None:
             start_args["on_member_progress"] = on_member_progress
+        if execute_write_operation is not None:
+            start_args["pkb_claim_write_enabled"] = True
         catalog = resource_catalog or default_resource_catalog()
         cycles = 0
         if resume_snapshot is not None:
@@ -117,6 +120,72 @@ async def run_observation_loop(
                 and stop_requested()
             )
         ):
+            # PKB writes use the same Task loop but need durable Action reservation
+            # before dispatch. Never misrecord them as read-only observations.
+            write_requests = [
+                item for item in (session.get("pending_requests") or [])
+                if isinstance(item, dict) and item.get("source") == "pkb_write"
+            ]
+            if write_requests:
+                if (
+                    execute_write_operation is None
+                    or active_attempt_id is None
+                    or len(write_requests) != 1
+                    or len(session.get("pending_requests") or []) != 1
+                    or write_requests[0].get("operation_id") != "pkb.register_claim"
+                ):
+                    session.update(status="stopped", next_step="pkb_write_not_executable")
+                    break
+                if any(
+                    obs.get("source") == "pkb_write"
+                    for obs in (session.get("observations") or [])
+                    if isinstance(obs, dict)
+                ):
+                    # This slice will not perform a second side-effect without
+                    # fresh explicit user intent in a separate Task.
+                    session.update(status="stopped", next_step="pkb_write_already_attempted")
+                    break
+                pending = write_requests[0]
+                if stop_requested is not None and stop_requested():
+                    break
+                observation = await anyio.to_thread.run_sync(
+                    execute_write_operation,
+                    request, task_uuid, active_attempt_id, pending, session,
+                )
+                if (
+                    not isinstance(observation, dict)
+                    or observation.get("source") != "pkb_write"
+                    or observation.get("operation_id") != "pkb.register_claim"
+                    or observation.get("responds_to") != [pending["request_id"]]
+                    or not observation.get("action_id")
+                    or not observation.get("result_id")
+                    or not isinstance(observation.get("text"), str)
+                    or not observation["text"].strip()
+                ):
+                    raise ValueError("pkb_write_result_record_required")
+                all_executions.append({
+                    "status": "ok" if observation.get("verified") is True else "error",
+                    "capability": "pkb_structured_claim",
+                })
+                if checkpoint_source_progress is not None:
+                    await anyio.to_thread.run_sync(
+                        checkpoint_source_progress,
+                        task_uuid, session, [observation], cycles, active_attempt_id,
+                    )
+                if stop_requested is not None and stop_requested():
+                    break
+                continuation_args = {
+                    "timeout": timeout, "stop_requested": stop_requested,
+                    "on_turn_start": on_turn_start,
+                }
+                if on_member_progress is not None:
+                    continuation_args["on_member_progress"] = on_member_progress
+                session = await observation_continuation(
+                    session, [observation], **continuation_args,
+                )
+                cycles += 1
+                continue
+
             groups, unavailable = pending_source_requests(
                 session,
                 resource_catalog=catalog,
