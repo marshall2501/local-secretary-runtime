@@ -267,6 +267,11 @@ def web_query_from_request(
             observation.get("evidence_preview") or []
         ):
             private_terms.add(value)
+        # PKBが確認した非公開IDをWeb検索へ持ち出させない。
+        for value in _flatten_strings(
+            observation.get("resolved_entity") or {}
+        ):
+            private_terms.add(value)
 
     folded_query = query.casefold()
     folded_original = original.casefold()
