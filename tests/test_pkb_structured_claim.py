@@ -78,6 +78,60 @@ class StructuredClaimTests(unittest.TestCase):
         self.assertEqual(len(repo.payloads), 1)
         self.assertEqual(first["claim_id"], again["claim_id"])
 
+    def test_explicit_model_and_manufacturer_attributes_register_safely(self):
+        """登録済みEntityへの明示属性は既存Receiptで冪等に保存する。"""
+        for predicate, original, value in (
+            ("model", "架空GPUの機種はRTX 4070 Ti SUPER。", "RTX 4070 Ti SUPER"),
+            ("manufacturer", "架空GPUのメーカーはNVIDIA。", "NVIDIA"),
+        ):
+            with self.subTest(predicate=predicate):
+                repo = FakePkbRepository()
+                args = dict(
+                    user_text=original, evidence_end=len(original),
+                    predicate=predicate, value=value,
+                )
+                result = write(repo, **args)
+                replay = write(repo, **args)
+                self.assertEqual(result["status"], "inserted")
+                self.assertEqual(replay["status"], "replayed")
+                self.assertEqual(result["claim_id"], replay["claim_id"])
+                self.assertEqual(len(repo.payloads), 1)
+
+    def test_attribute_value_must_follow_matching_label(self):
+        """モデルが属性と別の値を対応付けても自動登録を拒否する。"""
+        for predicate, original, value, expected in (
+            ("model", "架空GPUのメーカーはNVIDIA。", "NVIDIA",
+             "value_or_attribute_not_explicit_in_quote"),
+            ("model", "架空GPUの機種はRTX-100、メーカーはNVIDIA。", "NVIDIA",
+             "value_or_attribute_not_explicit_in_quote"),
+            ("manufacturer", "架空GPUの機種はRTX-100。", "RTX-100",
+             "value_or_attribute_not_explicit_in_quote"),
+            ("model", "架空GPUの機種はRTX-100、型番はRTX-200。", "RTX-100",
+             "ambiguous_attribute_statement"),
+        ):
+            with self.subTest(original=original, predicate=predicate):
+                repo = FakePkbRepository()
+                result = write(
+                    repo, user_text=original, evidence_end=len(original),
+                    predicate=predicate, value=value,
+                )
+                self.assertEqual(result["status"], "review")
+                self.assertEqual(result["reason"], expected)
+                self.assertEqual(repo.payloads, {})
+
+    def test_uncertainty_outside_quoted_span_still_blocks_attribute(self):
+        """狭い引用範囲で未確認表現を落としても登録は保留する。"""
+        original = "架空GPUの機種はRTX-100。未確認です。"
+        span = original.index("。") + 1
+        repo = FakePkbRepository()
+        result = write(
+            repo, user_text=original, evidence_end=span,
+            predicate="model", value="RTX-100",
+        )
+        self.assertEqual(result["status"], "review")
+        self.assertEqual(result["reason"], "uncertain_or_correction_language")
+        self.assertEqual(repo.payloads, {})
+
     def test_source_and_evidence_do_not_depend_on_model_assertions(self):
         repo = FakePkbRepository()
         self.assertEqual(write(repo)["status"], "inserted")
