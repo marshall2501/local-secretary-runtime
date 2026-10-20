@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 import runpy
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -92,7 +91,7 @@ def run(connect):
     except ValueError as exc:
         assert str(exc) == "pkb_write_already_reserved", exc
     action, result = store.finish(
-        task_id=first, attempt_id=attempt, action_id=__import__("uuid").UUID(action_id),
+        task_id=first, attempt_id=attempt, action_id=UUID(action_id),
         execution={"status": "review", "reason": "ambiguous_fixture_entity"},
     )
     assert action == action_id and result
@@ -109,7 +108,7 @@ def run(connect):
     try:
         store.finish(
             task_id=first, attempt_id=attempt,
-            action_id=__import__("uuid").UUID(action_id),
+            action_id=UUID(action_id),
             execution={"status": "review", "reason": "repeat"},
         )
         raise AssertionError("duplicate result was committed")
@@ -121,7 +120,7 @@ def run(connect):
         task_id=interrupted, attempt_id=attempt,
         request_id=request_id, user_text=TEXT, arguments=ARGS,
     )
-    action_id = __import__("uuid").UUID(reserved["action_id"])
+    action_id = UUID(reserved["action_id"])
     action, result = store.mark_unknown(
         task_id=interrupted, action_id=action_id,
         error_type="SimulatedInterruptedAfterDispatch",
