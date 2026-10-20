@@ -103,6 +103,16 @@ def normalize_explicit_attribute_evidence(text: str, arguments: dict) -> dict:
     label_pattern = rf"(?:{labels})\s*(?:は|が|:|：)"
     if not re.search(label_pattern, original_quote):
         return result
+    # An already correct, fully quoted value is an immutable source of truth.
+    # Do not rewrite accepted evidence offsets: existing Action receipts and
+    # reconciliation payloads depend on exact original arguments.
+    explicit_value = (
+        rf"(?:{labels})\s*(?:は|が|:|：)\s*{re.escape(value)}"
+        rf"(?=$|[\s。、，,;；!?！？）)」]|です)"
+    )
+    if (len(re.findall(label_pattern, original_quote)) == 1
+            and re.search(explicit_value, original_quote)):
+        return result
     # Multiple declarations of the same attribute are not a safe auto-fix.
     if len(re.findall(label_pattern, text)) != 1:
         return result
