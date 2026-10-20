@@ -126,6 +126,16 @@ class PkbGoalSyntheticProbeTests(unittest.TestCase):
         self.assertEqual(evaluate_proposal("with-entity", state, decision),
                          (True, "PKB_schema_and_literal_gates_passed"))
 
+    def test_real_ollama_truncated_span_is_matched_against_exact_user_text(self):
+        """本人実機で観測した0..15の不足を純粋照合だけで解消する。"""
+        state = synthetic_session("fake", "http://127.0.0.1:11434", 20, "with-entity")
+        decision = proposal(start=0, end=15)
+        self.assertEqual(validate_goal_turn(decision), [])
+        self.assertEqual(
+            evaluate_proposal("with-entity", state, decision),
+            (True, "PKB_schema_and_literal_gates_passed:normalized_evidence"),
+        )
+
     def test_forged_id_value_and_bad_span_do_not_pass(self):
         state = synthetic_session("fake", "http://127.0.0.1:11434", 20, "with-entity")
         for changes in (
