@@ -11,7 +11,7 @@ import asyncio
 from copy import deepcopy
 
 from ritsuko.magi.dialogue import select_weighted_consensus
-from ritsuko.magi.goal_contract import VERSION, validate_goal_turn
+from ritsuko.magi.goal_contract import VERSION, WRITE_OPERATION_ID, validate_goal_turn
 from ritsuko.application.observation_sources import READ_OPERATIONS
 from ritsuko.magi.protocol import default_resource_catalog
 
@@ -67,7 +67,16 @@ async def evaluate_goal(
             operation_id: {"kind": "read", "source": source, "arguments": ["query"]}
             for operation_id, source in READ_OPERATIONS.items()
             if catalog.get(source, {}).get("available")
-        },
+        } | ({
+            WRITE_OPERATION_ID: {
+                "kind": "write", "source": "pkb_write",
+                "arguments": [
+                    "entity_id", "entity_mention", "predicate", "value",
+                    "evidence_start", "evidence_end",
+                ],
+                "note": "Explicit user-grounded claim; unknown entity or conflict may require review",
+            },
+        } if session.get("pkb_claim_write_enabled") is True else {}),
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
     }
     envelope = apply_context_policy_to_envelope(envelope, context_policy)
