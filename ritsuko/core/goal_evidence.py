@@ -29,7 +29,7 @@ def check_goal_response_evidence(
         str(observation["result_id"]): observation
         for observation in session.get("observations") or []
         if isinstance(observation, dict)
-        and observation.get("source") in AUTO_READ_SOURCES
+        and observation.get("source") in (*AUTO_READ_SOURCES, "pkb_write")
         and observation.get("result_id")
     }
     # Referencing an absent or unverified result must never upgrade it to proof.
@@ -47,6 +47,10 @@ def check_goal_response_evidence(
         }
 
     if evidence.get("basis") == "not_required":
+        # A Task that requested PKB registration cannot complete by later
+        # claiming no result was required: only a persisted write receipt proves it.
+        if session.get("pkb_claim_write_requested"):
+            return "pkb_write_result_required", {}
         if references:
             return "goal_evidence_missing", {}
         # Goal意味判断はMAGIが担当。Coreは依頼文を解釈せず、
