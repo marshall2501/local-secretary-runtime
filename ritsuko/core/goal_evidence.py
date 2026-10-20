@@ -42,6 +42,11 @@ def check_goal_response_evidence(
     if evidence.get("basis") == "result_refs":
         if not references:
             return "goal_evidence_missing", {}
+        if session.get("pkb_claim_write_requested") and not any(
+            recorded[result_id].get("source") == "pkb_write"
+            for result_id in references
+        ):
+            return "pkb_write_result_required", {}
         return "verified_results", {
             result_id: recorded[result_id] for result_id in references
         }
