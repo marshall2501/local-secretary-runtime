@@ -24,14 +24,16 @@ ARGUMENT_KEYS = frozenset({
 
 def _task(cur, task_id: UUID, attempt_id: UUID) -> tuple[str, datetime]:
     cur.execute(
-        """SELECT request, status, permission_scope, checkpoint, created_at
+        """SELECT request, requested_by, status, permission_scope, checkpoint, created_at
            FROM secretary.tasks WHERE id=%s FOR UPDATE""",
         (task_id,),
     )
     row = cur.fetchone()
     if row is None:
         raise ValueError("unknown_task")
-    request, status, permissions, checkpoint, created_at = row
+    request, requester, status, permissions, checkpoint, created_at = row
+    if requester != "local_user":
+        raise ValueError("pkb_write_requires_original_local_user_task")
     checkpoint = checkpoint or {}
     if (status != "running"
             or checkpoint.get("core_slice") != CORE_SLICE
@@ -54,7 +56,8 @@ def reserve(
     Recovery must reconcile that Action and PKB receipt instead of replaying a
     potentially committed write with new arguments or a new invocation ID.
     """
-    if (not isinstance(request_id, str) or not request_id.startswith("REQ-")
+    if (not isinstance(request_id, str)
+            or not request_id.startswith(f"REQ-{str(task_id)[:8]}-")
             or len(request_id) > 100 or not isinstance(arguments, dict)
             or set(arguments) != ARGUMENT_KEYS
             or not isinstance(user_text, str) or not user_text.strip()):
@@ -64,6 +67,10 @@ def reserve(
             or any(type(arguments[k]) is not int
                    for k in ("evidence_start", "evidence_end"))):
         raise ValueError("invalid_pkb_write_arguments")
+    try:
+        UUID(arguments["entity_id"])
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("invalid_pkb_entity_id") from exc
     from pkb.write_service import KNOWN_PREDICATES
     if arguments["predicate"] not in KNOWN_PREDICATES:
         raise ValueError("pkb_write_predicate_not_supported")
