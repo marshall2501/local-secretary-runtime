@@ -103,5 +103,25 @@ class PkbGoalSyntheticProbeTests(unittest.TestCase):
         self.assertTrue(evaluate_proposal("uncertain", state, ask)[0])
 
 
+class PkbGoalSyntheticEnvelopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_actual_magi_goal_envelope_receives_entity_and_write_catalog(self):
+        """本番のMAGI Goal envelopeは実在IDとOperation契約を保持する。"""
+        from ritsuko.magi.goal_decision import evaluate_goal
+        session = synthetic_session("fake", "http://127.0.0.1:11434", 20, "with-entity")
+
+        async def fake_ollama(spec, envelope, **_kwargs):
+            self.assertEqual(spec["provider"], "ollama")
+            self.assertEqual(envelope["user_input"]["raw"], TEXT)
+            self.assertEqual(envelope["observations"][0]["resolved_entity"]["id"], ENTITY_ID)
+            self.assertIn("pkb.register_claim", envelope["operation_catalog"])
+            self.assertIn("model", envelope["operation_catalog"]["pkb.register_claim"]["predicates"])
+            return {"status": "ok", "response": proposal()}
+
+        result = await evaluate_goal(session, timeout=3, caller=fake_ollama)
+        self.assertTrue(evaluate_proposal("with-entity", session, result)[0])
+        self.assertEqual(session["turns"][0]["status"], "ok")
+
+
+
 if __name__ == "__main__":
     unittest.main()
