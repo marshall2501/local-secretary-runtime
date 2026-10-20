@@ -34,6 +34,21 @@ class GoalContractTests(unittest.TestCase):
         self.assertEqual(validate_goal_turn(direct), [])
         self.assertEqual(validate_goal_turn(read), [])
 
+    def test_nonrespond_answer_is_rejected_and_prompt_tells_model_null(self):
+        """LLMの余分なanswerで未実行操作が完了扱いにならない。"""
+        from ritsuko.magi.goal_contract import GOAL_SYSTEM
+        self.assertIn("next=invoke", GOAL_SYSTEM)
+        self.assertIn("answer=null", GOAL_SYSTEM)
+        proposal = judgment("invoke", answer="架空GPUの機種を登録しました")
+        proposal["operation_request"] = {
+            "operation_id": "pkb.search",
+            "arguments": {"query": "架空GPU"},
+            "reason": "登録対象を確認",
+        }
+        self.assertIn("answer:unexpected", validate_goal_turn(proposal))
+        proposal["answer"] = None
+        self.assertEqual(validate_goal_turn(proposal), [])
+
     def test_invoke_registered_read_and_reject_unregistered_operation(self):
         # New MAGI judgments use one typed Operation request, not domain IFs.
         read = judgment("invoke")
