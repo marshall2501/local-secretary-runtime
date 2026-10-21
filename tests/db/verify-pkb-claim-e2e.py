@@ -364,8 +364,14 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
             )
             # Bounded diagnostic features, never free-form LLM text.
             categories = {
-                "entity_identity": ("entity_id", "既存", "登録先", "対象", "名前", "実在", "ID", "識別"),
-                "fact_certainty": ("本当", "正確", "確定", "事実", "架空", "仮想", "実際", "真偽", "正しい"),
+                "entity_identity": (
+                    "entity_id", "Entity ID", "登録先", "対象が不明",
+                    "対象の識別", "対象名", "実在ID", "識別でき", "識別する",
+                ),
+                "fact_certainty": (
+                    "本当", "正確", "確定", "未確認", "不確実",
+                    "真偽", "正しい", "事実ですか", "事実かどうか",
+                ),
                 "permission": ("権限", "承認", "同意", "許可"),
                 "memory_scope": ("どの情報", "何を記録", "どこまで", "記録範囲", "登録内容"),
                 "time_context": ("いつ", "日時", "時点", "日付"),
@@ -405,7 +411,9 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
     }]
     repo, task_id, text, _args, entity_id = prepare(
         connect, predicate="model", value="RTX-SYNTH-400",
-        entity_name="架空装置", member_specs=members,
+        # Match the entity type/name used by the earlier successful
+        # no-Entity proposal probe; keep the model value fully synthetic.
+        entity_name="架空GPU", member_specs=members,
         explicit_memory_request=True,
     )
     reads, writes, turns = [], [], []
