@@ -301,6 +301,34 @@ async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value=
 
 
 
+
+def live_write_target_integrity(session: dict, proposed_id: object) -> tuple[bool, bool]:
+    """Return UUID shape and match to a verified PKB read, never the LLM's ID.
+
+    A syntactically valid UUID is not proof that PKB has resolved that Entity.
+    This test-only check keeps the acceptance failure at the trust boundary.
+    """
+    try:
+        candidate = str(UUID(proposed_id)) if isinstance(proposed_id, str) else None
+    except (ValueError, TypeError, AttributeError):
+        candidate = None
+    if candidate is None:
+        return False, False
+    for item in session.get("observations") or []:
+        if (not isinstance(item, dict) or item.get("source") != "pkb"
+                or item.get("verified") is not True
+                or not item.get("action_id") or not item.get("result_id")):
+            continue
+        resolved = item.get("resolved_entity")
+        actual_id = resolved.get("id") if isinstance(resolved, dict) else None
+        try:
+            if isinstance(actual_id, str) and str(UUID(actual_id)) == candidate:
+                return True, True
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return True, False
+
+
 def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
                                  turns: list) -> None:
     """実モデルの各判断を列挙値と件数だけで報告し、本文やIDは漏らさない。
@@ -462,9 +490,20 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
         )
 
     def write(user_raw, uid, attempt, pending, _session):
-        """実RITSUKOが予約したActionで一度だけPKBへ登録する。"""
+        """Only a previously PKB-resolved Entity is eligible for test write."""
         if writes:
             raise ValueError("live_magi_duplicate_write")
+        proposed_id = (pending.get("arguments") or {}).get("entity_id")
+        uuid_valid, verified_match = live_write_target_integrity(
+            _session, proposed_id,
+        )
+        if not uuid_valid or not verified_match:
+            # Keep both the model proposal and any private data out of stdout.
+            # The test deliberately fails rather than converting or guessing IDs.
+            report_live_goal_diagnostics(_session, reads, writes, turns)
+            print(f"diagnostic: proposed_entity_uuid_valid={str(uuid_valid).lower()}")
+            print(f"diagnostic: proposed_entity_from_verified_read={str(verified_match).lower()}")
+            raise AssertionError("live_magi_write_target_not_verified")
         result = invoke_pkb_claim(
             task_store=store, pkb_repository=pkb,
             task_id=uid, attempt_id=attempt,
