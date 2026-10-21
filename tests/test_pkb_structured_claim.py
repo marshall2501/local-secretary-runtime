@@ -211,16 +211,24 @@ class StructuredClaimTests(unittest.TestCase):
         for end in (18, len(raw)):
             with self.subTest(end=end):
                 repo = FakePkbRepository()
-                result = write(
-                    repo,
-                    user_text=raw,
-                    entity_mention="架空GPU",
-                    predicate="model",
-                    value="RTX-SYNTH-400",
-                    evidence_start=0,
-                    evidence_end=end,
-                )
-                self.assertEqual(result["status"], "review")
+                kwargs = {
+                    "user_text": raw,
+                    "entity_mention": "架空GPU",
+                    "predicate": "model",
+                    "value": "RTX-SYNTH-400",
+                    "evidence_start": 0,
+                    "evidence_end": end,
+                }
+                if end < len(raw):
+                    # The truncated quote cannot even pass input grounding.
+                    with self.assertRaisesRegex(
+                        ValueError, "structured_claim_not_grounded_in_user_text"
+                    ):
+                        write(repo, **kwargs)
+                else:
+                    # Even complete evidence must not promote tentative claims.
+                    result = write(repo, **kwargs)
+                    self.assertEqual(result["status"], "review")
                 self.assertEqual(repo.payloads, {})
 
     def test_uncertain_user_statement_needs_review(self):
