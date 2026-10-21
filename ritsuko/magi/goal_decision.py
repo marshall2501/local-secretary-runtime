@@ -76,7 +76,7 @@ async def evaluate_goal(
                     "evidence_start", "evidence_end",
                 ],
                 "predicates": sorted(KNOWN_PREDICATES),
-                "note": "Use only PKB-verified existing IDs from observations; search first. For model/manufacturer, quote an explicit labeled value such as 機種は or メーカーは. Do not guess.",
+                "note": "Use only PKB-verified existing IDs from observations; search first. For model/manufacturer, quote an explicit labeled value such as 機種は or メーカーは. Tentative user claims such as かもしれない/未確認/不明 are NOT confirmed facts: choose ask_user with a clarification question, never pkb.register_claim even if the Entity ID and value are known. Do not guess.",
             },
         } if session.get("pkb_claim_write_enabled") is True else {}),
         "question_from_ritsuko": "目標・必要な根拠・次の一手を判断してください",
