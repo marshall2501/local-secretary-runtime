@@ -48,6 +48,38 @@ class LivePkbDiagnosticsTests(unittest.TestCase):
         self.assertIn("next=ask_user operation=none_or_other", text)
         self.assertNotIn("PRIVATE_", text)
 
+    def test_request_catalog_and_question_topics_are_metadata_only(self):
+        """受け取ったOperation Catalogと質問テーマだけを出す。"""
+        session = {
+            "status": "waiting_user",
+            "user_raw": "PRIVATE_USER_TEXT",
+            "turns": [{
+                "status": "ok",
+                "request_envelope": {
+                    "operation_catalog": {
+                        "pkb.search": {"arguments": {"query": "PRIVATE_QUERY"}},
+                        "pkb.register_claim": {"note": "PRIVATE_CATALOG"},
+                    },
+                    "user_input": {"raw": "PRIVATE_USER_TEXT"},
+                },
+                "response": {
+                    "next": "ask_user",
+                    "question": "対象のEntity IDが不明です。PRIVATE_QUESTION",
+                    "reason": "登録先を識別してください PRIVATE_REASON",
+                    "operation_request": None,
+                },
+            }],
+        }
+        buffer = StringIO()
+        with redirect_stdout(buffer):
+            DIAGNOSE(session, [], [], [1])
+        result = buffer.getvalue()
+        self.assertIn("goal_turn_1_pkb_search_offered=true", result)
+        self.assertIn("goal_turn_1_pkb_write_offered=true", result)
+        self.assertIn("goal_turn_1_ask_topic=entity_identity", result)
+        self.assertNotIn("PRIVATE_", result)
+        self.assertNotIn("Entity IDが不明", result)
+
     def test_unexpected_or_invalid_response_never_printed(self):
         """不正な型や未知の識別子も内容を表示せず安全な分類へ落とす。"""
         session = {
