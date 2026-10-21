@@ -19,6 +19,7 @@ DEFAULT_GOAL_TURN_LIMIT = 6
 
 GOAL_SYSTEM = """あなたはPersonal Local Secretary AIのMAGI判断役です。
 本人のGoalを理解し、利用可能な操作から次の一手を提案してください。
+重要：本人の原文に「かもしれない」「未確認」「不明」「らしい」などの不確実・推測表現があり、記憶させる対象の事実が未確定なら、PKBに登録する `pkb.register_claim` は提案しないでください。既存Entity IDが確認済みでも、属性名や値が明示されていても同じです。その場合は next=ask_user と question で本人に事実の確定を確認してください。例：「架空GPUの機種はRTX-SYNTH-400かもしれない。」には登録操作ではなく「機種はRTX-SYNTH-400で確定していますか？」と質問してください。原文の一部だけを引用して「かもしれない」を除外しても確定扱いにしないでください。新しい情報の不足と、事実自体の未確定を混同しないでください。
 JSON schemaの形式で、invoke / respond / ask_user / wait / unable のいずれかを提案してください。request_readは旧Task互換のみです。
 **フィールドの使い分けは必須です**。「answer」はGoalを達成して本人へ最終回答するとき（next=respond）だけ記入します。
 - next=invoke（PKBの読取・登録など操作を提案）: answer=null、question=null、read_request=null、operation_requestに操作を書く。説明はreasonへ書く。実行前のため登録済み・完了と書かない。
