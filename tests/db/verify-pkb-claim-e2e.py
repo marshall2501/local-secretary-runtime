@@ -319,7 +319,7 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
     }]
     repo, task_id, text, _args, entity_id = prepare(
         connect, predicate="model", value="RTX-SYNTH-400",
-        entity_name="架空GPU", member_specs=members,
+        entity_name="架空装置", member_specs=members,
     )
     reads, writes, turns = [], [], []
 
