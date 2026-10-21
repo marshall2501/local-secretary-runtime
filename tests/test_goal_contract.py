@@ -41,6 +41,9 @@ class GoalContractTests(unittest.TestCase):
         self.assertIn("answer=null", GOAL_SYSTEM)
         self.assertIn("Unicode文字インデックス", GOAL_SYSTEM)
         self.assertIn("raw[evidence_start:evidence_end]", GOAL_SYSTEM)
+        self.assertIn("未確定なら", GOAL_SYSTEM)
+        self.assertIn("かもしれない", GOAL_SYSTEM)
+        self.assertIn("登録操作ではなく", GOAL_SYSTEM)
         proposal = judgment("invoke", answer="架空GPUの機種を登録しました")
         proposal["operation_request"] = {
             "operation_id": "pkb.search",
