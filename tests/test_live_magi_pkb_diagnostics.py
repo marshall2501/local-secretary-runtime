@@ -10,9 +10,11 @@ import runpy
 import unittest
 
 
-DIAGNOSE = runpy.run_path(
+DIAGNOSTICS = runpy.run_path(
     str(Path(__file__).resolve().parent / "db" / "verify-pkb-claim-e2e.py")
-)["report_live_goal_diagnostics"]
+)
+DIAGNOSE = DIAGNOSTICS["report_live_goal_diagnostics"]
+TARGET_INTEGRITY = DIAGNOSTICS["live_write_target_integrity"]
 
 
 class LivePkbDiagnosticsTests(unittest.TestCase):
@@ -47,6 +49,25 @@ class LivePkbDiagnosticsTests(unittest.TestCase):
         self.assertIn("next=invoke operation=pkb.search", text)
         self.assertIn("next=ask_user operation=none_or_other", text)
         self.assertNotIn("PRIVATE_", text)
+
+    def test_unverified_uuid_cannot_be_used_as_a_pkb_write_target(self):
+        """Valid UUID syntax is insufficient without recorded PKB source evidence."""
+        verified_id = "f1c70000-0000-4000-8000-000000000001"
+        unknown_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        session = {"observations": [{
+            "source": "pkb", "verified": True,
+            "action_id": "action-1", "result_id": "result-1",
+            "resolved_entity": {"id": verified_id, "name": "作業用GPU-A"},
+        }]}
+        self.assertEqual(TARGET_INTEGRITY(session, "not-a-uuid"), (False, False))
+        self.assertEqual(TARGET_INTEGRITY(session, unknown_id), (True, False))
+        self.assertEqual(TARGET_INTEGRITY(session, verified_id), (True, True))
+        session["observations"][0]["verified"] = False
+        self.assertEqual(TARGET_INTEGRITY(session, verified_id), (True, False))
+        session["observations"][0]["verified"] = True
+        session["observations"][0]["result_id"] = None
+        self.assertEqual(TARGET_INTEGRITY(session, verified_id), (True, False))
+        self.assertEqual(TARGET_INTEGRITY({"observations": []}, verified_id), (True, False))
 
     def test_request_catalog_and_question_topics_are_metadata_only(self):
         """受け取ったOperation Catalogと質問テーマだけを出す。"""
