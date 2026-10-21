@@ -302,7 +302,7 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
     Goalの文字列フィールドではなく既知の次操作・状態だけを出力する。
     """
     status = session.get("status")
-    if status not in {"running", "waiting_information", "waiting_user",
+    if not isinstance(status, str) or status not in {"running", "waiting_information", "waiting_user",
                       "candidate_ready", "stopped", "proposal_ready"}:
         status = "other"
     print(f"diagnostic: goal_status={status}")
@@ -322,14 +322,14 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
         if not isinstance(proposal, dict):
             proposal = {}
         decision = proposal.get("next")
-        if decision not in next_choices:
+        if not isinstance(decision, str) or decision not in next_choices:
             decision = "none_or_other"
         operation = proposal.get("operation_request")
         operation = operation.get("operation_id") if isinstance(operation, dict) else None
-        if operation not in operation_choices:
+        if not isinstance(operation, str) or operation not in operation_choices:
             operation = "none_or_other"
         result = turn.get("status")
-        if result not in result_choices:
+        if not isinstance(result, str) or result not in result_choices:
             result = "other"
         print(
             f"diagnostic: goal_turn_{index}_status={result}"
