@@ -342,6 +342,42 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
             f"diagnostic: goal_turn_{index}_status={result}"
             f" next={decision} operation={operation}"
         )
+        # Inspect only the actual RITSUKO envelope: repository setup alone
+        # does not establish that MAGI was offered the executable Operation.
+        envelope = turn.get("request_envelope")
+        catalog = envelope.get("operation_catalog") if isinstance(envelope, dict) else None
+        if not isinstance(catalog, dict):
+            catalog = {}
+        print(
+            f"diagnostic: goal_turn_{index}_pkb_search_offered="
+            f"{str('pkb.search' in catalog).lower()}"
+        )
+        print(
+            f"diagnostic: goal_turn_{index}_pkb_write_offered="
+            f"{str('pkb.register_claim' in catalog).lower()}"
+        )
+        if decision == "ask_user":
+            question = proposal.get("question")
+            reason = proposal.get("reason")
+            content = " ".join(
+                item for item in (question, reason) if isinstance(item, str)
+            )
+            # Bounded diagnostic features, never free-form LLM text.
+            categories = {
+                "entity_identity": ("entity_id", "既存", "登録先", "対象", "名前", "実在", "ID", "識別"),
+                "fact_certainty": ("本当", "正確", "確定", "事実", "架空", "仮想", "実際", "真偽", "正しい"),
+                "permission": ("権限", "承認", "同意", "許可"),
+                "memory_scope": ("どの情報", "何を記録", "どこまで", "記録範囲", "登録内容"),
+                "time_context": ("いつ", "日時", "時点", "日付"),
+            }
+            detected = [
+                label for label, hints in categories.items()
+                if any(hint in content for hint in hints)
+            ]
+            print(
+                f"diagnostic: goal_turn_{index}_ask_topic="
+                + (",".join(detected) if detected else "unclassified")
+            )
 
 
 async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
