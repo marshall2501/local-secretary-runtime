@@ -86,13 +86,17 @@ def make_turn(next_step, text, entity_id, *, result_id=None,
 
 
 def prepare(connect, *, predicate="driver_updated", value="DRV-200",
-            entity_name=None, member_specs=None):
+            entity_name=None, member_specs=None, explicit_memory_request=False):
     """One synthetic Entity and a Task granted Write only inside disposable DB."""
     name = entity_name if entity_name is not None else "架空GPU" + uuid4().hex[:10]
     text = (
         f"{name}の機種は{value}。" if predicate == "model"
         else f"{name}を{value}へ更新した。"
     )
+    if explicit_memory_request:
+        # A fact statement alone is not necessarily a request to remember it.
+        # Only the live acceptance Task states an unambiguous registration Goal.
+        text += "この機種情報をPKBに記録して。"
     with connect() as db, db.transaction(), db.cursor() as cur:
         cur.execute(
             """INSERT INTO secretary.entities(name,entity_type,domain)
@@ -363,6 +367,7 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
     repo, task_id, text, _args, entity_id = prepare(
         connect, predicate="model", value="RTX-SYNTH-400",
         entity_name="架空装置", member_specs=members,
+        explicit_memory_request=True,
     )
     reads, writes, turns = [], [], []
 
