@@ -80,6 +80,27 @@ class LivePkbDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_", result)
         self.assertNotIn("Entity IDが不明", result)
 
+    def test_generic_fictional_target_words_are_not_evidence_of_an_issue(self):
+        """『架空』『対象』だけでは本人確認の理由を断定しない。"""
+        session = {
+            "status": "waiting_user",
+            "turns": [{
+                "status": "ok", "response": {
+                    "next": "ask_user",
+                    "question": "架空GPUという対象の記録ですか？",
+                    "reason": "架空の対象を説明しています",
+                    "operation_request": None,
+                },
+            }],
+        }
+        buffer = StringIO()
+        with redirect_stdout(buffer):
+            DIAGNOSE(session, [], [], [1])
+        result = buffer.getvalue()
+        self.assertIn("goal_turn_1_ask_topic=unclassified", result)
+        self.assertNotIn("架空", result)
+        self.assertNotIn("対象", result)
+
     def test_unexpected_or_invalid_response_never_printed(self):
         """不正な型や未知の識別子も内容を表示せず安全な分類へ落とす。"""
         session = {
