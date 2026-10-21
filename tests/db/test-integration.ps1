@@ -73,8 +73,10 @@ function Verify-PkbClaimE2E([switch]$LiveOllama) {
     & $python (Join-Path $PSScriptRoot 'verify-pkb-claim-e2e.py') @verifyArgs
     if ($LASTEXITCODE -ne 0) { throw 'Real PKB Claim vertical verification failed.' }
 }
-$before = Snapshot-Others
+$before = $null
+$primaryFailure = $null
 try {
+    $before = Snapshot-Others
     # Prove a bound port fails before creating a container.
     $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $testPort)
     $listener.Server.ExclusiveAddressUse = $true
@@ -152,13 +154,51 @@ try {
     & $python (Join-Path $PSScriptRoot 'verify-observation-sources.py')
     if ($LASTEXITCODE -ne 0) { throw 'Observation source persistence verification failed.' }
     Write-Host 'PASS: port conflict, migrations/reapply/drift rejection, constraints/roles, restart, binary backup/restore, overwrite refusal.'
+} catch {
+    # Preserve the original verification failure even if an unrelated
+    # container changes while the test is running.
+    $primaryFailure = $_
+    throw
 } finally {
-    # Exactly the random test project created by this run; never prune or target another project.
-    Invoke-TestDocker ($compose + @('down','--volumes'))
-    if ((Snapshot-Others) -ne $before) { throw 'Other container state changed during test; investigate.' }
-    Remove-Item -LiteralPath $testEnvFile -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $testRoleSecret -ErrorAction SilentlyContinue
+    # Release only this random test project. A cleanup or snapshot error must
+    # not bypass temporary credential removal and process-environment restore.
+    $cleanupFailure = $null
+    $snapshotFailure = $null
+    $othersChanged = $false
+    if ($null -ne $before) {
+        try {
+            Invoke-TestDocker ($compose + @('down','--volumes'))
+        } catch {
+            $cleanupFailure = $_
+            Write-Warning 'Disposable PostgreSQL project cleanup failed; manual inspection required.'
+        }
+        try {
+            $othersChanged = (Snapshot-Others) -ne $before
+        } catch {
+            $snapshotFailure = $_
+            Write-Warning 'Unable to verify other container states after cleanup.'
+        }
+    }
+    foreach ($temporaryFile in @($testEnvFile, $testRoleSecret)) {
+        try {
+            if (Test-Path -LiteralPath $temporaryFile) {
+                Remove-Item -LiteralPath $temporaryFile -Force -ErrorAction Stop
+            }
+        } catch {
+            if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+            Write-Warning 'A disposable test file could not be deleted; manual inspection required.'
+        }
+    }
     [Environment]::SetEnvironmentVariable('LSA_TEST_DB_ENV_FILE', $previousTestEnvFile, 'Process')
     [Environment]::SetEnvironmentVariable('LSA_DB_PORT', $previousDbPort, 'Process')
-    Write-Host 'PASS: other container IDs, status, start times and restart counts unchanged.'
+    if ($othersChanged) {
+        Write-Warning 'Other container state changed during test; cause and changed service are not yet established.'
+    } elseif ($null -ne $before -and $null -eq $snapshotFailure) {
+        Write-Host 'PASS: other container IDs, status, start times and restart counts unchanged.'
+    }
+    if ($null -eq $primaryFailure) {
+        if ($null -ne $cleanupFailure) { throw 'Disposable PostgreSQL cleanup incomplete.' }
+        if ($null -ne $snapshotFailure) { throw 'Other container state verification failed.' }
+        if ($othersChanged) { throw 'Other container state changed during test; investigate.' }
+    }
 }
