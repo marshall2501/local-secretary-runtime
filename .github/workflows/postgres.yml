@@ -35,6 +35,7 @@ jobs:
           python -m unittest discover -s tests -p test_pkb_claim_operation.py -v
           python -m unittest discover -s tests -p test_goal_contract.py -v
           python -m unittest discover -s tests -p test_probe_magi_pkb_goal_synthetic.py -v
+          python -m unittest discover -s tests -p test_live_magi_pkb_diagnostics.py -v
       - name: Test isolated PostgreSQL lifecycle
         shell: pwsh
         run: ./tests/db/test-integration.ps1
