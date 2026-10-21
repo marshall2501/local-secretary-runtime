@@ -197,6 +197,32 @@ class StructuredClaimTests(unittest.TestCase):
                     write(repo, **override)
         self.assertEqual(len(repo.payloads), 1)
 
+    def test_tentative_model_claim_never_autocommits_even_with_short_quote(self):
+        """かもしれないを引用から外しても登録しない。"""
+        raw = "架空GPUの機種はRTX-SYNTH-400かもしれない。"
+        arguments = {
+            "entity_mention": "架空GPU",
+            "predicate": "model",
+            "value": "RTX-SYNTH-400",
+            "evidence_start": 0,
+            "evidence_end": 18,
+        }
+        self.assertEqual(normalize_explicit_attribute_evidence(raw, arguments), arguments)
+        for end in (18, len(raw)):
+            with self.subTest(end=end):
+                repo = FakePkbRepository()
+                result = write(
+                    repo,
+                    user_text=raw,
+                    entity_mention="架空GPU",
+                    predicate="model",
+                    value="RTX-SYNTH-400",
+                    evidence_start=0,
+                    evidence_end=end,
+                )
+                self.assertEqual(result["status"], "review")
+                self.assertEqual(repo.payloads, {})
+
     def test_uncertain_user_statement_needs_review(self):
         repo = FakePkbRepository()
         tentative = "架空GPUをDRV-200へ更新したかもしれない。"
