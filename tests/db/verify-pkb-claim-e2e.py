@@ -1,11 +1,12 @@
 # Provenance-Origin: original
 # Provenance-AI: AI-assisted
-"""Real PKB Claim → Task Action/Result → synthetic MAGI, in disposable PG only.
+"""Disposable PostgreSQL PKB Claim → Task Action/Result acceptance.
 
-The owning PowerShell harness verifies the random Docker project and binds its
-PostgreSQL to 127.0.0.1. This test never uses the daily Runtime connection,
-secrets, real providers, or a real user's memory. The PKB Repository and all
-RITSUKO persistence ports are actual PostgreSQL adapters.
+The default mode uses a synthetic MAGI. Explicit --live-ollama opt-in uses one
+local Ollama model, never a cloud provider or normal MAGI profile. The owning
+PowerShell harness binds only its random test PostgreSQL project to loopback.
+No daily Runtime connection, production secrets, or real user memory are used.
+RITSUKO and PKB persistence ports remain the actual PostgreSQL adapters.
 """
 from __future__ import annotations
 
@@ -94,6 +95,8 @@ def prepare(connect, *, predicate="driver_updated", value="DRV-200",
         else f"{name}を{value}へ更新した。"
     )
     if explicit_memory_request:
+        if predicate != "model":
+            raise ValueError("live_memory_fixture_requires_model_attribute")
         # A fact statement alone is not necessarily a request to remember it.
         # Only the live acceptance Task states an unambiguous registration Goal.
         text += "この機種情報をPKBに記録して。"
