@@ -216,6 +216,10 @@ class PkbGoalSyntheticEnvelopeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(envelope["observations"][0]["resolved_entity"]["id"], ENTITY_ID)
             self.assertIn("pkb.register_claim", envelope["operation_catalog"])
             self.assertIn("model", envelope["operation_catalog"]["pkb.register_claim"]["predicates"])
+            self.assertIn(
+                "Tentative user claims",
+                envelope["operation_catalog"]["pkb.register_claim"]["note"],
+            )
             return {"status": "ok", "response": proposal()}
 
         result = await evaluate_goal(session, timeout=3, caller=fake_ollama)
