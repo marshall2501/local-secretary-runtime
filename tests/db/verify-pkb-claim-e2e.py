@@ -294,6 +294,49 @@ async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value=
 
 
 
+def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
+                                 turns: list) -> None:
+    """実モデルの各判断を列挙値と件数だけで報告し、本文やIDは漏らさない。
+
+    実モデルが予期した経路に進まなかった理由を検証するために、
+    Goalの文字列フィールドではなく既知の次操作・状態だけを出力する。
+    """
+    status = session.get("status")
+    if status not in {"running", "waiting_information", "waiting_user",
+                      "candidate_ready", "stopped", "proposal_ready"}:
+        status = "other"
+    print(f"diagnostic: goal_status={status}")
+    print(f"diagnostic: goal_turn_count={len(turns)}")
+    print(f"diagnostic: pkb_read_count={len(reads)}")
+    print(f"diagnostic: pkb_write_count={len(writes)}")
+    next_choices = {"invoke", "respond", "ask_user", "wait", "unable",
+                    "request_read"}
+    operation_choices = {"pkb.search", "pkb.register_claim"}
+    result_choices = {"ok", "invalid", "unavailable", "timeout",
+                      "error", "disagreement"}
+    for index, turn in enumerate((session.get("turns") or [])[:3], 1):
+        if not isinstance(turn, dict):
+            print(f"diagnostic: goal_turn_{index}=invalid_record")
+            continue
+        proposal = turn.get("response")
+        if not isinstance(proposal, dict):
+            proposal = {}
+        decision = proposal.get("next")
+        if decision not in next_choices:
+            decision = "none_or_other"
+        operation = proposal.get("operation_request")
+        operation = operation.get("operation_id") if isinstance(operation, dict) else None
+        if operation not in operation_choices:
+            operation = "none_or_other"
+        result = turn.get("status")
+        if result not in result_choices:
+            result = "other"
+        print(
+            f"diagnostic: goal_turn_{index}_status={result}"
+            f" next={decision} operation={operation}"
+        )
+
+
 async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
     """架空の実Entityで、実MAGI→PKB読取→実Write→再判断を一Taskで試す。
 
@@ -409,13 +452,16 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
         max_observation_cycles=3,
     )
     if reads != ["search"] or len(writes) != 1 or turns != [1, 2, 3]:
+        report_live_goal_diagnostics(session, reads, writes, turns)
         raise AssertionError("live_magi_read_write_rejudge_sequence_failed")
     if session.get("status") != "candidate_ready":
+        report_live_goal_diagnostics(session, reads, writes, turns)
         raise AssertionError("live_magi_goal_not_ready")
     judgment = session.get("goal_judgment") or {}
     if (judgment.get("next") != "respond"
             or writes[0]["result_id"] not in (
                 judgment.get("evidence") or {}).get("result_ids", [])):
+        report_live_goal_diagnostics(session, reads, writes, turns)
         raise AssertionError("live_magi_result_not_grounded")
     with connect() as db, db.cursor() as cur:
         cur.execute(
