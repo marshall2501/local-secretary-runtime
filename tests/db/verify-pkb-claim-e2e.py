@@ -9,6 +9,7 @@ RITSUKO persistence ports are actual PostgreSQL adapters.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 from datetime import datetime, timezone
 from functools import partial
@@ -84,9 +85,10 @@ def make_turn(next_step, text, entity_id, *, result_id=None,
     }
 
 
-def prepare(connect, *, predicate="driver_updated", value="DRV-200"):
+def prepare(connect, *, predicate="driver_updated", value="DRV-200",
+            entity_name=None, member_specs=None):
     """One synthetic Entity and a Task granted Write only inside disposable DB."""
-    name = "架空GPU" + uuid4().hex[:10]
+    name = entity_name if entity_name is not None else "架空GPU" + uuid4().hex[:10]
     text = (
         f"{name}の機種は{value}。" if predicate == "model"
         else f"{name}を{value}へ更新した。"
@@ -100,7 +102,7 @@ def prepare(connect, *, predicate="driver_updated", value="DRV-200"):
     repo = PostgresMagiTaskRepository(connect)
     task_id = uuid4()
     assert repo.reserve_start(
-        task_id=task_id, request=text, member_specs=MEMBERS,
+        task_id=task_id, request=text, member_specs=member_specs or MEMBERS,
         decision_strategy="llm", policy_snapshot=POLICY,
     )
     with connect() as db, db.transaction(), db.cursor() as cur:
@@ -117,7 +119,8 @@ def prepare(connect, *, predicate="driver_updated", value="DRV-200"):
 
 
 def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
-                   expected_predicate="driver_updated", expected_value="DRV-200"):
+                   expected_predicate="driver_updated", expected_value="DRV-200",
+                   prior_read_count=0):
     """Database constraints, source identity, final Result and no duplicates."""
     with connect() as db, db.cursor() as cur:
         cur.execute(
@@ -125,7 +128,7 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
                       r.evidence->>'claim_id',r.id
                FROM secretary.actions a
                JOIN secretary.results r ON r.action_id=a.id
-               WHERE a.task_id=%s""", (task_id,),
+               WHERE a.task_id=%s AND a.operation='pkb.register_claim'""", (task_id,),
         )
         rows = cur.fetchall()
         assert len(rows) == 1, rows
@@ -157,14 +160,14 @@ def verify_receipt(connect, task_id, *, action_id, result_id, entity_id,
         cur.execute(
             "SELECT count(*) FROM secretary.actions WHERE task_id=%s", (task_id,),
         )
-        assert cur.fetchone()[0] == 1
+        assert cur.fetchone()[0] == 1 + prior_read_count
         cur.execute(
             "SELECT count(*) FROM secretary.pkb_input_receipts WHERE claim_id=%s",
             (receipt_claim,),
         )
         assert cur.fetchone()[0] == 1
         cur.execute(
-            "SELECT id FROM secretary.actions WHERE task_id=%s", (task_id,),
+            "SELECT id FROM secretary.actions WHERE task_id=%s AND operation='pkb.register_claim'", (task_id,),
         )
         assert str(cur.fetchone()[0]) == str(action_id)
 
@@ -290,6 +293,144 @@ async def normal_goal(connect, pkb, store, *, predicate="driver_updated", value=
             assert cur.fetchone()[0] == 1, "conflicting model was written"
 
 
+
+async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
+    """架空の実Entityで、実MAGI→PKB読取→実Write→再判断を一Taskで試す。
+
+    この関数は使い捨てDB専用入口からのみ起動する。モデル本文と本人情報を
+    標準出力へ書かず、3 Turnを超えて推論を自動反復しない。
+    """
+    from infrastructure.async_runtime.transport import request_json_with_retry
+    from pkb.application.daily import entity_map, search_text
+    from ritsuko.application.pkb_observation import execute_magi_pkb_request
+    from ritsuko.application.read_dispatch import execute_core_read
+    from ritsuko.core.request_scope import core_answer
+    import ritsuko.magi.async_execution as transport
+
+    # Existing provider transport is bound explicitly in this disposable test,
+    # never through the daily settings or any external/cloud profile.
+    transport.request_json_with_retry = request_json_with_retry
+    members = [{
+        "name": "MELCHIOR", "provider": "ollama", "model": model,
+        "endpoint": "http://127.0.0.1:11434", "enabled": True,
+        "weight": 1.0, "timeout_seconds": timeout,
+        "retry_within_turn": False,
+        "context_window_tokens": 8192, "ollama_num_predict": 2048,
+    }]
+    repo, task_id, text, _args, entity_id = prepare(
+        connect, predicate="model", value="RTX-SYNTH-400",
+        entity_name="架空GPU", member_specs=members,
+    )
+    reads, writes, turns = [], [], []
+
+    def check_turn(number: int) -> None:
+        """モデル呼出し回数を制限し、予期しない追加推論を拒否する。"""
+        if number > 3:
+            raise ValueError("live_magi_turn_limit")
+        turns.append(number)
+
+    def pkb_read(user_raw: str, pending: dict, _session: dict) -> dict:
+        """本人原文で既存Entityを解決し、実PKBのClaim検索を使う。"""
+        if pending.get("source") != "pkb":
+            raise ValueError("live_magi_non_pkb_source_not_allowed")
+
+        def bounded_search(capability: str, query: str) -> dict:
+            """共通RITSUKO read adapterだけでテストDBへ検索する。"""
+            if capability != "pkb_search":
+                raise ValueError("live_magi_unexpected_read_capability")
+            return execute_core_read(
+                capability, query,
+                pkb_search=lambda q: search_text(q, repository=pkb),
+                pkb_answer=core_answer,
+                finance_read=None, web_research=None,
+                finance_answer=None, web_answer=None,
+            )
+
+        execution = execute_magi_pkb_request(
+            user_raw, pending, pkb_repository=pkb,
+            entity_map=lambda: entity_map(pkb),
+            execute_read=bounded_search,
+        )
+        resolved = (execution.get("source_metadata") or {}).get("resolved_entity") or {}
+        if str(resolved.get("id")) != str(entity_id):
+            raise ValueError("live_magi_verified_entity_missing")
+        reads.append(execution.get("operation"))
+        return execution
+
+    def record_read(uid, execution, pending, attempt):
+        """実Source/Action/Result IDを使い捨てDBに保存する。"""
+        return repo.record_source_read(
+            task_id=uid, execution=execution,
+            pending_request=pending, expected_attempt_id=attempt,
+        )
+
+    def write(user_raw, uid, attempt, pending, _session):
+        """実RITSUKOが予約したActionで一度だけPKBへ登録する。"""
+        if writes:
+            raise ValueError("live_magi_duplicate_write")
+        result = invoke_pkb_claim(
+            task_store=store, pkb_repository=pkb,
+            task_id=uid, attempt_id=attempt,
+            request_id=pending["request_id"], user_text=user_raw,
+            arguments=pending["arguments"],
+        )
+        writes.append(result)
+        return result
+
+    def checkpoint(uid, session, observations, cycles, attempt):
+        """次のLLM呼出し前に同一TaskのSource checkpointを確定する。"""
+        repo.save_source_resume(
+            task_id=uid, session=session, observations=observations,
+            cycles=cycles, expected_attempt_id=attempt,
+        )
+
+    session = await run_observation_loop(
+        text, task_id=task_id, member_specs=members, timeout=timeout,
+        create_task_record=lambda uid, request, specs: repo.claim_start(
+            task_id=uid, request=request, member_specs=specs,
+        ),
+        execute_source_request=pkb_read,
+        record_source_read_record=record_read,
+        execute_write_operation=write,
+        checkpoint_source_progress=checkpoint,
+        persist_session_record=lambda uid, s, cap, att: repo.persist_session(
+            task_id=uid, session=s, selected_capability=cap,
+            expected_attempt_id=att,
+        ),
+        fail_task_record=lambda uid, err, att: repo.fail_task(
+            task_id=uid, error=err, expected_attempt_id=att,
+        ),
+        dialogue_starter=partial(
+            start_dialogue_async, decision_strategy="llm",
+            policy_snapshot=POLICY,
+        ),
+        observation_continuation=continue_with_verified_observations_async,
+        on_turn_start=check_turn,
+        max_observation_cycles=3,
+    )
+    if reads != ["search"] or len(writes) != 1 or turns != [1, 2, 3]:
+        raise AssertionError("live_magi_read_write_rejudge_sequence_failed")
+    if session.get("status") != "candidate_ready":
+        raise AssertionError("live_magi_goal_not_ready")
+    judgment = session.get("goal_judgment") or {}
+    if (judgment.get("next") != "respond"
+            or writes[0]["result_id"] not in (
+                judgment.get("evidence") or {}).get("result_ids", [])):
+        raise AssertionError("live_magi_result_not_grounded")
+    with connect() as db, db.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM secretary.tasks WHERE id=%s", (task_id,),
+        )
+        if cur.fetchone()[0] != "completed":
+            raise AssertionError("live_magi_task_not_completed")
+    verify_receipt(
+        connect, task_id, action_id=writes[0]["action_id"],
+        result_id=writes[0]["result_id"], entity_id=entity_id,
+        expected_predicate="model", expected_value="RTX-SYNTH-400",
+        prior_read_count=1,
+    )
+    print("PASS: disposable real Ollama -> real PKB search -> Action/Claim/Receipt/Result -> real MAGI rejudgment -> completed")
+
 def interrupted_commit(connect, pkb, store):
     """Loss after PKB commit; reconcile by old Action without another write."""
     repo, task_id, text, arguments, entity_id = prepare(connect)
@@ -389,10 +530,22 @@ def interrupted_commit(connect, pkb, store):
 
 
 def main():
-    if len(sys.argv) != 4:
-        raise RuntimeError("requires_disposable_project_container_and_role_secret")
-    port = DISPOSABLE_PORT(sys.argv[1], sys.argv[2])
-    secret_file = Path(sys.argv[3])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("project")
+    parser.add_argument("container")
+    parser.add_argument("role_secret")
+    parser.add_argument("--live-ollama", action="store_true")
+    parser.add_argument("--model", default="gemma4:12b")
+    parser.add_argument("--timeout", type=int, default=180)
+    args = parser.parse_args()
+    if args.live_ollama and (
+        not 10 <= args.timeout <= 300
+        or not 1 <= len(args.model) <= 100
+        or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:." for ch in args.model)
+    ):
+        raise ValueError("invalid_live_ollama_arguments")
+    port = DISPOSABLE_PORT(args.project, args.container)
+    secret_file = Path(args.role_secret)
     if (secret_file.parent.resolve() != (ROOT / "secrets").resolve()
             or not secret_file.name.startswith(".pkb-e2e-local-secretary-test-")
             or not secret_file.is_file()):
@@ -412,6 +565,11 @@ def main():
         assert db.info.dbname == "secretary"
     pkb = PostgresPkbRepository(connect)
     store = PostgresPkbClaimActionStore(connect)
+    if args.live_ollama:
+        asyncio.run(live_goal(
+            connect, pkb, store, model=args.model, timeout=args.timeout,
+        ))
+        return
     asyncio.run(normal_goal(connect, pkb, store))
     asyncio.run(normal_goal(
         connect, pkb, store, predicate="model", value="RTX-SYNTH-400",
