@@ -50,6 +50,93 @@ class LivePkbDiagnosticsTests(unittest.TestCase):
         self.assertIn("next=ask_user operation=none_or_other", text)
         self.assertNotIn("PRIVATE_", text)
 
+    def test_final_goal_write_receipt_gate_is_diagnosed_without_ids(self):
+        """Show why a model's final respond did not complete the Task."""
+        write_id = "PRIVATE_WRITE_RESULT_ID"
+        session = {
+            "status": "stopped",
+            "next_step": "pkb_write_result_required",
+            "pkb_claim_write_requested": True,
+            "goal_judgment": {
+                "evidence": {
+                    "basis": "not_required", "result_ids": [],
+                    "assessment": "PRIVATE_ASSESSMENT",
+                },
+            },
+            "observations": [{
+                "source": "pkb_write", "verified": True,
+                "result_id": write_id, "action_id": "PRIVATE_ACTION_ID",
+                "text": "PRIVATE_OBSERVATION",
+            }],
+            "turns": [{
+                "status": "ok", "response": {
+                    "next": "respond", "answer": "PRIVATE_ANSWER",
+                    "reason": "PRIVATE_REASON", "operation_request": None,
+                },
+            }],
+        }
+        writes = [{
+            "write_status": "inserted", "verified": True,
+            "action_id": "PRIVATE_ACTION_ID", "result_id": write_id,
+        }]
+        buffer = StringIO()
+        with redirect_stdout(buffer):
+            DIAGNOSE(session, ["search"], writes, [1])
+        result = buffer.getvalue()
+        self.assertIn("diagnostic: goal_next_step=pkb_write_result_required", result)
+        self.assertIn("diagnostic: pkb_write_result_status=inserted", result)
+        self.assertIn("diagnostic: pkb_write_result_verified=true", result)
+        self.assertIn("diagnostic: pkb_write_observation_verified=true", result)
+        self.assertIn("diagnostic: goal_evidence_basis=not_required", result)
+        self.assertIn("diagnostic: goal_evidence_ref_count=0", result)
+        self.assertIn("diagnostic: goal_evidence_references_write_result=false", result)
+        self.assertIn("diagnostic: goal_evidence_gate=pkb_write_result_required", result)
+        self.assertNotIn("PRIVATE_", result)
+
+        session["status"] = "candidate_ready"
+        session["next_step"] = "review_answer_candidate"
+        session["goal_judgment"]["evidence"]["basis"] = "result_refs"
+        session["goal_judgment"]["evidence"]["result_ids"] = [write_id]
+        buffer = StringIO()
+        with redirect_stdout(buffer):
+            DIAGNOSE(session, ["search"], writes, [1])
+        result = buffer.getvalue()
+        self.assertIn("diagnostic: goal_evidence_references_write_result=true", result)
+        self.assertIn("diagnostic: goal_evidence_gate=verified_results", result)
+        self.assertNotIn("PRIVATE_", result)
+
+    def test_nonverified_write_result_is_not_trusted_as_goal_evidence(self):
+        """A rejected PKB write cannot be converted into a completion proof."""
+        result_id = "PRIVATE_REJECTED_RESULT_ID"
+        session = {
+            "status": "stopped",
+            "next_step": "unrecorded_task_result_reference",
+            "pkb_claim_write_requested": True,
+            "goal_judgment": {
+                "evidence": {
+                    "basis": "result_refs", "result_ids": [result_id],
+                    "assessment": "PRIVATE_ASSESSMENT",
+                },
+            },
+            "observations": [{
+                "source": "pkb_write", "verified": False,
+                "action_id": "PRIVATE_ACTION_ID", "result_id": result_id,
+            }],
+            "turns": [],
+        }
+        writes = [{"write_status": "rejected", "verified": False,
+                   "result_id": result_id}]
+        buffer = StringIO()
+        with redirect_stdout(buffer):
+            DIAGNOSE(session, ["search"], writes, [1])
+        result = buffer.getvalue()
+        self.assertIn("diagnostic: pkb_write_result_status=rejected", result)
+        self.assertIn("diagnostic: pkb_write_result_verified=false", result)
+        self.assertIn("diagnostic: pkb_write_observation_verified=false", result)
+        self.assertIn("diagnostic: goal_evidence_references_write_result=true", result)
+        self.assertIn("diagnostic: goal_evidence_gate=unrecorded_task_result_reference", result)
+        self.assertNotIn("PRIVATE_", result)
+
     def test_live_entity_fixture_resolves_without_component_relation(self):
         """単独Entity登録の受入はGPU/NIC部品の親PCを前提としない。"""
         from pkb.entity_model_service import COMPONENT_ROLE_TOKENS
