@@ -50,6 +50,49 @@ class LivePkbDiagnosticsTests(unittest.TestCase):
         self.assertIn("next=ask_user operation=none_or_other", text)
         self.assertNotIn("PRIVATE_", text)
 
+    def test_live_entity_fixture_resolves_without_component_relation(self):
+        """単独Entity登録の受入はGPU/NIC部品の親PCを前提としない。"""
+        from pkb.entity_model_service import COMPONENT_ROLE_TOKENS
+        from ritsuko.application.pkb_observation import execute_magi_pkb_request
+        from ritsuko.application.observation_sources import verified_source_observation
+
+        entity_name = DIAGNOSTICS["LIVE_ENTITY_NAME"]
+        model = DIAGNOSTICS["LIVE_ENTITY_MODEL"]
+        request = f"{entity_name}の機種は{model}。この機種情報をPKBに記録して。"
+        # This is a *direct* Entity fixture; GPU/NIC triggers the specialized
+        # parent-computer component lookup and makes this test impossible.
+        self.assertFalse(any(role in request for role in COMPONENT_ROLE_TOKENS))
+        entity_id = "f1c70000-0000-4000-8000-000000000001"
+        calls = []
+
+        def bounded_read(capability, query):
+            calls.append((capability, query))
+            return {
+                "status": "ok", "operation": "search",
+                "verified_by": "deterministic_pkb_query",
+                "answer": "登録済みの機種情報はありません。",
+                "result": {"status": "ok", "result_kind": "claims",
+                           "total": 0, "items": []},
+                "total": 0,
+            }
+
+        execution = execute_magi_pkb_request(
+            request, {"source": "pkb", "what": entity_name},
+            pkb_repository=None,
+            entity_map=lambda: {
+                entity_name: {"id": entity_id, "name": entity_name,
+                              "entity_type": "gpu"},
+            },
+            execute_read=bounded_read,
+        )
+        self.assertEqual(calls, [("pkb_search", entity_name)])
+        self.assertEqual(execution["source_metadata"]["resolved_entity"]["id"], entity_id)
+        observation = verified_source_observation(
+            execution, {"source": "pkb", "request_ids": ["read-request-1"]},
+        )
+        self.assertEqual(observation["resolved_entity"]["id"], entity_id)
+        self.assertTrue(observation["verified"])
+
     def test_unverified_uuid_cannot_be_used_as_a_pkb_write_target(self):
         """Valid UUID syntax is insufficient without recorded PKB source evidence."""
         verified_id = "f1c70000-0000-4000-8000-000000000001"
