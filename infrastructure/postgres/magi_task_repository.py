@@ -55,7 +55,8 @@ def _merge_goal_interpretation(checkpoint: dict, session: dict) -> bool:
     return True
 
 
-def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) -> None:
+def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict],
+                allow_pkb_write: bool = False) -> None:
     checkpoint = {
         "core_slice": CORE_SLICE,
         "phase": "orient",
@@ -80,6 +81,7 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
                 "依頼固有の達成条件は未確定（TaskのGoal理解と根拠評価で判断）",
                 Jsonb({
                     "pkb_read": True,
+                    **({"pkb_write": True} if allow_pkb_write is True else {}),
                     "finance_read": True,
                     "web_research": True,
                     "files_read": False,
@@ -109,7 +111,8 @@ def create_task(db, *, task_id: UUID, request: str, member_specs: list[dict]) ->
 
 
 def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
-                  decision_strategy: str, policy_snapshot: dict | None) -> bool:
+                  decision_strategy: str, policy_snapshot: dict | None,
+                  allow_pkb_write: bool = False) -> bool:
     """受付Taskをpendingで確定する。commit後にTrue、新規でない再送はFalse。
 
     判定方式・メンバー設定・Task用Policy snapshotは同一checkpointに保存する。
@@ -143,6 +146,7 @@ def reserve_start(db, *, task_id: UUID, request: str, member_specs: list[dict],
                 "依頼固有の達成条件は未確定（TaskのGoal理解と根拠評価で判断）",
                 Jsonb({
                     "pkb_read": True, "finance_read": True,
+                    **({"pkb_write": True} if allow_pkb_write is True else {}),
                     "web_research": True, "files_read": False,
                     "external_actions": False, "cloud_private_context": False,
                 }),
@@ -1505,12 +1509,17 @@ def fail_task(db, *, task_id: UUID, error: str,
 class PostgresMagiTaskRepository:
     """Connection-owning adapter used by application/composition layers."""
 
-    def __init__(self, connection_factory):
+    def __init__(self, connection_factory, *, allow_pkb_write: bool = False):
         self._connection_factory = connection_factory
+        # Only the owner-local daily composition opts into future Task writes.
+        self._allow_pkb_write = allow_pkb_write is True
 
     def create_task(self, *, task_id: UUID, request: str, member_specs: list[dict]) -> None:
         with self._connection_factory() as db:
-            create_task(db, task_id=task_id, request=request, member_specs=member_specs)
+            create_task(
+                db, task_id=task_id, request=request, member_specs=member_specs,
+                allow_pkb_write=self._allow_pkb_write,
+            )
 
     def reserve_start(self, *, task_id: UUID, request: str,
                       member_specs: list[dict], decision_strategy: str,
@@ -1520,6 +1529,7 @@ class PostgresMagiTaskRepository:
             return reserve_start(
                 db, task_id=task_id, request=request, member_specs=member_specs,
                 decision_strategy=decision_strategy, policy_snapshot=policy_snapshot,
+                allow_pkb_write=self._allow_pkb_write,
             )
 
     def claim_start(self, *, task_id: UUID, request: str,
