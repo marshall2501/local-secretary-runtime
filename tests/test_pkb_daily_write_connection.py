@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
+
+from bootstrap.magi_task_runtime import MagiTaskBindings, build_magi_task_commands
 
 from infrastructure.postgres.magi_task_repository import (
     PostgresMagiTaskRepository, create_task, reserve_start,
@@ -190,6 +193,53 @@ class VerifiedEntityWriteTests(unittest.TestCase):
         require_verified_pkb_write_target(
             self.text, self.arguments, {"observations": [observation]},
         )
+
+
+class DailyWritePortTests(unittest.TestCase):
+    """同一Taskの既存書込み処理に到達する前に対象の検査を行う。"""
+
+    def test_composed_port_requires_real_source_before_action(self):
+        entity_id = str(uuid4())
+        user_text = "作業用機材Aの機種はTEST-900です。記録して"
+        args = {
+            "entity_id": entity_id, "entity_mention": "作業用機材A",
+            "predicate": "model", "value": "TEST-900",
+            "evidence_start": 0, "evidence_end": len(user_text),
+        }
+        pending = {
+            "operation_id": "pkb.register_claim",
+            "request_id": "REQ-synthetic",
+            "arguments": args,
+        }
+        source = {
+            "source": "pkb", "verified": True,
+            "action_id": str(uuid4()), "result_id": str(uuid4()),
+            "resolved_entity": {
+                "id": entity_id, "name": "作業用機材A",
+                "resolution": "pkb_unique_explicit_name",
+            },
+        }
+        store = object()
+        bindings = MagiTaskBindings(
+            magi_repository=object(), pkb_repository=object(),
+            finance_repository=object(), queries=object(),
+            member_specs_loader=lambda: [], policy_snapshot_loader=lambda: None,
+            pkb_claim_action_store=store,
+        )
+        with (patch("bootstrap.magi_task_runtime.build_task_application") as built,
+              patch("bootstrap.magi_task_runtime.invoke_pkb_claim") as invoked):
+            build_magi_task_commands(bindings)
+            write = built.call_args.kwargs["execute_write_operation"]
+            self.assertIsNotNone(write)
+            task_id, attempt_id = uuid4(), uuid4()
+            with self.assertRaisesRegex(ValueError, "pkb_write_target_not_verified"):
+                write(user_text, task_id, attempt_id, pending, {"observations": []})
+            invoked.assert_not_called()
+            write(user_text, task_id, attempt_id, pending,
+                  {"observations": [source]})
+            invoked.assert_called_once()
+            self.assertIs(invoked.call_args.kwargs["task_store"], store)
+            self.assertEqual(invoked.call_args.kwargs["task_id"], task_id)
 
 
 if __name__ == "__main__":
