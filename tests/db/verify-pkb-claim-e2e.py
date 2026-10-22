@@ -349,6 +349,75 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
     print(f"diagnostic: goal_turn_count={len(turns)}")
     print(f"diagnostic: pkb_read_count={len(reads)}")
     print(f"diagnostic: pkb_write_count={len(writes)}")
+    # Report only enumerated state, counts and booleans. Never emit raw
+    # model responses, Result IDs, personal claims or credential values.
+    allowed_next_steps = {
+        "unrecorded_task_result_reference", "pkb_write_result_required",
+        "goal_evidence_missing", "pending_source_request_not_completed",
+        "max_turns_reached", "goal_member_invalid", "goal_turn_limit",
+        "goal_evidence_or_source_requirement_not_met", "user_requested_stop",
+        "repeated_request_without_progress", "review_answer_candidate",
+        "review_information_requests",
+    }
+    next_step = session.get("next_step")
+    if not isinstance(next_step, str) or next_step not in allowed_next_steps:
+        next_step = "other"
+    print(f"diagnostic: goal_next_step={next_step}")
+
+    write = writes[0] if writes and isinstance(writes[0], dict) else {}
+    write_status = write.get("write_status")
+    if write_status not in {"inserted", "replayed", "review", "rejected"}:
+        write_status = "none_or_other"
+    print(f"diagnostic: pkb_write_result_status={write_status}")
+    print(
+        "diagnostic: pkb_write_result_verified="
+        + str(write.get("verified") is True).lower()
+    )
+
+    claim = session.get("goal_judgment")
+    if not isinstance(claim, dict):
+        claim = {}
+    evidence = claim.get("evidence")
+    if not isinstance(evidence, dict):
+        evidence = {}
+    basis = evidence.get("basis")
+    if basis not in {"not_required", "result_refs", "insufficient"}:
+        basis = "none_or_other"
+    refs = evidence.get("result_ids")
+    if not isinstance(refs, list) or not all(isinstance(x, str) for x in refs):
+        refs = []
+    print(f"diagnostic: goal_evidence_basis={basis}")
+    print(f"diagnostic: goal_evidence_ref_count={len(refs)}")
+    print(
+        "diagnostic: goal_evidence_references_write_result="
+        + str(bool(write.get("result_id") and write["result_id"] in refs)).lower()
+    )
+    observed_writes = [
+        observation for observation in (session.get("observations") or [])
+        if isinstance(observation, dict)
+        and observation.get("source") == "pkb_write"
+    ]
+    print(f"diagnostic: pkb_write_observation_count={len(observed_writes)}")
+    print(
+        "diagnostic: pkb_write_observation_verified="
+        + str(any(ob.get("verified") is True and ob.get("result_id")
+                  for ob in observed_writes)).lower()
+    )
+    if basis != "none_or_other":
+        from ritsuko.core.goal_evidence import check_goal_response_evidence
+        gate_status, _ = check_goal_response_evidence(
+            session, {**evidence, "result_ids": refs},
+        )
+    else:
+        gate_status = "none_or_other"
+    if gate_status not in {
+        "verified_results", "source_free", "pkb_write_result_required",
+        "unrecorded_task_result_reference", "goal_evidence_missing",
+        "pending_source_request_not_completed",
+    }:
+        gate_status = "none_or_other"
+    print(f"diagnostic: goal_evidence_gate={gate_status}")
+
     next_choices = {"invoke", "respond", "ask_user", "wait", "unable",
                     "request_read"}
     operation_choices = {"pkb.search", "pkb.register_claim"}
