@@ -44,6 +44,11 @@ MEMBERS = [{
     "endpoint": "http://127.0.0.1:11434",
     "enabled": True, "weight": 1.0, "timeout_seconds": 5,
 }]
+# A free-standing Entity name must not be mistaken for a PC component
+# role by execute_magi_pkb_request's legacy GPU/NIC relationship resolver.
+LIVE_ENTITY_NAME = "作業用機材A"
+LIVE_ENTITY_MODEL = "GeForce RTX 4060"
+
 POLICY = {
     "profile_id": "disposable", "profile_name": "disposable",
     "revision": 1, "grants": [{
@@ -437,13 +442,13 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
         "retry_within_turn": False,
         "context_window_tokens": 8192, "ollama_num_predict": 2048,
     }]
-    # Avoid the negative example in GOAL_SYSTEM (架空GPU/RTX-SYNTH-400
-    # かもしれない): use a fictional owner-side Entity with an ordinary,
-    # clearly asserted GPU model. This remains a disposable test DB only.
-    test_model = "GeForce RTX 4060"
+    # The negative example in GOAL_SYSTEM uses 架空GPU/RTX-SYNTH-400.
+    # Also avoid GPU/NIC in the name: those tokens intentionally activate
+    # the *PC component relation* resolver, which this standalone Entity
+    # fixture does not provision. No daily PKB data is touched.
     repo, task_id, text, _args, entity_id = prepare(
-        connect, predicate="model", value=test_model,
-        entity_name="作業用GPU-A", member_specs=members,
+        connect, predicate="model", value=LIVE_ENTITY_MODEL,
+        entity_name=LIVE_ENTITY_NAME, member_specs=members,
         explicit_memory_request=True,
     )
     reads, writes, turns = [], [], []
@@ -565,7 +570,7 @@ async def live_goal(connect, pkb, store, *, model: str, timeout: int) -> None:
     verify_receipt(
         connect, task_id, action_id=writes[0]["action_id"],
         result_id=writes[0]["result_id"], entity_id=entity_id,
-        expected_predicate="model", expected_value=test_model,
+        expected_predicate="model", expected_value=LIVE_ENTITY_MODEL,
         prior_read_count=1,
     )
     print("PASS: disposable real Ollama -> real PKB search -> Action/Claim/Receipt/Result -> real MAGI rejudgment -> completed")
