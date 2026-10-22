@@ -90,8 +90,16 @@ def build_pkb_repository() -> PostgresPkbRepository:
     return PostgresPkbRepository(connection)
 
 
-def build_magi_task_repository() -> PostgresMagiTaskRepository:
-    return PostgresMagiTaskRepository(connection)
+def build_magi_task_repository(*, allow_pkb_write: bool = False) -> PostgresMagiTaskRepository:
+    """Enable new owner-local Task writes only at the daily composition root."""
+    return PostgresMagiTaskRepository(connection, allow_pkb_write=allow_pkb_write)
+
+
+def build_pkb_claim_action_store():
+    """Bind the existing Task-scoped PKB Action store to the daily secretary DB."""
+    from infrastructure.postgres.pkb_claim_action_repository import PostgresPkbClaimActionStore
+
+    return PostgresPkbClaimActionStore(connection)
 
 
 def build_magi_settings_repository() -> PostgresMagiSettingsRepository:
