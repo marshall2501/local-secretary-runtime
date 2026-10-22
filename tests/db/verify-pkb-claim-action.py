@@ -41,27 +41,24 @@ POLICY = {"profile_id": "disposable", "revision": 1, "grants": []}
 
 def run(connect):
     repo = PostgresMagiTaskRepository(connect)
+    allowed_repo = PostgresMagiTaskRepository(connect, allow_pkb_write=True)
     store = PostgresPkbClaimActionStore(connect)
 
     def seed(*, authorized):
         task_id = uuid4()
-        assert repo.reserve_start(
+        # Only the opted-in daily composition writes the permission at INSERT.
+        target_repo = allowed_repo if authorized else repo
+        assert target_repo.reserve_start(
             task_id=task_id, request=TEXT, member_specs=MEMBERS,
             decision_strategy="llm", policy_snapshot=POLICY,
         )
-        attempt_id = repo.claim_start(
+        attempt_id = target_repo.claim_start(
             task_id=task_id, request=TEXT, member_specs=MEMBERS,
         )
-        if authorized:
-            # Local user permission is granted only to this disposable fixture;
-            # production's Task defaults and database are untouched.
-            with connect() as db, db.transaction(), db.cursor() as cur:
-                cur.execute(
-                    """UPDATE secretary.tasks
-                       SET permission_scope=jsonb_set(
-                           permission_scope, '{pkb_write}', 'true'::jsonb)
-                       WHERE id=%s""", (task_id,),
-                )
+        with connect() as db, db.cursor() as cur:
+            cur.execute("SELECT permission_scope FROM secretary.tasks WHERE id=%s", (task_id,))
+            permissions = cur.fetchone()[0]
+            assert (permissions.get("pkb_write") is True) == authorized
         request_id = f"REQ-{str(task_id)[:8]}-01-01"
         return task_id, attempt_id, request_id
 
@@ -134,7 +131,7 @@ def run(connect):
             (action_id,),
         )
         assert cur.fetchone() == ("unknown", "inconclusive")
-    print("PASS: isolated PKB Action permission/reservation/replay/Result/unknown")
+    print("PASS: isolated new Task PKB permission/Action/replay/Result/unknown")
 
 
 def main():
