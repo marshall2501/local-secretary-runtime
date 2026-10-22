@@ -54,6 +54,41 @@ class GoalContractTests(unittest.TestCase):
         proposal["answer"] = None
         self.assertEqual(validate_goal_turn(proposal), [])
 
+    def test_post_write_goal_instruction_cites_persisted_write_result(self):
+        """PKB登録後のGoal達成評価には既存の書込みResultを明示させる。"""
+        from ritsuko.magi.goal_contract import GOAL_SYSTEM
+        from ritsuko.core.goal_evidence import check_goal_response_evidence
+
+        self.assertIn("source=pkb_write", GOAL_SYSTEM)
+        self.assertIn("verified=true", GOAL_SYSTEM)
+        self.assertIn("evidence.basis=result_refs", GOAL_SYSTEM)
+        self.assertIn("evidence.result_ids", GOAL_SYSTEM)
+        self.assertIn("書込みを伴うGoalにnot_requiredを使ってはいけません", GOAL_SYSTEM)
+
+        session = {
+            "pkb_claim_write_requested": True,
+            "observations": [{
+                "source": "pkb_write", "verified": True,
+                "action_id": "action-1", "result_id": "write-result-1",
+                "verification_level": "pkb_repository_receipt",
+            }],
+        }
+        absent = {"basis": "not_required", "result_ids": []}
+        grounded = {"basis": "result_refs", "result_ids": ["write-result-1"]}
+        invented = {"basis": "result_refs", "result_ids": ["invented"]}
+        self.assertEqual(
+            check_goal_response_evidence(session, absent)[0],
+            "pkb_write_result_required",
+        )
+        self.assertEqual(
+            check_goal_response_evidence(session, grounded)[0],
+            "verified_results",
+        )
+        self.assertEqual(
+            check_goal_response_evidence(session, invented)[0],
+            "unrecorded_task_result_reference",
+        )
+
     def test_invoke_registered_read_and_reject_unregistered_operation(self):
         # New MAGI judgments use one typed Operation request, not domain IFs.
         read = judgment("invoke")
