@@ -4,7 +4,7 @@
 
 具象RepositoryやCredential取得経路はComposition Rootだけが選ぶ。
 このモジュールをimportしただけではDB接続・Task作成・MAGI送信をしない。
-通常8097の読取プレビューにはまだ注入しない。
+通常のSecretary Serverは既存RepositoryでTask/PKBを共有する。
 """
 from __future__ import annotations
 
@@ -20,7 +20,9 @@ from ritsuko.application.task_commands import TaskCommands
 from ritsuko.application.pkb_observation import execute_magi_pkb_request
 from ritsuko.application.read_dispatch import execute_core_read
 from ritsuko.application.source_execution import execute_magi_source_request
-from ritsuko.application.pkb_claim_operation import invoke_pkb_claim
+from ritsuko.application.pkb_claim_operation import (
+    invoke_pkb_claim, require_verified_pkb_write_target,
+)
 from ritsuko.core.task_execution import (
     review_proposal, run_observation_loop, resume_user_answer,
 )
@@ -132,6 +134,11 @@ def build_magi_task_commands(
             raise ValueError("pkb_write_port_not_bound")
         if pending.get("operation_id") != "pkb.register_claim":
             raise ValueError("pkb_operation_not_registered")
+        # Match the model's target to a real, previously recorded PKB read
+        # before creating a durable Action; an unobserved UUID is not authority.
+        require_verified_pkb_write_target(
+            user_raw, pending.get("arguments"), _session,
+        )
         return invoke_pkb_claim(
             task_store=bindings.pkb_claim_action_store,
             pkb_repository=pkb, task_id=task_id, attempt_id=attempt_id,
@@ -215,14 +222,14 @@ def build_magi_task_commands(
 def build_daily_magi_task_commands() -> TaskCommands:
     """通常日常RuntimeのRepositoryとCredentialを組み立てる。
 
-    実Taskのwriteを行うのはこの関数ではなく、返したCommandsへ
-    本人がTaskを依頼した後。通常8097のmainからはまだ呼び出さない。
+    構築時は書き込まず、通常Taskが受け付けられた後に既存PKB Writerを実行する。
     """
     from bootstrap.web_runtime import (
         build_core_task_queries,
         build_finance_repository,
         build_magi_settings_repository,
         build_magi_task_repository,
+        build_pkb_claim_action_store,
         build_pkb_repository,
         build_runtime_policy_repository,
         build_service_connection_repository,
@@ -245,7 +252,7 @@ def build_daily_magi_task_commands() -> TaskCommands:
     policy = build_runtime_policy_repository()
     from pkb.application.memory_intake import register_memory_intake
 
-    magi_repository = build_magi_task_repository()
+    magi_repository = build_magi_task_repository(allow_pkb_write=True)
     pkb_repository = build_pkb_repository()
 
     def remember_from_task(task_id):
@@ -263,4 +270,5 @@ def build_daily_magi_task_commands() -> TaskCommands:
         member_specs_loader=lambda: load_member_specs(settings),
         policy_snapshot_loader=lambda: policy.load_snapshot_or_none("lan"),
         memory_review_writer=remember_from_task,
+        pkb_claim_action_store=build_pkb_claim_action_store(),
     ))
