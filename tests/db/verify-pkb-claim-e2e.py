@@ -366,7 +366,7 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
 
     write = writes[0] if writes and isinstance(writes[0], dict) else {}
     write_status = write.get("write_status")
-    if write_status not in {"inserted", "replayed", "review", "rejected"}:
+    if not isinstance(write_status, str) or write_status not in {"inserted", "replayed", "review", "rejected"}:
         write_status = "none_or_other"
     print(f"diagnostic: pkb_write_result_status={write_status}")
     print(
@@ -381,7 +381,7 @@ def report_live_goal_diagnostics(session: dict, reads: list, writes: list,
     if not isinstance(evidence, dict):
         evidence = {}
     basis = evidence.get("basis")
-    if basis not in {"not_required", "result_refs", "insufficient"}:
+    if not isinstance(basis, str) or basis not in {"not_required", "result_refs", "insufficient"}:
         basis = "none_or_other"
     refs = evidence.get("result_ids")
     if not isinstance(refs, list) or not all(isinstance(x, str) for x in refs):
