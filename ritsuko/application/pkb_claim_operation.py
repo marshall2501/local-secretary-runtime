@@ -18,6 +18,65 @@ from pkb.write_service import normalize_explicit_attribute_evidence
 OPERATION_ID = "pkb.register_claim"
 
 
+def require_verified_pkb_write_target(
+    user_text: str, arguments: dict, session: dict,
+) -> None:
+    """実PKB読取で解決した単一EntityだけをAction予約前に許可する。
+
+    MAGIが任意のUUIDを生成しても書込み先には採用しない。PKBの
+    実読取結果からRITSUKOが作成した検証済みObservationと照合する。
+    """
+    if not isinstance(arguments, dict) or not isinstance(session, dict):
+        raise ValueError("pkb_write_target_not_verified")
+    target = arguments.get("entity_id")
+    mention = arguments.get("entity_mention")
+    if not isinstance(target, str) or not isinstance(mention, str):
+        raise ValueError("pkb_write_target_not_verified")
+    if not mention.strip() or mention not in user_text:
+        raise ValueError("pkb_write_target_not_verified")
+    try:
+        target_id = UUID(target)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("pkb_write_target_not_verified") from exc
+
+    observed = []
+    for observation in session.get("observations") or []:
+        if not isinstance(observation, dict):
+            continue
+        if (observation.get("source") != "pkb"
+                or observation.get("verified") is not True
+                or not observation.get("action_id")
+                or not observation.get("result_id")):
+            continue
+        resolved = observation.get("resolved_entity")
+        if not isinstance(resolved, dict):
+            continue
+        if resolved.get("resolution") not in {
+            "pkb_unique_explicit_name", "pkb_component_relation",
+        }:
+            continue
+        try:
+            resolved_id = UUID(str(resolved["id"]))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        resolved_name = resolved.get("name")
+        if not isinstance(resolved_name, str) or not resolved_name.strip():
+            continue
+        observed.append((resolved_id, resolved_name, resolved["resolution"]))
+
+    # Ambiguous or absent observations must not be resolved by the model.
+    if not observed or {row[0] for row in observed} != {target_id}:
+        raise ValueError("pkb_write_target_not_verified")
+    # An ordinary name-based search only authorizes the exact name in the
+    # original request. Component IDs are already resolved by the PKB's
+    # deterministic parent/relation read, and may have different display names.
+    if any(
+        resolution == "pkb_unique_explicit_name" and name != mention
+        for _, name, resolution in observed
+    ):
+        raise ValueError("pkb_write_target_not_verified")
+
+
 def invoke_pkb_claim(
     *, task_store, pkb_repository, task_id: UUID, attempt_id: UUID,
     request_id: str, user_text: str, arguments: dict,
