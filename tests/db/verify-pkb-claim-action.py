@@ -63,6 +63,15 @@ def run(connect):
         return task_id, attempt_id, request_id
 
     denied, attempt, request_id = seed(authorized=False)
+    # Retrying an older read-only Task from the newly opted-in composition
+    # must never upgrade its persisted permission_scope.
+    assert allowed_repo.reserve_start(
+        task_id=denied, request=TEXT, member_specs=MEMBERS,
+        decision_strategy="llm", policy_snapshot=POLICY,
+    ) is False
+    with connect() as db, db.cursor() as cur:
+        cur.execute("SELECT permission_scope FROM secretary.tasks WHERE id=%s", (denied,))
+        assert cur.fetchone()[0].get("pkb_write") is not True
     try:
         store.reserve(
             task_id=denied, attempt_id=attempt, request_id=request_id,
